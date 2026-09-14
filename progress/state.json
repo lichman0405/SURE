@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P2",
-  "last_updated": "2026-09-14T17:26:12.630Z",
+  "last_updated": "2026-09-14T17:32:40.098Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -256,13 +256,13 @@
       "notes": "P2-T007 — represent a monorepo as the components it is.\n\nAcceptance: \"Multi-component/monorepo representation exists\" and \"Unknown stack\ndetails remain inference.\"\n\nDELIVERED. `sure_core::components` (crates/sure-core/src/components.rs): a\n`ComponentGraph::of(&Discovery)` that is a pure view and opens no file, so it\ncannot disagree with the discovery it came from about what was in the project;\n`Component` carrying one `ManifestReading` per ecosystem rather than a merged\nverdict, so there is no merge to get wrong; `Stack` derived from those readings\nrather than stored; `Members`, whose `NotRead` arm keeps \"SURE did not look\"\napart from \"there are none\"; and `contains`, nearest-enclosing containment by\npath component. Plus crates/sure-core/tests/components_graph.rs (4 tests) and\ndocs/architecture/COMPONENT_GRAPH.md (gaps 1-4 recorded).\n\nEVIDENCE. Commit 586d3a3, run 34864498113: all five jobs green, Windows 871 /\nmacOS 873 / Ubuntu 874 passed, 0 failed, 1 ignored, each over 36 result lines =\n26 parents + 10 children. Windows equals the local Windows run exactly. Local:\ncargo fmt clean; cargo clippy --workspace --all-targets --all-features -D\nwarnings clean; cargo test --workspace --no-fail-fast 871 passed / 0 failed / 1\nignored; node scripts/taskctl.mjs validate -> \"state OK: 166 tasks\".\n\nThe 22 new tests were read out of all three rust logs BY NAME, not inferred from\nthe job colours: 18 `components::tests::*` and 4 `components_graph` names, each\n\"... ok\" on Windows, macOS and Ubuntu, 0 FAILED. The one that most needed it is\nthe_component_graph_opens_no_file_and_starts_no_process, which reads\ncrates/sure-core/src/components.rs through sure_testkit::repository_root() and so\ndepends on the checkout layout rather than the fixture machinery.\n\nMUTATION. target/tmp/mutate11.py: 20 mutations, 20 observable, 0 declared\nunobservable, all 20 caught by a failing test, exit 0, baseline green. The first\nrun was NOT clean and the three holes it found were real, so they were closed\nwith tests rather than reclassified: python_root_reading's prefer-the-failure\narm had no test where the Node equivalent did; nothing set max_workspace_members\nlow enough to observe truncation; and every containment test looked an edge up\nby its key, so an extra edge nobody asked about was invisible. The source\nsentinel was verified CAPABLE OF FAILING by injecting `let _ = std::fs::read(path);`\ninto get() and watching it go red, then reverting -- a sentinel that passes on\nthe first try is not evidence.\n\nNOT ESTABLISHED. The graph has no consumer yet: nothing in sure-cli builds one,\nso `Stack` and `Members` are properties of the module and its tests, not yet of\na `sure` invocation. Whether `exclude` removes a Rust member is Cargo's rule and\nSURE has not read it, so excluded members are still components here. A Python\nmonorepo is one component with a `NotRead` caveat and its members are not\nenumerated."
     },
     "P2-T008": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T17:32:40.097Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Started with phase P2 at 9 of 12; P2-T008 and P2-T009 are the two that finish it. Chosen over P2-T009 because its two criteria are a structural privacy property (find required keys without ever holding a value) and a real comparison (references against examples/docs), and because SECRET_REDACTION.md names the first as a requirement rather than a preference."
     },
     "P2-T009": {
       "status": "queued",

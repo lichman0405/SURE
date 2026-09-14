@@ -15,6 +15,7 @@ pub mod fingerprint;
 pub mod paths;
 pub mod project_intent;
 pub mod redact;
+pub mod references;
 pub mod scan;
 pub mod store;
 pub mod support;

@@ -368,6 +368,16 @@ environment variable can point it at a scratch directory. A test that did it
 would put an invented requirement into somebody's history and look exactly like a
 green test.
 
+**That is not hypothetical, and the instance is worth keeping.** During
+`P2-T010`'s mutation run the mutation that deletes the empty-goal refusal — the
+first mutation in `target/tmp/mutate12.py` — made exactly that happen: the
+process-level test ran the real binary, the refusal was gone, and six empty-text
+`project-intent` rows were written to the developer's store. The unmutated suite
+was then measured around a single run and leaves that store byte-identical, so
+this is a coverage gap rather than active pollution. But the margin is a refusal
+in the module under test, not a boundary around the store, and
+`progress/HANDOFF.md` records the rows and what removing them would take.
+
 So `a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line` is the whole
 of the flag's process-level coverage, and it is the refusal rather than the
 write. The happy path is covered by `crates/sure-cli/src/check.rs`, which drives

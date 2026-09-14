@@ -2,23 +2,29 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 27 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (7/12).** `P2-T010` is `in_progress` — started,
-implemented, and **not yet accepted**: the acceptance waits on a read CI run, so
-it lands in a commit after the one this file is in. What is implemented is
-described under "What `P2-T010` added" below, and every claim there is a local
-measurement.
+Progress: 28 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (8/12).** `P2-T010` is `accepted`, on a read run,
+and **nothing is `in_progress`** — the next session may start any `READY` task
+without adopting an orphan. What it added is described under "What `P2-T010`
+added" below, and its run is read in "Reading run `34869888350`".
 
 The commit that follows `0907acf` is not `P2-T010`'s first work: it fixes a
 defect that run `34865716315` exposed, and the reason the fix came first is that
 `P2-T010`'s acceptance requires the store to open reliably, which is the thing
 that run showed it does not always do.
 
-**`P2-T007` is accepted and its acceptance is in `0907acf`, with this file.** The
-check is `git show --stat 0907acf`, not `git log -1 --stat` — that sentence was
-written when the acceptance was expected to be the tip of the branch, and the
-commit that fixes the red run follows it. A handoff that names the wrong
-verification command is worse than one that names none.
+**The branch, in order, from the last accepted task to here:** `0907acf` accepts
+`P2-T007`; `3be88f1` records the run of the fix that `0907acf` follows; `4746c48`
+is `P2-T010`'s implementation; the commit carrying this file is the `P2-T010`
+acceptance. The acceptance of `P2-T007` is therefore **not** at the tip and never
+was, so the check for it is `git show --stat 0907acf` rather than
+`git log -1 --stat` — the sentence here used to name the wrong command, and a
+handoff that is wrong about how to verify it is worse than one that says nothing.
+
+**`P2-T010` follows the two-commit shape `P2-T007` used**, and for the same
+reason: the acceptance cannot be written honestly until its run exists, so the
+implementation is committed and pushed, the run is read, and only then is the
+acceptance recorded — in `progress/state.json`, in the commit with this file.
 
 **`P2-T007`'s implementation went in on its own commit, with its own run read
 before the acceptance was taken.** `586d3a3`, run `34864498113`, all five jobs
@@ -66,33 +72,32 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 27, queued: 139 }
-READY: P2-T008, P2-T009, P2-T010, P2-T012, P3-T001, P4-T007, P4-T008, P6-T001,
-       P6-T005, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 28, queued: 138 }
+READY: P2-T008, P2-T009, P2-T012, P3-T001, P4-T007, P4-T008, P6-T001, P6-T005,
+       P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T007` is `accepted`** — `status: accepted`, `started_at`
-`2026-09-14T15:32:57.220Z`, `finished_at` `2026-09-14T15:54:09.720Z`, and a 2912
-byte note. **`in_progress` is 0**, so nothing is half-finished and the next
-session may start any READY task without adopting an orphan.
+**`P2-T010` is `accepted`**, on run `34869888350`, and **`in_progress` is 0**, so
+nothing is half-finished and the next session may start any READY task without
+adopting an orphan. Phase `P2` is **8 of 12**; `P2-T008`, `P2-T009` and `P2-T012`
+are the three that would finish it.
 
-**Five tasks entered `READY` on this acceptance and the list went 8 → 13.**
-`P2-T008`, `P2-T009` and `P2-T012` are the ones this file predicted, because they
-depend on `P2-T007`. **`P4-T007` and `P6-T005` appeared without being predicted
-by anything written down here**, and the READY list is quoted from the command
-rather than from that prediction precisely so this is visible instead of
-silently absent.
+**The READY list went 13 → 12 and nothing entered it.** `P2-T010` left the list by
+being accepted, and no task became ready in the same step — which is worth
+noting because the previous two acceptances each admitted new tasks. The list is
+quoted from the command rather than from a prediction, which is why a step that
+changes nothing is visible as nothing rather than as an omission.
 
 **What the acceptance tool fills and what it does not, read out of the file
-rather than assumed.** On `P2-T007`, `base_sha` and `head_sha` are both `null`
+rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
 and `evidence` is `[]`; `taskctl accept` sets `status`, `finished_at` and `notes`
-and nothing else. **That is true of the SHAs for all 27 accepted tasks — 0 carry
+and nothing else. **That is true of the SHAs for all 28 accepted tasks — 0 carry
 a `base_sha` or a `head_sha` — but it is NOT true of `evidence` or `notes`,
 and a blanket claim would have been wrong in two directions:** `P2-T003` is the
-one accepted task of the 27 with a non-empty `evidence` array (three strings,
+one accepted task of the 28 with a non-empty `evidence` array (three strings,
 added when that acceptance was recorded), and `P0-T009`, `P1-T001` and `P1-T002`
-carry no notes at all where the other 24 do. So the commits and the run for
-`P2-T007` are recorded **here**, and the fields in `progress/state.json` are not
+carry no notes at all where the other 25 do. So the commits and the run for
+`P2-T010` are recorded **here**, and the fields in `progress/state.json` are not
 a substitute for this file — they are not even uniform across tasks.
 
 **A correction that was made and then overtaken, kept because both halves are
@@ -307,6 +312,51 @@ have one. No test in this repository can see it, for the same reason as above.
 It is the second mutation in `mutate12.py`'s declared-unobservable set, and it
 closes the same day a caller can choose where SURE keeps its files.
 
+### The mutation run wrote six rows into the real store, and that is the same gap seen from the other side
+
+**The gap above is not only a missing test. It has a cost, and this run paid it.**
+`cli_contract.rs` runs the real `sure.exe` against the real locations, which on
+Windows means the developer's actual `%LOCALAPPDATA%\SURE\sure.db`. In the
+unmutated build that is harmless, because the only goal it passes is `--goal ""`
+and an empty goal is refused before the store is opened. **The mutation that
+deletes that refusal therefore does not merely fail a test — it writes into
+somebody's history.** It did:
+
+| id | kind | document | project_root |
+|---|---|---|---|
+| 1, 2, 3, 4, 5, 6 | `project-intent` | `{"id":"goal","raw_retained":true,"source":"explicit_user_goal","text":""}` | `C:\Users\lishi\code\SURE\crates\sure-cli` |
+
+Six rows, in three pairs a few hundred milliseconds apart, all inside a
+254-second window (`1789403446` – `1789403700`, ms since epoch). `text` is empty
+in every one — a shape no shipped code path can produce, which is what identifies
+them as the mutation's rather than a user's.
+
+**Two things were measured rather than assumed, and the second is the one that
+matters:**
+
+- **An unmutated suite run leaves the store byte-identical.** Taken around a
+  single `cargo test -p sure-cli --test cli_contract`: 6 rows before, 6 rows
+  after, the same SHA-256 over the row contents, and the same MD5 over the file.
+  So the shipped tests do not pollute it, and the claim in `docs/architecture/CLI.md`
+  about the gap is accurate as written.
+- **The file's hash is not a before/after comparison across sessions.** The hash
+  recorded in the previous session's handoff was compared against the hash today
+  and differed — and that comparison was meaningless, because it straddled a
+  migration and six writes. This is the second time this file has had to say that
+  a hash taken at two different times is not a measurement; the pairing has to be
+  taken around one command.
+
+**The rows are left in place, and removing them is the owner's call.** They are
+false records in a history file that has no backup, and deleting them is not
+reversible; the exact statement is
+`delete from records where id in (1,2,3,4,5,6)` against that database, which the
+owner may run or not. Leaving them also keeps the evidence, which is why the
+default here is to leave them. **The durable fix is the one already named: the day
+a caller can choose where SURE keeps its files, this test stops being able to
+touch the real store at all** — and until then, any mutation that removes the
+empty-goal refusal will do this again, which is worth knowing before the next
+mutation run rather than after it.
+
 ### Two things `P2-T010` observed and did not fix
 
 Neither is a defect claim; both are things the next reader will meet.
@@ -370,6 +420,16 @@ one was reported `BUILD` because it made a `match` non-exhaustive. Neither
 counted as a catch, which is what those verdicts are for — a mutation that was
 never applied, or that stopped the code compiling, says nothing about whether a
 test would have noticed the behaviour.
+
+**A fourth thing this run did was not a test result at all.** The whitespace
+mutation — the first in the list, and the one whose anchor is the refusal this
+module exists to state — made the process-level test in `cli_contract.rs` write
+six empty-text rows into the developer's real store, because that test runs the
+real binary against the real locations. **The mutation harness has a side effect
+outside the repository, and nothing in this file said so before.** The rows, the
+reason, the measurement showing the unmutated suite is clean, and the one-line
+statement that removes them are in "The mutation run wrote six rows into the real
+store" above. Worth knowing before the next mutation run rather than after it.
 
 ## What `P2-T007` added
 
@@ -1057,12 +1117,89 @@ Three of the five jobs were failing the whole time.
 | 34865317166 | `0907acf` — **the `P2-T007` acceptance** | **all five green**, and **871 / 873 / 874 again**, unchanged, `26` parents each. The acceptance touches only `progress/state.json` and this file, so the implementation's evidence survived its own recording. **This run is the end of the `P2-T007` chain and is reported in the session rather than committed** — see the rule stated at the top of this file |
 | 34865716315 | `906bfb0` — **the `P2-T007` record commit, which edits only this file** | **failure: `rust (ubuntu-latest)`.** The other four jobs green, including `rust (macos-latest)` and `rust (windows-latest)` on **the same commit**. Two tests failed in `sure-core --test store_concurrency`. Detail below — this is the first red run since `c735a2f` and the first ever seen on a documentation-only commit |
 | 34866795192 | `0f7c854` — **the fix for that run** | **all five green, including `rust (ubuntu-latest)`, the job that failed.** Windows **877** / macOS **879** / Ubuntu **880** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. **Windows equals the local Windows run exactly**, and the multiset comparison moved **one position on each of the three platforms** — the lib target, `401→407` on Windows and `398→404` on both Unix jobs. Detail below |
+| 34869888350 | `4746c48` — **the `P2-T010` implementation** | **all five green.** Windows **907** / macOS **909** / Ubuntu **910** passed, 0 failed, 1 ignored, each over **37** result lines = **27** parents + 10 children. The parent count went 26 → 27 because `project_intent_ingest` is a new test binary. **Windows agrees with the local Windows run exactly**, and the +30 is attributed **by binary name** rather than by total. Detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34869888350`, `P2-T010`'s — and a delta attributed by binary name
+
+**All five jobs green.**
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 37 | 27 | 10 | **907** | 0 | 1 |
+| `rust (macos-latest)` | 37 | 27 | 10 | **909** | 0 | 1 |
+| `rust (ubuntu-latest)` | 37 | 27 | 10 | **910** | 0 | 1 |
+
+**907 is the local Windows figure exactly**, measured before the push. The raw
+sum over all 37 lines is 917 / 919 / 920, which over-counts by exactly 10 for the
+reason recorded above. The platform offsets are +2 and +3, unchanged.
+
+#### The +30, attributed to four named binaries
+
+The multisets alone say *how much* moved; they do not say *what*. The logs carry
+the binary name on each `Running` line, so the delta was read out of them by
+name on Windows:
+
+| binary | before | after | delta |
+|---|---|---|---|
+| `sure_core` (lib) | 407 | **416** | **+9** |
+| `sure` (bin) | 36 | **48** | **+12** |
+| `cli_contract` | 13 | **14** | **+1** |
+| `project_intent_ingest` | — | **8** | **+8** (new binary) |
+
+**9 + 12 + 1 + 8 = 30, and every other position is identical.** That is the whole
+attribution, and it matches the four places `P2-T010` put tests: nine unit tests
+in `sure-core`'s `project_intent`, twelve in `sure-cli`'s `check`/`report`, one in
+`cli_contract`, and the eight-test integration binary.
+
+**The four parents the name matcher did not name are the four `Doc-tests`
+targets, and reconciling that is what makes the arithmetic close.** 23 `Running`
+lines plus 4 `Doc-tests` targets is 27 parents; the 23 named binaries sum to
+**903**, and `Doc-tests sure_core` contributes the remaining **4** (the other
+three doc-test targets have no tests). 903 + 4 = **907**. `Doc-tests sure_core`
+was 4 before this commit too, so it is not part of the delta — but a reader who
+subtracts 903 from 907 and finds 4 unexplained should know where it went rather
+than assume the table is short.
+
+**Two mistakes were made getting that table, and both are the kind that produce a
+green that means nothing.** The first pattern was written `Running .*?deps` — but
+the `Running` in a GitHub log is followed by an ANSI colour reset, not a space, so
+it matched nothing, and a name matcher that matches nothing prints a
+well-formed table of zeros that reads exactly like "no binary changed". The
+second carried the last-seen name forward across a `Running` line it had not
+matched, which labelled one binary's count with another's name and produced
+`sure_domain +87` on Ubuntu and `components_graph +22` on macOS — numbers for
+binaries nothing had touched. The fix is in `target/tmp/bincounts.py` (git-ignored)
+and the rule is written at the top of it: **consume the name with the result line
+it belongs to, and print the number of matches, because a zero-row diff and a
+dead pattern are otherwise the same output.**
+
+#### What is compared by name, what is compared by multiset, and what each can support
+
+The per-name table is **Windows only, and deliberately**. The macOS and Ubuntu
+logs interleave: cargo's output for parallel test binaries arrives with
+timestamps out of order, so a name and the count beneath it are not reliably
+adjacent. Every attempt to pair them there produced deltas for binaries nothing
+had touched — `sure_domain +87` on Ubuntu, `components_graph +22` on macOS — and
+those numbers were wrong in the way that matters, because they looked like
+findings.
+
+The multiset is sound on all three platforms, but **it can support less than it
+first appears to.** Its claim is checked rather than asserted: substituting the
+four Windows deltas into each platform's *before* multiset (404→413, 36→48,
+13→14, and one new 8) reproduces each *after* multiset exactly, on both Unix
+jobs. What it does **not** do is determine those deltas — sorting discards which
+value was which, so on macOS a greedy positional alignment instead yields
+`47→48, 46→47, 36→46`, a different mapping that is arithmetically consistent too.
+**The multiset is consistent with the attribution; the Windows name table is what
+pins it.** Recorded at this length because the tempting sentence — "the multiset
+says the same thing on all three platforms" — is the one this file is supposed to
+be able to refuse, and it very nearly went in.
 
 ### Reading run `34866795192`, the fix's — and a multiset comparison on all three platforms
 
@@ -1674,6 +1811,16 @@ three positions moved and one is new: the CLI binary 36 → 48, `cli_contract` 1
 14, a new `8` for the new integration test, and the lib 401 → 416 — that last
 being +6 from the migration-race fix that landed between the two runs and +9 from
 this one.
+
+**That local attribution was then confirmed by CI, binary by binary**, which is
+worth recording because it is the first time the two methods have been compared
+directly rather than used one at a time. Locally the multiset said the CLI binary
+gained 12, the lib 9, `cli_contract` 1, and a new binary 8; CI read the same four
+numbers out of the `Running` lines by name, against a different baseline run.
+The local figures for the CLI binary and the lib also agree with the file-level
+count — nine in `check.rs` plus two in `report.rs` plus one in `commands.rs` is
+twelve — so the same delta is now reachable three ways, and "Reading run
+`34869888350`" records what each of them can and cannot support.
 
 ## Gate set, as run on the `P2-T007` commit `586d3a3`
 
@@ -2979,61 +3126,63 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **The immediate action is to push `P2-T010`'s implementation commit and read
-   its run — it is not finished until then.** The runs to expect are the three
-   `rust` jobs. Confirm all five green and confirm **907 / 909 / 910** with 0
-   failed and 1 ignored over **37** result lines = **27 parents + 10 children** —
-   907 is the Windows figure measured on this machine, and the platform offsets
-   have been +2 and +3 for many runs. The line count moves because
-   `crates/sure-core/tests/project_intent_ingest.rs` is a new test binary; a run
-   reporting 36 lines is running an older tree.
-2. **Then take `P2-T010`'s acceptance**, which needs the run above, and then the
-   next task. `P2-T010` is `in_progress` with its start and a truthful `notes`
-   line in `progress/state.json`, and its work is committed but **not accepted**:
-   the acceptance is deliberately withheld until a run exists, which is the rule
-   this file has now paid for three times.
-3. **`P2-T007` is accepted, its two commits are pushed and read.**
-   `586d3a3` the implementation in run `34864498113` — **all five jobs green**,
-   Windows **871** / macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36
-   result lines = 26 parents + 10 children, Windows equal to the local Windows
-   run; `435181f` the run record; `0907acf` the acceptance.
-   `node scripts/taskctl.mjs status` reads `{ accepted: 27, queued: 138,
-   in_progress: 1 }`, phase `P2`, **7 of 12** — and `P2-T010` is the one
-   `in_progress`, which is what keeps that count at 7 until its run is read.
-4. **The READY list is 12 long now that `P2-T010` is taken.** The list:
+1. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+   implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
+   with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
+   children** — read, and attributed by binary name, in "Reading run
+   `34869888350`". The acceptance is the commit carrying this file, and **its run
+   is read in the session that took it rather than committed** — the stopping
+   rule at the top of this file.
+2. **The next task is a real choice, and the list is 12 long.**
    `P2-T008`, `P2-T009`, `P2-T012`, `P3-T001`, `P4-T007`, `P4-T008`, `P6-T001`,
-   `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. `P2-T010` was chosen
-   from it because **it finishes phase P2**, and it is no longer in the list: it
-   is the one `in_progress` task, waiting on its run. The next choice is between
-   `P2-T008`/`P2-T009`/`P2-T012`, which extend a component graph that is two
-   commits old and still has no consumer, and `P4-T007`/`P6-T005`, which are
-   unread by any session and **whose arrival was not predicted when the list was
-   first written**, so they are a genuine choice rather than a formality. What
-   `P2-T010` changes about that picture: `project_fingerprint` now has **one real
-   caller** — `sure check --goal` — so the sentence in item 5 below about nothing
-   calling it is no longer true of that function, though it remains true that
-   nothing runs a check.
-   Checked rather than assumed, because a handoff that describes the next task
-   wrongly is a handoff that costs a session: the pieces `P2-T010` needs already
-   exist — `sure_domain::intent::ProjectIntent` in
-   `crates/sure-domain/src/intent.rs`,
-   `ProjectIntentConfig` at `crates/sure-core/src/config/mod.rs:145`,
-   `RecordKind::Document(DocumentKind::ProjectIntent)` at
-   `crates/sure-core/src/store/record.rs:75`, and `sure check` as a real CLI
-   subcommand (`crates/sure-cli/src/cli.rs:179`). What is missing is the path
-   between them. **What has *not* been read is whether "a trusted explicit goal"
-   is a phrase with a defined meaning elsewhere** — this entry names where the
-   types live and nothing about their shape, and the first thing to read is
-   `intent.rs`, not this paragraph.
+   `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **8 of
+   12**; `P2-T008`, `P2-T009` and `P2-T012` would finish it. They extend a
+   component graph that is now three commits old and **still has no consumer** —
+   `ComponentGraph` is produced by `P2-T007` and read by nothing — so the argument
+   for them is coherence of a phase rather than a pull from anything downstream.
+   `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007` and
+   `P8-T001` have been on the list since before this file was written. **Read the
+   task entry before choosing**; do not choose from this paragraph.
+3. **`P2-T007` is accepted, its two commits are pushed and read.**
+   `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
+   **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
+   `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
+   with **nothing `in_progress`**, so the next session may start any `READY` task
+   without adopting an orphan.
+4. **The store now holds six rows that no user wrote, and that is the first item
+   for whoever next touches `--goal` or the mutation harness.** They are listed in
+   "The mutation run wrote six rows into the real store" above, with the reason
+   they exist and the one-line statement that removes them. **They are left in
+   place deliberately**, because removing rows from a history file with no backup
+   is not reversible and is the owner's decision, not this session's. Two
+   consequences: a mutation that deletes the empty-goal refusal **will do it
+   again**, and any local experiment that runs the `cli_contract` binary writes to
+   the developer's real store until a caller can choose where SURE keeps its files
+   — which is the same gap `docs/architecture/CLI.md` records as missing test
+   coverage.
    **Keep the ordering discipline**: push each task's commits, read that run, and
    only then start the next acceptance. The cost of not doing it is written down
-   three times in this file now. **`P2-T006` paid for it in a new currency**: the
+   four times in this file now. **`P2-T006` paid for it in a new currency**: the
    per-target counts read out of a CI log by proximity were wrong three times for
-   `P2-T005`, so since then the whole-step count is cross-checked by a **multiset**
-   comparison — a check that is sound where proximity is not. **`P2-T007` added
-   the next increment**: the multiset was compared against the previous run's
-   multiset position by position, which is the only form of that check that can
-   tell a difference this commit made from one that was already there.
+   `P2-T005`, so the whole-step count is cross-checked by a **multiset**
+   comparison. **`P2-T007`** compared that multiset against the previous run's
+   position by position. **`P2-T010` added the third increment, and it is the one
+   to carry forward: compare by binary name, and print the number of matches.**
+   Two attempts here reported a well-formed table of zeros — the first because
+   `Running` in a GitHub log is followed by an ANSI escape rather than a space,
+   the second because a name was carried across a line the pattern had missed and
+   labelled another binary's count. Both looked exactly like "no binary changed".
+   `target/tmp/bincounts.py` exists so the next session does not rediscover it.
+5. **`project_fingerprint` now has one caller, and it is not a check.**
+   `sure check --goal` fingerprints the project to bind a recorded goal to a
+   state; nothing constructs an `Authority`, nothing runs the check pipeline, and
+   nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
+   rule and the dispatch rule are still properties of the modules and their
+   tests, verified, and **not yet properties of a `sure check`** — the one
+   invocation that reaches the fingerprinter reaches it for a goal, and reports
+   the kind and the digest rather than checking anything. The documentation says
+   so in as many words; do not let a later summary of this branch imply
+   otherwise.
 5. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and

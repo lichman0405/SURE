@@ -145,6 +145,18 @@ pub(crate) enum HashError {
 /// **A link is followed.** `File::open` follows one, and the caller is the one
 /// who knows whether the link or its target is the thing worth hashing. Every
 /// caller in this module decides before calling.
+///
+/// **Whatever path is passed is opened, and this function has no root to check
+/// it against.** Containment is the caller's obligation, because the caller is
+/// the one that knows what the project is. A caller holding a path from
+/// somewhere other than its own walk — a subprocess's output, a configuration
+/// file, a record in a store — must have established that the path is inside the
+/// project before this is reached; `crate::fingerprint::git` does that in
+/// `relative_to_root`, and the reason it does is in the comment there.
+///
+/// It carries no `// SAFETY`-shaped reassurance on purpose: a helper that
+/// looked contained while opening anything would be worse than one that says
+/// plainly where the boundary is.
 pub(crate) fn hash_file(path: &Path, limit: u64) -> Result<Hashed, HashError> {
     let file = File::open(path).map_err(HashError::Io)?;
     // One byte past the limit, so a file of exactly `limit + 1` bytes is seen to

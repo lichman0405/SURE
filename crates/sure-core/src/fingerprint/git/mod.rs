@@ -70,7 +70,7 @@ pub mod status;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use sure_domain::vocabulary::{GitState, ProjectFingerprint};
@@ -410,14 +410,36 @@ fn message_from(stderr: &[u8]) -> String {
 /// paths and not on strings: a repository containing `app` and `app-old` would
 /// defeat a string prefix, and `app-old/file.rs` would come out of one as
 /// `-old/file.rs` — a file that does not exist, hashed as though it did.
+///
+/// # Why this also refuses a path that climbs
+///
+/// The caller does `root.join(relative)` and then reads what is there, so a
+/// `..` in `relative` is a read outside the project — `root.join("../../etc")`
+/// is not inside `root`, and `join` will not say so. Nothing here relies on Git
+/// having rejected such a path: a repository is a thing SURE is asked to check,
+/// its `.git/index` is a file in it, and an index Git will read is not the same
+/// as an index Git would have written. `strip_prefix` is a textual operation
+/// and passes `..` straight through, so the refusal is its own step.
+///
+/// The check runs even when the project *is* the repository root and there is no
+/// prefix to strip, because that is the case with no strip at all between a path
+/// Git printed and a path that gets opened.
 fn relative_to_root<'a>(path: &'a Path, prefix: &Path) -> Result<&'a Path, FingerprintError> {
+    let outside = || FingerprintError::OutsideRoot {
+        path: path.to_path_buf(),
+    };
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(outside());
+    }
     if prefix.as_os_str().is_empty() {
         return Ok(path);
     }
-    path.strip_prefix(prefix)
-        .map_err(|_| FingerprintError::OutsideRoot {
-            path: path.to_path_buf(),
-        })
+    path.strip_prefix(prefix).map_err(|_| outside())
 }
 
 /// What is at one of the paths Git named.
@@ -619,4 +641,67 @@ impl<'a> Reader<'a> {
 /// recorded here and a path reported there are the same kind of thing.
 fn display_path(path: &Path) -> String {
     crate::scan::display_path(path)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    /// A path that climbs out is refused however the prefix reads.
+    ///
+    /// This is a unit test of the rule rather than an end-to-end reproduction,
+    /// and that is worth stating: no `git` on this machine will print a status
+    /// line containing `..`, so the only way to reach this through the public
+    /// entry point would be to hand-write a `.git/index` Git accepts — which is
+    /// exactly the input the guard is for, and is not something a test can
+    /// cheaply construct. The alternative to testing the rule directly was
+    /// testing nothing and calling the guard covered.
+    #[test]
+    fn a_path_that_climbs_is_refused_with_or_without_a_prefix() {
+        for prefix in [Path::new(""), Path::new("app")] {
+            for climbing in ["../outside", "app/../../outside", "/etc/passwd"] {
+                match relative_to_root(Path::new(climbing), prefix) {
+                    Err(FingerprintError::OutsideRoot { path }) => {
+                        assert_eq!(path, Path::new(climbing));
+                    }
+                    other => panic!(
+                        "{climbing:?} under prefix {prefix:?} gave {other:?}, and joining that \
+                         onto a project root would leave it"
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The ordinary cases still work, so the refusal above is not a refusal of
+    /// everything.
+    #[test]
+    fn a_path_inside_the_prefix_is_still_accepted() {
+        assert_eq!(
+            relative_to_root(Path::new("app/src/main.rs"), Path::new("app")).unwrap(),
+            Path::new("src/main.rs")
+        );
+        // The project *is* the repository root: no prefix, and the path comes
+        // back as it was.
+        assert_eq!(
+            relative_to_root(Path::new("src/main.rs"), Path::new("")).unwrap(),
+            Path::new("src/main.rs")
+        );
+        // A single `.` component is not a climb, and refusing it would refuse a
+        // path Git can legitimately print.
+        assert_eq!(
+            relative_to_root(Path::new("./src/main.rs"), Path::new("")).unwrap(),
+            Path::new("./src/main.rs")
+        );
+    }
+
+    /// A project in `app` is not confused by a sibling named `app-old`.
+    #[test]
+    fn the_prefix_comes_off_as_path_components_and_not_as_text() {
+        match relative_to_root(Path::new("app-old/file.rs"), Path::new("app")) {
+            Err(FingerprintError::OutsideRoot { .. }) => {}
+            other => panic!("a string prefix would have answered {other:?}"),
+        }
+    }
 }

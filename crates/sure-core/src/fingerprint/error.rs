@@ -87,10 +87,15 @@ pub enum FingerprintError {
     /// Git reported a change to a path outside the directory SURE was given.
     ///
     /// SURE asks Git for the status of one subtree, so this cannot happen
-    /// through Git honouring the pathspec it was given. It is a value rather
-    /// than an assertion because the alternative — dropping the path — is the
-    /// silent kind of wrong: the fingerprint would omit a change and look
-    /// complete.
+    /// through Git honouring the pathspec it was given, or because the path has
+    /// a `..`, a root or a drive prefix in it and joining it onto the project
+    /// root would step outside. The second is not reachable through a well
+    /// behaved Git; it is there because a repository is untrusted input and its
+    /// index is a file in it.
+    ///
+    /// It is a value rather than an assertion because the alternative — dropping
+    /// the path — is the silent kind of wrong: the fingerprint would omit a
+    /// change and look complete.
     OutsideRoot {
         /// The path Git reported.
         path: PathBuf,

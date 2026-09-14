@@ -266,10 +266,32 @@ fn a_name_that_is_not_valid_unicode_is_ordered_by_the_name_and_not_by_its_text()
         paths(&scan)
     );
     // And the rendered form is a loss, which is why the comparison above is not
-    // made on it: both names are in the scan and the report cannot tell them
-    // apart, so `display_path` is for reading and `Entry::path` is for telling
-    // two things apart.
-    assert_eq!(scan.entries()[0].display_path(), "\u{fffd}");
+    // made on it.
+    //
+    // How much of a loss is the platform's, and that is what this assertion used
+    // not to allow for. Windows holds a name as WTF-8 and renders the single
+    // unpaired surrogate as one U+FFFD; a Unix name is a byte string, the three
+    // bytes of the same sequence are three maximal subparts of an invalid
+    // sequence, and it renders as three. Pinning the count asserted one
+    // platform's rendering onto the other and failed on Linux.
+    //
+    // The count is not the claim — `to_string_lossy` not being the identity here
+    // is the claim — so what is asserted is that a replacement character
+    // appeared, followed by the consequence the test exists for: sorting the
+    // *rendered* names puts them in the opposite order to the names the
+    // operating system gave. That is true of either rendering.
+    let rendered = paths(&scan);
+    assert!(
+        rendered[0].contains('\u{fffd}'),
+        "the unrenderable name rendered faithfully: {rendered:?}"
+    );
+    let mut by_text = rendered.clone();
+    by_text.sort();
+    assert_ne!(
+        by_text, rendered,
+        "the text order and the name order agree, so this fixture does not \
+         demonstrate the difference it exists for"
+    );
 }
 
 /// A file name the platform will accept and that is not valid Unicode.

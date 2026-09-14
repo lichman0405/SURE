@@ -432,17 +432,48 @@ mod tests {
     mod unix {
         use super::*;
 
+        /// The part of the default entry point's answer that is the same on
+        /// every Unix, so it is asserted on every Unix.
+        ///
+        /// `is_within`, not `within`: the shared tests take the case rule as an
+        /// argument, so this is the one place that checks the platform's own
+        /// answer reaches the function callers actually use.
         #[test]
-        fn the_platform_rule_is_applied_by_the_default_entry_point() {
-            // `is_within`, not `within`: the shared tests take the case rule as
-            // an argument, so this is the one place that checks the platform's
-            // own answer reaches the function callers actually use.
+        fn a_path_outside_by_more_than_case_is_outside() {
+            assert!(is_within(
+                Path::new("/home/u/project/evidence"),
+                Path::new("/home/u/project")
+            ));
+            assert!(!is_within(
+                Path::new("/home/other/evidence"),
+                Path::new("/home/u/project")
+            ));
+        }
+
+        /// Linux's answer, asserted where Linux's answer holds.
+        ///
+        /// This used to be one test under a bare `#[cfg(unix)]`, which is not
+        /// one answer: `unix` includes macOS, whose default volume is
+        /// case-insensitive, so that test asserted Linux's rule on a platform
+        /// whose rule is the opposite and failed there. "Unix" is a set of
+        /// platforms and not a case rule — `CaseSensitivity::platform` already
+        /// says so, and this now follows it rather than contradicting it.
+        #[test]
+        #[cfg(not(target_os = "macos"))]
+        fn the_default_entry_point_folds_nothing_on_a_case_sensitive_platform() {
             assert!(!is_within(
                 Path::new("/home/u/Project/evidence"),
                 Path::new("/home/u/project")
             ));
+        }
+
+        /// macOS's answer, asserted where macOS's answer holds — the same path
+        /// as above, and the opposite expectation.
+        #[test]
+        #[cfg(target_os = "macos")]
+        fn the_default_entry_point_folds_case_on_a_case_insensitive_platform() {
             assert!(is_within(
-                Path::new("/home/u/project/evidence"),
+                Path::new("/home/u/Project/evidence"),
                 Path::new("/home/u/project")
             ));
         }

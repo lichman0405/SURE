@@ -2,19 +2,21 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 26 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (6/12).** `P2-T006` is accepted and recorded in
-`progress/state.json`, and the runs for its acceptance and for the commit that
-recorded it are rows in the table below.
+Progress: 27 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (7/12).** `P2-T007` is accepted and recorded in
+`progress/state.json` **in the same commit as this file** — so `git log -1 --stat`
+is the check. If that commit's subject does not name `P2-T007`, the acceptance is
+not recorded and the task is not done. The commit after it records the acceptance
+commit's own run, because a push is not finished until its run has been read —
+and that last run is where this task's chain stops, so it is reported in the
+session rather than enshrined in yet another commit.
 
-**`P2-T007` is the task in hand, and as this commit lands it is not accepted.**
-Its implementation is pushed as `586d3a3`, run `34864498113` is green on all five
-jobs and has been read — counts, per-binary multiset, and all 22 new test names
-by name on all three `rust` logs. **The acceptance is outstanding**, so the honest
-reading of `progress/state.json` at this commit is `P2-T007: in_progress`, which
-is what "Exact current state" below says. The acceptance, and the correction it
-forces on that block, land in the commit after this one. A push is not finished
-until its run has been read.
+**`P2-T007`'s implementation went in first, on its own commit, with its own run
+read before the acceptance was taken.** `586d3a3`, run `34864498113`, all five
+jobs green; `435181f` records that run. The two-commit shape is deliberate and is
+not the four-commit shape `P2-T006` used: the acceptance could not be written
+honestly until the run existed, and once it did, the only remaining commits are
+the acceptance and the record of its own run.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -44,15 +46,34 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 26, in_progress: 1, queued: 139 }
-READY: P2-T010, P3-T001, P4-T008, P6-T001, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 27, queued: 139 }
+READY: P2-T008, P2-T009, P2-T010, P2-T012, P3-T001, P4-T007, P4-T008, P6-T001,
+       P6-T005, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T007` is `in_progress`** (started 2026-09-14), which is why it is no longer
-in `READY`. It was started on dependency-graph grounds rather than list order: it
-consumes all three discovery modules and unblocks `P2-T008`, `P2-T009` and
-`P2-T012`, while `P2-T010` — which also sits in `READY` and depends only on
-long-accepted tasks — unblocks nothing.
+**`P2-T007` is `accepted`** — `status: accepted`, `started_at`
+`2026-09-14T15:32:57.220Z`, `finished_at` `2026-09-14T15:54:09.720Z`, and a 2912
+byte note. **`in_progress` is 0**, so nothing is half-finished and the next
+session may start any READY task without adopting an orphan.
+
+**Five tasks entered `READY` on this acceptance and the list went 8 → 13.**
+`P2-T008`, `P2-T009` and `P2-T012` are the ones this file predicted, because they
+depend on `P2-T007`. **`P4-T007` and `P6-T005` appeared without being predicted
+by anything written down here**, and the READY list is quoted from the command
+rather than from that prediction precisely so this is visible instead of
+silently absent.
+
+**What the acceptance tool fills and what it does not, read out of the file
+rather than assumed.** On `P2-T007`, `base_sha` and `head_sha` are both `null`
+and `evidence` is `[]`; `taskctl accept` sets `status`, `finished_at` and `notes`
+and nothing else. **That is true of the SHAs for all 27 accepted tasks — 0 carry
+a `base_sha` or a `head_sha` — but it is NOT true of `evidence` or `notes`,
+and a blanket claim would have been wrong in two directions:** `P2-T003` is the
+one accepted task of the 27 with a non-empty `evidence` array (three strings,
+added when that acceptance was recorded), and `P0-T009`, `P1-T001` and `P1-T002`
+carry no notes at all where the other 24 do. So the commits and the run for
+`P2-T007` are recorded **here**, and the fields in `progress/state.json` are not
+a substitute for this file — they are not even uniform across tasks.
 
 **A correction that was made and then overtaken, kept because both halves are
 worth having.** An earlier draft of this file said `accepted: 26` and "nothing is
@@ -61,16 +82,17 @@ worth having.** An earlier draft of this file said `accepted: 26` and "nothing i
 pushed and its run read, and neither of those is an acceptance. The count had
 been carried forward from a summary instead of read out of the file it describes,
 which is the failure mode this repository is built against. It was corrected to
-`25` while the acceptance was still outstanding, and `26` above is a **separate,
+`25` while the acceptance was still outstanding, and `26` was a **separate,
 later** reading of the same command. The distinction is the point: a figure that
-becomes true later was not true when it was written.
+becomes true later was not true when it was written. `27` above is a third
+reading, taken after the acceptance landed.
 
 **`READY` gained `P2-T007` and `P4-T008` when `P2-T006` was accepted** — neither
 could start until Cargo discovery existed. That is the dependency graph doing its
 job, and it is the reason the list is quoted from the command rather than
 remembered.
 
-`P2-T007` (the component graph) is `in_progress` and described in "What `P2-T007`
+`P2-T007` (the component graph) is `accepted` and described in "What `P2-T007`
 added" below, with its implementation run read in "Reading run `34864498113`".
 `P2-T006` is `accepted` and described in "What `P2-T006` added".
 The three things worth
@@ -2598,30 +2620,24 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **`P2-T007` is implemented and pushed, its run is read, and the acceptance is
-   the next action.** `586d3a3` in run `34864498113` — **all five jobs green**,
-   Windows **871** / macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36
-   result lines = 26 parents + 10 children. Run the acceptance with a note written
-   to a file and passed as `--note "$(cat …)"`, then commit the acceptance and
-   read that run too. **`P2-T006` is accepted and all three of its commits are
-   pushed and read.** Windows **840 → 849 → 849**; the first step is the nine new
-   `pattern.rs` tests and the second is a documentation-only commit changing no
-   number, which is the useful reading for a record commit. The `P2-T007` chain is
-   deliberately **two** commits rather than `P2-T006`'s four, and the stopping
-   rule is the one recorded above: the acceptance commit's run is read and
-   reported in the session rather than enshrined in a further commit. State at
-   this commit: `{ accepted: 26, in_progress: 1, queued: 139 }`, phase `P2`,
-   **6 of 12**.
-2. **After the acceptance, the READY list is `P2-T010`, `P3-T001`, `P4-T008`,
-   `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001` — and accepting
-   `P2-T007` adds `P2-T008`, `P2-T009` and `P2-T012`, which depend on it.** The
+1. **`P2-T007` is accepted, its two commits are pushed and read, and the next
+   action is to start the next task — nothing is in flight.** `586d3a3` the
+   implementation in run `34864498113` — **all five jobs green**, Windows **871** /
+   macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36 result lines = 26
+   parents + 10 children, Windows equal to the local Windows run; `435181f` the
+   run record. `node scripts/taskctl.mjs status` now reads
+   `{ accepted: 27, queued: 139 }`, phase `P2`, **7 of 12**, with **`in_progress:
+   0`**.
+2. **The READY list is now 13 long and two of its entries were not predicted:
+   `P2-T008`, `P2-T009`, `P2-T010`, `P2-T012`, `P3-T001`, `P4-T007`, `P4-T008`,
+   `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`.** The
    order to consider is `P2-T010` — *"Implement `ProjectIntent` ingestion from
    explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
    explicit goal without requiring raw transcript recording"* — because **it
    finishes phase P2**, against `P2-T008`/`P2-T009`/`P2-T012` which extend a graph
-   that is one commit old and has no consumer yet. `P3-T001` is blocked on
-   nothing here but is a phase change; `P4-T008` has still not been read by any
-   session.
+   that is one commit old and has no consumer yet. `P4-T007` and `P6-T005` are
+   unread by any session and **their arrival was not predicted here**, so they are
+   a genuine choice rather than a formality.
    Checked rather than assumed, because a handoff that describes the next task
    wrongly is a handoff that costs a session: the pieces `P2-T010` needs already
    exist — `sure_domain::intent::ProjectIntent` in

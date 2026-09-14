@@ -57,13 +57,16 @@ impl Command {
             // can read — instead of a thing that goes and looks.
             Self::Doctor => Report::Doctor(Box::new(sure_core::doctor::examine_this_machine())),
 
+            // Asked with `--goal`, this command does something: it records what
+            // the user asked for, and then says that nothing was checked. The
+            // decision is `crate::check`'s, and it is a decision rather than an
+            // implementation detail because this is the only command on the
+            // surface with a side effect a user cannot see in the output — the
+            // goal goes into their history.
+            Self::Check { path, goal } => crate::check::run(self, path.as_deref(), goal.as_deref()),
+
             // Everything below is a real command with a real job and no
             // implementation yet.
-            Self::Check { .. } => not_yet(
-                self,
-                "check a project and report what it found",
-                "Nothing was checked.",
-            ),
             Self::Recheck { .. } => not_yet(
                 self,
                 "check a project again and compare what it finds with what it found last time",
@@ -133,9 +136,23 @@ mod tests {
     /// By hand rather than by walking clap's `CommandFactory`, because this is
     /// the list of *commands* and a list derived from the parser would share a
     /// source of truth with the thing it checks.
+    ///
+    /// # What is deliberately not in this list
+    ///
+    /// `Check` with a goal that has words in it. Every command here is asked for
+    /// a report, and `sure check --goal "…"` writes to the store **this machine
+    /// really uses** — so a test that added it here would be putting an invented
+    /// requirement into the history of whoever ran the suite, and it would look
+    /// exactly like a passing test. There is no environment variable that could
+    /// point it somewhere else: on Windows the data directory comes from
+    /// `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`. `crate::check`'s
+    /// tests drive the same code against locations they name.
     fn every_command() -> Vec<Command> {
         vec![
-            Command::Check { path: None },
+            Command::Check {
+                path: None,
+                goal: None,
+            },
             Command::Recheck { path: None },
             Command::Repair { path: None },
             Command::History { action: None },
@@ -213,8 +230,56 @@ mod tests {
                 // `a_command_that_runs_never_answers_a_question_it_was_not_asked`
                 // for the name it answers under.
                 Report::Version | Report::Protocol | Report::Handshake(_) | Report::Doctor(_) => {}
+                // Neither shape is reachable from [`every_command`], and that is
+                // asserted rather than ignored: the list holds no invocation that
+                // writes to the store, so a report of either shape appearing here
+                // means somebody added one — and a test that quietly skipped it
+                // would be the only thing standing between an invented
+                // requirement and the history of the machine running the suite.
+                Report::GoalRecorded(_) | Report::Failed(_) => panic!(
+                    "{command:?} produced {report:?}, and nothing in this list may have a \
+                     side effect or a failure. See `every_command`."
+                ),
             }
         }
+    }
+
+    #[test]
+    fn a_goal_with_no_words_reaches_the_check_and_fails_rather_than_being_a_wrong_command_line() {
+        // The one way this file can exercise the `--goal` path at all — see
+        // `every_command` for why a goal with words in it is not here. A goal
+        // with no words in it is refused before SURE looks for its store, so this
+        // run leaves the machine as it found it, and it still goes through the
+        // dispatch: the grammar's variant, the arm, and `crate::check`.
+        //
+        // Status 5, not 2 and not 3. 2 would mean SURE did not accept the command
+        // line, and it did: `--goal ""` is a goal, and an empty one. 3 would mean
+        // this build cannot record a goal, and it can — `crate::check`'s tests
+        // record them against locations they name. What happened is that SURE was
+        // asked to do something and could not finish it.
+        let report = Command::Check {
+            path: None,
+            goal: Some(String::new()),
+        }
+        .report();
+
+        let failure = match &report {
+            Report::Failed(failure) => failure,
+            other => panic!("an empty goal was answered with {other:?}"),
+        };
+        assert_eq!(failure.command, "check");
+        assert_eq!(report.exit_code(), crate::report::exit::FAILED);
+        assert_ne!(report.exit_code(), crate::report::exit::UNAVAILABLE);
+        assert_ne!(report.exit_code(), crate::report::exit::USAGE);
+        assert!(
+            failure.what.contains("Nothing was recorded"),
+            "the user is not told whether their history changed: {:?}",
+            failure.what
+        );
+        assert!(
+            failure.what.ends_with('.') && failure.detail.ends_with('.'),
+            "a sentence a user reads has to finish: {failure:?}"
+        );
     }
 
     #[test]

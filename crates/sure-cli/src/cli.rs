@@ -65,6 +65,20 @@ pub enum Command {
     Check {
         /// The project to check. Default: the current directory.
         path: Option<PathBuf>,
+
+        /// What you want the project to do, in your own words.
+        ///
+        /// This is the one channel the project cannot write, and the reason it
+        /// exists: a goal found in a README or in `sure.yaml` is documentation,
+        /// because the agent whose work is being checked can edit both. A goal
+        /// typed here is a user requirement, and SURE may compare the project
+        /// against it — see `docs/architecture/PROJECT_INTENT.md`.
+        ///
+        /// The wording is kept exactly as given. SURE does not summarize it,
+        /// rewrap it or trim it, because a goal that lost a clause on the way in
+        /// is a requirement the user never stated.
+        #[arg(long, value_name = "TEXT")]
+        goal: Option<String>,
     },
 
     /// Check a project again, after a repair, and compare with last time.

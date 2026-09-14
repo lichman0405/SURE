@@ -487,6 +487,7 @@ dependencies = [
  "clap",
  "serde_json",
  "sure-core",
+ "sure-testkit",
 ]
 
 [[package]]

@@ -3,11 +3,16 @@
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
 Progress: 27 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (7/12).** `P2-T010` is `in_progress` — started, and
-its start is in `progress/state.json` — but **the commit after `0907acf` is not
-`P2-T010`'s first work**: it fixes a defect that run `34865716315` exposed, and
-the reason the fix came first is that `P2-T010`'s acceptance requires the store to
-open reliably, which is the thing that run showed it does not always do.
+(11/11), phase P2 in progress (7/12).** `P2-T010` is `in_progress` — started,
+implemented, and **not yet accepted**: the acceptance waits on a read CI run, so
+it lands in a commit after the one this file is in. What is implemented is
+described under "What `P2-T010` added" below, and every claim there is a local
+measurement.
+
+The commit that follows `0907acf` is not `P2-T010`'s first work: it fixes a
+defect that run `34865716315` exposed, and the reason the fix came first is that
+`P2-T010`'s acceptance requires the store to open reliably, which is the thing
+that run showed it does not always do.
 
 **`P2-T007` is accepted and its acceptance is in `0907acf`, with this file.** The
 check is `git show --stat 0907acf`, not `git log -1 --stat` — that sentence was
@@ -229,6 +234,142 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T010` added
+
+`crates/sure-core/src/project_intent.rs`, its integration test
+`crates/sure-core/tests/project_intent_ingest.rs`, `crates/sure-cli/src/check.rs`,
+and the two new `Report` variants that the CLI needed to answer with. The
+documentation is `docs/architecture/PROJECT_INTENT.md` (rewritten from a stub
+whose sections were all still in the imperative) and a new section in
+`docs/architecture/CLI.md`.
+
+The acceptance is one sentence: *"`sure check` can receive/store a trusted
+explicit goal without requiring raw transcript recording."* It has three
+separable claims, and each is answered in a different place:
+
+- **receive** — `explicit_goal(&str)` turns the text into one `Requirement` with
+  the fixed identifier `goal`. The text is stored **verbatim**: not trimmed, not
+  re-wrapped, not cut at the first full stop. The emptiness test trims, because
+  `--goal "   "` has no words in it however it was spelled; the stored value does
+  not, because trimming is already an edit.
+- **trusted** — the source is `IntentSource::ExplicitUserGoal`, one of the only
+  two `is_user_requirement` accepts, and `raw_retained` is true because the words
+  are the user's own rather than a summary of them.
+- **without requiring raw transcript recording** — nothing consults
+  `requires_full_recording`, and
+  `storing_a_goal_writes_no_recording` asserts the *absence* of a recording row
+  through `HistoryFilter::recordings()`. That is the half a test asserting "a row
+  appeared" would miss.
+
+`crates/sure-cli/src/check.rs` is where the run happens, and three decisions in
+it are the ones worth knowing about:
+
+1. **A bare `sure check` is unchanged.** `--goal` absent means "check the
+   project", which this build cannot do, so it still returns the same `NotYet` at
+   status 3 and still touches nothing. Adding the flag turned no existing command
+   line into a different answer.
+2. **Recording a goal is `Report::GoalRecorded`, not a `NotYet`** — a new result
+   shape, at status 3. The check did not happen, but the user's history changed,
+   and a refusal that said only "not implemented in this build" would be true
+   about the check and false about the run. Status 3 stops the script; the frame
+   carries the record. Reporting 0 here would make `sure check` a green light in
+   CI while checking nothing, which is the failure this program exists to find.
+3. **A run that tried and could not finish is `Report::Failed` at status 5**, not
+   3. The remedy for 3 is a newer build; the remedy for 5 is to look at the
+   machine. `outcome`'s closed set in `docs/architecture/CLI.md` grew to include
+   `failed`.
+
+The goal is bound to a **real** project fingerprint — `project_fingerprint` with
+default options — and the report leads with the kind and the digest rather than
+with the identifier, because `FingerprintId` is minted per run. The consequence
+for a reader is written down in `PROJECT_INTENT.md`: find the goal by project
+root and kind, not by fingerprint.
+
+### Two things `P2-T010` could not test, both recorded rather than papered over
+
+**The happy path is not covered as a process.** `cli_contract.rs` runs the
+binary, and it runs `sure check --goal ""` and nothing more: a goal *with words*
+would be written to the store the developer's own machine really uses, and on
+Windows that location comes from `SHGetKnownFolderPath`, which ignores
+`LOCALAPPDATA` — so no environment variable can point a test at a scratch
+directory. A test that did it would put an invented requirement into somebody's
+history and look exactly like a green one. The code under that path is driven by
+`src/check.rs`'s unit tests against locations they name, and by
+`sure-core/tests/project_intent_ingest.rs`. `docs/architecture/CLI.md` states the
+gap in those words.
+
+**One code path's defence cannot be observed at all.** The early return in
+`check::run` — "a bare `sure check` does not look for its files" — is a promise
+about a machine where SURE has *no* data directory. Removable, the answer a user
+gets is identical and the difference is a store created on a machine that did not
+have one. No test in this repository can see it, for the same reason as above.
+It is the second mutation in `mutate12.py`'s declared-unobservable set, and it
+closes the same day a caller can choose where SURE keeps its files.
+
+### Two things `P2-T010` observed and did not fix
+
+Neither is a defect claim; both are things the next reader will meet.
+
+1. **`FingerprintId` is minted per call while `Evidence::is_fresh_for` compares
+   ids.** `ProjectFingerprint::git` and `::content` call `FingerprintId::generate`
+   every time, so an unchanged project gets a different identifier on every run,
+   while `sure_domain::evidence::Evidence::is_fresh_for(current)` asks whether two
+   *identifiers* are equal. If that predicate is ever the thing that decides
+   whether stored evidence is stale, it will answer "not fresh" for evidence
+   about a project nobody touched — the failure mode `choose.rs` and
+   `FINGERPRINTING.md` both argue against. Nothing calls it with a real
+   fingerprint id yet, so this is a question to answer rather than a bug to fix:
+   **is a fingerprint id meant to be stable across runs, or is `kind` + `digest`
+   the identity and the id only names one computation?** `P2-T010` assumed the
+   second and reports `kind` and `digest`, keeping the id to the machine frame.
+   `docs/architecture/PROJECT_INTENT.md` records the same assumption.
+2. **`HistoryFilter` has no `project_root` filter.**
+   `sure_core::store::HistoryFilter` filters by project fingerprint and by record
+   kind, and a goal is stored against a project *root*. So a reader asking a
+   shared user-level store for one project's goal must fetch by kind and filter
+   by root itself. Nothing in this build reads a goal back at the user level —
+   `sure check --goal` only writes — so the gap is recorded rather than worked
+   around, and the task that first reads one owns closing it.
+
+### The `P2-T010` mutation run, and the two holes it found
+
+`target/tmp/mutate12.py` (git-ignored), 23 mutations over three files: **21 of
+21 observable mutations caught by a failing test, 2 declared unobservable and
+missed as declared, 0 skipped, 0 that failed to compile.**
+
+The families are the three claims above plus the one about what a run *says*, and
+the third is where the value was. Eleven mutations are false-green shapes —
+`sure check --goal` reporting `ok`, exiting 0, filing a recorded goal as an
+answer about the project, reporting a summary of the goal as the goal itself.
+Each fails three tests at once, which is the point: the exit status, the outcome
+word and the human sentence are three independent renderings of one decision and
+the suite holds all three.
+
+Two mutations came back green on the first run, and both tests were written
+afterwards:
+
+- **"the goal is summarized into one sentence before it is stored"** —
+  `Requirement::text` is documented as *"normalized to one sentence where
+  possible"*, so cutting at the first full stop is the most plausible way to get
+  the no-summarizing rule wrong. Every goal in the test had no full stop in it, so
+  the mutation changed nothing. A user writing a goal writes several sentences
+  when it takes several to say what they want — which is exactly when losing the
+  rest matters most. Two multi-sentence goals are in the test now.
+- **"the store is opened before SURE knows whether it has anything to write"** —
+  and the reason it was green is the more useful finding.
+  `a_project_that_cannot_be_read_leaves_no_store_behind` used a **relative** root,
+  and `Store::open` refuses a relative root through `Paths::ensure_outside` as
+  well, so the module that opened the store first passed the very test written to
+  catch it. The test now also uses an absolute path that does not exist — the
+  ordinary mistake of a mistyped path — which only the fingerprinter refuses.
+
+The third rule of the harness earned its place twice: one mutation was reported
+`SKIP` because its anchor did not match (the formatter had reflowed the line), and
+one was reported `BUILD` because it made a `match` non-exhaustive. Neither
+counted as a catch, which is what those verdicts are for — a mutation that was
+never applied, or that stopped the code compiling, says nothing about whether a
+test would have noticed the behaviour.
 
 ## What `P2-T007` added
 
@@ -1503,6 +1644,36 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P2-T010`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **907 passed, 0 failed, 1 ignored, across 37 result lines = 27 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `python target/tmp/mutate12.py` | **21 of 21 observable mutations caught, 2 declared unobservable and missed as declared, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` did not fire |
+
+**907 is 877 + 30, and 877 is the Windows figure this file already recorded for
+`3be88f1`** — the commit this work starts from — so the arithmetic does not have
+to cross the migration-race fix in the middle. The thirty are: twelve in
+`sure-cli`'s binary (nine in `check.rs`, two in `report.rs`, one in
+`commands.rs`), one in `cli_contract.rs`, nine in `sure-core`'s lib
+(`project_intent.rs`), and eight in the new `project_intent_ingest` binary.
+Counting `test result:` lines alone would have given 917, which over-counts by
+exactly 10 for the reason recorded above.
+
+The result-line count moved from 36 to 37 because `project_intent_ingest.rs` is a
+new test binary, so the parents went from 26 to 27. The per-binary multiset — the
+only sound way to attribute a count to a target — is now
+`416, 87, 48, 46, 43, 33, 31, 30, 29, 24, 23, 15, 14, 12, 9, 8×2, 7, 6×2, 4×3, 0×4`:
+27 values for 27 expected binaries. Against `586d3a3`'s
+`401, 87, 46, 43, 36, 33, 31, 30, 29, 24, 23, 15, 13, 12, 9, 8, 7, 6×2, 4×3, 0×4`,
+three positions moved and one is new: the CLI binary 36 → 48, `cli_contract` 13 →
+14, a new `8` for the new integration test, and the lib 401 → 416 — that last
+being +6 from the migration-race fix that landed between the two runs and +9 from
+this one.
 
 ## Gate set, as run on the `P2-T007` commit `586d3a3`
 
@@ -2808,37 +2979,40 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **The immediate action is to push this fix and read its run — it is not
-   finished until then, and the run it answers was red.** The run to expect is
-   `rust (ubuntu-latest)` in particular: it is the job that failed, and the two
-   that passed are not the ones to check. Confirm all five green and confirm
-   **877 / 879 / 880** with 0 failed and 1 ignored over 36 result lines = 26
-   parents + 10 children — the Windows figure locally measured is 877, and the
-   platform offsets have been +2 and +3 for many runs.
-2. **Then `P2-T010`**, which is `in_progress` with its start recorded in
-   `progress/state.json` and **no work committed yet**. The red run is why it was
-   not started: its acceptance is "`sure check` can receive/store a trusted
-   explicit goal", and `sure check` opens the store.
+1. **The immediate action is to push `P2-T010`'s implementation commit and read
+   its run — it is not finished until then.** The runs to expect are the three
+   `rust` jobs. Confirm all five green and confirm **907 / 909 / 910** with 0
+   failed and 1 ignored over **37** result lines = **27 parents + 10 children** —
+   907 is the Windows figure measured on this machine, and the platform offsets
+   have been +2 and +3 for many runs. The line count moves because
+   `crates/sure-core/tests/project_intent_ingest.rs` is a new test binary; a run
+   reporting 36 lines is running an older tree.
+2. **Then take `P2-T010`'s acceptance**, which needs the run above, and then the
+   next task. `P2-T010` is `in_progress` with its start and a truthful `notes`
+   line in `progress/state.json`, and its work is committed but **not accepted**:
+   the acceptance is deliberately withheld until a run exists, which is the rule
+   this file has now paid for three times.
 3. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — **all five jobs green**,
    Windows **871** / macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36
    result lines = 26 parents + 10 children, Windows equal to the local Windows
    run; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` reads `{ accepted: 27, queued: 138,
-   in_progress: 1 }`, phase `P2`, **7 of 12**.
-4. **The READY list is 13 long, and the sentence that used to introduce it said
-   "two of its entries were not predicted" about `P4-T007` and `P6-T005` — which
-   was true when it was written and is left here as the number it became.** The
-   list: `P2-T008`, `P2-T009`, `P2-T010`, `P2-T012`, `P3-T001`, `P4-T007`,
-   `P4-T008`, `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`,
-   `P13-T001` — with `P2-T010` already taken. The order to consider is `P2-T010` —
-   *"Implement `ProjectIntent` ingestion from
-   explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
-   explicit goal without requiring raw transcript recording"* — because **it
-   finishes phase P2**, against `P2-T008`/`P2-T009`/`P2-T012` which extend a graph
-   that is one commit old and has no consumer yet. `P4-T007` and `P6-T005` are
-   unread by any session and **their arrival was not predicted here**, so they are
-   a genuine choice rather than a formality.
+   in_progress: 1 }`, phase `P2`, **7 of 12** — and `P2-T010` is the one
+   `in_progress`, which is what keeps that count at 7 until its run is read.
+4. **The READY list is 12 long now that `P2-T010` is taken.** The list:
+   `P2-T008`, `P2-T009`, `P2-T012`, `P3-T001`, `P4-T007`, `P4-T008`, `P6-T001`,
+   `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. `P2-T010` was chosen
+   from it because **it finishes phase P2**, and it is no longer in the list: it
+   is the one `in_progress` task, waiting on its run. The next choice is between
+   `P2-T008`/`P2-T009`/`P2-T012`, which extend a component graph that is two
+   commits old and still has no consumer, and `P4-T007`/`P6-T005`, which are
+   unread by any session and **whose arrival was not predicted when the list was
+   first written**, so they are a genuine choice rather than a formality. What
+   `P2-T010` changes about that picture: `project_fingerprint` now has **one real
+   caller** — `sure check --goal` — so the sentence in item 5 below about nothing
+   calling it is no longer true of that function, though it remains true that
+   nothing runs a check.
    Checked rather than assumed, because a handoff that describes the next task
    wrongly is a handoff that costs a session: the pieces `P2-T010` needs already
    exist — `sure_domain::intent::ProjectIntent` in
@@ -2860,13 +3034,16 @@ it needs a Mac.
    the next increment**: the multiset was compared against the previous run's
    multiset position by position, which is the only form of that check that can
    tell a difference this commit made from one that was already there.
-5. **Neither fingerprint entry point is called by anything yet**, and that has
-   now been true for two tasks: nothing constructs an `Authority`, nothing runs
-   the check pipeline, and `project_fingerprint` is the function the pipeline
-   will call first. So `FINGERPRINTING.md`'s coverage rule and the dispatch rule
-   are properties of the modules and their tests, verified, and not yet
-   properties of a `sure` invocation. The documentation says so in as many
-   words; do not let a later summary of this branch imply otherwise.
+5. **`project_fingerprint` now has one caller, and it is not a check.**
+   `sure check --goal` fingerprints the project to bind a recorded goal to a
+   state; nothing constructs an `Authority`, nothing runs the check pipeline, and
+   nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
+   rule and the dispatch rule are still properties of the modules and their
+   tests, verified, and **not yet properties of a `sure check`** — the one
+   invocation that reaches the fingerprinter reaches it for a goal, and reports
+   the kind and the digest rather than checking anything. The documentation says
+   so in as many words; do not let a later summary of this branch imply
+   otherwise.
 
 **What `P2-T002` left for later, and what `P2-T003` then did with it.**
 `P2-T002` left the Git fingerprint asked for explicitly, by a caller that had

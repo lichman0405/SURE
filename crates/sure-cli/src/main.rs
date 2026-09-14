@@ -11,6 +11,7 @@
 //! | what a command does in this build | [`commands`] |
 //! | how a result is written | [`report`] |
 //! | what `sure doctor` says, in both forms | [`doctor`] |
+//! | what `sure check --goal` stores, and what it refuses to claim | [`check`] |
 //! | which stream, and which of the two paths | [`output`] |
 //! | the exit status | `report::Report::exit_code` |
 //!
@@ -24,6 +25,7 @@
 //! than SURE's is how a documented table quietly becomes wrong. `try_parse`
 //! hands the error back, and [`status_of`] is the whole of the mapping.
 
+mod check;
 mod cli;
 mod commands;
 mod doctor;

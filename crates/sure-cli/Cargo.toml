@@ -19,5 +19,14 @@ sure-core = { path = "../sure-core" }
 clap = { workspace = true }
 serde_json = { workspace = true }
 
+# The testkit is a development-only dependency, for the same reason `sure-core`
+# takes it: the tests under `src/check.rs` need a scratch directory that is
+# ignored by Git and that is not the user's own, and they ask for the checkout
+# rather than re-deriving the repository root. It is not a production
+# dependency, so no fixture can ship inside the product — a rule
+# `crates/sure-testkit/tests/repository_shape.rs` checks against these manifests.
+[dev-dependencies]
+sure-testkit = { path = "../sure-testkit" }
+
 [lints]
 workspace = true

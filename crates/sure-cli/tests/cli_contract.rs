@@ -386,6 +386,88 @@ fn the_machine_form_is_one_object_on_one_line_of_standard_output() {
 }
 
 #[test]
+fn a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line() {
+    // The one way this file can reach `--goal` from here. A goal with words in
+    // it is written to the store **this machine really uses**, and there is no
+    // environment variable that could point it somewhere else — on Windows the
+    // data directory comes from `SHGetKnownFolderPath`, which ignores
+    // `LOCALAPPDATA`. So a test here would be adding an invented requirement to
+    // the history of whoever ran the suite, and it would look like a passing
+    // test. A goal with no words in it is refused before SURE looks for its
+    // store, which makes this the whole of the flag's process-level coverage;
+    // `src/check.rs` drives the rest against locations it names.
+    //
+    // Status 5, and the two statuses it is not: 2 would mean the parser rejected
+    // the command line, and `--goal ""` is accepted — an empty goal is a goal
+    // with nothing in it, which is a thing a user can type. 3 would mean this
+    // build cannot record a goal, and it can. 5 is "it tried and did not finish",
+    // which is what happened.
+    for args in [
+        &["check", "--goal", ""][..],
+        &["check", "--goal", "   "][..],
+    ] {
+        let human = run(args);
+        assert_eq!(
+            human.status,
+            5,
+            "`sure {}` returned {}. A goal with no words in it is a run that could not \
+             finish:\n{}",
+            args.join(" "),
+            human.status,
+            human.stderr
+        );
+        assert!(
+            human.stdout.is_empty(),
+            "the complaint went to standard output, where `sure check > report.txt` would \
+             put it in the file and read as a report:\n{}",
+            human.stdout
+        );
+        assert!(
+            human.stderr.contains("could not finish"),
+            "`sure check --goal ''` does not say it did not finish:\n{}",
+            human.stderr
+        );
+        // The promise a user has to be able to rely on without reading the code:
+        // a run that failed did not change their history.
+        assert!(
+            human.stderr.contains("Nothing was recorded"),
+            "`sure check --goal ''` does not say whether the history changed:\n{}",
+            human.stderr
+        );
+        assert!(
+            !human.stderr.contains("is not implemented in this build"),
+            "a run that tried is worded as a command this build lacks:\n{}",
+            human.stderr
+        );
+
+        let mut machine: Vec<&str> = vec!["--format", "json"];
+        machine.extend_from_slice(args);
+        let machine = run(&machine);
+        assert_eq!(machine.status, human.status, "{}", machine.stdout);
+        let frame: serde_json::Value =
+            serde_json::from_str(machine.stdout.trim()).expect("one frame");
+        assert_eq!(frame["outcome"].as_str(), Some("failed"), "{frame}");
+        assert_eq!(frame["exit_code"].as_i64(), Some(5), "{frame}");
+        assert_eq!(frame["command"].as_str(), Some("check"), "{frame}");
+        assert_eq!(
+            frame["details"]["what"].as_str(),
+            human
+                .stderr
+                .lines()
+                .find(|line| line.contains("Nothing was recorded"))
+                .map(str::trim),
+            "the two paths disagree about what did not happen: {frame}"
+        );
+        assert!(
+            frame["details"]["detail"]
+                .as_str()
+                .is_some_and(|detail| !detail.is_empty()),
+            "the frame does not say what stopped the run: {frame}"
+        );
+    }
+}
+
+#[test]
 fn the_two_paths_disagree_about_nothing_that_matters() {
     // The separation has to be a difference in *shape*, not in *content*. If
     // the machine form and the human form could describe different outcomes,

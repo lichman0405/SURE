@@ -11,11 +11,16 @@ what it found; P1-T010 made `sure protocol` answer a caller that asks whether
 the two can talk. Three commands do their work. The rest are recognised, and say
 so.
 
+P2-T010 gave `sure check` its first flag with an effect: `--goal TEXT` records
+what the user asked for and then reports that nothing was checked. It is the one
+place on this surface where a command changes something the output does not
+contain, so it has its own section below.
+
 ## The commands
 
 | Command | What it will do | In this build |
 | --- | --- | --- |
-| `sure check [PATH]` | check a project and report what it found | recognised, not implemented |
+| `sure check [PATH] [--goal TEXT]` | check a project and report what it found | records `--goal` and checks nothing; a bare `check` is recognised, not implemented |
 | `sure recheck [PATH]` | check again and compare with last time | recognised, not implemented |
 | `sure repair [PATH]` | turn what was found into instructions an agent can act on | recognised, not implemented |
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | recognised, not implemented |
@@ -48,6 +53,12 @@ A path is accepted where the documented form has one, and defaults to the
 current directory. An identifier is accepted where a command names something.
 Both are optional in this build, because making one required is a decision about
 the command's contract that belongs to the phase implementing it.
+
+`--goal` on `sure check` is the first flag that is honoured rather than carried,
+and it arrived with the phase that could act on it. It is deliberately not
+optional-with-a-default: absent means "check the project", which this build
+cannot do, and that path still exits 3. Adding the flag did not turn any
+existing command line into a different answer.
 
 ## `sure doctor`
 
@@ -124,6 +135,64 @@ a script that read prose would break the first time the prose was improved.
 {"command":"protocol","details":{"agreed":false,"caller_speaks":2,"sure_speaks":1,"update":"sure"},"exit_code":3,"outcome":"unavailable","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
 ```
 
+## `sure check --goal TEXT`
+
+The first place on this surface where a command changes something the output does
+not contain: the goal goes into the user's record store. Everything below follows
+from having to be honest about that.
+
+**A bare `sure check` is unchanged.** It does nothing, it says so, and it exits 3
+exactly as it did before this flag existed. `--goal` is what makes the command do
+anything at all.
+
+**What a run with `--goal` does.** It writes the text, verbatim, as a project
+intent whose `source` is `explicit_user_goal` — the source the domain marks as a
+user requirement, and the one that asks for no transcript recording. There is no
+session to capture: the words arrived with the command that stored them.
+`docs/architecture/PROJECT_INTENT.md` is the contract; this section is the
+command-line half of it.
+
+**Then the run stops and says so.** No project is checked, and the report is not
+a report about the project. It is `Report::GoalRecorded` — its own result, not a
+`NotYet` — because something *did* happen and a refusal that said only "not
+implemented in this build" would be true about the check and false about the run.
+The status is **3**, so a script that ran `sure check` in CI still stops; the
+frame carries the recorded goal under `details` so a script can see what was
+stored. Reporting 0 here would make `sure check` a green light in CI while
+checking nothing, which is the failure this program exists to find in other
+people's work.
+
+**The goal is bound to a project state.** The store's only project-aware write
+takes a fingerprint, and the binding is right: a goal recorded with no project is
+a row no reader looking for *this project's* goal can find. The report names the
+kind and the digest of the state it recorded against.
+
+**The project is read before the store is opened.** Opening a store creates its
+directory and its file. Every refusal in this path therefore leaves the machine
+as it found it, which is a promise a user can check and a failure report can
+stand on.
+
+**A run that could not finish is 5, not 3.** 3 is "this build cannot carry that
+out", whose remedy is a newer build. A run that met an unreadable project or a
+store it could not open tried and did not finish, which is what 5 is for. One
+status for both is how a broken installation gets read as a build that has
+nothing to do. The one failure in this path that *did* write something says so in
+its own words rather than reusing the sentence for the refusals.
+
+An empty goal — `--goal ""`, or one holding nothing but whitespace — is a
+failure, not a usage error. It is a goal with no words in it, which is a thing a
+user can type, so the parser accepts it and the check refuses it.
+
+### What this flag does not do
+
+SURE cannot authenticate its own command line. `--goal "…"` records that
+*somebody who could run this binary* stated that goal; it cannot establish that
+the words are what a person asked for rather than what a script decided to
+record. That is why the source is `explicit_user_goal` and remains a claim about
+provenance rather than a proof of it, and why a goal is never turned into a
+finding by being stored. `docs/architecture/PROJECT_INTENT.md` states the limit
+in full.
+
 ## Two output paths, and no third
 
 | `--format` | Stream | Shape |
@@ -172,8 +241,10 @@ that a field should appear when it says something; that is the wrong test for
 this one, because a frame where it is sometimes absent is a frame a script has
 to special-case. The status is a fact about every run.
 
-`outcome` is a closed set: `ok`, `not_green`, `unavailable`. It grows when a
-command can end another way, and every reader's switch has to grow with it.
+`outcome` is a closed set: `ok`, `not_green`, `unavailable`, `failed`. It grows
+when a command can end another way, and every reader's switch has to grow with
+it. `failed` arrived with `sure check --goal` (P2-T010), the first command that
+can try and not finish.
 
 `outcome` and `exit_code` are one decision written twice: `Report::outcome` and
 `Report::exit_code` read the same predicate, so a build where they disagree is
@@ -215,9 +286,9 @@ real second consumer in hand.
 | 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `--help`, `--version` |
 | 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `sure check` once it can check |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
-| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
+| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak; `sure check --goal` after it has recorded the goal and checked nothing |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
-| 5 | the command tried and did not finish | anything, including a result that could not be written out |
+| 5 | the command tried and did not finish | `sure check --goal` when the project, the store or the goal could not be read or written; anything, including a result that could not be written out |
 
 The whole table is in `crates/sure-cli/src/report.rs` as `report::exit`, and it
 is the only place a status is chosen. `main` handles clap's parse error itself
@@ -272,6 +343,14 @@ anything about output or status: both are SURE's, and both have one home.
 | `sure doctor` never creates the store | same file, `the_report_never_creates_what_it_reports_on` |
 | The doctor names the files the store writes | same file, `the_diagnostic_names_the_files_the_store_actually_uses` |
 | The report always states what it did not check | same file, `the_report_always_says_what_it_did_not_look_at` |
+| A goal with no words in it is a failure, not a wrong command line | `crates/sure-cli/tests/cli_contract.rs`, `a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line`; `crates/sure-cli/src/commands.rs`, `a_goal_with_no_words_reaches_the_check_and_fails_rather_than_being_a_wrong_command_line` |
+| A recorded goal is a result of its own rather than a refusal | `crates/sure-cli/src/report.rs`, `a_recorded_goal_is_a_result_of_its_own_and_not_a_refusal` |
+| A command that did not finish is not a command that cannot be carried out | same file, `a_command_that_did_not_finish_is_not_a_command_that_cannot_be_carried_out` |
+| `--goal` records a goal that reads back as the user stated it | `crates/sure-core/tests/project_intent_ingest.rs` |
+| Recording a goal writes no recording row | same file, and `crates/sure-cli/src/check.rs`, `storing_a_goal_writes_no_recording_and_the_goal_is_not_summarized` |
+| Every refusal on the `--goal` path leaves the machine as it found it | `crates/sure-cli/src/check.rs`, `a_goal_with_no_words_is_refused_before_the_store_exists` and `a_project_that_cannot_be_read_leaves_no_store_behind` |
+| The store may not be inside the project it records a goal for | same file, `the_store_may_not_be_inside_the_project_it_records_a_goal_for` |
+| Every refusal says what did not happen | same file, `every_refusal_in_this_module_says_what_did_not_happen` |
 | A new command cannot ship with no answer about whether it works | the exhaustiveness of `Command::report` — see below |
 
 The last row has no test, because it does not need one: `Command::report` and
@@ -279,10 +358,33 @@ The last row has no test, because it does not need one: `Command::report` and
 command to the grammar stops the build until somebody decides. That was checked
 by adding one and watching the build fail in both places, not argued.
 
+### The one gap in that table, and why it is one
+
+`cli_contract.rs` runs the binary as a process, and it deliberately never runs
+`sure check --goal` with a goal that has words in it. Such a run writes to the
+store **the developer's own machine really uses** — on Windows the data
+directory comes from `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`, so no
+environment variable can point it at a scratch directory. A test that did it
+would put an invented requirement into somebody's history and look exactly like a
+green test.
+
+So `a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line` is the whole
+of the flag's process-level coverage, and it is the refusal rather than the
+write. The happy path is covered by `crates/sure-cli/src/check.rs`, which drives
+the same code against store locations it names itself, and by
+`crates/sure-core/tests/project_intent_ingest.rs`. What no test in this
+repository yet covers is the *combination*: the process writing a real goal to a
+real location. That arrives with the phase that gives SURE a store location a
+caller can choose.
+
 ## What this document does not cover
 
 - **What a check finds.** `docs/architecture/CHECK_PIPELINE.md` and, when it
   exists, the report format.
+- **What a goal becomes once it is stored, and what may be read out of it.**
+  `docs/architecture/PROJECT_INTENT.md`. That document owns the trust labels and
+  the rule that an unauthenticated statement is never a finding; this one owns
+  the flag that carries it.
 - **What a hook receives.** `docs/architecture/EVENT_PROTOCOL.md` and
   `docs/integrations/`.
 - **Who has to run the handshake.** The rule is here and

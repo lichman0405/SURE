@@ -22,6 +22,12 @@ serde_json = "1.0.140"
 # a real TOML parser: a hand-rolled one could silently mis-parse and report "no
 # violations", which is a false green in the check that exists to prevent them.
 toml = "1.1.6"
+# `sure.yaml` is a documented product surface (`PROJECT_NAME.md`,
+# `docs/architecture/ARCHITECTURE.md`), so it is parsed with a real YAML parser
+# rather than a hand-rolled one. `serde_yaml` itself is archived upstream, and
+# this is the maintained fork of it, which keeps the error type, the location
+# reporting and the serde integration that the diagnostics depend on.
+serde_yaml_ng = "0.10.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

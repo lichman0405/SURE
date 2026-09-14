@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T08:45:28.790Z",
+  "last_updated": "2026-09-14T09:05:55.762Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -99,22 +99,22 @@
       "notes": ""
     },
     "P1-T002": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T08:45:28.790Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T08:51:32.446Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
       "notes": ""
     },
     "P1-T003": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T09:05:30.116Z",
+      "finished_at": "2026-09-14T09:05:55.762Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "sure.yaml model + loader: privacy/protection/execution/analysis/project_intent/checks/report all parse; every invalid-config path stops the run with a message naming the setting, the expected values, a typo suggestion and the file; requested_privileges/scope_reductions enumerate every privileged and scope-reducing setting; no config field accepts a credential and values reaching diagnostics are redacted. 70 sure-core tests + 9 filesystem tests. Gates: fmt, check, clippy -D warnings, test --workspace, validate-bootstrap, git-guard all clean."
     },
     "P1-T004": {
       "status": "queued",

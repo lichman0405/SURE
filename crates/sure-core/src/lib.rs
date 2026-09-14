@@ -6,6 +6,8 @@
 //! single import path, and so that the crate boundary is exercised from the
 //! first commit rather than introduced later.
 
+pub mod config;
+
 pub use sure_domain::{
     PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,
     severity, status, vocabulary,

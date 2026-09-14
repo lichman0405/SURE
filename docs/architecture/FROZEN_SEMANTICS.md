@@ -25,6 +25,7 @@ decisions *mean* and where that meaning is enforced.
 | 0008 | Cursor Plugin before a heavy extension |
 | 0009 | Explicit execution trust |
 | 0010 | Frozen domain semantics live in code |
+| 0011 | Project configuration is a request, not a grant |
 
 Each of those ADRs carries a "Frozen semantics" section pointing back here.
 
@@ -45,6 +46,9 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | Execution modes and permissions | `docs/architecture/EXECUTION_SAFETY.md` | `crates/sure-domain/src/execution.rs` |
 | Capability tiers | `MASTER_PROMPT.md` §6 | `crates/sure-domain/src/capability.rs` |
 | Repair contract fields | `docs/architecture/REPAIR_PROTOCOL.md` | `sure_domain::vocabulary::RepairContract` |
+| Project settings surface | `docs/architecture/CONFIG_REFERENCE.md` | `crates/sure-core/src/config/` |
+| Project settings are inert requests | `docs/architecture/CONFIG_AUTHORITY.md` | `sure_core::config::Config::requested_privileges` |
+| Project goal trust | `docs/architecture/PROJECT_INTENT.md` | `sure_core::config::Config::goal_source` |
 
 ## Statuses
 

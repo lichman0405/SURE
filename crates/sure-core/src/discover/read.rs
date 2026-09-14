@@ -556,14 +556,13 @@ mod tests {
         assert!(contained_relative("packages/app").is_some());
         assert!(contained_relative(r"packages\app").is_some());
 
+        // Climbing, spelled the way every platform spells it.
         for climbing in [
             "../elsewhere",
             "packages/../../elsewhere",
             "..",
             "./..",
             "/etc/passwd",
-            r"C:\Windows",
-            r"\\server\share",
             "",
             ".",
             "./",
@@ -571,6 +570,49 @@ mod tests {
             assert!(
                 contained_relative(climbing).is_none(),
                 "{climbing:?} was accepted as a path inside the project"
+            );
+        }
+
+        // **A Windows-spelled absolute path is not absolute on Unix.** There it
+        // is one relative name with a backslash in it, which is a legal name for
+        // something inside the project, and reading it as one is correct as well
+        // as harmless: the caller looks for a directory by that name and finds
+        // nothing.
+        //
+        // The first version of this test asserted the Windows answer on every
+        // platform, and **it failed on the macOS and Ubuntu CI jobs** with
+        // `"C:\\Windows" was accepted as a path inside the project`. The code was
+        // right and the assertion was wrong -- which is the direction to be wrong
+        // in, and still a red CI run that a Windows-only check could not have
+        // predicted. It is now pinned both ways, because the tempting
+        // "portability fix" here is to refuse these everywhere, and that would
+        // refuse a legal name on the platform the manifest was written for.
+        #[cfg(windows)]
+        for windows_absolute in [r"C:\Windows", r"\\server\share"] {
+            assert!(
+                contained_relative(windows_absolute).is_none(),
+                "{windows_absolute:?} is absolute on Windows and cannot be inside \
+                 the project"
+            );
+        }
+        #[cfg(unix)]
+        for windows_spelled in [r"C:\Windows", r"\\server\share"] {
+            // The premise, asserted rather than assumed: on this platform the
+            // name is not absolute, which is *why* accepting it is right.
+            assert!(
+                !Path::new(windows_spelled).is_absolute(),
+                "premise: {windows_spelled:?} is relative on this platform"
+            );
+            // And the contract, rather than the exact spelling the first draft
+            // of this test guessed at: whatever comes back is a path that cannot
+            // leave the project. That is the whole of what the function
+            // promises, and it is the statement that has to hold on a platform
+            // this machine cannot run.
+            let inside = contained_relative(windows_spelled)
+                .expect("a relative name is a name the project could hold");
+            assert!(
+                !inside.is_absolute() && !inside.has_root(),
+                "{windows_spelled:?} produced {inside:?}, which is not contained"
             );
         }
     }

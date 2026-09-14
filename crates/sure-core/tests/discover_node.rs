@@ -5,6 +5,10 @@
 //! > Detects package managers, workspace structure, declared scripts and common
 //! > web/server frameworks.
 //!
+//! `docs/architecture/ECOSYSTEM_DISCOVERY.md` is the authority for what is
+//! asserted here, and its "Enforced by" table is the index from a statement to
+//! the test below that holds it.
+//!
 //! # Why these tests build real projects
 //!
 //! Every criterion is about reading files a person wrote, and the parts that can

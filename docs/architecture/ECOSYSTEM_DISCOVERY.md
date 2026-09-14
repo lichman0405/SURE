@@ -135,6 +135,12 @@ same `Tree`.
   `Component::Normal`, so an absolute path, a root, `.` and `..` are refused as
   `NotInsideProject`. The patterns are project-controlled text, and this is the
   same containment rule the fingerprint applies to the paths Git reports.
+  **"Absolute" is the platform's idea, not a spelling**: `C:\Windows` is refused
+  on Windows and is one relative name on Unix, where a backslash is an ordinary
+  character and a file may legally be called that. Accepting it there is correct
+  — the name is inside the project and resolves to nothing — and a test asserting
+  the Windows answer on every platform **failed on the macOS and Ubuntu jobs**
+  before this sentence was here.
 - **`**` is refused, not approximated.** A pattern containing it is
   `UnsupportedPattern` — a statement about the pattern — which is kept apart
   from `NoMatch`, a statement about the project. Answering one with the other

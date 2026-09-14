@@ -177,8 +177,9 @@ a package with nothing in it. So `ReadFile` is `Absent`/`Parsed`/`Unread`,
 `ManifestState` is `Read`/`Absent`/`Unread`, `MemberManifest` is
 `Present`/`Absent`/`NotReadable`, and `UnreadReason` names all seven ways a file
 reaches the third state rather than one. `read.rs` is the only place that decides
-which, and that is what makes the rule structural: a new caller cannot get it
-wrong without adding a variant.
+which, and that is what makes the rule structural rather than a convention: a
+caller that wants to confuse the two states now has to write the confusion out
+loud, in a match arm, where a reviewer can see it.
 
 **The package manager is not "the one with a lockfile".** Four managers are
 recognised — npm, yarn, pnpm, bun — and each can be evidenced three ways of
@@ -194,7 +195,9 @@ root is never a member of its own workspace. A pattern that would reach outside
 the project is refused; a pattern that names nothing is reported as naming
 nothing, because the alternative is a workspace list that silently covers less
 than it claims; and a list that was cut short says so. `packages/*` expands one
-level, and each component in turn — see gap 4 below for what that excludes.
+level, and each component in turn; a pattern relying on brace expansion or
+character classes — which npm does not support either — is reported as
+`UnsupportedPattern` rather than approximated.
 
 **Scripts.** 8 conventional roles, each looked up across the spellings projects
 actually use, and `command_for(manager, role)` renders the command the declared
@@ -249,8 +252,11 @@ expansion is one component at a time and brace expansion is reported as
 `UnsupportedPattern` rather than approximated; and the link-at-the-manifest case
 is a **directory** link, because `mklink /J` needs no privilege here and a file
 symbolic link does, so the file-link arm is one code path by argument rather than
-by test. The last two of those are also where CI could falsify this section, and
-CI has not run on `P2-T004` yet.
+by test. **CI has now run on `P2-T004` and falsified something outside this
+list** — not one of these five gaps but a claim that there were no
+platform-dependent surfaces at all. See "Reading run `34850549120`" below, which
+also records that the `#[cfg(unix)]` arms of this task remain uncompiled and
+unrun here.
 
 ## The defect `P2-T004`'s verification found: five scratch paths every run reused
 
@@ -266,9 +272,9 @@ somebody else's records as its own.
 
 **The instance that is proven, and the proof.** `tests/store_concurrency.rs`
 reported **200 records where 100 had been written**, and reported a lost write.
-Both numbers are wrong in the same direction: the file had never been cleared, so
-the count was the old run's rows plus the new ones, and the "lost" write was
-there all along. Established by holding a handle open across the clear and
+Both reports were wrong: the file had never been cleared, so the count was the
+old run's rows added to the new ones, and the "lost" write had been there all
+along. Established by holding a handle open across the clear and
 watching it happen deterministically, not by argument. **The wrong number is the
 point** — the suite did not merely fail to see the truth, it stated the opposite
 of it, which is the kind of report this repository treats as worse than an error.
@@ -279,8 +285,8 @@ directory after `std::process::id()` — the convention `config/authority.rs`,
 loud backstop for the case where the id has been reused. But **only the first is
 shown to be that fault**, and the comments in the other four say so:
 
-- `src/store/mod.rs`'s test module — same shape, same file, not separately
-  reproduced.
+- `crates/sure-core/src/store/mod.rs`'s test module — the same shape as the one
+  above, in the store's own unit tests, not separately reproduced.
 - `crates/sure-core/src/doctor.rs` — seen to fail under a loaded run with
   `the store was readable: NotCreated` and `Unreadable` with `os error 5`, and
   those stopped once the path was unique; **that is not proof the path caused
@@ -553,12 +559,79 @@ Three of the five jobs were failing the whole time.
 | 34840594638 | `91e8838` — the CI-outage record | all five green |
 | 34843455162 | `9850a9a` — the filter-hardening record | all five green |
 | 34845282962 | `7ce90bf` + `1cda5a0` — **the `P2-T003` acceptance** | **all five green.** Detail below, because the colour is the least of it |
+| 34845645097 | `c7c0824` — the `P2-T003` record | all five green |
+| 34850549120 | `0a577ca` + `68e51d8` + `1ec5bee` — **the `P2-T004` acceptance** | **failure: `rust (ubuntu-latest)` and `rust (macos-latest)`.** One test, `discover::read::tests::a_path_a_manifest_named_cannot_leave_the_project`. Detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34850549120`, `P2-T004`'s — and a claim in this file that it falsified
+
+**Red on both Unix jobs, green on all three Windows-side jobs.** Windows
+`rust (windows-latest)` passed, `bootstrap-validate-windows` passed, so a
+Windows-only gate set would have shown this acceptance as clean. That is the
+pattern this section exists for.
+
+One test, read out of the log by name and by message rather than inferred from
+the colour:
+
+```
+test discover::read::tests::a_path_a_manifest_named_cannot_leave_the_project ... FAILED
+panicked at crates/sure-core/src/discover/read.rs:571:13:
+"C:\\Windows" was accepted as a path inside the project
+```
+
+on **both** `rust (ubuntu-latest)` and `rust (macos-latest)`.
+
+**The code was right and my test was wrong.** A Windows-spelled absolute path is
+not absolute on Unix: with no `/` in it, `C:\Windows` is a single
+`Component::Normal` — one relative name, and a legal name for a file inside the
+project. `contained_relative` accepting it is correct on that platform and
+harmless, because the caller then looks for a directory by that name and finds
+nothing. The test had listed `r"C:\Windows"` and `r"\\server\share"` among the
+strings that must be refused, which is true only where those spellings are
+absolute.
+
+**The claim this falsified is worth recording, because I wrote it in this file
+one commit earlier.** `P2-T004`'s entry said:
+
+> This task adds no platform-gated test, so nothing in it is invisible to a
+> Windows run the way the `#[cfg(unix)]` link tests are.
+
+**That is false, and it was the reason the failure was a surprise.** The task has
+three platform-dependent surfaces, not none: a `#[cfg(windows)]`/`#[cfg(unix)]`
+pair for `link_to_directory` (a **directory** link via `mklink /J` on Windows and
+`std::os::unix::fs::symlink` on Unix), whose Unix arm has never run here; this
+assertion; and the general class the sentence missed — an assertion about
+*platform behaviour* is invisible to a Windows run even when no `#[cfg]`
+attribute appears anywhere near it. The lesson is not "list the gated tests"; it
+is that **"this change is platform-independent" is itself a claim needing
+evidence, and the only evidence is a run on the other platform.**
+
+**The fix, and what it does and does not claim.** The Windows spellings are now
+asserted per platform. On Windows they must be refused, as before. On Unix the
+premise is asserted first — `!Path::new(name).is_absolute()`, so the test says
+*why* accepting it is right instead of guessing — and then the function's
+**contract** rather than a spelling: whatever comes back must be neither absolute
+nor rooted.
+
+That last choice is deliberate: the first draft of the fix asserted the exact
+`Some(PathBuf::from(name))`, which is a guess about Rust's normalization made by
+the same reasoning that produced the bug. Asserting the contract —
+*the answer cannot leave the project* — is the statement that actually has to
+hold, and it is the one a future refactor should be held to.
+
+**Not verified on this machine, and this time it is written down before the push
+rather than after.** `cargo clippy --target x86_64-unknown-linux-gnu` cannot run
+here for `--workspace --all-targets`: `rusqlite`'s bundled SQLite needs
+`x86_64-linux-gnu-gcc`, which is not installed, so the cross-target check the
+environment notes describe is unavailable for anything that links the store. The
+`#[cfg(unix)]` arm of this assertion therefore **has never been compiled or run
+anywhere**, exactly like `link_to_directory`'s. The macOS and Ubuntu jobs are its
+first execution, and the run has to be read rather than assumed.
 
 ### Reading run `34845282962`, `P2-T003`'s
 
@@ -1551,15 +1624,12 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **Push `0a577ca`, `68e51d8` and the record commit, then read that run.** That
-   is the first action, not the second: `P2-T004` is accepted, and the rule this
-   file has recorded twice already is that a push is not finished until its run
-   has been read. **There is no CI evidence for `P2-T004` yet** — every figure in
-   its section is local. This task adds no platform-gated test, so nothing in it
-   is invisible to a Windows run the way the `#[cfg(unix)]` link tests are; what
-   the five jobs add here is a second and third platform compiling the new module
-   and running the new binary, and a test binary that has never run anywhere else
-   is exactly where the last four CI failures lived.
+1. **Push the fix commit and read the run it starts.** `P2-T004` is accepted and
+   `0a577ca`, `68e51d8` and `1ec5bee` are already pushed and read — **and the run
+   was red**, on both Unix jobs, for a reason a Windows-only check could not have
+   predicted. See "Reading run `34850549120`" below; the fix is in the working
+   tree and unpushed, and it has to be seen to pass on macOS and Ubuntu before
+   the next task starts.
 2. `node scripts/taskctl.mjs start P2-T005` — Python project discovery. The
    remaining READY list is `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`,
    `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are

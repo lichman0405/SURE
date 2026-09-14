@@ -4,7 +4,10 @@
 //! of it — which files SURE will look at, and which it will not — is
 //! [`crate::scan`] and is described by `docs/architecture/PROJECT_DISCOVERY.md`.
 //! This module is the other half: **reading a few named files and saying what
-//! they claim the project is.**
+//! they claim the project is.** `docs/architecture/ECOSYSTEM_DISCOVERY.md` is
+//! the authority for that half — the rule, the limits, and the gaps it does not
+//! close — and the table at the end of it maps each statement to the test that
+//! holds it.
 //!
 //! # The one rule everything here is arranged around
 //!

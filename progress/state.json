@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T10:15:00.588Z",
+  "last_updated": "2026-09-14T10:33:09.951Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -162,22 +162,22 @@
       "notes": "crates/sure-cli: cli.rs (the grammar as one enum Command plus the three action enums; CLI.md lists the same ten commands and a test compares the doc against what this build parses), report.rs (report::exit — the whole status table and the only place a status is chosen — plus NotYet and Report{Version,Protocol,Unavailable} with human/machine/frame), output.rs (Format and the two output paths; the only module in the crate that names a process stream), commands.rs (Command::report, one exhaustive match with no _ arm and no unreachable!()), main.rs (try_parse rather than Parser::parse so clap's exit status goes through status_of). tests/cli_contract.rs: 11 process-boundary tests over the built binary. Two commands work (version, protocol — both answer questions about SURE, not about a project, so neither needs an engine); every other documented command parses, exits 3 and says so. A bare sure is 2, not 0. Statuses 1 and 4 reserved. clap 4.6.6 is the crate's first dependency. docs/architecture/CLI.md is new; PROTOCOL.md amended so 'everything SURE writes is one of seven documents' stays literally true (the response frame is a container, not a document, and lives in sure-cli because it has one consumer). The refusal deliberately does not name a phase: no test can check that a phase lands and sure history has no owning task. Six mutations run, all six fired; flipping Report::is_an_answer is visible only under --no-fail-fast. Also fixed a false comment in sure-core/tests/store_concurrency.rs: --quiet does not stop a child printing its own test-result summary, so a workspace run shows 28 result lines for 429 tests and the 408 recorded for P1-T005 was a raw sum that overstated the suite by the ten children; the true P1-T005 figure was 396 passed + 1 ignored, and P1-T008 adds 33. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 429 passed / 0 failed / 1 ignored across 14 test binaries; node scripts/validate-bootstrap.mjs 17 phases / 166 tasks. Commit b725fdb."
     },
     "P1-T009": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T10:15:00.587Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T10:25:12.044Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "sure doctor: sure-core::doctor returns a DoctorReport value (paths, presence, store facts, one tool, problems, and what it did not check); sure-cli/src/doctor.rs renders the human and machine forms independently. Exit 0 when the report is well, 1 when it is not -- the false-green rule applied to SURE's own installation. Three things the examination does not do, each structural: it does not read the settings file (no field could hold a secret; source scan in tests/doctor.rs), it does not create the store (existence checked before Store::open_at), and it does not run the programs it finds. A missing store is not a problem; an unreadable one is, and the repair is left to the user. NotLookedFor when Paths::discover fails, because nowhere-to-look is not nothing-recorded. Fixed two defects found while testing: Build.version held version_string() so the human form read 'SURE SURE 0.0.0-bootstrap' (sure_domain::VERSION is now the single spelling), and the label column glued the longest label to its value ('evidence and historyC:\\Users\\...'); both now have tests. exit_code is in every frame. New: crates/sure-core/src/doctor.rs (17 unit tests), crates/sure-core/tests/doctor.rs (6), crates/sure-cli/src/doctor.rs (5 unit tests, new test module), 1 new cli_contract test. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 462 passed / 0 failed / 1 ignored across 19 test binaries (14 with tests); validate-bootstrap 17 phases / 166 tasks. Six mutations, six fired. Commit ec8c293."
     },
     "P1-T010": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T10:25:26.457Z",
+      "finished_at": "2026-09-14T10:33:09.950Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "The version rule lives in exactly one place: sure_protocol::handshake::negotiate returns Agreed / CallerIsOlder / CallerIsNewer, and EventEnvelope::from_json calls it rather than comparing numbers itself. Exact equality, no compatibility table -- a version changes exactly when an older reader would get the format wrong, so a mismatch is a document that would be misread, and a misread event becomes wrong evidence. The CLI end is 'sure protocol --speaks VERSION': agreed exits 0 with the sentence on stdout, a mismatch exits 3 with the sentence on stderr and the numbers under details (sure_speaks, caller_speaks, agreed, update). 3 and not 4 because 4 is reserved for a refusal grounded in the user's configuration and no setting makes this build speak a protocol it was not compiled with. The refusal names which side has to move, because the two directions are not the same answer. Re-exported through sure-core rather than reached directly: sure-cli has one edge into the engine (ADR 0001). New: crates/sure-protocol/src/handshake.rs (5 unit tests), 1 new test in event.rs binding the reader and the handshake over 0..=PROTOCOL_VERSION + 3, 2 new tests in sure-cli/src/commands.rs, 2 in report.rs, 1 in cli_contract.rs -- 11 new tests. The CLI contract test reads the version out of the frame instead of carrying its own copy, so it cannot keep passing after what SURE announces and what it accepts have drifted. Six mutations, six fired: negotiate agreeing with newer callers (5 tests, in handshake.rs, event.rs and cli_contract.rs), the two directions swapped, a refused handshake exiting 0 (false green -- 3 unit + 1 integration), the CLI answering every caller with its own version, is_an_answer true for a refused handshake (complaint to stdout), and the reader comparing versions itself, which only 'the_reader_and_the_handshake_refuse_the_same_versions' catches. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 473 passed / 0 failed / 1 ignored across 19 test binaries (15 with tests); validate-bootstrap 17 phases / 166 tasks. Commit 8892e48."
     },
     "P1-T011": {
       "status": "queued",

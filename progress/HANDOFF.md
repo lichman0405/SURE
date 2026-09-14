@@ -2,9 +2,9 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 17 / 166 tasks accepted. Phase P0 complete (9/9). Phase P1 in progress
-(8/11). `P1-T008` is accepted, and `progress/state.json` records it in the commit
-immediately after the one carrying this file.
+Progress: 19 / 166 tasks accepted. Phase P0 complete (9/9). Phase P1 in progress
+(10/11). `P1-T010` is accepted, and `progress/state.json` records it in the
+commit immediately after the one carrying this file.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -17,37 +17,47 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P1
-{ accepted: 17, queued: 149 }
-READY: P1-T009, P1-T010, P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 19, queued: 147 }
+READY: P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-The next task is **`P1-T009`** (`sure doctor`), which `P1-T008` unblocked and
-which now has somewhere to put its answer: the command exists and refuses
-cleanly, `Command::report` has an arm waiting for it, and `Store` already
-exposes `journal_mode`, `schema_version` and `integrity_check` with nothing
-reaching them.
+**`P1-T011` is the last task in P1**: configuration authority layers — a project
+config must not be able to silently grant host execution, network, install or
+full recording, or to weaken user protection. Its two acceptance criteria are a
+property (with a unit test per layer) and an absence (a project layer that
+cannot escalate), and `crates/sure-core/src/config/` already has the loading
+order P1-T003 built, so this is where the authority question gets answered.
+`docs/adr/0011-project-configuration-is-a-request.md` is the decision it has to
+implement.
 
-`P1-T011` (configuration authority layers) is the alternative and is
-independent; `P1-T010` (protocol handshake) is unblocked and smaller.
+The other ready tasks are the first of their phases: `P2-T001` (bounded
+filesystem/project-root scanner — the first thing `sure check` needs and the
+broadest of them), `P2-T010` (ProjectIntent ingestion), `P3-T001`, `P6-T007`,
+`P8-T001`, `P12-T008`, `P13-T001`. `P2-T001` is the natural next one after P1
+closes: it is the largest, everything in P3 to P6 reads its output, and
+`P1-T004`'s `Paths` already gives it the project/outside-project rule.
 
-**Correction to an earlier revision of this file:** it said P1 in progress
-"(7/13)". P1 has **11** tasks, not 13 — `tasks/tasks.json` is the authority and
-`node scripts/taskctl.mjs status` counts from it.
-
-## Gate set, as run at `P1-T008`
+## Gate set, as run at `P1-T010`
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
-| `cargo test --workspace --all-features --no-fail-fast` | 429 passed, 0 failed, 1 ignored, across 14 test binaries |
+| `cargo test --workspace --all-features --no-fail-fast` | 473 passed, 0 failed, 1 ignored, across 19 test binaries (15 with tests) |
 | `node scripts/validate-bootstrap.mjs` | 17 phases, 166 tasks |
 
-Per binary: `sure-cli` 22 lib + 11 `cli_contract`; `sure-core` 179 lib + 9
-`config_loading` + 6 of 7 `store_concurrency` + 4 `store_packaging`;
-`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 40 lib + 12
-`conformance` + 15 `round_trip`; `sure-testkit` 7 `integration_thinness` + 8
-`repository_shape`. Four doc-test targets report 0.
+Per binary: `sure-cli` 36 lib + 13 `cli_contract`; `sure-core` 195 lib + 9
+`config_loading` + 6 `doctor` + 6 of 7 `store_concurrency` + 4 `store_packaging`;
+`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46 lib + 12
+`conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7 `integration_thinness`
++ 8 `repository_shape`. Four doc-test targets report 0.
+
+The arithmetic, so a later session can check it: 429 at `P1-T008`, 462 at
+`P1-T009` (+33), 473 here (+11 — 6 in `sure-protocol`, 4 in `sure-cli`'s unit
+tests, 1 in `cli_contract`). **Counting `#[test]` attributes does not reproduce
+these figures**: `sure-domain`'s `variants!` macro generates tests that no
+attribute names, and it undercounts the suite by about twenty. Take the numbers
+from a run.
 
 ### Count the parent lines, not the `test result:` lines
 
@@ -70,6 +80,64 @@ N tests` lines of the parent binaries or read the per-binary figures here.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P1-T010` added
+
+The protocol version handshake, in one function used by two callers:
+
+- `crates/sure-protocol/src/handshake.rs` (new) — `Handshake { Agreed,
+  CallerIsOlder, CallerIsNewer }`, `negotiate(u32) -> Handshake`, the three
+  accessors, and `Display`. **The whole version rule.** The module documentation
+  says why the rule is exact equality, why there is no compatibility table, and
+  why the two directions are not the same answer.
+- `crates/sure-protocol/src/event.rs` — `from_json` calls `negotiate` rather
+  than comparing numbers, so the reader and the CLI cannot drift. The test
+  `the_reader_and_the_handshake_refuse_the_same_versions` drives both over
+  `0..=PROTOCOL_VERSION + 3`.
+- `crates/sure-core/src/lib.rs` — re-exports `Handshake` and `negotiate`.
+  `sure-cli` has one edge into the engine (ADR 0001, and the note in its
+  manifest), so a new protocol type is re-exported rather than added as a
+  second dependency.
+- `crates/sure-cli/src/cli.rs` — `Protocol` grows `--speaks VERSION`.
+- `crates/sure-cli/src/commands.rs` — one more arm; with `--speaks`, the answer
+  is `sure_core::negotiate`'s.
+- `crates/sure-cli/src/report.rs` — `Report::Handshake`, and with it the two
+  predicates: `outcome` is `ok` or `unavailable`, `exit_code` is 0 or **3**, and
+  `is_an_answer` is `handshake.is_agreed()` — so the agreed sentence goes to
+  stdout and the refusal to stderr, by the same predicate as every other
+  command. The frame carries `sure_speaks`, `caller_speaks`, `agreed` and
+  `update`, never the sentence.
+- `crates/sure-cli/tests/cli_contract.rs` — a process-level test that reads the
+  version out of `sure protocol --format json`'s own frame and then requires
+  that exact number to be agreed and the two neighbouring ones refused, in both
+  directions. It carries no copy of the version, so it cannot keep passing after
+  what SURE announces and what it accepts have drifted apart.
+
+`docs/architecture/PROTOCOL.md` gained §The handshake and lost two of its three
+known gaps; `docs/architecture/CLI.md` gained §`sure protocol`.
+
+**What this does not cover.** The acceptance criterion names CLI, hook and MCP
+adapters. The hook and the MCP server are commands this build does not
+implement, so nothing but a caller's own shell has run the handshake. The rule
+is reachable, and `PROTOCOL.md` §Known gaps now says which half is missing
+rather than implying the whole of it is done.
+
+## What `P1-T009` added
+
+`sure doctor` — the first command whose answer depends on what it found, and so
+the first place where "the run was fine" and "the answer was fine" come apart.
+
+- `crates/sure-core/src/doctor.rs` — `examine_this_machine()` returns a
+  `DoctorReport` **value** (paths, presence, store facts, one tool, problems,
+  and what it did not check), so a test can build one and a renderer can read
+  it. Exit 0 when `is_well()`, **1** when it is not: the false-green rule applied
+  to SURE's own installation, so `sure doctor || fix it` works.
+- `crates/sure-cli/src/doctor.rs` — the human and machine renderers, separately.
+- Three things it deliberately does not do, each structural rather than
+  promised: it does not read the settings file (no field could hold a secret,
+  and a source scan in `tests/doctor.rs` enforces it), it does not create the
+  store (presence checked before `Store::open_at`), and it does not run the
+  programs it finds.
 
 ## What `P1-T008` added
 
@@ -154,6 +222,51 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P1-T010`
+
+Six mutations, six fired. The script is `target/tmp/mutate3.py` (git-ignored).
+
+- **`negotiate` agreeing with any version at or above this build's** fails five
+  tests across `handshake.rs`, `event.rs` and one already-written
+  `round_trip.rs` test. The cheapest plausible wrong rule, and the most
+  damaging: an adapter would be told yes and send events SURE then misreads.
+- **The two directions swapped** fails `a_mismatch_says_which_side_has_to_move`
+  and nothing else — which is the point of that test. A caller told the wrong
+  direction retries with the fix that cannot work.
+- **A refused handshake exiting 0** is the false-green mutation and fails three
+  unit tests plus the process-level one. It is the check this task exists for.
+- **The CLI answering every caller with its own version** fails both the unit
+  test that compares the CLI's answer to `negotiate`'s and the integration test.
+- **`is_an_answer` true for a refused handshake** fails two unit tests and the
+  integration test's `stdout.is_empty()`, so the complaint cannot be moved onto
+  the stream a caller is reading an answer from.
+- **The event reader comparing versions itself** — written so that it accepts an
+  *older* version the handshake refuses — is caught by
+  `the_reader_and_the_handshake_refuse_the_same_versions` **and by that test
+  alone**. Worth recording: the first version of this mutation accepted a
+  version *above* the tested range and escaped, which is a property of the
+  range, not of the test. A mutation outside the range it wrote is not evidence
+  about it.
+
+### `P1-T009`
+
+Six mutations, six fired. Two are worth keeping:
+
+- **Making the store open before the presence check** — a diagnostic that
+  creates what it diagnoses — fails `tests/doctor.rs::the_report_never_creates_what_it_reports_on`
+  and the `sure-core --lib doctor` tests.
+- **Putting `version_string()` back into `Build.version`** reproduces the
+  `SURE SURE 0.0.0-bootstrap` defect. It was found by reading output, not by a
+  test, so the test came after; that is the wrong order and it is worth saying
+  so.
+
+The first attempt at the store-creation mutation reported `SKIP` because the
+replacement text did not match the file — `target/tmp/mutate2.py` was rewritten
+against the real `match presence(store_file)` text. **A mutation that reports
+SKIP has tested nothing, and a script whose only output is "all fired" will say
+that about a mutation that never applied.** Both scripts print SKIP explicitly
+for this reason.
+
 ### `P1-T008`
 
 - **Making a refusal exit 0** fails `main::tests::a_bare_sure_is_not_a_success`
@@ -223,18 +336,29 @@ Each was reverted after confirming the check fires.
 - `P1-T008` — `crates/sure-cli/`, `docs/architecture/CLI.md`, and the `PROTOCOL.md`
   amendment that keeps "everything SURE writes is one of seven documents"
   literally true.
+- `ec8c293` P1-T009 — `sure doctor`, `crates/sure-core/src/doctor.rs` and
+  `crates/sure-cli/src/doctor.rs`.
+- `8892e48` P1-T010 — `crates/sure-protocol/src/handshake.rs`, `sure protocol
+  --speaks`, and §The handshake in `PROTOCOL.md`.
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P1-T009` (`sure doctor`). Three things are
-   already there to report and nothing reaches them: `Store::journal_mode`,
-   `Store::schema_version` and `Store::integrity_check`. `Command::report`'s
-   `Self::Doctor` arm is where the answer goes, and `Report` will need its first
-   new variant — which means `outcome()` and `exit_code()` grow with it, and the
-   frame's documented `outcome` set grows from `{ok, unavailable}`.
-2. Then `P1-T010` (protocol version handshake), which is unblocked and smaller.
-   It owns what an adapter does with `sure protocol`'s answer; `PROTOCOL.md`
-   known gap 3 records that this build stops short of it.
+1. `node scripts/taskctl.mjs start P1-T011` — configuration authority layers,
+   the last task in P1. Its acceptance is a property and an absence: a project
+   config cannot silently grant host execution, network, install or full
+   recording, or weaken user protection, and authority resolution has unit
+   tests. `crates/sure-core/src/config/` already has the loading order from
+   P1-T003, and `docs/adr/0011-project-configuration-is-a-request.md` is the
+   decision to implement. The shape that suggests itself is that each setting
+   carries which layer it came from and which layers are allowed to set it, so
+   that "the project asked for this" is a value the report can print rather than
+   a check somewhere in the middle of loading — but that is a decision to make
+   against the existing code, not to assume here.
+2. Then the first task of P2, `P2-T001` (bounded filesystem/project-root
+   scanner). It is the largest ready task and everything in P3 to P6 reads its
+   output; `P1-T004`'s `Paths` already carries the project/outside-project rule
+   it has to respect. Windows specifics from `CLAUDE.md` apply directly: spaces,
+   Unicode, case-insensitive comparison and long-path pressure.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -267,6 +391,23 @@ ignored, which is how the earliest tasks came to record an empty note.
   `report.command()`; the integration test that reads a real process's stdout is
   what catches it. When a test asserts `f(x) == g(x)` and both sides call the
   same function, check which test is actually load-bearing before trusting it.
+- **A mutation anchor must be copied out of the file, not out of memory.**
+  `rustfmt` reflows arms and arguments, so the text a mutation replaces is often
+  not the text that was written. A script that finds its anchor zero times
+  reports SKIP and has tested nothing; both mutation scripts print SKIP loudly
+  for that reason. `P1-T010`'s first CLI mutation hit exactly this.
+- **A mutation inside a test's stated range is evidence about the test; one
+  outside it is not.** `P1-T010`'s first reader mutation accepted a version
+  above the range the test loops over, and escaped — correctly. Writing the
+  mutation to land between two values the test covers is what turned it into
+  evidence.
+- **`clap` answers a typed argument's parse failure with exit 2**, which is
+  `sure protocol --speaks latest` → "you typed it wrong" rather than "SURE
+  cannot talk to that". `an_unknown_command_or_flag_is_a_wrong_command_line`
+  pins it; the distinction matters because 3 reads as a version that exists.
+- **The PowerShell here-string cannot carry a git commit message.** Use the Bash
+  tool for `git commit -F - <<'EOF'`; PowerShell rejects the redirection.
+  (`@'…'@` works in PowerShell but the closing `'@` must be at column 0.)
 - **Every integration test file needs
   `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` at the
   top.** The workspace lints are `warn` but the gate runs `-D warnings`, so a new

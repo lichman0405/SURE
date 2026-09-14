@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T09:37:44.400Z",
+  "last_updated": "2026-09-14T10:03:35.857Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -126,13 +126,13 @@
       "notes": "docs/architecture/STORAGE_AND_DATA_PATHS.md + crates/sure-core/src/paths/{mod,compare}.rs; dirs 6.0.0 for OS-native known folders (SHGetKnownFolderPath needs unsafe, forbidden workspace-wide); data=%LOCALAPPDATA%\\SURE, config=%APPDATA%\\SURE asked separately; Paths::ensure_outside refuses a project root containing the store (home-directory case); Paths::from_roots refuses relative; compare.rs is component-wise, case-folds where the platform folds, and unifies \\?\\ canonical spellings; 40 tests in paths (Windows), clippy clean for x86_64-unknown-linux-gnu and x86_64-apple-darwin; commit b6a14b4"
     },
     "P1-T005": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T09:37:44.399Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T10:03:35.856Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "SQLite compiled in (bundled), one STRICT table with AUTOINCREMENT, migrations through PRAGMA user_version with one transaction each and an in-transaction version re-read; records carry document_version and refuse to decode from a newer build. Gate set: fmt clean, clippy -D warnings clean, 408 passed / 0 failed, bootstrap 17 phases 166 tasks. Concurrency and packaging verified by tests/store_concurrency.rs (real child processes behind a barrier) and tests/store_packaging.rs (manifest-level). Two real bugs found by mutation-checking green tests: the journal-mode busy-handler exception (fixed by establish_journal_mode) and Store::write_error reporting DEFAULT_BUSY_TIMEOUT instead of the configured one. Commit 976d79a."
     },
     "P1-T006": {
       "status": "accepted",

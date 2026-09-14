@@ -39,7 +39,7 @@ use sure_domain::severity::Severity;
 use sure_domain::status::{
     AggregateSeverity, CheckStatus, CriticalState, NotCheckedReason, RequirementClaim,
 };
-use sure_domain::vocabulary::{FindingStatus, FingerprintKind, SupportLevel};
+use sure_domain::vocabulary::{FindingStatus, FingerprintKind, Project, SupportLevel};
 
 /// Pin the wire name of every variant of a unit-variant enum.
 macro_rules! frozen {
@@ -381,6 +381,47 @@ fn a_stored_id_survives_a_full_json_round_trip() {
             "{bad} must not deserialize as a project id"
         );
     }
+}
+
+#[test]
+fn a_project_record_stored_before_support_existed_reads_as_unclassified() {
+    // `Project::support` carries `#[serde(default)]`, and this is the claim that
+    // makes it safe: a record written by a build that had no such field reads
+    // back as **no answer**, not as an answer somebody made up on the way in.
+    //
+    // The distinction is invisible in `level` alone — `unrecorded` returns a real
+    // level, precisely so that a missing answer never reads as the best one — so
+    // it is asserted through `is_recorded`, which is the only door to it. The
+    // field is removed from a real record rather than hand-written as JSON, so
+    // this keeps testing the question if the record's shape changes.
+    let project = Project::new(ProjectId::generate(), "shop", "C:\\shop");
+    assert!(
+        !project.support.is_recorded(),
+        "a freshly built project record must carry no classification, or the field \
+         removed below is not the only route to `unrecorded`"
+    );
+    let mut stored = serde_json::to_value(&project).expect("serialize");
+    let removed = stored
+        .as_object_mut()
+        .expect("a project record is a JSON object")
+        .remove("support");
+    assert!(
+        removed.is_some(),
+        "`support` was not in the serialized record, so nothing below is being tested"
+    );
+
+    let back: Project = serde_json::from_value(stored).expect("deserialize");
+    assert!(
+        !back.support.is_recorded(),
+        "a record with no support field claims a classification: {}",
+        back.support.reason
+    );
+    assert_eq!(
+        back.support.level,
+        SupportLevel::InspectOnly,
+        "and the level it leaves behind must be the weakest one, because a project \
+         nobody has classified must never read as the best-supported one"
+    );
 }
 
 // --- the schemas are the same contract ----------------------------------

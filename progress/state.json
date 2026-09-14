@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P2",
-  "last_updated": "2026-09-14T16:45:51.713Z",
+  "last_updated": "2026-09-14T16:50:01.550Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -292,13 +292,13 @@
       "notes": ""
     },
     "P2-T012": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T16:50:01.549Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Started after P2-T010 was accepted and its chain closed. The task is to record a project-level support level; P2-T007's component graph has no consumer yet and P2-T012 is where phase P2 converges, so it is also the first task that can give the graph one."
     },
     "P3-T001": {
       "status": "queued",

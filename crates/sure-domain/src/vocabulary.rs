@@ -28,10 +28,30 @@ pub struct Project {
     /// What kind of project SURE believes this is, with its support level.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stacks: Vec<StackClassification>,
+    /// The one level for the project as a whole, and why.
+    ///
+    /// Not a restatement of [`Self::stacks`]: those answer *per ecosystem*, and
+    /// a project is the thing a person points SURE at. Which one a reader wants
+    /// depends on the question, so both are here and neither is derived from the
+    /// other at read time.
+    ///
+    /// **The rule that fills this is `sure_core::support`'s, not this crate's**,
+    /// and the crate that applies it is the one that can see a [`Discovery`].
+    /// A project record built by [`Self::new`] has not been classified, and says
+    /// so rather than guessing.
+    ///
+    /// [`Discovery`]: https://docs.rs/sure-core
+    #[serde(default)]
+    pub support: ProjectSupport,
 }
 
 impl Project {
     /// Build a project record.
+    ///
+    /// The support level is left [`unrecorded`](ProjectSupport::unrecorded).
+    /// There is no honest level to invent here: a project nobody has classified
+    /// is not a project at the weakest level, it is a project with no answer,
+    /// and the two would be the same value if this defaulted to a real one.
     #[must_use]
     pub fn new(id: ProjectId, name: impl Into<String>, root: impl Into<String>) -> Self {
         Self {
@@ -39,11 +59,29 @@ impl Project {
             name: name.into(),
             root: root.into(),
             stacks: Vec::new(),
+            support: ProjectSupport::unrecorded(),
         }
     }
 }
 
 /// How well SURE supports a discovered stack, and why.
+///
+/// # The order, which is load-bearing
+///
+/// The variants are declared **best first**, so the derived [`Ord`] sorts by
+/// strength: `FirstClass < Generic < InspectOnly`. `sure_core::support` takes
+/// the [`Ord::max`] of a project's levels, which is therefore the *weakest* one,
+/// and that is the whole of the aggregation rule.
+///
+/// It is written down because the derive makes it invisible: reordering the
+/// variants to read worst-first, which is an easy tidy-up, would silently
+/// invert every project's support level and no test that compared a level
+/// against its own name would notice. The variant order is part of this type's
+/// meaning, and `support::tests::the_order_of_the_levels_is_by_strength` is what
+/// holds it.
+///
+/// [`Ord`]: std::cmp::Ord
+/// [`Ord::max`]: std::cmp::Ord::max
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SupportLevel {
@@ -96,6 +134,76 @@ impl SupportLevel {
             }
             Self::InspectOnly => "SURE can look at this project's files, but cannot safely run it.",
         }
+    }
+}
+
+/// The one support level for a project as a whole, and the sentence saying why.
+///
+/// [`Project::stacks`] carries a level per ecosystem; this carries the level for
+/// the thing a person pointed SURE at. Both exist because they answer different
+/// questions and, for a project with two ecosystems at different levels, they
+/// have different answers — collapsing them would mean one of the two questions
+/// getting a wrong one.
+///
+/// **The two fields are recorded together and are filled by one rule**, in
+/// `sure_core::support`. A record whose level and reason came from different
+/// places is what this type exists to make visible: the reason is not optional
+/// and not a formatting of the level, so a level with nothing to say for itself
+/// cannot be constructed by accident.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectSupport {
+    /// How well SURE supports the project as a whole.
+    pub level: SupportLevel,
+    /// Why, naming what set the level, so the claim can be audited.
+    pub reason: String,
+}
+
+impl ProjectSupport {
+    /// The state of a project SURE has not classified.
+    ///
+    /// [`SupportLevel::InspectOnly`] rather than [`SupportLevel::FirstClass`],
+    /// because a missing answer must never read as the best one. It is still not
+    /// an answer, which is what [`Self::is_recorded`] is for — a caller that
+    /// wants to know whether anybody looked asks that, rather than comparing the
+    /// level against the default and hoping the comparison is right.
+    #[must_use]
+    pub fn unrecorded() -> Self {
+        Self {
+            level: SupportLevel::InspectOnly,
+            reason: "SURE has not worked out how well it supports this project.".to_owned(),
+        }
+    }
+
+    /// Build a classified project support record.
+    ///
+    /// The reason is taken as given rather than derived here: the rule that
+    /// decides a level also knows the findings it decided it from, and this
+    /// crate has neither.
+    #[must_use]
+    pub fn new(level: SupportLevel, reason: impl Into<String>) -> Self {
+        Self {
+            level,
+            reason: reason.into(),
+        }
+    }
+
+    /// Whether a rule filled this in, as opposed to [`Self::unrecorded`].
+    ///
+    /// `false` means SURE has no answer for this project, which is not the same
+    /// as an answer of [`SupportLevel::InspectOnly`] — and, because
+    /// [`Self::unrecorded`] returns that level, the difference is invisible to a
+    /// caller that only reads [`Self::level`].
+    #[must_use]
+    pub fn is_recorded(&self) -> bool {
+        *self != Self::unrecorded()
+    }
+}
+
+impl Default for ProjectSupport {
+    /// [`Self::unrecorded`], so that a stored project record written before this
+    /// field existed deserializes to *no answer* rather than to a claim.
+    fn default() -> Self {
+        Self::unrecorded()
     }
 }
 
@@ -590,6 +698,50 @@ mod tests {
         assert_eq!(SupportLevel::FirstClass.as_str(), "first_class");
         assert_eq!(SupportLevel::Generic.as_str(), "generic");
         assert_eq!(SupportLevel::InspectOnly.as_str(), "inspect_only");
+    }
+
+    #[test]
+    fn an_unclassified_project_defaults_to_the_weakest_level_and_says_it_has_no_answer() {
+        // Both halves matter, and the second is the one a caller is likely to
+        // forget: `unrecorded()` returns a *real* level, so a reader that looks
+        // only at `level` cannot tell "nobody classified this" from "SURE
+        // classified this and it is level C". `is_recorded` is the only door to
+        // that difference, and defaulting to the strongest level instead would
+        // make a project nobody had looked at the best-supported one.
+        let unrecorded = ProjectSupport::unrecorded();
+        assert_eq!(unrecorded.level, SupportLevel::InspectOnly);
+        assert!(!unrecorded.is_recorded());
+        assert_eq!(ProjectSupport::default(), unrecorded);
+
+        let classified = ProjectSupport::new(SupportLevel::InspectOnly, "because");
+        assert_eq!(
+            classified.level, unrecorded.level,
+            "the two must share a level or this test proves nothing"
+        );
+        assert!(
+            classified.is_recorded(),
+            "a rule that filled the reason in must count as an answer even when it \
+             lands on the same level as the default"
+        );
+        assert!(
+            ProjectSupport::new(SupportLevel::InspectOnly, "").is_recorded(),
+            "an answer with nothing to say for itself is still an answer; the level \
+             and the reason together are what `unrecorded` is, not the reason alone"
+        );
+        assert_eq!(
+            ProjectSupport::new(SupportLevel::FirstClass, "because").level,
+            SupportLevel::FirstClass,
+            "`new` records the level it is handed; a classifier's answer is the whole \
+             point of the type and it must not be replaced by a default here"
+        );
+
+        let built = Project::new(ProjectId::generate(), "shop", "C:\\shop");
+        assert!(
+            !built.support.is_recorded(),
+            "a project record built by `Project::new` carries no classification until a \
+             rule fills one in: {}",
+            built.support.reason
+        );
     }
 
     #[test]

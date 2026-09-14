@@ -570,6 +570,18 @@ reader is given differs: a lockfile is a stronger statement about a project than
 a toolchain pin is, and a level with three different sentences underneath it is
 three facts wearing one label.
 
+**A `grade` measures what SURE understood, and it is not the project's support
+level.** It is the input to it: `sure_core::support::classify` takes the weakest
+of these grades and the best level this build's capability allows, and
+`docs/product/SUPPORTED_STACKS.md` defines the levels by what SURE can do —
+including running checks, which this build does not do. So a readable
+`Cargo.toml` is graded `generic` here and the project it is in is reported at
+level `inspect_only`, with the reason naming both and saying why. The two are
+kept apart rather than merged because collapsing them would mean one of the two
+questions getting a wrong answer; the conflict between the two definitions of
+`generic` is recorded in `sure_core::support`'s module comment and in
+`progress/HANDOFF.md` as an open decision.
+
 ## What is bounded, and how
 
 Limits are on work, in the same spirit as `ScanOptions` and `FingerprintOptions`,

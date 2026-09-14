@@ -17,6 +17,7 @@ pub mod project_intent;
 pub mod redact;
 pub mod scan;
 pub mod store;
+pub mod support;
 
 pub use sure_domain::{
     PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,

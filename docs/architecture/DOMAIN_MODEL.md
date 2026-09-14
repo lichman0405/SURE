@@ -5,6 +5,14 @@ Core entities:
 ## Project
 A local software project or workspace under inspection.
 
+Carries `stacks`, one level per technology found, and `support`, the single level
+for the project as a whole with the sentence saying why. The two are different
+answers to different questions and are not collapsed: the level `support` holds
+is the weakest of what SURE read and what SURE can do with it, so a project whose
+manifests were all read can still be at a lower level than any of its stacks, and
+its `reason` names both. `sure_core::support` is the only rule that fills it;
+`docs/product/SUPPORTED_STACKS.md` is the authority for the levels.
+
 ## ProjectFingerprint
 Identity of the exact relevant project state to which evidence/results apply.
 

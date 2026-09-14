@@ -29,6 +29,17 @@ use sure_core::paths::Paths;
 
 /// A scratch directory under `target/tmp`, which is git-ignored and on the same
 /// volume as the checkout, as the store tests use.
+///
+/// The name carries the process id, so no other process can compute this path.
+/// The reason is the one `store_concurrency.rs` records in full, and one more
+/// that is particular to this file: `the_report_never_creates_what_it_reports_on`
+/// was seen to fail with `os error 3` on a directory it had just created, and the
+/// only code in the repository that deletes that path is `scratch` itself. A path
+/// another instance of this test cannot compute is a path another instance
+/// cannot delete. **That mechanism was not confirmed** — the failure appears
+/// roughly once in ten runs of the whole workspace and never once in twelve runs
+/// of this binary alone — so this removes a shared resource rather than
+/// repairing a proven fault, and it is recorded that way in `progress/HANDOFF.md`.
 fn scratch(name: &str) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -36,8 +47,18 @@ fn scratch(name: &str) -> PathBuf {
         .join("target")
         .join("tmp")
         .join("doctor_contract")
-        .join(name);
-    let _ = fs::remove_dir_all(&root);
+        .join(format!("{name}-{}", std::process::id()));
+    match fs::remove_dir_all(&root) {
+        Ok(()) => {}
+        // The ordinary case, and now the expected one.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!(
+            "cannot clear {}: {error}. This process id was used before and its files \
+             are still on disk, so this test could not tell them from the ones it \
+             writes.",
+            root.display()
+        ),
+    }
     fs::create_dir_all(&root).expect("a scratch directory");
     root
 }

@@ -137,7 +137,26 @@ fn a_check_engine_shipped_as_source_is_reported() {
 
 #[test]
 fn a_hook_manifest_pointing_at_a_missing_script_is_reported() {
-    let dir = std::env::temp_dir().join("sure-testkit-thinness-missing");
+    // A name that no other run can compute, for the reason `scan/mod.rs`'s
+    // missing-directory fixture already records: `%TEMP%` is shared, and a
+    // fixture a test did not create is one something else can take away.
+    //
+    // This test was one of five whose scratch directory carried a name every run
+    // reused, and it was seen to fail with `Os { code: 3, kind: NotFound }` on the
+    // write below — a write into a directory `create_dir_all` had just made.
+    // **What takes the directory away is not known.** The obvious explanation, a
+    // deletion by the previous run still finishing when this one starts, did not
+    // survive a probe: 3000 rounds of exactly this shape — fixed name, create,
+    // write, remove, repeat — failed zero times, and so did 3000 with a unique
+    // name. What is established is narrower and is what this change acts on: all
+    // five failures were on paths that every run shared, and a path no other
+    // process can compute is a path no other process can remove. The five are
+    // listed in `progress/HANDOFF.md`, with which of them were proven and which
+    // were not.
+    let dir = std::env::temp_dir().join(format!(
+        "sure-testkit-thinness-missing-{}",
+        std::process::id()
+    ));
     let hooks = dir.join("hooks");
     std::fs::create_dir_all(&hooks).expect("temp dir");
     let manifest = hooks.join("hooks.json");

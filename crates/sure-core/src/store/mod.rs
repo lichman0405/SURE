@@ -818,9 +818,31 @@ mod tests {
 
     /// A path under `target/tmp`, which is git-ignored and on the same volume
     /// as the checkout.
+    ///
+    /// The name carries the process id, for the reason `store_concurrency.rs`
+    /// records in full: freshness must not depend on a deletion succeeding, because
+    /// on Windows a file another process holds cannot be deleted and the failure is
+    /// easy to swallow. A unique name cannot be stale, so a directory a previous
+    /// run left locked is simply not this run's directory. The clear that follows
+    /// covers the one case uniqueness does not — a reused process id — and stops
+    /// the test there, since that is the case where a stale database is readable.
+    ///
+    /// A residue worth knowing about: unique names accumulate one directory per
+    /// test per run under `target/tmp`, which is disposable scratch space. The
+    /// alternative was a name that is reused, which is the thing that lied.
     fn scratch(name: &str) -> PathBuf {
-        let directory = crate::store::scratch_root().join(name);
-        let _ = fs::remove_dir_all(&directory);
+        let directory = crate::store::scratch_root().join(format!("{name}-{}", std::process::id()));
+        match fs::remove_dir_all(&directory) {
+            Ok(()) => {}
+            // The ordinary case, and now the expected one.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!(
+                "cannot clear {}: {error}. This process id was used before and its \
+                 database is still on disk, so the assertions below could not tell it \
+                 apart from this run's writes.",
+                directory.display()
+            ),
+        }
         fs::create_dir_all(&directory).expect("a scratch directory");
         directory
     }

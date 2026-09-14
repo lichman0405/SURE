@@ -64,6 +64,30 @@ fn everything() -> HistoryFilter<'static> {
 
 /// A path under `target/tmp`, which is git-ignored and on the same volume as
 /// the checkout.
+///
+/// # Why the name carries the process id
+///
+/// These tests need a **fresh, empty** directory, and they used to get one by
+/// clearing a fixed path and hoping. That made correctness depend on a deletion
+/// succeeding, and on Windows a deletion of a file another process still holds
+/// open does not succeed. The failure was silent — `let _ = remove_dir_all(…)` —
+/// and what followed was not: `Store::open_at` reopens a database that is
+/// already on disk, so the run appended its own records to the previous run's
+/// and the count assertions below reported that "a write was lost".
+///
+/// That was measured rather than reasoned about. With a handle held open on
+/// `racing_writers/sure.db`, the next run counted **200 records where 100 were
+/// written**, and reported a lost write — the opposite of what had happened,
+/// about a file that was never fresh. A `let _ =` on a precondition is how a
+/// false report gets written.
+///
+/// The path is therefore unique to this process, as it already is in
+/// `config/authority.rs`, `config/mod.rs` and `discover_node.rs`. Freshness then
+/// does not depend on a deletion at all: even if a previous run's directory is
+/// still locked and still there, it is not this run's, and nothing here reads
+/// it. The clear stays as a backstop for the one case uniqueness does not cover
+/// — a reused process id — and *that* one stops the test rather than being
+/// ignored, because it is the case where a stale database really could be read.
 fn scratch(name: &str) -> PathBuf {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -72,8 +96,18 @@ fn scratch(name: &str) -> PathBuf {
         .join("target")
         .join("tmp")
         .join("concurrency")
-        .join(name);
-    let _ = std::fs::remove_dir_all(&directory);
+        .join(format!("{name}-{}", std::process::id()));
+    match std::fs::remove_dir_all(&directory) {
+        Ok(()) => {}
+        // The ordinary case, and now the expected one: a name no earlier run used.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!(
+            "cannot clear {}: {error}. This process id was used before and its database \
+             is still on disk, so the counts below could not tell it apart from this \
+             run's writes.",
+            directory.display()
+        ),
+    }
     std::fs::create_dir_all(&directory).expect("a scratch directory");
     directory
 }

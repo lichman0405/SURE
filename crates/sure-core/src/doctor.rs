@@ -537,6 +537,16 @@ mod tests {
     use sure_protocol::documents::DocumentKind;
 
     /// A scratch directory under `target/tmp`, as the other store tests use.
+    ///
+    /// The name carries the process id, and the clear stops the test if it does
+    /// not happen, for the reason `store_concurrency.rs` records in full: the
+    /// freshness of a reused path depends on a deletion succeeding, and on Windows
+    /// a deletion can fail silently. These two tests were seen to fail under a
+    /// loaded run — `the store was readable: NotCreated`, and `Unreadable` with
+    /// `os error 5` on the history file — and both stopped failing once the path
+    /// was unique to the process. **That is not proof that the reused path caused
+    /// them**, and `progress/HANDOFF.md` records it as the weaker of the two kinds
+    /// of evidence in this change.
     fn scratch(name: &str) -> PathBuf {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
@@ -544,8 +554,18 @@ mod tests {
             .join("target")
             .join("tmp")
             .join("doctor")
-            .join(name);
-        let _ = fs::remove_dir_all(&root);
+            .join(format!("{name}-{}", std::process::id()));
+        match fs::remove_dir_all(&root) {
+            Ok(()) => {}
+            // The ordinary case, and now the expected one.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!(
+                "cannot clear {}: {error}. This process id was used before and its \
+                 history file is still on disk, so this test could not tell it apart \
+                 from the one it writes.",
+                root.display()
+            ),
+        }
         fs::create_dir_all(&root).expect("a scratch directory");
         root
     }

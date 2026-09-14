@@ -11,6 +11,14 @@ pub use sure_domain::{
     severity, status, vocabulary,
 };
 
+/// The integration protocol version this core build speaks.
+///
+/// Re-exported rather than restated, so a core that has not been taught a newer
+/// protocol cannot claim to speak it. The handshake that uses this lands in
+/// P1-T010; declaring it here is what makes the `sure-core -> sure-protocol`
+/// boundary a real edge from the first commit rather than a manifest line.
+pub const PROTOCOL_VERSION: u32 = sure_protocol::PROTOCOL_VERSION;
+
 /// The product name.
 pub const NAME: &str = PRODUCT_NAME;
 

@@ -10,8 +10,10 @@ name = "sure"
 path = "src/main.rs"
 
 [dependencies]
+# The CLI depends only on the core. Domain vocabulary is reached through the
+# core's re-exports, which keeps exactly one path from the presentation layer
+# into the engine and its vocabulary (ADR 0001).
 sure-core = { path = "../sure-core" }
-sure-domain = { path = "../sure-domain" }
 
 [lints]
 workspace = true

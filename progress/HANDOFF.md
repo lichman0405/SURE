@@ -2,11 +2,11 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 23 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (3/…).** `P2-T003` is accepted, and its acceptance
+Progress: 25 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (5/12).** `P2-T005` is accepted, and its acceptance
 is recorded in `progress/state.json` **in the same commit as this file** — so
 `git log -1 --stat` is the check. If that commit's subject does not name
-`P2-T003`, the acceptance is not recorded and the task is not done.
+`P2-T005`, the acceptance is not recorded and the task is not done.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -36,17 +36,19 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 24, queued: 142 }
-READY: P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001,
-      P12-T008, P13-T001
+{ accepted: 25, queued: 141 }
+READY: P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001, P12-T008,
+      P13-T001
 ```
 
-Nothing is `in_progress`: `P2-T004` was accepted at the end of the session that
-wrote this file, and the next task has not been started yet. `P2-T004` is
-described in "What `P2-T004` added" below, together with the defect in five test
-scratch helpers that verifying it turned up — fixed in `0a577ca`, and described
-with the one instance that was **proven** separated from the four that were not.
-Everything else on this branch is the `P2-T003` and `P2-T002` line.
+Nothing is `in_progress`: `P2-T005` was accepted at the end of the session that
+wrote this file, and the next task has not been started yet. `P2-T005` is
+described in "What `P2-T005` added" immediately below, and the two things worth
+knowing before touching any of it are that **one `Budget` serves both
+ecosystems** (so a Node-heavy project starves Python by call order, not by
+anything Python's module does) and that **`setup.py` is never read, because it
+is a program**. Everything else on this branch is the `P2-T004`, `P2-T003` and
+`P2-T002` line.
 
 **`P2-T002` (Git project fingerprint) is now the previous session's work.** All
 of it is on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the
@@ -157,6 +159,81 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T005` added
+
+Python discovery, as a second module beside the Node one. Five files carry it:
+`crates/sure-core/src/discover/python.rs` (2863 lines, 25 module unit tests),
+`crates/sure-core/tests/discover_python.rs` (31 tests, the new **20th** test
+binary), `mod.rs` (`Ecosystem::Python`, `Findings::Python`, the wiring),
+`read.rs` (`read_text_file`, and `to_json` for the TOML conversion), and
+`scan/ignore.rs` (`.tox`, `.nox` and `.eggs` as vendored). `toml` moved from a
+test-support dependency of `sure-core` to a real one, which the workspace
+manifest explains: it is deliberately **not** deserialized straight into
+`serde_json::Value`, because `toml` represents a datetime as
+`{"$__toml_private_datetime": ...}` — a table the project did not write, under a
+key that looks like project data — and `inf`/`nan` as `null`.
+
+**The rule is the same one `node.rs` is built on: not there is never
+there-but-unreadable.** `ManifestState`, `ReadFile` and `UnreadReason` are enums
+and never `Option`s, and `read_manifest` pairs the reader with the converter so a
+shape failure cannot reach the state without reaching `Discovery::unread`.
+
+**Two facts about this module are load-bearing and easy to get wrong.**
+
+*One `Budget` serves both ecosystems.* `discover()` builds one and hands it to
+`node::look` and then to `python::look`, in `Ecosystem::ALL` order. A project
+with 512 Node manifests therefore leaves nothing for Python, and its
+`pyproject.toml` is `OutOfBudget` rather than read. That is the intended reading
+of a limit on how many manifests SURE reads in one discovery, but it is a
+consequence of the call order and not of anything Python's module does. It is
+written down in `ECOSYSTEM_DISCOVERY.md` rather than left to be discovered.
+
+*`setup.py` is a program, so it is never read.* It declares its dependencies by
+executing Python, so it is `unread_legacy` — a name carried through to the
+result — and a project whose only manifest is a `setup.py` gets `InspectOnly`,
+which says exactly that. `discovery_runs_nothing` writes a `setup.py` and a
+`conftest.py` that would each leave a file behind if executed **or imported**,
+runs discovery, and requires that no such file appears; it also lists the
+directory, so the assertion is not only about the two names it could think of.
+
+**A requirements file is the weakest evidence and is never a disagreement on its
+own.** pip, uv, poetry and pdm all read `requirements.txt`, so a `uv.lock` beside
+one is the ordinary shape of a project that moved to uv. Reported as a
+contradiction it would be a false alarm, and a false alarm beside a real one is
+how a reader learns to ignore both. It is still collected and still reported, as
+the third tier, where it decides only when nothing stronger is present.
+
+**Requirement names are parsed and two rejections stop a name being invented.**
+A name immediately followed by `:` or `/` is not a name, which is what stops
+`https://example.invalid/pkg-1.0.whl` being read as a dependency called `https`;
+and a run ending in a non-alphanumeric is not a name, because `foo-` and `foo.`
+are prefixes. Every line of a requirements file lands in `requirements`,
+`directives` or `comments`, and a test asserts the three add up to the file's
+line count.
+
+**The mutation run found one real hole in a suite that was already green.**
+Changing the support level of the "recognised, but nothing SURE reads declares
+anything" arm from `InspectOnly` to `Generic` passed every test — so a project
+SURE had read nothing from (a bare `uv.lock`, or a bare `.python-version`) was
+being reported as a project SURE fully understands. That is the false-green
+direction, and
+`a_project_with_no_manifest_sure_can_read_is_not_called_fully_understood` closes
+it and asserts the reason carries no project text. `target/tmp/mutate9.py`
+applies **23** mutations, **22 caught** — the figures are from a re-run at the
+end of this session, and the count written here first was 22 and 21, wrong by one
+both times, see the mutation section — and the one that is not caught is recorded
+in the script with its reason and the verdict is right: it is the same standing
+as `FINGERPRINTING.md` gap 8.
+
+**Two things this work falsified, fixed rather than left.**
+`a_directory_with_no_node_files_in_it_is_not_a_node_project` asserted the exact
+list of ecosystems, which broke the moment Python was added: it was a fact about
+the build that the test had no business pinning, and it now asserts
+`Ecosystem::ALL` plus that Node is one of them. And the previous handoff claimed
+`crates/sure-testkit/tests/repository_shape.rs` pins a dependency's category —
+**that is false**, and the correction is written into the "Next concrete action"
+entry where the claim was made.
 
 ## What `P2-T004` added, and the defect its verification turned up
 
@@ -562,12 +639,55 @@ Three of the five jobs were failing the whole time.
 | 34845645097 | `c7c0824` — the `P2-T003` record | all five green |
 | 34850549120 | `0a577ca` + `68e51d8` + `1ec5bee` — **the `P2-T004` acceptance** | **failure: `rust (ubuntu-latest)` and `rust (macos-latest)`.** One test, `discover::read::tests::a_path_a_manifest_named_cannot_leave_the_project`. Detail below |
 | 34851008124 | `650852e` — the fix for that | **all five green**, and the test that failed was read out of all three `rust` logs **by name** |
+| 34854388756 | `e10f620` — **the `P2-T005` implementation** | **all five green.** Windows **786** / macOS **788** / Ubuntu **789** passed, 0 failed, each over 34 result lines. Detail below, because **Windows agreeing with the local run exactly is the fact worth having** |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34854388756`, `P2-T005`'s — and a counting method that is only sound where it was used
+
+**All five jobs green**, and this is the first run in which **any Python
+discovery test has ever executed**, on any platform.
+
+**The names were read out of all three `rust` logs, not inferred from the
+colour.** `a_project_with_no_manifest_sure_can_read_is_not_called_fully_understood`,
+`discovery_runs_nothing`,
+`every_file_that_marks_a_python_project_is_enough_on_its_own` and
+`a_scan_that_looked_at_everything_says_so_and_one_that_did_not_says_what_it_missed`
+are each `... ok` **exactly once in each of the Windows, Ubuntu and macOS logs**.
+That is what makes "the Python tests ran on Unix" a fact rather than an
+inference from a green job, and it is the check the counts cannot make.
+
+| job | result lines | parents | children | passed |
+|---|---|---|---|---|
+| `rust (windows-latest)` | 34 | 24 | 10 | **786** |
+| `rust (macos-latest)` | 34 | 24 | 10 | **788** |
+| `rust (ubuntu-latest)` | 34 | 24 | 10 | **789** |
+
+**Windows CI printed exactly the figure the local Windows run printed, 786, which
+is the fact worth having.** It is a stronger statement than "green": the same
+number from two independent executions on the same platform, one of them the one
+that will judge every future push. The `+2` macOS and `+3` Ubuntu deltas are the
+`#[cfg(unix)]` tests `P2-T002` recorded, unchanged, and 786 + 2 and 786 + 3 are
+the two totals to the test.
+
+**A method lesson, learned here by getting it wrong twice.** Attributing a
+`test result:` line to a target **by proximity in a CI log is invalid**. Cargo
+writes `Running <target>` to stderr and the test harness writes `test result:` to
+stdout, and the runner merges the two by arrival — so on CI a target's result
+lines appear **before** the `Running` line that produced them. Read that way, a
+macOS log showed `discover_node` at **9 passed** for a 33-test binary, and
+`discover_python` at **33** and again at **31** in the same log. None of those
+three numbers is a fact about the binary; they are facts about interleaving.
+There is one child signature that survives this, because `store_concurrency`'s
+children print a line no other target can print — `0 ignored; 0 measured; 6
+filtered out` — so the ten children can be identified and subtracted with
+confidence. **The figures above are counts over a whole job's step, minus those
+ten.** Per-target counts are quoted in this file **only from the local run**,
+where both streams reach one pipe in write order and the attribution is sound.
 
 ### Reading run `34851008124`, the fix for the red acceptance
 
@@ -784,6 +904,36 @@ nothing local can. Only a run on the platform can.
 consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
+
+## Gate set, as run at `e10f620` (`P2-T005`)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **786 passed, 0 failed, 1 ignored, across 34 result lines = 24 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+
+Per binary on this platform: `sure-cli` 36 **bin** + 13 `cli_contract`;
+`sure-core` **344 lib** + 9 `config_loading` + 33 `discover_node` + **31
+`discover_python`** + 6 `doctor` + 23 `fingerprint_content` + 43
+`fingerprint_git` + 30 `scan_project` + 6 `store_concurrency` + 4
+`store_packaging`; `sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46
+lib + 12 `conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7
+`integration_thinness` + 8 `repository_shape`; `Doc-tests sure_core` **4**. That
+is 49 + 529 + 116 + 73 + 15 + 4 = 786.
+
+**The arithmetic against 726 at `68e51d8` is +60 and every part is measured, not
+inferred from the total.** `git diff 68e51d8..e10f620` gives **+25 `#[test]`** in
+`python.rs` and **+4** in `read.rs` — the four `toml`-conversion tests — which is
+the whole of `sure-core`'s lib movement, **315 → 344**; and **+31** for the new
+`discover_python` target, which is also the **20th test binary** and takes the
+parent sections from 23 to 24. 25 + 4 + 31 = 60. **`scan/ignore.rs` added zero
+`#[test]`** — its new rows are `assert_eq!`s inside the existing vendored-set
+tests — and `mod.rs` and `discover_node.rs` added none either, which is worth
+stating because all three files are in the diff and a file being touched is not
+a test being added.
 
 ## Gate set, as run at `68e51d8` (`P2-T004`) and `0a577ca`
 
@@ -1284,6 +1434,88 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P2-T005`
+
+Twenty-three mutations in `target/tmp/mutate9.py` (git-ignored), run against
+`cargo test -p sure-core --lib --test discover_python --test discover_node
+--no-fail-fast`. **Twenty-two CAUGHT, one MISSED, zero SKIP, zero BUILD**, and
+the one missed is recorded with its reason and a verdict of *right*.
+
+**The count is a re-run, and it corrects two numbers written earlier in this
+session.** The first report said 22 mutations and 21 caught. Both were wrong by
+one, in the same direction: the figures were written from the script as it stood
+before its last mutation was added, and were never re-counted against the file.
+`grep -c '^CAUGHT'` over the re-run's output is where 22 comes from, and the
+script's own entry count is where 23 does. **It is recorded rather than quietly
+fixed because a mutation count is precisely the sort of figure a later reader
+treats as measured** — and because the error is the one this repository keeps
+finding: a number that was true of an earlier state, carried forward past the
+change that invalidated it. The reverted tree was checked afterwards (`git
+status` clean of everything but `progress/state.json` and `progress/HANDOFF.md`,
+which are this commit), so no mutation was left applied.
+
+The run is the same three families `P2-T004`'s was, which are the three the
+module is arranged around:
+
+- **"Not there" arriving as "there but unreadable", and the reverse (1–6).** A
+  `pyproject.toml` that failed to parse reported as a project with no
+  `pyproject.toml`; a file SURE could not read absent from the result; a
+  `setup.py` on its own, or a lockfile on its own, not making it a Python
+  project.
+- **An invented fact (7–11).** A URL read as a distribution called `https`; a
+  build *library* named as the project's installer; a build plan offered to a
+  project that declared nothing that builds it; a role with no declared tool
+  given a command anyway.
+- **A weaker source overriding a stronger one (12–15).** A requirements file
+  deciding the installer over a `uv.lock`; two lockfiles resolved to the first
+  instead of reported.
+
+Plus bounds, reading, the level and the build plan's command (16–23).
+
+**The script found one real hole in a suite that was already green, and it is
+the same shape as `P2-T004`'s.** *"A project that declares no manifest is graded
+as fully understood"* — changing the "recognised, but nothing SURE reads declares
+anything" arm's level from `InspectOnly` to `Generic` — **passed every test**. So
+a project SURE had read nothing from, a bare `uv.lock` or a bare
+`.python-version`, was being reported as a project SURE fully understands. That
+is the false-green direction exactly. **The mutation is now CAUGHT**, by
+`a_project_with_no_manifest_sure_can_read_is_not_called_fully_understood`, which
+also asserts the reason carries no project text.
+
+`target/tmp/mutate8.py`'s two counting rules were kept, and both were earned
+again in this run:
+
+- **Two mutations came back `SKIP` because `rustfmt` had reformatted the block
+  after they were written** — the anchor appeared zero times. An anchor that does
+  not match exactly once counts as **nothing**, not as caught, which is what
+  stops a report of a false green being itself a false report. Both were
+  rewritten against the real text and both are now caught.
+- A mutation that stops the code compiling prints `BUILD` and is not counted as
+  caught.
+
+**One mutation is not caught, and the verdict is right.** *"A plan with no
+command still names tools as its evidence"* replaces a reset of `because` with a
+plain rebinding and no test notices — because the guard is currently
+unobservable: `CommandRole::Install` is the only role whose reasons can be
+non-empty while its command is `None`, and `Install::tool_roles()` is `&[]`. It
+stays because it makes the invariant hold for a **new** role by construction
+rather than by the next author noticing, which is the standing
+`FINGERPRINTING.md` gap 8 records for its sort and its domain tag. Recorded
+rather than papered over with a test that would have to invent a role to reach
+it.
+
+**One mutation is deliberately absent, and the script says so.** *"`looks_like_one`
+admitting a bare `.py` file"* is not expressible as an edit to it: its parameters
+are six booleans and lists built from named files, so the edit would need the
+markers returned by the *walk*, and `requirement_candidates` is the only place
+`child_files` is consulted. Mutation 3 puts an arbitrary file into that candidate
+list — the closest expressible form — and the marker list itself is covered by
+two tests that do not depend on that function:
+`every_file_that_marks_a_python_project_is_enough_on_its_own` (the integration
+test, which writes each marker into a fixture and requires the project to be
+recognised) and `.._is_on_the_list_that_decides` (the unit test, which checks the
+list against the markers the walk can produce).
+
 ### `P2-T004`
 
 Twenty-seven mutations in `target/tmp/mutate8.py` (git-ignored), run against
@@ -1682,6 +1914,16 @@ it needs a Mac.
   `tests/discover_node.rs` (33 tests, the new 19th test binary), and the new
   `docs/architecture/ECOSYSTEM_DISCOVERY.md`. The module is a reader: it executes
   none of the scripts it reports, which is the property it is shaped around.
+- `e10f620` **`P2-T005`** — `crates/sure-core/src/discover/python.rs`,
+  `tests/discover_python.rs` (31 tests, the new **20th** test binary), the
+  Python half of `docs/architecture/ECOSYSTEM_DISCOVERY.md`, the promotion of
+  `toml` from a test-support dependency to a real one, and small extensions to
+  `mod.rs` (`Ecosystem::Python`, `Findings::Python`), `read.rs` (`read_text_file`
+  and the four `toml`-conversion tests) and `scan/ignore.rs` (`.tox`, `.nox`,
+  `.eggs` as vendored). **A second ecosystem is the point of it**: the enum that
+  refuses to let "not there" arrive as "there but unreadable" survived being
+  written a second time, and the one-budget-serves-both fact is recorded rather
+  than discovered.
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -1693,23 +1935,33 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **Nothing is outstanding from `P2-T004`.** Its four commits are pushed and
-   read: `0a577ca`, `68e51d8` and `1ec5bee` in run `34850549120` — **red on both
-   Unix jobs** — and the fix `650852e` in run `34851008124`, green on all five,
-   with the test that had failed confirmed by name in all three `rust` logs. The
-   red run was not a wasted push: it is the only reason a wrong assertion about
-   platform behaviour was found before the task was closed, and it found it in
-   the one place a Windows-only gate set cannot look.
-2. `node scripts/taskctl.mjs start P2-T005` — Python project discovery. The
-   remaining READY list is `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`,
-   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are
-   Python and Rust discovery, `P2-T010` is `ProjectIntent` ingestion from an
-   explicit goal/spec, which `Config` already carries a slot for.
-   `P2-T005` has one known prerequisite that `P2-T004` did not: it needs a TOML
-   reader, and `toml` is currently a **test-support** dependency of `sure-core`
-   rather than a real one. Promoting it is part of the task.
-   **Correction, 2026-09-14, while doing it:** the sentence that stood here said
-   `crates/sure-testkit/tests/repository_shape.rs` is where a dependency's
+1. **`P2-T005` is accepted, and its implementation commit is pushed and read.**
+   `e10f620` in run `34854388756`: **all five jobs green**, Windows **786** —
+   the same number the local Windows run printed — macOS 788, Ubuntu 789, and the
+   first run in which a Python discovery test executed anywhere. State:
+   `{ accepted: 25, queued: 141 }`, phase `P2`, **5 of 12**.
+2. `node scripts/taskctl.mjs start P2-T006` — Rust project discovery, the third
+   ecosystem and the one that finishes the trio `P2-T004` opened. The remaining
+   READY list is `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`,
+   `P8-T001`, `P12-T008`, `P13-T001`; `P2-T010` is `ProjectIntent` ingestion from
+   an explicit goal/spec, which `Config` already carries a slot for.
+   **`P2-T006`'s reader already exists and is already proven.**
+   `discover::read::read_toml` was built for `pyproject.toml` and carries four
+   unit tests of its own in `read.rs` — a TOML document's shape, order and types;
+   a datetime as the text that was written; a number JSON cannot write; and
+   invalid TOML as unread rather than absent. `Cargo.toml` is the same format, so
+   the conversion half of this task is done before it starts, and both manifests
+   say so in the same words: the workspace one that "`Cargo.toml` is `P2-T006`'s
+   reader and not implemented yet", and
+   `crates/sure-core/Cargo.toml` that `toml` is there for "`pyproject.toml` and,
+   from `P2-T006`, `Cargo.toml`". What is *not* done is
+   everything `Cargo.toml` means: `[workspace]` members, `[dependencies]` versus
+   `[dev-dependencies]` versus `[build-dependencies]` versus target-specific
+   tables, the `edition`/`rust-version` claims, and the fact that a
+   `Cargo.toml` with a `[workspace]` section is a **root** while one without may
+   be a member — a shape `node.rs` and `python.rs` have no analogue for.
+   **Correction, 2026-09-14, made while doing `P2-T005`:** a sentence stood here
+   saying `crates/sure-testkit/tests/repository_shape.rs` is where a dependency's
    category is pinned and that it "is the one that will say whether it was done".
    That is false. `repository_shape.rs` asserts `member_names()` and
    `normal_edges()`, both workspace-internal, and its `TestOnlyInProduction`
@@ -1721,7 +1973,9 @@ it needs a Mac.
    a test as the authority for a property without the test having been read.
    **Keep the ordering discipline**: push each task's commits, read that run, and
    only then start the next acceptance. The cost of not doing it is already
-   written down twice in this file.
+   written down twice in this file. **The `P2-T005` run paid for it once more**:
+   the per-target counts read out of a CI log by proximity were wrong three
+   times, and only the whole-step counts survived.
 3. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline

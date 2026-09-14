@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Project Intent",
+  "type": "object",
+  "required": [
+    "id",
+    "source",
+    "text"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "source": {
+      "enum": [
+        "explicit_user_goal",
+        "observed_user_request",
+        "project_spec",
+        "agent_claim",
+        "inferred"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "raw_retained": {
+      "type": "boolean"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

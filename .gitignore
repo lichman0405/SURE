@@ -1,0 +1,15 @@
+/target/
+/.sure/
+/diagnostics/*.json
+/diagnostics/*.md
+node_modules/
+*.db
+*.db-shm
+*.db-wal
+*.vsix
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example

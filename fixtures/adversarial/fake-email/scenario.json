@@ -1,0 +1,6 @@
+{
+  "id": "fake-email",
+  "expected_severity": "must_fix",
+  "description": "Email send path only logs to console.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "unknown-evidence",
+  "expected_severity": "note",
+  "description": "Insufficient observation must produce cannot_confirm, not pass.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

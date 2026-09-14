@@ -1,0 +1,6 @@
+{
+  "id": "lying-readme",
+  "expected_severity": "should_fix_first",
+  "description": "README setup command does not work on fixture.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

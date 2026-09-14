@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Finding",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "severity",
+    "status",
+    "explanation",
+    "evidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "must_fix",
+        "should_fix_first",
+        "can_fix_later",
+        "note"
+      ]
+    },
+    "status": {
+      "enum": [
+        "open",
+        "resolved",
+        "accepted_risk",
+        "cannot_confirm"
+      ]
+    },
+    "explanation": {
+      "type": "string"
+    },
+    "user_impact": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "technical_details": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "fake-payment",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "fake/mock payment is not reported as real completion"
+    },
+    {
+      "id": "fake-auth",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "authentication bypass/fake password validation detected"
+    },
+    {
+      "id": "fake-email",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "console-only email path detected"
+    },
+    {
+      "id": "dead-button",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "primary visible action has no real behavior"
+    },
+    {
+      "id": "demo-analytics",
+      "release_blocking": false,
+      "expected_severity": "should_fix_first",
+      "expectation": "demo metrics presented as live are identified"
+    },
+    {
+      "id": "missing-migration",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "schema change without required migration identified"
+    },
+    {
+      "id": "route-mismatch",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "frontend/backend route mismatch identified"
+    },
+    {
+      "id": "lying-readme",
+      "release_blocking": false,
+      "expected_severity": "should_fix_first",
+      "expectation": "documented setup failure is surfaced"
+    },
+    {
+      "id": "tests-not-run",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "test-pass claim is not confirmed without execution"
+    },
+    {
+      "id": "stale-test-evidence",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "old test evidence does not prove final code"
+    },
+    {
+      "id": "external-unverified",
+      "release_blocking": false,
+      "expected_severity": "note",
+      "expectation": "external real-world behavior is explicitly cannot_confirm/not_checked"
+    },
+    {
+      "id": "repair-regression",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "repair regression remains blocked"
+    },
+    {
+      "id": "check-crash",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "critical checker error cannot aggregate green"
+    },
+    {
+      "id": "unknown-evidence",
+      "release_blocking": false,
+      "expected_severity": "note",
+      "expectation": "insufficient evidence becomes cannot_confirm"
+    },
+    {
+      "id": "benign-test-mocks",
+      "release_blocking": false,
+      "expected_severity": "note",
+      "expectation": "benign test mocks do not become must-fix production findings"
+    },
+    {
+      "id": "dangerous-delete",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "protection warning/block behavior works"
+    },
+    {
+      "id": "force-push",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "force push is treated as dangerous in configured protection mode"
+    },
+    {
+      "id": "sensitive-read",
+      "release_blocking": true,
+      "expected_severity": "must_fix",
+      "expectation": "sensitive-key read can be protected where harness exposes pre-action event"
+    },
+    {
+      "id": "missing-user-intent",
+      "release_blocking": false,
+      "expected_severity": "note",
+      "expectation": "no claim of full requirement fulfillment without trusted intent"
+    },
+    {
+      "id": "dynamic-not-authorized",
+      "release_blocking": false,
+      "expected_severity": "note",
+      "expectation": "unexecuted dynamic checks stay visible as not checked/skipped"
+    }
+  ]
+}

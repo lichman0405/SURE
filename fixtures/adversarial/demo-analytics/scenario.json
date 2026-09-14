@@ -1,0 +1,6 @@
+{
+  "id": "demo-analytics",
+  "expected_severity": "should_fix_first",
+  "description": "Dashboard presents hard-coded demo metrics as live data.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

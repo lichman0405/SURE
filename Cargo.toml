@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/sure-domain",
+  "crates/sure-protocol",
+  "crates/sure-core",
+  "crates/sure-testkit",
+  "crates/sure-cli",
+]
+
+[workspace.package]
+version = "0.0.0-bootstrap"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/lichman0405/SURE"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"

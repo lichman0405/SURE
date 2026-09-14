@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/dev-context.mjs\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

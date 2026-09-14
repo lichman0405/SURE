@@ -1,0 +1,13 @@
+{
+  "name": "sure",
+  "version": "0.0.0-bootstrap",
+  "description": "Check AI-built projects, record agent evidence and return repair contracts without replacing Cursor.",
+  "author": {
+    "name": "SURE contributors"
+  },
+  "repository": "https://github.com/lichman0405/SURE",
+  "license": "Apache-2.0",
+  "commands": "commands/",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": "mcp.json"
+}

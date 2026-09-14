@@ -1,0 +1,1 @@
+Read `MASTER_PROMPT.md` completely, validate the task/progress state, and autonomously implement SURE from the current READY task(s) through the v0.1 definition of done. Do not stop at planning. Persist progress, tests, commits and handoff state. Only ask the user for genuinely external credentials/authorizations. Do not merge to main without explicit active-session permission.

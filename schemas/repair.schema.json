@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Repair Contract",
+  "type": "object",
+  "required": [
+    "issue_id",
+    "problem",
+    "why_it_matters",
+    "required_fix",
+    "acceptance"
+  ],
+  "properties": {
+    "issue_id": {
+      "type": "string"
+    },
+    "problem": {
+      "type": "string"
+    },
+    "why_it_matters": {
+      "type": "string"
+    },
+    "required_fix": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "preserve": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "forbidden_shortcuts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

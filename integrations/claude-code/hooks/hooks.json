@@ -1,0 +1,55 @@
+{
+  "description": "SURE evidence/protection hooks \u2014 Windows bootstrap template; release packaging must render/test per-platform launchers.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"${CLAUDE_PLUGIN_ROOT}\\scripts\\sure-hook.ps1\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"${CLAUDE_PLUGIN_ROOT}\\scripts\\sure-hook.ps1\" pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"${CLAUDE_PLUGIN_ROOT}\\scripts\\sure-hook.ps1\" post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"${CLAUDE_PLUGIN_ROOT}\\scripts\\sure-hook.ps1\" stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

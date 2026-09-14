@@ -1,0 +1,2 @@
+# Keep target selection host-native. Windows primary development uses x86_64-pc-windows-msvc
+# through rust-toolchain/rustup and a real MSVC link smoke test. CI covers macOS/Linux.

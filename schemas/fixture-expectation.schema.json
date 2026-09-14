@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Fixture Expectation",
+  "type": "object",
+  "required": [
+    "id",
+    "required_outcomes"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "required_outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "forbidden_outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

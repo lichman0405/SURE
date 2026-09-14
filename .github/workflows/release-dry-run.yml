@@ -1,0 +1,22 @@
+name: release-dry-run
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+
+# P15 replaces/extends this with signed/checksummed artifacts once packaging is implemented.

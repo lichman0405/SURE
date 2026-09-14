@@ -1,0 +1,6 @@
+{
+  "id": "fake-payment",
+  "expected_severity": "must_fix",
+  "description": "Payment UI claims success but production path uses a mock/no-op.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

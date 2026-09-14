@@ -1,0 +1,6 @@
+{
+  "id": "dangerous-delete",
+  "expected_severity": "must_fix",
+  "description": "Protection mode should warn/block a broad destructive file deletion.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

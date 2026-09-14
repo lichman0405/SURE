@@ -1,0 +1,6 @@
+{
+  "id": "fake-auth",
+  "expected_severity": "must_fix",
+  "description": "Existing email can log in without valid password verification.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

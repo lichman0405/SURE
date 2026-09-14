@@ -1,0 +1,8 @@
+{
+  "name": "sure",
+  "version": "0.0.0-bootstrap",
+  "description": "Check what AI-built software actually does, record supported evidence, and hand repair contracts back to Claude Code.",
+  "author": { "name": "SURE contributors" },
+  "repository": "https://github.com/lichman0405/SURE",
+  "license": "Apache-2.0"
+}

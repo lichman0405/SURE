@@ -1,0 +1,189 @@
+[
+  {
+    "id": "P0",
+    "title": "Bootstrap, governance and frozen semantics",
+    "objective": "Validate repository/bootstrap, source-of-truth semantics, Git workflow and architectural ADRs.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P1",
+    "title": "Rust foundation and local state",
+    "objective": "Production workspace boundaries, config, storage, protocols, tracing, IDs and CLI foundations.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P2",
+    "title": "Project discovery, intent and fingerprinting",
+    "objective": "Discover project structure/stacks, trustworthy intent sources and exact project state.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P3",
+    "title": "Execution trust, safe runner and isolation",
+    "objective": "Bounded process execution, user execution modes, command classification, service supervision and optional container path.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P4",
+    "title": "Deterministic stack checks",
+    "objective": "Build/test/type/lint/config/readme/database consistency checks across first-class stacks.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P5",
+    "title": "Behavioral/runtime checks",
+    "objective": "Local service, HTTP/browser behavior and real flow probes without overstating coverage.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P6",
+    "title": "False-completion and integration analysis",
+    "objective": "Mocks/stubs/no-op/fake success/demo data/broken glue and grounded semantic analysis.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P7",
+    "title": "Findings, verdicts and plain-language reports",
+    "objective": "Evidence-grounded findings, severity, overall verdict and nontechnical UX.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P8",
+    "title": "Session evidence and AI claim checking",
+    "objective": "Normalized event storage, recording modes, claim extraction/checking and stale evidence.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P9",
+    "title": "Repair contracts and re-check loop",
+    "objective": "Turn findings into bounded repair work and independently verify the result.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P10",
+    "title": "Claude Code integration",
+    "objective": "First-class plugin/hooks, evidence, protection, commands and repair round-trip.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P11",
+    "title": "Cursor integration",
+    "objective": "Cursor Plugin/hooks, commands, capability reporting, Windows launcher/path behavior and repair round-trip.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P12",
+    "title": "Codex, portable plugin and model providers",
+    "objective": "Codex/Agent Plugin integration plus optional provider abstraction and no-model mode.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P13",
+    "title": "Privacy, redaction and protection hardening",
+    "objective": "Retention/deletion, privacy modes, secret redaction and dangerous-action protection.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P14",
+    "title": "Adversarial fixtures and product evaluation",
+    "objective": "Runnable false-completion/claim/safety/intent corpus and false-green release metrics.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P15",
+    "title": "Packaging, installation and cross-platform release",
+    "objective": "Windows-primary packaging/install, macOS/Linux artifacts, GitHub release workflow and checksums.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  },
+  {
+    "id": "P16",
+    "title": "Final acceptance and handoff",
+    "objective": "Clean-system validation, documentation, final report and PR-ready state.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
+  }
+]

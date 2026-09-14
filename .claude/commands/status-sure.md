@@ -1,0 +1,1 @@
+Report the current SURE autonomous development status from `progress/state.json`, `progress/HANDOFF.md`, Git status/commits and task DAG. Do not infer status from chat memory.

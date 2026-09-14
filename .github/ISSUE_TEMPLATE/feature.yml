@@ -1,0 +1,14 @@
+name: Feature request
+description: Suggest a feature that supports SURE's core user jobs.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: User problem
+      description: Which SURE user job does this improve?
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes: { label: Proposal }

@@ -1,0 +1,2559 @@
+[
+  {
+    "id": "P0-T001",
+    "phase": "P0",
+    "title": "Validate bootstrap package and DAG",
+    "required": true,
+    "depends_on": [],
+    "acceptance": [
+      "Node bootstrap validator passes.",
+      "All source-of-truth files exist.",
+      "Task dependencies are acyclic and progress ledger matches task IDs."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T002",
+    "phase": "P0",
+    "title": "Verify canonical Git remote and safe branch workflow",
+    "required": true,
+    "depends_on": [
+      "P0-T001"
+    ],
+    "acceptance": [
+      "Canonical remote is lichman0405/SURE.",
+      "No-force-push policy is preserved.",
+      "Autonomous work branch/checkpoint policy is documented and executable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T003",
+    "phase": "P0",
+    "title": "Freeze core domain vocabulary",
+    "required": true,
+    "depends_on": [
+      "P0-T001"
+    ],
+    "acceptance": [
+      "Project, ProjectIntent, ProjectFingerprint, Session, Event, CheckPlan, CheckResult, Evidence, Claim, Finding, RepairContract, Verdict and CapabilityTier have typed definitions.",
+      "Fact/model/inference/unknown remain distinct."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T004",
+    "phase": "P0",
+    "title": "Freeze check status and aggregation semantics",
+    "required": true,
+    "depends_on": [
+      "P0-T003"
+    ],
+    "acceptance": [
+      "pass/fail/warning/skipped/error/unknown are explicit.",
+      "Critical skipped/error/unknown cannot silently aggregate to green.",
+      "Overall verdict rules are testable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T005",
+    "phase": "P0",
+    "title": "Freeze project-intent trust semantics",
+    "required": true,
+    "depends_on": [
+      "P0-T003"
+    ],
+    "acceptance": [
+      "Intent source enum is implemented.",
+      "Inference cannot become user requirement.",
+      "After-the-fact mode limitation is encoded in report semantics."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T006",
+    "phase": "P0",
+    "title": "Freeze execution-trust semantics",
+    "required": true,
+    "depends_on": [
+      "P0-T003"
+    ],
+    "acceptance": [
+      "inspect_only, host_confirmed and container modes are represented.",
+      "Dependency install/network/arbitrary command permissions are separate."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T007",
+    "phase": "P0",
+    "title": "Freeze harness capability tiers",
+    "required": true,
+    "depends_on": [
+      "P0-T003"
+    ],
+    "acceptance": [
+      "Tier 0/1/2 meanings are stable.",
+      "Adapters/reporting can expose achieved tier and missing visibility."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T008",
+    "phase": "P0",
+    "title": "Freeze v0.1 no-daemon/no-hosted-LLM decisions",
+    "required": true,
+    "depends_on": [
+      "P0-T003"
+    ],
+    "acceptance": [
+      "Short-lived local CLI/hook path is default.",
+      "No hosted model proxy/service in v0.1.",
+      "Provider/no-model architecture documented."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P0-T009",
+    "phase": "P0",
+    "title": "Record foundational ADRs",
+    "required": true,
+    "depends_on": [
+      "P0-T002",
+      "P0-T004",
+      "P0-T005",
+      "P0-T006",
+      "P0-T007",
+      "P0-T008"
+    ],
+    "acceptance": [
+      "Accepted ADRs reflect frozen semantics and Windows-primary development."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T001",
+    "phase": "P1",
+    "title": "Refactor bootstrap workspace into production crate/module boundaries",
+    "required": true,
+    "depends_on": [
+      "P0-T009"
+    ],
+    "acceptance": [
+      "Workspace compiles with acyclic dependencies.",
+      "Harness packages contain no duplicated check engine."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T002",
+    "phase": "P1",
+    "title": "Implement typed IDs and serialized core enums",
+    "required": true,
+    "depends_on": [
+      "P1-T001"
+    ],
+    "acceptance": [
+      "Stable serialization tests exist for IDs/status/evidence/intent/tier enums."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T003",
+    "phase": "P1",
+    "title": "Implement config model and sure.yaml loading",
+    "required": true,
+    "depends_on": [
+      "P1-T001",
+      "P0-T006",
+      "P0-T008"
+    ],
+    "acceptance": [
+      "Privacy/protection/execution/provider/report settings parse.",
+      "Invalid config is actionable.",
+      "Secrets are never printed in diagnostics."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T004",
+    "phase": "P1",
+    "title": "Implement OS-native data path abstraction",
+    "required": true,
+    "depends_on": [
+      "P1-T001"
+    ],
+    "acceptance": [
+      "Windows per-user application-data/config path is correct; authoritative evidence remains outside the project tree.",
+      "Windows/Linux paths are abstracted/tested without hardcoding ~/.sure."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T005",
+    "phase": "P1",
+    "title": "Implement local SQLite/history storage and migrations",
+    "required": true,
+    "depends_on": [
+      "P1-T002",
+      "P1-T004"
+    ],
+    "acceptance": [
+      "Fresh/upgrade migrations pass.",
+      "Storage packages without requiring system SQLite.",
+      "Short-lived concurrent event writes have a defined safe behavior."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T006",
+    "phase": "P1",
+    "title": "Implement structured tracing and redaction foundation",
+    "required": true,
+    "depends_on": [
+      "P1-T001"
+    ],
+    "acceptance": [
+      "Run/session/check correlation fields exist.",
+      "No raw secret values are required in logs."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T007",
+    "phase": "P1",
+    "title": "Implement versioned protocol types and schema validation",
+    "required": true,
+    "depends_on": [
+      "P1-T002"
+    ],
+    "acceptance": [
+      "Event/finding/claim/check-result/intent/repair structures match schema versions.",
+      "Round-trip tests pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T008",
+    "phase": "P1",
+    "title": "Implement CLI command framework",
+    "required": true,
+    "depends_on": [
+      "P1-T003",
+      "P1-T004",
+      "P1-T007"
+    ],
+    "acceptance": [
+      "sure check/recheck/repair/history/doctor/config/hook/explain parse.",
+      "Human vs machine-readable output paths are separated."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T009",
+    "phase": "P1",
+    "title": "Implement sure doctor foundation",
+    "required": true,
+    "depends_on": [
+      "P1-T008"
+    ],
+    "acceptance": [
+      "Reports config/data paths, core version and basic tool availability without exposing secrets."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T010",
+    "phase": "P1",
+    "title": "Implement core/integration protocol version handshake",
+    "required": true,
+    "depends_on": [
+      "P1-T007"
+    ],
+    "acceptance": [
+      "CLI/hook/MCP adapters can detect incompatible protocol versions and fail visibly rather than corrupt evidence."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P1-T011",
+    "phase": "P1",
+    "title": "Implement configuration authority layers",
+    "required": true,
+    "depends_on": [
+      "P1-T003"
+    ],
+    "acceptance": [
+      "Project config cannot silently grant host execution/network/install/full-recording or weaken user protection.",
+      "Authority resolution has unit tests."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T001",
+    "phase": "P2",
+    "title": "Implement bounded filesystem/project root scanner",
+    "required": true,
+    "depends_on": [
+      "P1-T001"
+    ],
+    "acceptance": [
+      "Ignores VCS/vendor/build/cache appropriately.",
+      "Handles spaces/Unicode/case-insensitive Windows semantics and long-path pressure."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T002",
+    "phase": "P2",
+    "title": "Implement Git project fingerprint",
+    "required": true,
+    "depends_on": [
+      "P2-T001",
+      "P0-T004"
+    ],
+    "acceptance": [
+      "HEAD/dirty tracked diff/relevant untracked state affect fingerprint.",
+      "Fingerprint changes on relevant source changes."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T003",
+    "phase": "P2",
+    "title": "Implement non-Git project fingerprint",
+    "required": true,
+    "depends_on": [
+      "P2-T001"
+    ],
+    "acceptance": [
+      "Scoped content manifest is deterministic.",
+      "Generated/vendor churn is excluded by documented rules."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T004",
+    "phase": "P2",
+    "title": "Implement JavaScript/TypeScript discovery",
+    "required": true,
+    "depends_on": [
+      "P2-T001"
+    ],
+    "acceptance": [
+      "Detects package managers, workspace structure, declared scripts and common web/server frameworks."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T005",
+    "phase": "P2",
+    "title": "Implement Python discovery",
+    "required": true,
+    "depends_on": [
+      "P2-T001"
+    ],
+    "acceptance": [
+      "Detects pyproject/requirements/uv/poetry/pip structures and declared test/lint/type tools."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T006",
+    "phase": "P2",
+    "title": "Implement Rust discovery",
+    "required": true,
+    "depends_on": [
+      "P2-T001"
+    ],
+    "acceptance": [
+      "Detects Cargo workspaces/packages and conventional commands."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T007",
+    "phase": "P2",
+    "title": "Implement generic component/service graph",
+    "required": true,
+    "depends_on": [
+      "P2-T004",
+      "P2-T005",
+      "P2-T006"
+    ],
+    "acceptance": [
+      "Multi-component/monorepo representation exists.",
+      "Unknown stack details remain inference."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T008",
+    "phase": "P2",
+    "title": "Implement environment-variable/config reference discovery",
+    "required": true,
+    "depends_on": [
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Finds required keys without collecting values.",
+      "Can compare references with examples/docs."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T009",
+    "phase": "P2",
+    "title": "Implement README/spec command and claim extraction",
+    "required": true,
+    "depends_on": [
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Extracted commands are untrusted documentation and never auto-executed merely because documented."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T010",
+    "phase": "P2",
+    "title": "Implement ProjectIntent ingestion from explicit goal/spec",
+    "required": true,
+    "depends_on": [
+      "P0-T005",
+      "P1-T007"
+    ],
+    "acceptance": [
+      "sure check can receive/store a trusted explicit goal without requiring raw transcript recording."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T011",
+    "phase": "P2",
+    "title": "Implement observed/documented/inferred intent model",
+    "required": true,
+    "depends_on": [
+      "P2-T009",
+      "P2-T010"
+    ],
+    "acceptance": [
+      "Intent sources preserve provenance/trust labels.",
+      "Inferred intent cannot satisfy user requirements."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P2-T012",
+    "phase": "P2",
+    "title": "Implement support-level classification",
+    "required": true,
+    "depends_on": [
+      "P2-T004",
+      "P2-T005",
+      "P2-T006",
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Project/report records first-class/generic/inspect-only support level."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T001",
+    "phase": "P3",
+    "title": "Implement centralized bounded process runner",
+    "required": true,
+    "depends_on": [
+      "P1-T006"
+    ],
+    "acceptance": [
+      "Executable/args/cwd/env/timeout/cancel/output limits are explicit.",
+      "Direct args used instead of unsafe shell string construction where possible."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T002",
+    "phase": "P3",
+    "title": "Implement native Windows process lifecycle tests",
+    "required": true,
+    "depends_on": [
+      "P3-T001"
+    ],
+    "acceptance": [
+      "Start/timeout/cancel/output capture pass on native Windows.",
+      "Process-tree cleanup is tested without relying on Unix signals.",
+      "Paths with spaces/Unicode are covered."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T003",
+    "phase": "P3",
+    "title": "Implement Windows/Linux process compatibility tests",
+    "required": true,
+    "depends_on": [
+      "P3-T001"
+    ],
+    "acceptance": [
+      "CI covers platform-specific runner behavior."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T004",
+    "phase": "P3",
+    "title": "Implement command safety classification",
+    "required": true,
+    "depends_on": [
+      "P0-T006",
+      "P3-T001"
+    ],
+    "acceptance": [
+      "Static/read-only, dynamic host, install, network, destructive categories are distinct."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T005",
+    "phase": "P3",
+    "title": "Implement execution permission/consent plan",
+    "required": true,
+    "depends_on": [
+      "P3-T004",
+      "P1-T003"
+    ],
+    "acceptance": [
+      "Check plan can explain which commands need permission and why.",
+      "Denied command becomes skipped/not checked, never pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T006",
+    "phase": "P3",
+    "title": "Implement host_confirmed execution mode",
+    "required": true,
+    "depends_on": [
+      "P3-T005"
+    ],
+    "acceptance": [
+      "Only approved command categories execute.",
+      "Approval state is locally auditable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T007",
+    "phase": "P3",
+    "title": "Implement inspect_only enforcement",
+    "required": true,
+    "depends_on": [
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Project-controlled executable code is not launched in inspect-only mode.",
+      "Tests prove dynamic checks remain not-run."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T008",
+    "phase": "P3",
+    "title": "Implement optional container execution adapter",
+    "required": true,
+    "depends_on": [
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Docker/Podman absence is nonfatal.",
+      "Container plan controls mounts/network/working dir and is described as limited isolation, not perfect sandboxing."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T009",
+    "phase": "P3",
+    "title": "Implement service startup supervisor",
+    "required": true,
+    "depends_on": [
+      "P3-T001",
+      "P3-T006"
+    ],
+    "acceptance": [
+      "Can start/stop supported local services with timeouts and captured logs."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T010",
+    "phase": "P3",
+    "title": "Implement local port/HTTP probe",
+    "required": true,
+    "depends_on": [
+      "P3-T009"
+    ],
+    "acceptance": [
+      "Probe records concrete response/outcome.",
+      "Open port alone is not feature completeness."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P3-T011",
+    "phase": "P3",
+    "title": "Implement optional browser-probe interface",
+    "required": true,
+    "depends_on": [
+      "P3-T009"
+    ],
+    "acceptance": [
+      "Browser unavailable => skipped/unknown.",
+      "Browser automation is isolated from core verdict semantics."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T001",
+    "phase": "P4",
+    "title": "Implement check plan builder",
+    "required": true,
+    "depends_on": [
+      "P2-T012",
+      "P3-T005"
+    ],
+    "acceptance": [
+      "Ordered plan includes reason, evidence class and execution requirements per check."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T002",
+    "phase": "P4",
+    "title": "Implement JS/TS deterministic checks",
+    "required": true,
+    "depends_on": [
+      "P4-T001",
+      "P2-T004"
+    ],
+    "acceptance": [
+      "Declared build/lint/type/test checks run only under allowed execution mode.",
+      "Missing commands are not passes."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T003",
+    "phase": "P4",
+    "title": "Implement Python deterministic checks",
+    "required": true,
+    "depends_on": [
+      "P4-T001",
+      "P2-T005"
+    ],
+    "acceptance": [
+      "Declared import/test/lint/type checks use available tools without silent package installation."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T004",
+    "phase": "P4",
+    "title": "Implement Rust deterministic checks",
+    "required": true,
+    "depends_on": [
+      "P4-T001",
+      "P2-T006"
+    ],
+    "acceptance": [
+      "fmt/check/clippy/test evidence binds to current fingerprint."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T005",
+    "phase": "P4",
+    "title": "Implement README/setup validation",
+    "required": true,
+    "depends_on": [
+      "P2-T009",
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Safe claims/paths/scripts can be validated.",
+      "Arbitrary README shell text is not blindly run."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T006",
+    "phase": "P4",
+    "title": "Implement env/config completeness check",
+    "required": true,
+    "depends_on": [
+      "P2-T008"
+    ],
+    "acceptance": [
+      "Missing key/documentation mismatches are reported without requiring secret values."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T007",
+    "phase": "P4",
+    "title": "Implement DB schema/migration consistency framework",
+    "required": true,
+    "depends_on": [
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Framework-specific detectors are pluggable.",
+      "Mandatory missing-migration fixture can be detected."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T008",
+    "phase": "P4",
+    "title": "Implement dependency state check without silent install",
+    "required": true,
+    "depends_on": [
+      "P2-T004",
+      "P2-T005",
+      "P2-T006"
+    ],
+    "acceptance": [
+      "Missing dependencies are distinguishable from failing project code.",
+      "Install remains separate approved action."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P4-T009",
+    "phase": "P4",
+    "title": "Implement deterministic check aggregation",
+    "required": true,
+    "depends_on": [
+      "P0-T004",
+      "P4-T002",
+      "P4-T003",
+      "P4-T004"
+    ],
+    "acceptance": [
+      "Critical skipped/error/unknown is visible.",
+      "False-green unit tests exist."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T001",
+    "phase": "P5",
+    "title": "Implement runtime probe planner",
+    "required": true,
+    "depends_on": [
+      "P3-T010",
+      "P4-T001"
+    ],
+    "acceptance": [
+      "Runtime probes specify execution/network requirements and target component."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T002",
+    "phase": "P5",
+    "title": "Implement web/service start smoke check",
+    "required": true,
+    "depends_on": [
+      "P5-T001"
+    ],
+    "acceptance": [
+      "Supported service can be started/probed/terminated.",
+      "Startup failure remains explicit."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T003",
+    "phase": "P5",
+    "title": "Implement HTTP route smoke framework",
+    "required": true,
+    "depends_on": [
+      "P5-T002"
+    ],
+    "acceptance": [
+      "Known local routes can be probed safely.",
+      "Response evidence is bound to run/fingerprint."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T004",
+    "phase": "P5",
+    "title": "Implement optional browser smoke adapter",
+    "required": true,
+    "depends_on": [
+      "P3-T011",
+      "P5-T002"
+    ],
+    "acceptance": [
+      "Browser check can navigate supported local app and capture runtime/console errors.",
+      "Unavailable browser never reports pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T005",
+    "phase": "P5",
+    "title": "Implement core-flow probe contract",
+    "required": true,
+    "depends_on": [
+      "P5-T003",
+      "P5-T004"
+    ],
+    "acceptance": [
+      "A project/fixture can describe safe local acceptance flows without arbitrary free-form shell."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T006",
+    "phase": "P5",
+    "title": "Implement external-service verification boundary",
+    "required": true,
+    "depends_on": [
+      "P5-T005"
+    ],
+    "acceptance": [
+      "Payment/email/cloud behaviors requiring real external systems become needs_external_verification/cannot_confirm rather than local pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P5-T007",
+    "phase": "P5",
+    "title": "Implement runtime evidence cleanup and cancellation",
+    "required": true,
+    "depends_on": [
+      "P5-T002",
+      "P5-T004"
+    ],
+    "acceptance": [
+      "Child services/browser sessions are cleaned after success/failure/cancel."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T001",
+    "phase": "P6",
+    "title": "Implement candidate scanner for TODO/mock/stub/placeholder patterns",
+    "required": true,
+    "depends_on": [
+      "P2-T001"
+    ],
+    "acceptance": [
+      "Candidates include context and are not automatically product defects."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T002",
+    "phase": "P6",
+    "title": "Implement production-path/context filter",
+    "required": true,
+    "depends_on": [
+      "P6-T001",
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Test/example/docs mocks are distinguished from likely real user paths where possible."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T003",
+    "phase": "P6",
+    "title": "Implement no-op/fake-success heuristics",
+    "required": true,
+    "depends_on": [
+      "P6-T002"
+    ],
+    "acceptance": [
+      "Mandatory fake-email/payment/no-op fixtures produce grounded candidates."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T004",
+    "phase": "P6",
+    "title": "Implement hard-coded demo-data heuristics",
+    "required": true,
+    "depends_on": [
+      "P6-T002"
+    ],
+    "acceptance": [
+      "Mandatory demo-analytics fixture is identified without blanket constant flagging."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T005",
+    "phase": "P6",
+    "title": "Implement frontend/backend route consistency",
+    "required": true,
+    "depends_on": [
+      "P2-T007"
+    ],
+    "acceptance": [
+      "Mandatory route-mismatch fixture is identified.",
+      "Dynamic/unknown routing does not produce false certainty."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T006",
+    "phase": "P6",
+    "title": "Implement UI-action completeness bridge",
+    "required": true,
+    "depends_on": [
+      "P5-T004",
+      "P6-T005"
+    ],
+    "acceptance": [
+      "Runtime-backed UI evidence used where available; static-only result remains inference."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T007",
+    "phase": "P6",
+    "title": "Implement grounded semantic-analysis request/response contract",
+    "required": true,
+    "depends_on": [
+      "P0-T008",
+      "P1-T007"
+    ],
+    "acceptance": [
+      "Model assessments require evidence anchors.",
+      "Provider error yields error/unknown, not pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T008",
+    "phase": "P6",
+    "title": "Implement project-intent versus implementation comparison",
+    "required": true,
+    "depends_on": [
+      "P2-T011",
+      "P6-T007"
+    ],
+    "acceptance": [
+      "Only trusted/explicit/documented intent sources are evaluated as such.",
+      "Missing intent triggers limitation, not fabricated completeness."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P6-T009",
+    "phase": "P6",
+    "title": "Implement false-completion candidate aggregator",
+    "required": true,
+    "depends_on": [
+      "P6-T003",
+      "P6-T004",
+      "P6-T005",
+      "P6-T006",
+      "P6-T008"
+    ],
+    "acceptance": [
+      "Deduplicates/grounds material candidates and prioritizes user impact over style noise."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T001",
+    "phase": "P7",
+    "title": "Implement Finding model and four-level severity",
+    "required": true,
+    "depends_on": [
+      "P1-T007",
+      "P6-T009"
+    ],
+    "acceptance": [
+      "Finding requires evidence/assessment source and severity rationale."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T002",
+    "phase": "P7",
+    "title": "Implement concrete evidence anchors",
+    "required": true,
+    "depends_on": [
+      "P7-T001"
+    ],
+    "acceptance": [
+      "File/line/check/runtime/intent/claim anchors supported.",
+      "Model-only finding is clearly labeled."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T003",
+    "phase": "P7",
+    "title": "Implement plain-language finding contract",
+    "required": true,
+    "depends_on": [
+      "P7-T002"
+    ],
+    "acceptance": [
+      "Material finding answers what/impact/severity/next action."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T004",
+    "phase": "P7",
+    "title": "Implement coverage/not-checked summary",
+    "required": true,
+    "depends_on": [
+      "P4-T009",
+      "P5-T006"
+    ],
+    "acceptance": [
+      "Report shows what SURE actually checked, skipped, could not run and support level."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T005",
+    "phase": "P7",
+    "title": "Implement overall project verdict",
+    "required": true,
+    "depends_on": [
+      "P7-T001",
+      "P7-T004"
+    ],
+    "acceptance": [
+      "Must-fix prevents release recommendation.",
+      "Unknown critical coverage constrains verdict.",
+      "Verdict does not claim production safety."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T006",
+    "phase": "P7",
+    "title": "Implement terminal human report",
+    "required": true,
+    "depends_on": [
+      "P7-T003",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Default report is readable by non-CS user."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T007",
+    "phase": "P7",
+    "title": "Implement stable JSON report",
+    "required": true,
+    "depends_on": [
+      "P7-T002",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Machine output preserves evidence/status/coverage without prose ambiguity."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T008",
+    "phase": "P7",
+    "title": "Implement Markdown/HTML portable report",
+    "required": true,
+    "depends_on": [
+      "P7-T003",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Local/shareable report is redacted and clearly scoped."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P7-T009",
+    "phase": "P7",
+    "title": "Implement plain-language golden tests",
+    "required": true,
+    "depends_on": [
+      "P7-T006",
+      "P7-T008"
+    ],
+    "acceptance": [
+      "Banned-jargon and unknown-language regressions are caught."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T001",
+    "phase": "P8",
+    "title": "Implement versioned harness event ingestion",
+    "required": true,
+    "depends_on": [
+      "P1-T007"
+    ],
+    "acceptance": [
+      "Multiple sources normalize into common protocol.",
+      "Unknown incompatible versions fail visibly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T002",
+    "phase": "P8",
+    "title": "Implement session/event persistence",
+    "required": true,
+    "depends_on": [
+      "P8-T001",
+      "P1-T005"
+    ],
+    "acceptance": [
+      "Events bind to project/session/time/capability source.",
+      "Retention metadata exists."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T003",
+    "phase": "P8",
+    "title": "Implement standard recording projection",
+    "required": true,
+    "depends_on": [
+      "P8-T002"
+    ],
+    "acceptance": [
+      "Tools/commands/outcomes/Git/file/build-test activity can be stored without full transcript."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T004",
+    "phase": "P8",
+    "title": "Implement full recording opt-in projection",
+    "required": true,
+    "depends_on": [
+      "P8-T002"
+    ],
+    "acceptance": [
+      "Raw transcript/terminal payload retention is explicit and distinguishable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T005",
+    "phase": "P8",
+    "title": "Implement observed ProjectIntent capture path",
+    "required": true,
+    "depends_on": [
+      "P2-T011",
+      "P8-T003"
+    ],
+    "acceptance": [
+      "Raw prompt is not durably retained in standard mode by default.",
+      "Structured intent capture respects provider/privacy mode."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T006",
+    "phase": "P8",
+    "title": "Implement agent completion-claim extraction",
+    "required": true,
+    "depends_on": [
+      "P8-T003",
+      "P6-T007"
+    ],
+    "acceptance": [
+      "Original claim reference retained.",
+      "Extraction failure does not create fake claim."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T007",
+    "phase": "P8",
+    "title": "Implement deterministic claim checkers",
+    "required": true,
+    "depends_on": [
+      "P8-T006",
+      "P4-T009"
+    ],
+    "acceptance": [
+      "Test-ran/file-changed/Git-state/current-code claims can be checked where evidence exists.",
+      "Cannot-confirm differs from contradiction."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T008",
+    "phase": "P8",
+    "title": "Implement stale test/result evidence detection",
+    "required": true,
+    "depends_on": [
+      "P8-T007",
+      "P2-T002",
+      "P2-T003"
+    ],
+    "acceptance": [
+      "Relevant later code changes invalidate earlier proof."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T009",
+    "phase": "P8",
+    "title": "Implement capability/blind-spot reporting",
+    "required": true,
+    "depends_on": [
+      "P8-T001",
+      "P0-T007"
+    ],
+    "acceptance": [
+      "Missing harness events lower claim coverage/tier honestly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T010",
+    "phase": "P8",
+    "title": "Implement AI-claim report section",
+    "required": true,
+    "depends_on": [
+      "P8-T007",
+      "P8-T008",
+      "P8-T009",
+      "P7-T003"
+    ],
+    "acceptance": [
+      "Confirmed/contradicted/cannot-confirm explained plainly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P8-T011",
+    "phase": "P8",
+    "title": "Implement idempotent/concurrent hook event ingestion",
+    "required": true,
+    "depends_on": [
+      "P8-T002",
+      "P1-T010"
+    ],
+    "acceptance": [
+      "Duplicate event IDs do not create duplicate authoritative evidence.",
+      "Short-lived concurrent hook writes have deterministic tested behavior."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T001",
+    "phase": "P9",
+    "title": "Implement RepairContract domain/schema",
+    "required": true,
+    "depends_on": [
+      "P7-T002"
+    ],
+    "acceptance": [
+      "Problem/impact/evidence/required fix/preserve/acceptance/rechecks/forbidden shortcuts supported."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T002",
+    "phase": "P9",
+    "title": "Generate repair contract from grounded finding",
+    "required": true,
+    "depends_on": [
+      "P9-T001",
+      "P7-T003"
+    ],
+    "acceptance": [
+      "No unobserved fact invented.",
+      "Acceptance conditions are observable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T003",
+    "phase": "P9",
+    "title": "Implement harness-neutral repair envelope",
+    "required": true,
+    "depends_on": [
+      "P9-T001",
+      "P1-T007"
+    ],
+    "acceptance": [
+      "Same contract can be delivered by Claude/Cursor/Codex adapters."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T004",
+    "phase": "P9",
+    "title": "Implement impacted-check selection",
+    "required": true,
+    "depends_on": [
+      "P9-T002",
+      "P4-T001"
+    ],
+    "acceptance": [
+      "Repair selects affected + relevant regression checks."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T005",
+    "phase": "P9",
+    "title": "Implement re-check lifecycle/history",
+    "required": true,
+    "depends_on": [
+      "P9-T004",
+      "P1-T005"
+    ],
+    "acceptance": [
+      "New evidence closes/keeps finding; old run remains auditable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P9-T006",
+    "phase": "P9",
+    "title": "Implement repair-regression guard",
+    "required": true,
+    "depends_on": [
+      "P9-T005"
+    ],
+    "acceptance": [
+      "Mandatory repair-regression fixture cannot turn green."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T001",
+    "phase": "P10",
+    "title": "Validate current Claude Code plugin/hook schemas",
+    "required": true,
+    "depends_on": [
+      "P8-T001"
+    ],
+    "acceptance": [
+      "Bootstrap manifest/hooks updated to current supported schema.",
+      "Synthetic raw event fixtures recorded without secrets."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T002",
+    "phase": "P10",
+    "title": "Implement Claude hook event launcher/normalizer",
+    "required": true,
+    "depends_on": [
+      "P10-T001",
+      "P8-T003"
+    ],
+    "acceptance": [
+      "Launcher passes clean stdin/stdout JSON to local SURE on Windows.",
+      "Locates installed `sure.exe` reliably when Claude is launched normally, not only from a prepared dev shell.",
+      "Missing SURE binary fails safely without fabricated evidence."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T003",
+    "phase": "P10",
+    "title": "Implement Claude session evidence ingestion",
+    "required": true,
+    "depends_on": [
+      "P10-T002",
+      "P8-T009"
+    ],
+    "acceptance": [
+      "Available lifecycle/tool events map to SURE events and capability tier."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T004",
+    "phase": "P10",
+    "title": "Implement Claude check command",
+    "required": true,
+    "depends_on": [
+      "P10-T001",
+      "P7-T006"
+    ],
+    "acceptance": [
+      "User can check current project from Claude without changing harness."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T005",
+    "phase": "P10",
+    "title": "Implement Claude repair handoff",
+    "required": true,
+    "depends_on": [
+      "P10-T004",
+      "P9-T003"
+    ],
+    "acceptance": [
+      "Selected repair is delivered to current Claude workflow and can trigger re-check."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T006",
+    "phase": "P10",
+    "title": "Implement Claude protection decisions",
+    "required": true,
+    "depends_on": [
+      "P10-T002",
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Supported pre-action events can warn/block according to mode.",
+      "Hook error behavior documented."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T007",
+    "phase": "P10",
+    "title": "Implement Claude full-recording opt-in",
+    "required": true,
+    "depends_on": [
+      "P10-T003",
+      "P8-T004"
+    ],
+    "acceptance": [
+      "Full payload capture off by default and clearly opt-in."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T008",
+    "phase": "P10",
+    "title": "Claude synthetic E2E check-repair-recheck",
+    "required": true,
+    "depends_on": [
+      "P10-T003",
+      "P10-T005"
+    ],
+    "acceptance": [
+      "Works without paid/live network dependency in CI."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P10-T009",
+    "phase": "P10",
+    "title": "Claude live smoke-test procedure",
+    "required": true,
+    "depends_on": [
+      "P10-T008"
+    ],
+    "acceptance": [
+      "Optional authenticated smoke process documented and results can be recorded without becoming CI requirement."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T001",
+    "phase": "P11",
+    "title": "Validate current Cursor Plugin/hooks schema",
+    "required": true,
+    "depends_on": [
+      "P8-T001"
+    ],
+    "acceptance": [
+      ".cursor-plugin manifest and hook config updated to current supported schema.",
+      "Synthetic raw event fixtures recorded."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T002",
+    "phase": "P11",
+    "title": "Implement Cursor hook launcher/normalizer",
+    "required": true,
+    "depends_on": [
+      "P11-T001",
+      "P8-T003"
+    ],
+    "acceptance": [
+      "Cursor hook launcher invokes local SURE reliably when Cursor is launched from the Windows Start menu.",
+      "stdin/stdout JSON and exit/decision semantics have fixtures.",
+      "Missing SURE binary fails safely."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T003",
+    "phase": "P11",
+    "title": "Implement Cursor commands/UI surfaces",
+    "required": true,
+    "depends_on": [
+      "P11-T001",
+      "P7-T006"
+    ],
+    "acceptance": [
+      "Check/status/fix/recheck are available through supported Cursor Plugin command mechanisms."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T004",
+    "phase": "P11",
+    "title": "Implement Cursor session evidence ingestion",
+    "required": true,
+    "depends_on": [
+      "P11-T002",
+      "P8-T009"
+    ],
+    "acceptance": [
+      "Available events map to capability tier and SURE event protocol."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T005",
+    "phase": "P11",
+    "title": "Implement Cursor repair handoff",
+    "required": true,
+    "depends_on": [
+      "P11-T003",
+      "P9-T003"
+    ],
+    "acceptance": [
+      "Repair contract can be handed to current Cursor workflow using supported plugin mechanisms."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T006",
+    "phase": "P11",
+    "title": "Implement Cursor protection where supported",
+    "required": true,
+    "depends_on": [
+      "P11-T002",
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Available pre-action hook can warn/block.",
+      "Unavailable feature downgrades tier explicitly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T007",
+    "phase": "P11",
+    "title": "Cursor local-plugin installation/symlink flow",
+    "required": true,
+    "depends_on": [
+      "P11-T003"
+    ],
+    "acceptance": [
+      "Windows per-user local plugin install/uninstall is documented/tested.",
+      "Does not require symlink privileges; copy/render fallback works."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T008",
+    "phase": "P11",
+    "title": "Cursor synthetic E2E",
+    "required": true,
+    "depends_on": [
+      "P11-T004",
+      "P11-T005",
+      "P11-T006"
+    ],
+    "acceptance": [
+      "Check->finding->repair->recheck and protection event fixtures pass without live account."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P11-T009",
+    "phase": "P11",
+    "title": "Decide whether TypeScript extension is necessary",
+    "required": true,
+    "depends_on": [
+      "P11-T008"
+    ],
+    "acceptance": [
+      "If plugins/hooks satisfy v0.1, ADR records no extension.",
+      "If not, concrete missing capability + minimal extension is documented/implemented without core duplication."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T001",
+    "phase": "P12",
+    "title": "Implement AnalysisProvider abstraction",
+    "required": true,
+    "depends_on": [
+      "P6-T007"
+    ],
+    "acceptance": [
+      "disabled/local-command/Claude-CLI/OpenAI-compatible categories represented.",
+      "Deterministic checks require no model."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T002",
+    "phase": "P12",
+    "title": "Implement disabled/no-model provider",
+    "required": true,
+    "depends_on": [
+      "P12-T001"
+    ],
+    "acceptance": [
+      "SURE remains useful and reports reduced semantic coverage honestly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T003",
+    "phase": "P12",
+    "title": "Implement user-owned Claude CLI provider",
+    "required": true,
+    "depends_on": [
+      "P12-T001"
+    ],
+    "acceptance": [
+      "Bounded context/output and external-analysis disclosure exist.",
+      "Output remains model_assessment."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T004",
+    "phase": "P12",
+    "title": "Implement user-owned OpenAI-compatible provider",
+    "required": true,
+    "depends_on": [
+      "P12-T001"
+    ],
+    "acceptance": [
+      "Endpoint/model/credential are user-configured and redacted.",
+      "SURE does not proxy service."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T005",
+    "phase": "P12",
+    "title": "Validate portable Agent Plugin package",
+    "required": true,
+    "depends_on": [
+      "P12-T002"
+    ],
+    "acceptance": [
+      "plugin/skill schema is current and package can be installed/tested in at least one compatible local harness."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T006",
+    "phase": "P12",
+    "title": "Implement Codex check/repair integration",
+    "required": true,
+    "depends_on": [
+      "P12-T005",
+      "P9-T003"
+    ],
+    "acceptance": [
+      "Current Codex workflow can invoke check and consume repair contract at documented tier."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T007",
+    "phase": "P12",
+    "title": "Implement Codex evidence bridge where public surface permits",
+    "required": true,
+    "depends_on": [
+      "P12-T006",
+      "P8-T009"
+    ],
+    "acceptance": [
+      "Available events ingested; missing parity is not fabricated."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T008",
+    "phase": "P12",
+    "title": "Document Copilot adapter boundary",
+    "required": true,
+    "depends_on": [
+      "P1-T007"
+    ],
+    "acceptance": [
+      "Future adapter can target same event/repair protocols."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T009",
+    "phase": "P12",
+    "title": "Implement stdio SURE MCP server",
+    "required": true,
+    "depends_on": [
+      "P1-T008",
+      "P1-T010",
+      "P9-T003"
+    ],
+    "acceptance": [
+      "sure mcp serve exposes bounded check/report/repair/recheck/status tools.",
+      "MCP preserves CLI execution/privacy semantics and has protocol tests."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P12-T010",
+    "phase": "P12",
+    "title": "Wire MCP bridge into Claude/Cursor/Agent plugin packages",
+    "required": true,
+    "depends_on": [
+      "P12-T009",
+      "P10-T001",
+      "P11-T001",
+      "P12-T005"
+    ],
+    "acceptance": [
+      "Plugin MCP manifests invoke local sure binary.",
+      "Missing/incompatible binary yields actionable error, not fabricated result."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T001",
+    "phase": "P13",
+    "title": "Implement secret redaction engine",
+    "required": true,
+    "depends_on": [
+      "P1-T006"
+    ],
+    "acceptance": [
+      "Configured secrets/common formats are masked in logs/reports/model packets.",
+      "Redaction tests include false-positive cases."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T002",
+    "phase": "P13",
+    "title": "Implement privacy modes",
+    "required": true,
+    "depends_on": [
+      "P12-T002",
+      "P13-T001"
+    ],
+    "acceptance": [
+      "local-first/fully-local/cloud-enhanced semantics explicit.",
+      "External model use is visible."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T003",
+    "phase": "P13",
+    "title": "Implement recording retention/deletion controls",
+    "required": true,
+    "depends_on": [
+      "P8-T002",
+      "P13-T001"
+    ],
+    "acceptance": [
+      "User can inspect/delete local session records.",
+      "Full recording retention configurable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T004",
+    "phase": "P13",
+    "title": "Implement protection rule engine",
+    "required": true,
+    "depends_on": [
+      "P3-T004"
+    ],
+    "acceptance": [
+      "Standard/Strict/Custom modes return action + plain-language reason."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T005",
+    "phase": "P13",
+    "title": "Implement dangerous shell/file/Git detectors",
+    "required": true,
+    "depends_on": [
+      "P13-T004"
+    ],
+    "acceptance": [
+      "Broad delete/force push/sensitive reads represented with one-time override path."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T006",
+    "phase": "P13",
+    "title": "Implement protection audit history",
+    "required": true,
+    "depends_on": [
+      "P13-T004",
+      "P8-T002"
+    ],
+    "acceptance": [
+      "warn/block/allow-once decision recorded locally without secrets."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T007",
+    "phase": "P13",
+    "title": "Implement hook failure semantics tests",
+    "required": true,
+    "depends_on": [
+      "P10-T002",
+      "P11-T002",
+      "P13-T004"
+    ],
+    "acceptance": [
+      "Fail-open/fail-closed behavior is explicit for each harness/event and surfaced in docs."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T008",
+    "phase": "P13",
+    "title": "Privacy/security integration suite",
+    "required": true,
+    "depends_on": [
+      "P13-T002",
+      "P13-T003",
+      "P13-T005",
+      "P13-T007",
+      "P13-T009"
+    ],
+    "acceptance": [
+      "Full recording off by default.",
+      "Mandatory secret/protection fixtures pass."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P13-T009",
+    "phase": "P13",
+    "title": "Enforce user authority over project-controlled config/evidence",
+    "required": true,
+    "depends_on": [
+      "P1-T011",
+      "P1-T005",
+      "P13-T004"
+    ],
+    "acceptance": [
+      "Project sure.yaml cannot weaken user-level safety/privacy policy.",
+      "Authoritative evidence is stored outside the checked working tree.",
+      "Tamper-oriented tests cover project .sure edits."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T001",
+    "phase": "P14",
+    "title": "Implement TypeScript adversarial fixture apps",
+    "required": true,
+    "depends_on": [
+      "P6-T009",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Fake payment/auth/email/dead button/route/demo cases runnable with expected outcomes."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T002",
+    "phase": "P14",
+    "title": "Implement Python adversarial fixture apps",
+    "required": true,
+    "depends_on": [
+      "P6-T009",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Missing config/migration/fake integration cases runnable."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T003",
+    "phase": "P14",
+    "title": "Implement Rust/generic fixture apps",
+    "required": true,
+    "depends_on": [
+      "P4-T004",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "At least one Rust real-fail/real-pass project exercises discovery/execution/reporting."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T004",
+    "phase": "P14",
+    "title": "Implement claim-evidence fixtures",
+    "required": true,
+    "depends_on": [
+      "P8-T010"
+    ],
+    "acceptance": [
+      "Tests-not-run/stale evidence/cannot-confirm outcomes exact."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T005",
+    "phase": "P14",
+    "title": "Implement intent/requirement fixtures",
+    "required": true,
+    "depends_on": [
+      "P6-T008",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Missing intent never yields full requirement fulfillment.",
+      "Explicit intent mismatch can yield grounded finding."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T006",
+    "phase": "P14",
+    "title": "Implement execution-trust fixtures",
+    "required": true,
+    "depends_on": [
+      "P3-T008",
+      "P7-T004"
+    ],
+    "acceptance": [
+      "Dynamic-not-authorized stays visible.",
+      "Container unavailable path is honest."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T007",
+    "phase": "P14",
+    "title": "Implement checker-error/unknown fixtures",
+    "required": true,
+    "depends_on": [
+      "P4-T009",
+      "P7-T005"
+    ],
+    "acceptance": [
+      "Critical error/skipped/unknown cannot aggregate green."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T008",
+    "phase": "P14",
+    "title": "Implement dangerous-action fixtures",
+    "required": true,
+    "depends_on": [
+      "P13-T005"
+    ],
+    "acceptance": [
+      "Delete/force-push/sensitive-read expected protection behavior tested."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T009",
+    "phase": "P14",
+    "title": "Implement repair E2E/regression fixture",
+    "required": true,
+    "depends_on": [
+      "P9-T006",
+      "P10-T008"
+    ],
+    "acceptance": [
+      "Repair can close only with new passing evidence; regression variant blocked."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T010",
+    "phase": "P14",
+    "title": "Implement benign false-positive corpus",
+    "required": true,
+    "depends_on": [
+      "P6-T002",
+      "P7-T001"
+    ],
+    "acceptance": [
+      "Test mocks/examples/docs TODOs do not become indiscriminate must-fix findings."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T011",
+    "phase": "P14",
+    "title": "Implement product eval runner/report",
+    "required": true,
+    "depends_on": [
+      "P14-T001",
+      "P14-T002",
+      "P14-T003",
+      "P14-T004",
+      "P14-T005",
+      "P14-T006",
+      "P14-T007",
+      "P14-T008",
+      "P14-T009",
+      "P14-T010"
+    ],
+    "acceptance": [
+      "Produces machine-readable acceptance report against evaluation/acceptance-manifest.json."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P14-T012",
+    "phase": "P14",
+    "title": "Meet mandatory false-green release metrics",
+    "required": true,
+    "depends_on": [
+      "P14-T011"
+    ],
+    "acceptance": [
+      "Release-blocking corpus has zero false green.",
+      "Any unmet case blocks P15 release packaging."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T001",
+    "phase": "P15",
+    "title": "Finalize sure doctor for Windows developer/user environment",
+    "required": true,
+    "depends_on": [
+      "P13-T008",
+      "P12-T006"
+    ],
+    "acceptance": [
+      "Detects core paths/integrations/execution/container/provider state without exposing secrets.",
+      "Reports native Windows/MSVC and per-user data/install paths clearly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T002",
+    "phase": "P15",
+    "title": "Build Windows x64 release artifact",
+    "required": true,
+    "depends_on": [
+      "P14-T012",
+      "P15-T001"
+    ],
+    "acceptance": [
+      "x86_64-pc-windows-msvc artifact builds/tests and checksum generated."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T003",
+    "phase": "P15",
+    "title": "Create Windows per-user install/uninstall PowerShell flow",
+    "required": true,
+    "depends_on": [
+      "P15-T002"
+    ],
+    "acceptance": [
+      "Installs CLI to a documented per-user path without hidden background service or administrator requirement.",
+      "Uninstall preserves/deletes user data only with clear choice.",
+      "PATH/integration behavior is documented and tested."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T004",
+    "phase": "P15",
+    "title": "Create WinGet manifest/template",
+    "required": false,
+    "depends_on": [
+      "P15-T002"
+    ],
+    "acceptance": [
+      "Template references stable release artifact/checksum and documents update process.",
+      "Marketplace publication itself may remain external/optional."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T005",
+    "phase": "P15",
+    "title": "Build macOS Apple Silicon release artifact",
+    "required": true,
+    "depends_on": [
+      "P14-T012",
+      "P15-T001"
+    ],
+    "acceptance": [
+      "aarch64 macOS artifact builds/tests and checksum generated in CI/release environment."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T006",
+    "phase": "P15",
+    "title": "Build macOS Intel artifact or document support policy",
+    "required": false,
+    "depends_on": [
+      "P14-T012",
+      "P15-T001"
+    ],
+    "acceptance": [
+      "x86_64 macOS artifact is built/tested when supported, or exact limitation/policy is documented without false support claims."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T007",
+    "phase": "P15",
+    "title": "Build Linux x64 release artifact",
+    "required": true,
+    "depends_on": [
+      "P14-T012",
+      "P15-T001"
+    ],
+    "acceptance": [
+      "Linux x64 Rust core/CLI package builds/tests and checksum generated."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T008",
+    "phase": "P15",
+    "title": "Package Claude/Cursor/Agent plugins",
+    "required": true,
+    "depends_on": [
+      "P10-T008",
+      "P11-T008",
+      "P12-T006"
+    ],
+    "acceptance": [
+      "Installable/local-test packages have version aligned with release.",
+      "Windows launchers are tested; secondary platform launchers/configs are included as supported."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T009",
+    "phase": "P15",
+    "title": "Implement integration install/uninstall helpers",
+    "required": true,
+    "depends_on": [
+      "P15-T003",
+      "P15-T008"
+    ],
+    "acceptance": [
+      "Windows user can install/remove Claude/Cursor integration packages with documented PowerShell commands.",
+      "Normal per-user install does not require symlink privileges or administrator rights."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T010",
+    "phase": "P15",
+    "title": "Create cross-platform CI matrix",
+    "required": true,
+    "depends_on": [
+      "P15-T002",
+      "P15-T005",
+      "P15-T007"
+    ],
+    "acceptance": [
+      "Windows is mandatory primary job; macOS/Linux core jobs mandatory; fmt/check/clippy/test/evals included appropriately."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T011",
+    "phase": "P15",
+    "title": "Create GitHub release workflow/checksums",
+    "required": true,
+    "depends_on": [
+      "P15-T008",
+      "P15-T010"
+    ],
+    "acceptance": [
+      "Release workflow can produce artifacts without requiring marketplace publication.",
+      "No automatic force/merge behavior."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T012",
+    "phase": "P15",
+    "title": "Document Windows signing/SmartScreen status",
+    "required": true,
+    "depends_on": [
+      "P15-T003"
+    ],
+    "acceptance": [
+      "If Authenticode/code-signing credentials are unavailable, mark external limitation honestly.",
+      "Do not fake signing or claim SmartScreen reputation."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T013",
+    "phase": "P15",
+    "title": "Document secondary macOS signing/notarization status",
+    "required": true,
+    "depends_on": [
+      "P15-T005"
+    ],
+    "acceptance": [
+      "If Apple credentials are unavailable, mark external limitation honestly.",
+      "Do not fake signing/notarization."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P15-T014",
+    "phase": "P15",
+    "title": "Create clean Windows install quickstart",
+    "required": true,
+    "depends_on": [
+      "P15-T009"
+    ],
+    "acceptance": [
+      "Nontechnical Windows user can install CLI + one harness integration and run first check."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T001",
+    "phase": "P16",
+    "title": "Run clean native Windows validation",
+    "required": true,
+    "depends_on": [
+      "P15-T014"
+    ],
+    "acceptance": [
+      "Environment -> install -> doctor -> check -> Claude/Cursor plugin flow recorded on native Windows 11 x64.",
+      "Repository path includes a spaces/Unicode validation case."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T002",
+    "phase": "P16",
+    "title": "Run secondary macOS/Linux release coverage",
+    "required": true,
+    "depends_on": [
+      "P15-T005",
+      "P15-T006",
+      "P15-T007",
+      "P15-T010"
+    ],
+    "acceptance": [
+      "macOS/Linux build/test results recorded; unsupported artifact limitations documented honestly."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T003",
+    "phase": "P16",
+    "title": "Run final cross-platform core gates",
+    "required": true,
+    "depends_on": [
+      "P15-T010"
+    ],
+    "acceptance": [
+      "Required Windows/macOS/Linux jobs green for final commit."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T004",
+    "phase": "P16",
+    "title": "Run final product acceptance eval",
+    "required": true,
+    "depends_on": [
+      "P14-T012",
+      "P16-T003"
+    ],
+    "acceptance": [
+      "Acceptance manifest results attached/recorded with zero mandatory false green."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T005",
+    "phase": "P16",
+    "title": "Review privacy/execution/protection docs against implementation",
+    "required": true,
+    "depends_on": [
+      "P13-T008",
+      "P16-T004"
+    ],
+    "acceptance": [
+      "Docs accurately state default data/execution behavior and limitations."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T006",
+    "phase": "P16",
+    "title": "Finalize user/developer documentation",
+    "required": true,
+    "depends_on": [
+      "P15-T014",
+      "P16-T005"
+    ],
+    "acceptance": [
+      "README/quickstart/integration docs match exact commands."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T007",
+    "phase": "P16",
+    "title": "Dogfood SURE against the SURE repository",
+    "required": true,
+    "depends_on": [
+      "P16-T004",
+      "P16-T006"
+    ],
+    "acceptance": [
+      "Run the built SURE checker against its own repository under documented execution mode.",
+      "Material findings are repaired or explicitly documented with evidence.",
+      "Dogfood result is saved for FINAL_REPORT."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T008",
+    "phase": "P16",
+    "title": "Generate FINAL_REPORT.md",
+    "required": true,
+    "depends_on": [
+      "P16-T001",
+      "P16-T002",
+      "P16-T003",
+      "P16-T004",
+      "P16-T006",
+      "P16-T007"
+    ],
+    "acceptance": [
+      "Includes exact commit, commands/tests/evals, supported stacks, integration tiers, native Windows status, cross-platform status, privacy/execution behavior, known limitations and external blockers."
+    ],
+    "outputs": [],
+    "notes": ""
+  },
+  {
+    "id": "P16-T009",
+    "phase": "P16",
+    "title": "Prepare final autonomous branch for owner review",
+    "required": true,
+    "depends_on": [
+      "P16-T008"
+    ],
+    "acceptance": [
+      "Working tree clean.",
+      "All accepted task commits present.",
+      "Branch pushed if GitHub auth available.",
+      "PR-ready summary prepared; no autonomous merge to main."
+    ],
+    "outputs": [],
+    "notes": ""
+  }
+]

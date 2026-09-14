@@ -1,0 +1,11 @@
+{
+  "name": "sure-bootstrap-tools",
+  "private": true,
+  "version": "0.0.0-bootstrap",
+  "engines": { "node": ">=24 <27" },
+  "scripts": {
+    "validate": "node scripts/validate-bootstrap.mjs",
+    "tasks": "node scripts/taskctl.mjs status",
+    "ready": "node scripts/taskctl.mjs ready"
+  }
+}

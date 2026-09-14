@@ -1,0 +1,27 @@
+privacy:
+  mode: local_first
+  full_recording: false
+  telemetry: false
+
+protection:
+  mode: standard
+
+execution:
+  mode: inspect_only
+  allow_dependency_install: false
+  allow_network: false
+
+analysis:
+  provider: disabled
+
+project_intent:
+  # Optional explicit goal supplied by the user.
+  goal: null
+
+checks:
+  existing_tests: true
+  start_local_services: auto
+  browser_probe: auto
+
+report:
+  format: human

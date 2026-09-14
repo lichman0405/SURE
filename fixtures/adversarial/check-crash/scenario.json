@@ -1,0 +1,6 @@
+{
+  "id": "check-crash",
+  "expected_severity": "must_fix",
+  "description": "A crashed check must surface ERROR/UNKNOWN and never aggregate to green.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

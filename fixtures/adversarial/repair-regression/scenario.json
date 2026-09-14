@@ -1,0 +1,6 @@
+{
+  "id": "repair-regression",
+  "expected_severity": "must_fix",
+  "description": "Repair closes finding A but breaks previously passing behavior.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

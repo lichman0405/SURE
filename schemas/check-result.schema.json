@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Check Result",
+  "type": "object",
+  "required": [
+    "id",
+    "status",
+    "evidence_class",
+    "project_fingerprint"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pass",
+        "fail",
+        "warning",
+        "skipped",
+        "error",
+        "unknown"
+      ]
+    },
+    "evidence_class": {
+      "enum": [
+        "observed_fact",
+        "deterministic_check",
+        "model_assessment",
+        "inference",
+        "unknown"
+      ]
+    },
+    "project_fingerprint": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

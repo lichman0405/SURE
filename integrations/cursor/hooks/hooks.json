@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 session-start"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 pre-tool-use",
+        "matcher": "Shell|Read|Write|Delete"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 post-tool-use"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 post-tool-failure"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 after-file-edit"
+      }
+    ],
+    "stop": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 stop"
+      }
+    ]
+  }
+}

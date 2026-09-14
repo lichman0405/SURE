@@ -1,0 +1,21 @@
+name: False green / incorrect pass
+description: SURE reported a project/claim as okay when it was not.
+title: "[false-green] "
+labels: ["false-green", "bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What SURE said
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What was actually true
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction / project details

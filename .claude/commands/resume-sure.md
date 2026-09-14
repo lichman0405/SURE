@@ -1,0 +1,1 @@
+Resume SURE autonomous development from durable repository state. First read `MASTER_PROMPT.md`, `progress/state.json`, `progress/HANDOFF.md`, `git status`, recent commits and `node scripts/taskctl.mjs ready`. Verify any claimed previous completion from files/tests before continuing. Then implement READY tasks continuously.

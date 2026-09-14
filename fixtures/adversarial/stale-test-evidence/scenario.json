@@ -1,0 +1,6 @@
+{
+  "id": "stale-test-evidence",
+  "expected_severity": "must_fix",
+  "description": "Tests ran before final source modification and are stale.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

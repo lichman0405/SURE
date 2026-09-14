@@ -1,0 +1,6 @@
+{
+  "id": "route-mismatch",
+  "expected_severity": "must_fix",
+  "description": "Frontend calls an API route that backend does not expose.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

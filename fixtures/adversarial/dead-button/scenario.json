@@ -1,0 +1,6 @@
+{
+  "id": "dead-button",
+  "expected_severity": "must_fix",
+  "description": "Visible primary button has no connected behavior.",
+  "fixture_status": "to_be_implemented_by_task_graph"
+}

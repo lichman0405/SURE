@@ -2,13 +2,13 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 25 / 166 tasks accepted, 1 in progress. **Phase P0 complete (9/9), phase
-P1 complete (11/11), phase P2 in progress (5/12).** `P2-T006` is `in_progress`:
-its implementation is pushed and green, and its acceptance has not been recorded
-yet. When it is, the acceptance lands in `progress/state.json` **in the same
-commit as this file** — so `git log -1 --stat` is the check. If that commit's
-subject does not name `P2-T006`, the acceptance is not recorded and the task is
-not done.
+Progress: 26 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (6/12).** `P2-T006` is accepted, and its acceptance
+is recorded in `progress/state.json` **in the same commit as this file** — so
+`git log -1 --stat` is the check. If that commit's subject does not name
+`P2-T006`, the acceptance is not recorded and the task is not done. The commit
+after it records the acceptance commit's own run, because a push is not finished
+until its run has been read.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -38,21 +38,30 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 25, in_progress: 1, queued: 140 }
-READY: P2-T010, P3-T001, P6-T001, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 26, queued: 140 }
+READY: P2-T007, P2-T010, P3-T001, P4-T008, P6-T001, P6-T007, P8-T001, P12-T008,
+P13-T001
 ```
 
-**A correction, because an earlier draft of this file said `accepted: 26` and
-"nothing is `in_progress`" and both were false.** `progress/state.json` has
-`P2-T006` as `in_progress` with `finished_at: null` and an empty `notes`, which is
-what a task looks like *before* it is accepted. The implementation commit
-`9c931d0` was pushed and its run was read, and neither of those is an acceptance.
-The count was lifted from a summary rather than read out of the file it describes,
-which is the whole failure mode this repository is built against. `P2-T006`'s
-acceptance is the next step below.
+**A correction that was made and then overtaken, kept because both halves are
+worth having.** An earlier draft of this file said `accepted: 26` and "nothing is
+`in_progress`" while `progress/state.json` had `P2-T006` as `in_progress` with
+`finished_at: null` and an empty `notes` — the implementation commit had been
+pushed and its run read, and neither of those is an acceptance. The count had
+been carried forward from a summary instead of read out of the file it describes,
+which is the failure mode this repository is built against. It was corrected to
+`25` while the acceptance was still outstanding, and `26` above is a **separate,
+later** reading of the same command. The distinction is the point: a figure that
+becomes true later was not true when it was written.
 
-`P2-T006` is
-described in "What `P2-T006` added" immediately below. The three things worth
+**`READY` gained `P2-T007` and `P4-T008` when `P2-T006` was accepted** — neither
+could start until Cargo discovery existed. That is the dependency graph doing its
+job, and it is the reason the list is quoted from the command rather than
+remembered.
+
+Nothing is `in_progress`: `P2-T006` has been accepted and the next task has not
+been started. `P2-T006` is described in "What `P2-T006` added" immediately below.
+The three things worth
 knowing before touching any of it are that **one `Budget` serves all three
 ecosystems** — and the same one is shared, so a Node-heavy project starves both
 Python and Rust by call order, now measured as exactly two affected files rather
@@ -2363,20 +2372,21 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **`P2-T006`'s second commit has to be pushed and its run read before the
-   acceptance is recorded.** The implementation commit `9c931d0` was pushed in
-   run `34858555861`: **all five jobs green**, Windows **840** — the same number
-   the local Windows run printed — macOS 842, Ubuntu 843, over 35 result lines =
-   25 parents + 10 children, and the first run in which a Rust discovery test
-   executed anywhere. The second commit carries the `pattern.rs` tests, the
-   sentinel change, the doc rows and gap 16, so it moves the local total and
-   needs its own run read. State: `{ accepted: 25, in_progress: 1, queued: 140 }`,
-   phase `P2`, **5 of 12**.
+1. **`P2-T006` is accepted, and all three of its commits are pushed and read.**
+   `9c931d0` the implementation in run `34858555861`, `9c6e08d` the `pattern.rs`
+   tests in run `34861419193`, `1638414` the run record in run `34861757296` —
+   **all five jobs green every time**. Windows **840 → 849 → 849**; the first
+   step is the nine new tests and the second is a documentation-only commit
+   changing no number, which is the useful reading for a record commit. State:
+   `{ accepted: 26, queued: 140 }`, phase `P2`, **6 of 12**.
 2. `node scripts/taskctl.mjs start P2-T010` — *"Implement `ProjectIntent` ingestion
    from explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
    explicit goal without requiring raw transcript recording."* The remaining READY
-   list is `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`,
-   `P13-T001`, and **`P2-T010` finishes phase P2**.
+   list is `P2-T007`, `P2-T010`, `P3-T001`, `P4-T008`, `P6-T001`, `P6-T007`,
+   `P8-T001`, `P12-T008`, `P13-T001`, and **`P2-T010` finishes phase P2**.
+   `P2-T007` and `P4-T008` appear here for the first time because `P2-T006` was
+   their blocker, and neither has been read yet — so the choice below is a choice
+   between `P2-T010` and two tasks nobody in this session has looked at.
    Checked rather than assumed, because a handoff that describes the next task
    wrongly is a handoff that costs a session: the pieces it needs already exist —
    `sure_domain::intent::ProjectIntent` in `crates/sure-domain/src/intent.rs`,

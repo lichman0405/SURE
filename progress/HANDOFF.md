@@ -2,9 +2,10 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 20 / 166 tasks accepted. **Phase P0 complete (9/9) and phase P1
-complete (11/11).** `P1-T011` is accepted, and `progress/state.json` records it
-in the commit immediately after the one carrying this file.
+Progress: 21 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (1/…).** `P2-T001` is accepted, and
+`progress/state.json` records it in the commit immediately after the one carrying
+this file.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -16,44 +17,60 @@ Autonomous branch: `claude/v0.1-autonomous`
 `node scripts/taskctl.mjs status` reports:
 
 ```
-Project: SURE | status: in_progress | phase: P1
-{ accepted: 20, queued: 146 }
-READY: P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
+Project: SURE | status: in_progress | phase: P2
+{ accepted: 21, queued: 145 }
+READY: P2-T002, P2-T003, P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001,
+      P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-**All 11 tasks of P1 are done and P2 is next.** `P2-T001` (bounded
-filesystem/project-root scanner) is the first of the seven ready tasks, the
-largest of them, and everything in P3 to P6 reads its output; `P1-T004`'s `Paths`
-already carries the project/outside-project rule it has to respect. Behind it:
-`P2-T010` (ProjectIntent ingestion), then `P3-T001`, `P6-T007`, `P8-T001`,
-`P12-T008`, `P13-T001` — the first task of each later phase.
+Accepting `P2-T001` is what put `P2-T002`–`P2-T006` and `P6-T001` on the ready
+list: they were waiting on the scan and are the fingerprint, stack detection and
+first-consumer tasks that read its output.
 
-## Gate set, as run at `P1-T011`
+**Phase P2 has begun.** `P2-T001` (the bounded filesystem/project-root scanner)
+is done: `sure_core::scan` enumerates a project inside stated limits and reports
+everything it did not look at. Next is `P2-T002` (**Git project fingerprint**),
+which is the first reader of the scan and the first thing that has to decide
+which of the scan's entries it is allowed to open — every evidence record carries
+a project fingerprint, and evidence whose fingerprint differs from the current
+one is stale (`docs/architecture/EVIDENCE_MODEL.md`). `P2-T003` is the non-Git
+fingerprint, and `P2-T004`–`P2-T006` are the first three stack discoveries
+(JS/TS, Python, Rust).
+
+## Gate set, as run at `P2-T001`
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
-| `cargo test --workspace --all-features --no-fail-fast` | **492 passed, 0 failed, 1 ignored, across 15 test binaries** |
+| `cargo test --workspace --all-features --no-fail-fast` | **553 passed, 0 failed, 1 ignored, across 16 test binaries and 4 doc-test targets** |
 | `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
 
 Per binary, re-run and reconciled with `target/tmp/count_tests.py`: `sure-cli`
-36 lib + 13 `cli_contract`; `sure-core` 214 lib + 9 `config_loading` + 6 `doctor`
-+ 6 `store_concurrency` + 4 `store_packaging`; `sure-domain` 87 lib + 29
-`wire_contract`; `sure-protocol` 46 lib + 12 `conformance` + 15 `round_trip`;
-`sure-testkit` 0 lib + 7 `integration_thinness` + 8 `repository_shape`. Four
-doc-test targets report 0.
+36 **bin** + 13 `cli_contract`; `sure-core` 244 lib + 9 `config_loading` + 6
+`doctor` + **30 `scan_project`** + 6 `store_concurrency` + 4 `store_packaging`;
+`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46 lib + 12
+`conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7 `integration_thinness`
++ 8 `repository_shape`. **`Doc-tests sure_core` now runs 1 test** (the `scan`
+example, marked `no_run`), where the previous entry's "four doc-test targets
+report 0" was true; the other three still report 0.
 
-The arithmetic: 473 at `P1-T010`, **492 here (+19, all in `sure-core`'s lib
-target: 195 → 214)**, which is the 18 tests of `authority.rs` plus 1 for the
-near-miss name check in `mod.rs`.
+The arithmetic: 492 at `P1-T011`, **553 here (+61)** — 30 in `sure-core`'s lib
+target (214 → 244: 29 in `src/scan/` plus 1 in `ignore.rs`), 30 in the new
+`scan_project` integration target, and 1 doc-test. The previous entry's "15 test
+binaries" is now **16**, the increase being `scan_project`. (The previous entry
+called `sure-cli`'s first target a *lib*; it is the `src/main.rs` **bin**
+target. The number, 36, was right.)
 
-**Correction to the previous entry.** This file said `P1-T010` ran "across 19
-test binaries (15 with tests)". That is wrong, and the acceptance note for
-`P1-T010` carries the same wrong figure: it counted the output of
-`store_concurrency`'s child processes as extra binaries. The **473** test count
-was right; the binary count was not. The true figure then and now is **15 test
-binaries**, per the per-binary list above.
+**Correction to the previous two entries, and the correction to the
+correction.** `P1-T010`'s "19 test binaries" counted `store_concurrency`'s child
+processes; `P1-T011` corrected the count to 15 and said "four doc-test targets
+report 0". Both were true when written and both are now wrong as descriptions of
+the repository: the 15 became 16, and the doc-test zeros became a one.
+`target/tmp/count_tests.py` **used to skip the `Doc-tests` sections entirely**,
+which is why the figure it printed and the figure in the handoff disagreed by
+one until both were changed together. It now counts them and prints them
+separately.
 
 **Counting `#[test]` attributes does not reproduce these figures**: `sure-domain`'s
 `variants!` macro generates tests that no attribute names, and it undercounts the
@@ -91,6 +108,81 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T001` added
+
+`crates/sure-core/src/scan/` — **the file list every later stage reads**, and the
+place where a loss becomes invisible. Four modules plus a new integration target:
+
+- `skip.rs` — `SkipReason` (ten variants) and `Skipped`. **A skip is a value in
+  the result, not a log line**, which is the whole task: a scanner that returns a
+  list of files has said nothing about the files it did not return.
+  - `is_by_design()` and `loses_coverage()` are **two full `match`es, not one
+    predicate and its negation**. A negation answers `false` — "not a loss" — for
+    a variant nobody thought about, and that is the quiet direction. A new variant
+    now fails to compile in both until both questions are answered.
+  - `NotFollowed` and `SpecialFile` are **losses even though not looking at them
+    is deliberate**: what a link points at is not in the scan, and a pipe is an
+    entry that exists and is not in the list. Classifying them as "by design"
+    because the scanner chose them would be the scanner grading its own decision.
+  - `SureCache` (`.sure`) is separate from `Cache` for a reason none of the
+    others have: a fingerprint taken over a tree containing SURE's own output
+    changes *when SURE runs*, so checking a project would change the thing being
+    checked.
+  - The `.sure` rule is spelled through `paths::PROJECT_CACHE_DIR`, not as a
+    literal, so the directory SURE writes into and the one it skips cannot drift.
+- `ignore.rs` — two tables of exact names, **split by entry kind**. `build`,
+  `target` and `dist` are both a tool's output directory and a hand-written
+  script at the root; one table keyed on the name alone cannot tell those apart
+  and drops the script. `bin`, `obj`, `out`, `Debug`, `Release` and `third_party`
+  are deliberately **not** in either table — each is a plausible project
+  directory, and leaving a real directory out of a scan is a loss.
+  `matching_rule(name, kind, case)` takes the case rule as an **argument**, so
+  both platform rules are testable on one machine; the fold is ASCII-only.
+- `error.rs` — `ScanError`, the four refusals (`NotAbsolute`, `Missing`,
+  `NotADirectory`, `Unreadable`). Each is *no scan at all* rather than a scan with
+  losses, because an empty `Scan` and a project with nothing in it look the same.
+  Each message names the path and says what SURE did instead; `Unreadable` quotes
+  the operating system rather than paraphrasing it.
+- `mod.rs` — `scan(root, ScanOptions)`, `Scan`, `Entry`, `EntryKind`,
+  `display_path`, and the walker. **It reads no file contents** — names and
+  file-or-directory only — and a source scan in `tests/scan_project.rs` asserts
+  exactly that against the four files, because a scan of a project whose files
+  are huge, encrypted, on a slow share or cloud placeholders that would be
+  *fetched* by being read must cost the same as any other.
+- `tests/scan_project.rs` — 30 tests over real filesystems, in scratch
+  directories under `target/tmp/` whose *names* contain a space and a non-ASCII
+  character, so every path in every test is a path the platforms disagree about.
+  Links are built with `mklink /J` on Windows and `symlink` elsewhere.
+- `docs/architecture/PROJECT_DISCOVERY.md` (new) — the three guarantees, the skip
+  vocabulary, both tables and what is deliberately absent from them, the four
+  refusals, determinism, and three **known coverage gaps**. `CHECK_PIPELINE.md`
+  step 1 now points at it, and `FROZEN_SEMANTICS.md` gained four rows plus a new
+  §Closed vocabularies are matched in full.
+
+**The three guarantees, and how each is held.** *Stays inside the root*: children
+are the parent's path joined with one `file_name()` from the operating system —
+a single component, no separator, no `..` — and links are never followed. That is
+an argument *from construction*, not a check that could be wrong, which is why
+`SkipReason` has no `Outside` variant. *Is bounded*: `max_depth` (32) and
+`max_entries` (200 000), each recorded when it bites; a directory of two hundred
+thousand files does not hang SURE, it makes SURE say it stopped. *Says what it did
+not look at*: `Scan::is_complete()` is the one question a caller must answer, and
+`losses()` versus `scope()` separates "something may be missing" from "SURE said
+it would not look there".
+
+**Three decisions worth keeping.** `DirEntry::file_type()` reports a junction as
+`is_symlink() == true, is_dir() == false`, so the walk's arms are matched
+symlink-first; without that the `Some(_)` arm would file every junction on Windows
+as a `SpecialFile` and the "never followed" guarantee would be nominal. The
+ignore tables are consulted *after* that arm, so a link named `node_modules` is
+truthfully reported as `NotFollowed` (a loss)
+rather than `Vendored` (declared scope) — reporting the wrong reason is by itself
+enough to turn a loss green. The root **is** followed through a link and is not
+subject to the ignore tables: the caller named it, and a scan of a directory
+called `target` scans it. And `.gitignore` is deliberately not consulted: a
+project's ignore file is a statement about the repository, which is a different
+question from what belongs in a check.
 
 ## What `P1-T011` added
 
@@ -282,6 +374,51 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P2-T001`
+
+Twenty-eight mutations, **twenty-seven fired, one did not**, in
+`target/tmp/mutate5.py` (git-ignored). The one that did not is recorded in
+`PROJECT_DISCOVERY.md` §Known coverage gaps rather than deleted from the list: a
+mutation that escapes because its *input cannot be built* is a gap, and a
+mutation quietly removed from the list is a gap nobody knows about.
+
+Six are the false-green shapes this task exists to prevent:
+
+- **`is_complete()` returning `true` unconditionally**, and separately **a loss
+  reason moved into the "by design" group** and **a declared skip moved into the
+  loss group**. The first two fail a dozen tests; the third fails
+  `every_reason_answers_both_questions_consistently`, which is the test that
+  exists because the two predicates must not be each other's negation.
+- **A link filed under whatever name it has** (the ignore table consulted before
+  the symlink arm) fails `a_link_is_a_loss_whatever_it_is_called`. **This test
+  was written because the mutation found the hole**, not the other way round: the
+  first version of the link test used a link called `shortcut`, which is not an
+  ignore-table name, so the ordering the module comment claims was unenforced.
+- **A link reported as `Vendored`** — the same false green by the other route —
+  fails the same test.
+
+Three found real holes and two were equivalent mutants, which is the more useful
+half of the result:
+
+- **A rule matched against the relative path instead of the name** — i.e. "the
+  ignore tables apply only at the top level" — was **green** until
+  `a_left_out_directory_is_left_out_at_any_depth` and
+  `a_nested_version_control_directory_is_left_out_too` were added. Every existing
+  fixture had `node_modules`, `target` and `.git` at the root, so a scanner that
+  would read a vendored tree in a real workspace passed the whole suite.
+- **Sorting by `to_string_lossy()` instead of by the `OsString`** was **green**
+  until the file-name test below was written. The comment in `mod.rs` claimed the
+  text sort loses the order; nothing tested it.
+- **The Unicode fold instead of the ASCII fold** was an **equivalent mutant**
+  through `matching_rule`: no name in either table contains a letter with a
+  non-ASCII lowercase twin (the kelvin sign is the only Latin one, and no rule
+  contains a `k`). It is caught now by
+  `the_fold_is_ascii_rather_than_the_one_unicode_defines`, which calls the private
+  `name_matches` with a rule named `kotlin-build` precisely because going through
+  the tables cannot see the difference.
+- **Dropping a `read_dir` entry the operating system failed to describe** is the
+  one that escapes. See the gap note above.
+
 ### `P1-T011`
 
 Fourteen mutations, fourteen fired. The script is `target/tmp/mutate4.py`
@@ -411,6 +548,18 @@ for this reason.
   inside the `properties` lookup, so a closed object with no `properties` allowed
   every key) and the `issue` → `issue_id` repair-contract gap.
 
+**The file name that is not valid Unicode, and how it got tested.** The previous
+entry in this file recorded it as a gap ("cannot be constructed on Windows at
+all"). It can be: `OsString::from_wide(&[0xD800])` is an unpaired surrogate, Rust's
+`OsString` on Windows is WTF-8 so it holds one, and NTFS does not forbid it. It is
+now tested, and it is the test that makes the sort mutation visible, because a
+name that cannot be rendered is the *only* case where sorting by name and sorting
+by rendered text disagree: an unpaired surrogate and `\u{E000}` sort one way by
+bytes and the other way as text. Both orders were checked with a standalone probe
+first. macOS is excluded from the test, and the reason — APFS validating a file
+name as UTF-8 — is written down as a belief rather than a fact, because verifying
+it needs a Mac.
+
 ## Accepted work on this branch
 
 - `4f2d75d` P0-T009 — foundational ADRs, plus `FROZEN_SEMANTICS.md`.
@@ -436,23 +585,29 @@ for this reason.
   --speaks`, and §The handshake in `PROTOCOL.md`.
 - `b6ca862` P1-T011 — `crates/sure-core/src/config/authority.rs`, `load_file`,
   and the rewritten `CONFIG_AUTHORITY.md`. **This closed P1.**
+- `82f3cf7` P2-T001 — `crates/sure-core/src/scan/`, `tests/scan_project.rs`, and
+  the new `docs/architecture/PROJECT_DISCOVERY.md`. **This opened P2.**
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P2-T001` — the bounded filesystem/project-root
-   scanner. It is the largest ready task, it is the first thing `sure check`
-   needs, and everything in P3 to P6 reads its output. `P1-T004`'s `Paths`
-   already carries the project/outside-project rule it has to respect, and
-   `P1-T011`'s `Authority` is what will later decide what the scan is allowed to
-   open. The bounded part is the acceptance criterion, not an optimisation: a
-   scanner that follows a symlink out of the project, or that reads a directory
-   because it was named rather than because a rule allowed it, is a scope leak
-   that no later check can detect. Windows specifics from `CLAUDE.md` apply
-   directly — spaces, Unicode, case-insensitive comparison, long-path pressure,
-   and junction/reparse points rather than only POSIX symlinks.
-2. Then `P2-T010` (ProjectIntent ingestion from an explicit goal/spec), which
-   reads `Config::requested_privileges`' neighbour `project_intent` and is the
-   other half of what makes a report able to say what the user asked for.
+1. `node scripts/taskctl.mjs start P2-T002` — the Git project fingerprint. It is
+   the first consumer of the scan and the first thing that has to decide **which
+   entries it may open**: `P2-T001` reads no file contents at all, so every read
+   from here on is a decision, and the scan's `is_complete()` is the thing that
+   has to travel with the fingerprint — a fingerprint taken over a scan with
+   losses is a fingerprint of part of a project, and evidence keyed to it would
+   be evidence about a project state that was never fully observed.
+2. Then `P2-T003` (non-Git fingerprint) and `P2-T004`–`P2-T006` (JS/TS, Python
+   and Rust discovery), then `P2-T010` (ProjectIntent ingestion from an explicit
+   goal/spec), which `Config` already carries a slot for.
+
+**What `P2-T001` deliberately left for later.** The scan produces names and
+file-or-directory only: no sizes, no timestamps, no contents, and nothing about
+what anything *is*. The fingerprint is `P2-T002`/`P2-T003`; deciding that a
+`package.json` means a Node project is `P2-T004` onwards. Nothing in this release
+calls `scan` yet — `sure check` does not exist — so `PROJECT_DISCOVERY.md`'s
+guarantees are properties of the module and of its tests, and the first thing
+that will exercise them end to end is the check pipeline.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -507,6 +662,40 @@ ignored, which is how the earliest tasks came to record an empty note.
   top.** The workspace lints are `warn` but the gate runs `-D warnings`, so a new
   test file fails clippy until it carries the opt-out. `cargo fmt --all` will
   place it correctly if the file starts with it.
+- **A directory junction reports `is_symlink() == true, is_dir() == false`** from
+  `DirEntry::file_type()`. Checked with a probe, not assumed. This is why the
+  walk matches the symlink arm first: put it after `is_dir()`/`is_file()` and
+  every junction on Windows falls into the `Some(_)` arm as a `SpecialFile`, and
+  the "never followed" rule still *looks* enforced because nothing is followed.
+- **`mklink /J` (junction, no admin needed) parses forward slashes in its
+  arguments as its own switches.** Build the argument vector with backslashes —
+  `r"target\tmp\..."`, not `"target/tmp/..."` — or it fails with a usage error in
+  the console's own code page. It is also invoked through `cmd /C`, so a Rust
+  string you pass it must be a raw string or the `\t` is a tab.
+- **Win32 strips trailing spaces and dots from the last path component before the
+  file is created.** A fixture asking for `"padded "` produces `padded` on Windows
+  and `padded ` on Unix; `a_trailing_space_is_not_a_character_on_windows` is the
+  test that pins the difference, so the omission elsewhere is a fact with a test
+  rather than a hole. An interior or leading space is kept.
+- **A file name that is not valid Unicode *is* constructible on Windows**:
+  `std::os::windows::ffi::OsStringExt::from_wide(&[0xD800])` gives an unpaired
+  surrogate, NTFS accepts it, and `to_string_lossy` renders it U+FFFD. On Unix it
+  is `OsStringExt::from_vec(vec![0xED, 0xA0, 0x80])`. APFS is believed to refuse
+  it; that belief is recorded in `PROJECT_DISCOVERY.md` rather than relied on
+  silently.
+- **Sorting by `to_string_lossy()` and sorting by `OsString` agree for every pair
+  of names that both render faithfully, and differ for exactly one pair**: a name
+  that cannot be rendered (lossy U+FFFD) against a name whose code points are all
+  above U+FFFD. `\u{D800}` vs `\u{E000}` sort one way by bytes and the other way
+  as text. A mutation to the text sort therefore escapes every test that uses
+  ordinary names — which is why the invalid-name test is the one that has to
+  exist.
+- **A "reads no file contents" guarantee can only be tested against the source.**
+  `scanning_the_repository_does_not_open_any_file` greps the four `scan/*.rs`
+  files for `File::open`, `fs::read(`, `fs::read_to_string`, `read_to_end`,
+  `BufReader`, `read_link` and `canonicalize`. No run of the code demonstrates
+  that a file was never opened. Adding `let _ = fs::read(...)` to the walk makes
+  it fail, which was checked by mutation.
 - **Rank a closed enum with a full `match` returning a number, not with a
   `bool` predicate.** `P1-T011`'s first `resolve` took
   `stronger: impl Fn(T) -> bool` (e.g. `|mode| mode == Standard`), which silently

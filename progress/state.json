@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P1",
-  "last_updated": "2026-09-14T10:42:41.198Z",
+  "current_phase": "P2",
+  "last_updated": "2026-09-14T10:58:56.736Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -189,13 +189,13 @@
       "notes": "The authority rule is docs/architecture/CONFIG_AUTHORITY.md's sentence as code: a layer cannot widen what a layer above it allows, and cannot weaken a restriction a layer above it imposed. New file crates/sure-core/src/config/authority.rs. Layer is User and Project and nothing else -- rank 3 (organization policy) is not a variant, so no caller can name a source it can never obtain, and rank 1 (the person at the keyboard) is not configuration and stays in ConsentGrantor::InteractiveUser. Layer::can_grant is a match, not 'self == Self::User', so a third layer must answer the question. Authority::privileges() records every ask including refused ones -- request, every layer that asked (most trusted first), grantor or None -- because dropping refusals would make 'asked and refused' and 'never asked' the same list. A grant comes only from the topmost layer that asked and only if that layer may grant; a project and its user both asking is not an escalation. permissions() is not decide(): it says which permissions a file was allowed to hand over, and the execution mode is deliberately not a permission, so a project asking for host_confirmed gets nothing in the set. Restrictions resolve the other way -- protection and privacy take the stricter of the two layers with Resolved::by naming the most trusted layer that asked -- and 'by: None' means 'nothing beyond the default' rather than 'SURE did not look'. Ranks are hand-written matches rather than a derived Ord, with the two unavailable variants ranked in the safe direction. No merged Config (ADR 0011); scope reductions are reported, never overridden. Config::load split into load/load_file so the user's configuration is read by the same reader at a different path, with the sure.yml near-miss check following the file name -- now a contract of a public function, so it has its own test. NOT wired in: no command builds an Authority yet; that is P13-T009, which depends on this task, and the architecture document says so rather than implying enforcement that has not been built. 19 new tests (18 in authority.rs, 1 in mod.rs -- one of them goes through Authority::load with real files, because an Authority that found the user's file and then discarded it would pass every test that builds one directly). 14 mutations, 14 fired, including three false-green shapes: a project granting itself execution authority, a refusal dropped instead of reported, and the permission set starting with the network already allowed. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 492 passed / 0 failed / 1 ignored across 15 test binaries; taskctl validate 166 tasks. Commit b6ca862. Correction to the figure recorded for P1-T010: '19 test binaries' was wrong. store_concurrency spawns child processes that print their own 'test result:' lines, and a count that reads those as binaries gets 19 where the true number is 15. The 473 test count was right; 473 + 19 new = 492."
     },
     "P2-T001": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T10:43:46.870Z",
+      "finished_at": "2026-09-14T10:58:56.735Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "crates/sure-core/src/scan/ (skip.rs, ignore.rs, error.rs, mod.rs) + tests/scan_project.rs (30 tests) + docs/architecture/PROJECT_DISCOVERY.md. Gates: fmt clean; clippy clean; cargo test --workspace --all-features --no-fail-fast = 553 passed, 0 failed, 1 ignored, across 16 test binaries and 4 doc-test targets; taskctl validate = state OK: 166 tasks. A skip is a value in the result, not a log line: SkipReason (10 variants) with is_by_design() and loses_coverage() as two full matches, never one predicate and its negation. Containment is by construction (one file_name() component per step, links never followed), which is why there is no SkipReason::Outside. Bounded by max_depth 32 and max_entries 200000, each recorded when it bites. Two ignore tables split by entry kind, so a hand-written build script is not dropped as a build directory; bin/obj/out/Debug/Release/third_party deliberately absent. Reads no file contents, asserted by a source scan. 28 mutations, 27 fired: two of them found real holes (ignore tables now tested at depth, and the sort is by OsString not by to_string_lossy, which needed a file name that is not valid Unicode). The one that escapes needs an entry the OS fails to describe, which cannot be built, and is recorded as a gap."
     },
     "P2-T002": {
       "status": "queued",

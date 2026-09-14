@@ -7,6 +7,7 @@
 //! first commit rather than introduced later.
 
 pub mod config;
+pub mod paths;
 
 pub use sure_domain::{
     PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,

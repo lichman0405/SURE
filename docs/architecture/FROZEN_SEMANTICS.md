@@ -49,6 +49,9 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | Project settings surface | `docs/architecture/CONFIG_REFERENCE.md` | `crates/sure-core/src/config/` |
 | Project settings are inert requests | `docs/architecture/CONFIG_AUTHORITY.md` | `sure_core::config::Config::requested_privileges` |
 | Project goal trust | `docs/architecture/PROJECT_INTENT.md` | `sure_core::config::Config::goal_source` |
+| Storage locations | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `crates/sure-core/src/paths/mod.rs` |
+| Authoritative evidence is outside the project | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `sure_core::paths::Paths::ensure_outside` |
+| Path comparison direction | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `crates/sure-core/src/paths/compare.rs` |
 
 ## Statuses
 

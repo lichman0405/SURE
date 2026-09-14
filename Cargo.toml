@@ -28,6 +28,16 @@ toml = "1.1.6"
 # this is the maintained fork of it, which keeps the error type, the location
 # reporting and the serde integration that the diagnostics depend on.
 serde_yaml_ng = "0.10.0"
+# Per-user application-data and configuration locations.
+#
+# `docs/architecture/STORAGE_AND_DATA_PATHS.md` asks for "a well-tested path
+# abstraction rather than hard-coded `~/.sure`", and names the Windows known
+# folders it expects. Reading `%LOCALAPPDATA%` by hand would be wrong whenever
+# the variable is unset, and the correct API is `SHGetKnownFolderPath`, which
+# this workspace cannot call: `unsafe_code = "forbid"` is workspace-wide. Asking
+# a library that already does it is the only way to be right on all three
+# platforms rather than only on the one that was tested.
+dirs = "6.0.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

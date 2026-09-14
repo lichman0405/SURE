@@ -10,6 +10,7 @@ sure-domain = { path = "../sure-domain" }
 sure-protocol = { path = "../sure-protocol" }
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
+dirs = { workspace = true }
 
 # The testkit is a development-only dependency. Nothing the product ships may
 # reach it (see `sure-testkit`'s `workspace` module), and the loader tests use

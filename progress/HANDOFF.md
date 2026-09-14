@@ -2,10 +2,18 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 21 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (1/…).** `P2-T001` is accepted, and
-`progress/state.json` records it in the commit immediately after the one carrying
-this file.
+Progress: 22 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (2/…).** `P2-T002` is accepted, and its acceptance
+is recorded in `progress/state.json` **in the same commit as this file** — so
+`git log -1 --stat` is the check. If that commit's subject does not name
+`P2-T002`, the acceptance is not recorded and the task is not done.
+
+A correction to the two entries before this one: each said `progress/state.json`
+records the acceptance "in the commit immediately after the one carrying this
+file". Neither did — in `07e20be` and its predecessor the handoff and the
+acceptance landed together, so the sentence described a procedure that was not
+the one followed. Stated here because a handoff that is wrong about how to
+verify it is worse than one that says nothing.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -18,49 +26,34 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 21, queued: 145 }
-READY: P2-T002, P2-T003, P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001,
-      P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 22, queued: 144 }
+READY: P2-T003, P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007,
+      P8-T001, P12-T008, P13-T001
 ```
 
-Accepting `P2-T001` is what put `P2-T002`–`P2-T006` and `P6-T001` on the ready
-list: they were waiting on the scan and are the fingerprint, stack detection and
-first-consumer tasks that read its output.
+**`P2-T002` (Git project fingerprint) is the work of this session.** All of it is
+on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the `git`
+and `digest` modules behind it, 37 new unit tests, 34 new integration tests in
+`crates/sure-core/tests/fingerprint_git.rs` (3 more are `#[cfg(unix)]` and first
+run on CI), and the new `docs/architecture/FINGERPRINTING.md`. `P2-T003` (the
+non-Git fingerprint) is the next ready task, and `fingerprint/mod.rs`
+deliberately offers no function that picks between the two kinds — choosing by
+looking at the project is the decision `P2-T003` owns, and it is the one that can
+be wrong (a project inside somebody else's repository).
 
-**Phase P2 has begun.** `P2-T001` (the bounded filesystem/project-root scanner)
-is done: `sure_core::scan` enumerates a project inside stated limits and reports
-everything it did not look at. Next is `P2-T002` (**Git project fingerprint**),
-which is the first reader of the scan and the first thing that has to decide
-which of the scan's entries it is allowed to open — every evidence record carries
-a project fingerprint, and evidence whose fingerprint differs from the current
-one is stale (`docs/architecture/EVIDENCE_MODEL.md`). `P2-T003` is the non-Git
-fingerprint, and `P2-T004`–`P2-T006` are the first three stack discoveries
-(JS/TS, Python, Rust).
-
-## Gate set, as run at `P2-T001`
-
-| Command | Result |
-| --- | --- |
-| `cargo fmt --all -- --check` | clean |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
-| `cargo test --workspace --all-features --no-fail-fast` | **553 passed, 0 failed, 1 ignored, across 16 test binaries and 4 doc-test targets** |
-| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
-
-Per binary, re-run and reconciled with `target/tmp/count_tests.py`: `sure-cli`
-36 **bin** + 13 `cli_contract`; `sure-core` 244 lib + 9 `config_loading` + 6
-`doctor` + **30 `scan_project`** + 6 `store_concurrency` + 4 `store_packaging`;
-`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46 lib + 12
-`conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7 `integration_thinness`
-+ 8 `repository_shape`. **`Doc-tests sure_core` now runs 1 test** (the `scan`
-example, marked `no_run`), where the previous entry's "four doc-test targets
-report 0" was true; the other three still report 0.
-
-The arithmetic: 492 at `P1-T011`, **553 here (+61)** — 30 in `sure-core`'s lib
-target (214 → 244: 29 in `src/scan/` plus 1 in `ignore.rs`), 30 in the new
-`scan_project` integration target, and 1 doc-test. The previous entry's "15 test
-binaries" is now **16**, the increase being `scan_project`. (The previous entry
-called `sure-cli`'s first target a *lib*; it is the `src/main.rs` **bin**
-target. The number, 36, was right.)
+**One thing this session could not verify locally, stated so it is not assumed.**
+`a_link_is_recorded_by_its_target_and_not_by_what_it_points_at`,
+`a_change_behind_an_unchanged_link_is_not_a_change` and
+`a_change_to_a_file_sure_cannot_read_has_no_fingerprint` are `#[cfg(unix)]`, and
+the body of the second was **rewritten this session without ever having run on
+this machine** — it previously asserted almost nothing (see the mutation section
+below). Windows cannot create a symbolic link without Developer Mode or
+administrator rights, and both were probed and are absent. WSL Ubuntu exists here
+with Git 2.53.0 but no Rust toolchain, so the intended verification is the
+`ubuntu-latest` and `macos-latest` jobs in `.github/workflows/ci.yml`, which run
+`cargo test --workspace`. **Read the CI result for the commit that carries this
+file**; if the Unix jobs fail there, the failing test is almost certainly one of
+those three and the fix belongs in `fingerprint_git.rs`, not in the product.
 
 **Correction to the previous two entries, and the correction to the
 correction.** `P1-T010`'s "19 test binaries" counted `store_concurrency`'s child
@@ -108,6 +101,95 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## Gate set, as run at `P2-T002`
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --all-features --no-fail-fast` | **624 passed, 0 failed, 1 ignored, across 17 test binaries and 4 doc-test targets** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+
+Per binary: `sure-cli` 36 **bin** + 13 `cli_contract`; `sure-core` **281 lib** + 9
+`config_loading` + 6 `doctor` + 30 `scan_project` + 6 `store_concurrency` + 4
+`store_packaging` + **34 `fingerprint_git`**; `sure-domain` 87 lib + 29
+`wire_contract`; `sure-protocol` 46 lib + 12 `conformance` + 15 `round_trip`;
+`sure-testkit` 0 lib + 7 `integration_thinness` + 8 `repository_shape`;
+`Doc-tests sure_core` 1.
+
+The arithmetic: 553 at `P2-T001`, **624 here (+71)** = 37 in `sure-core`'s lib
+target (244 → 281: 8 digest + 5 error + 16 status + 3 `fingerprint/mod.rs` + 5
+in `scan/ignore.rs` for `left_out`) plus the new `fingerprint_git` integration
+target's **34 on Windows, 37 on Unix** (the three `#[cfg(unix)]` bodies are
+compiled only there, so the CI number will be three higher and is not a
+discrepancy). The **17** binaries are 16 plus `fingerprint_git`; the previous
+entry's "16" was right for its commit.
+
+The single `ignored` is not new and not a gap being hidden: it is
+`store_concurrency.rs:167`, `#[ignore = "spawned by the parent tests, not run on
+its own"]`, and it has read that way since `P1-T005`.
+
+## What `P2-T002` added
+
+`crates/sure-core/src/fingerprint/` — **the answer to "is this still the same
+project?"**, and the one thing every evidence record is stamped with
+(`docs/architecture/EVIDENCE_MODEL.md`: evidence whose fingerprint differs from
+the current one is stale). Three files:
+
+- `digest.rs` — `Digest`, a length-prefixed incremental SHA-256. **The domain tag
+  is the first field written** (`sure.git-fingerprint.v1`), so a digest of one
+  kind can never equal a digest of another; `field()` writes the byte length
+  before the bytes, which is what stops `("ab", "c")` and `("a", "bc")` from
+  being one digest. `optional()` writes a presence byte, not an empty string, so
+  "absent" and "empty" are two states — the same distinction the change list
+  needs. `hash_file` reads `limit + 1` bytes and **errors** above the limit
+  rather than hashing a prefix: a hash of the first megabyte of a two-gigabyte
+  file is a fingerprint of something nobody has.
+- `git/mod.rs` — `Git::fingerprint(root)`. It asks Git for `status` and `HEAD`
+  and then **reads the files themselves**; the digest is over file contents, not
+  over Git's diff (the reasoning is in `FINGERPRINTING.md`, and it is what makes
+  the fingerprint survive a `git commit --amend`, a rebase and a stash).
+  `--no-renames` because a rename reported as rename-or-delete must not depend on
+  Git's similarity threshold; `--untracked-files=all` because a nested checkout
+  is otherwise one line with no contents; `-- .` plus `--show-prefix` because
+  `--relative` **silently prints nothing at all** on Git 2.55.0 for a repo with
+  changes and exit status 0; the prefix is stripped with `Path::strip_prefix`,
+  not string comparison, so a project in `app/` is not confused by a sibling
+  `app-old/`. Excluded directories are skipped **before** they are read, and the
+  walk's losses are an error (`IncompleteTree`), never a hash of a partial tree.
+- `mod.rs` — `FingerprintOptions`, `FingerprintKind`, `FingerprintError` (11
+  variants), and the `git_fingerprint` entry point. The record type itself is
+  `sure_domain::vocabulary::ProjectFingerprint` — `id`, `kind`, `digest`,
+  `git: Option<GitState>` — with `content(..)` and `git(..)` as **constructors,
+  not fields**; `mod.rs` re-exports rather than redefines it, so the wire type
+  the protocol and the store already carry is the one being produced.
+  **`matches` compares `kind` and `digest` and never `id`.** There is no partial
+  fingerprint and no "unknown" state: a fingerprint either exists or an error
+  says why not — an `Option<ProjectFingerprint>` whose `None` meant "could not
+  tell" would be compared as "not equal" by every caller and quietly invalidate
+  all evidence.
+- `crates/sure-core/tests/fingerprint_git.rs` — 34 tests (37 on Unix) against
+  real repositories in the same scratch-directory pattern as `scan_project.rs`,
+  with `FIXTURE_LIMIT = 5_000`. Only the tests that need a specific Git version's
+  *text* pin `GIT_AUTHOR_DATE`; the rest assert relationships between two
+  fingerprints rather than literal digests, so a Git upgrade cannot turn them red
+  for a reason that is not a bug.
+- `docs/architecture/FINGERPRINTING.md` (new) — the rule (**a file is part of the
+  fingerprint if and only if a check could read it**), the two-failure-directions
+  table, the path in/out table, the link case the rule does not decide, why HEAD
+  is digested and the branch name is not, and **five known coverage gaps**.
+  `CHECK_PIPELINE.md` step 3 and `FROZEN_SEMANTICS.md` (a new §"What 'the same
+  project state' means") both point at it.
+
+**What the mutation run found, because the green suite did not.** Three of the
+five tests added this session exist because a mutation survived (the section
+below has the detail): the nested-repository walk in `Reader::tree` was reached
+by **no test at all**; the monorepo test proved only *stability*, so an
+implementation that never stripped the prefix — and therefore never read any
+file's contents — passed every assertion it made; and the byte budget had only
+ever been exercised with one file, which cannot tell a per-file budget from a
+per-fingerprint one. None of the three was visible as a failure.
 
 ## What `P2-T001` added
 
@@ -374,6 +456,82 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P2-T002`
+
+Twenty mutations, **twenty fired**, in `target/tmp/mutate6.py` (git-ignored).
+Every one is a plausible *wrong implementation of fingerprinting*, not a random
+edit, and most make the fingerprint ignore something it must not — the
+false-green direction, and the direction the two acceptance criteria are about.
+
+The script got two things right that the earlier ones did not, both because of
+failures in its first version:
+
+- **A mutation that stops the code compiling is now reported as `BUILD`, not as
+  caught.** A non-zero `cargo` exit with no `FAILED` line says nothing about
+  whether a test would have noticed the behaviour, and counting it as caught is
+  the same false green this script is looking for, one level up. Two mutations in
+  the first run were exactly this.
+- **An anchor that does not match exactly once prints `SKIP`.** The first version
+  of "HEAD is not part of the fingerprint" still hashed HEAD — a no-op mutation
+  that was duly reported MISSED, i.e. a hole that did not exist. A mutation
+  reported as missing when it was never applied is a false report of a false
+  green, which is worse than either.
+
+The catches worth naming:
+
+- **HEAD not digested**, **the branch name digested**, **a clean project's empty
+  change list digested like a full one**, **an untracked file dropped**, **a file
+  deleted made equal to a file emptied** (using the literal SHA-256 of the empty
+  string), **a file's own path left out of its digest**: each fails at least one
+  test, and together they are the first acceptance criterion.
+- **The ignore tables not applied**, **a walk that lost something hashed
+  anyway**, **a file that moved inside the walk keeping its place**, **the
+  project's place inside the repository ignored**: the second acceptance
+  criterion, and the errors-not-partial-fingerprints rule.
+- **Both budgets** — the file budget not enforced, and the byte budget applied
+  per file instead of per fingerprint.
+- **Three about what Git is asked**: `--relative` added after all (the flag that
+  silently prints nothing on Git 2.55.0), `--no-renames` dropped, and
+  `--untracked-files=normal` instead of `all` — the last being the one that
+  makes a nested checkout one opaque line.
+- **Two refusals**: a relative root quietly resolved against the working
+  directory, and a Git that will not start reported as a Git that failed. The
+  second matters because the first message says "install Git" and the second says
+  "Git ran and refused", and a user told the wrong one fixes the wrong thing.
+- **Two about the framing itself**: fields written without their length (`ab`+`c`
+  = `a`+`bc`), and an absent field written as an empty one.
+
+**Three real holes, found by mutations that were green**, and the tests written
+to close them:
+
+1. **`Reader::tree` — the whole nested-repository walk, the per-file path digest
+   inside it, and the `IncompleteTree` guard — was reached by no test at all.**
+   `a_directory_git_will_not_descend_into_is_walked_and_read` builds a real
+   nested `git init` inside the fixture; probing Git confirmed it is reported as
+   one untracked directory (`? inner/`) even under `--untracked-files=all`, which
+   is precisely why the walk exists. It asserts the change of a file inside the
+   nested checkout, the addition of the nested checkout, and that a file moved
+   *within* the walk changes the fingerprint.
+2. **The monorepo test proved stability, not correctness.** It asserted that a
+   fingerprint is unchanged when nothing changes, so an implementation that never
+   stripped `--show-prefix` — looking every path up at `<root>/<prefix>/…`,
+   finding `Gone`, and hashing nothing — passed every assertion it made.
+   `a_change_inside_a_project_that_is_not_the_repository_root_is_read` now edits
+   the same file twice and requires the two fingerprints to differ, which is the
+   only form of that test that reads a file.
+3. **The byte budget was only ever exercised with one file**, so per-file and
+   per-fingerprint were indistinguishable.
+   `the_byte_limit_is_over_the_fingerprint_and_not_over_each_file` writes two
+   600-byte files under a 1 000-byte limit and requires the error to name the
+   file that crossed it.
+
+**What this run does not cover, stated rather than implied.** The link and
+unreadable-file paths are `#[cfg(unix)]` in the test file, so no mutation was
+applied to them on this machine — the script's own header says so. That is not
+coverage; it is the reason the `ubuntu-latest` and `macos-latest` CI jobs exist.
+And the mutation list is a list: twenty plausible wrong implementations, not the
+space of wrong implementations.
+
 ### `P2-T001`
 
 Twenty-eight mutations, **twenty-seven fired, one did not**, in
@@ -587,27 +745,42 @@ it needs a Mac.
   and the rewritten `CONFIG_AUTHORITY.md`. **This closed P1.**
 - `82f3cf7` P2-T001 — `crates/sure-core/src/scan/`, `tests/scan_project.rs`, and
   the new `docs/architecture/PROJECT_DISCOVERY.md`. **This opened P2.**
+- P2-T002 (this session) — `crates/sure-core/src/fingerprint/` (the `git` and
+  `digest` modules), `tests/fingerprint_git.rs`, the new
+  `docs/architecture/FINGERPRINTING.md`, and the `scan/ignore.rs` `left_out`
+  extraction. The commit hash is in `progress/state.json`'s `P2-T002` note and in
+  `git log --oneline -n 4`.
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P2-T002` — the Git project fingerprint. It is
-   the first consumer of the scan and the first thing that has to decide **which
-   entries it may open**: `P2-T001` reads no file contents at all, so every read
-   from here on is a decision, and the scan's `is_complete()` is the thing that
-   has to travel with the fingerprint — a fingerprint taken over a scan with
-   losses is a fingerprint of part of a project, and evidence keyed to it would
-   be evidence about a project state that was never fully observed.
-2. Then `P2-T003` (non-Git fingerprint) and `P2-T004`–`P2-T006` (JS/TS, Python
-   and Rust discovery), then `P2-T010` (ProjectIntent ingestion from an explicit
-   goal/spec), which `Config` already carries a slot for.
+1. `node scripts/taskctl.mjs start P2-T003` — the non-Git/content fingerprint.
+   **`fingerprint/mod.rs` deliberately offers no function that chooses between
+   the two kinds**, and that is the decision this task owns. `FingerprintKind`,
+   `ProjectFingerprint::content` and the `Content` digest domain already exist
+   and are unused-by-design; what `P2-T003` has to answer is *when* a project is
+   fingerprinted by content rather than by Git, and the case that can be answered
+   wrongly is a project that sits **inside somebody else's repository** — a
+   directory under a checkout that is not its own. Fingerprinting that by the
+   outer Git would make its evidence go stale whenever the outer repository's
+   unrelated work changed, and it would report a `GitState` for a repository the
+   project is not in. The other half of the task is the non-Git case proper: no
+   `git` on the path, or a directory that is not a working tree at all.
+   `Git::fingerprint` already refuses a non-absolute root and reports
+   `GitUnavailable` distinctly from `GitFailed`, so which of those two refusals
+   `P2-T003` turns into a content fingerprint and which stays an error is a
+   decision worth stating in `FINGERPRINTING.md` rather than inferring.
+2. Then `P2-T004`–`P2-T006` (JS/TS, Python and Rust discovery), then `P2-T010`
+   (ProjectIntent ingestion from an explicit goal/spec), which `Config` already
+   carries a slot for.
 
-**What `P2-T001` deliberately left for later.** The scan produces names and
-file-or-directory only: no sizes, no timestamps, no contents, and nothing about
-what anything *is*. The fingerprint is `P2-T002`/`P2-T003`; deciding that a
-`package.json` means a Node project is `P2-T004` onwards. Nothing in this release
-calls `scan` yet — `sure check` does not exist — so `PROJECT_DISCOVERY.md`'s
-guarantees are properties of the module and of its tests, and the first thing
-that will exercise them end to end is the check pipeline.
+**What `P2-T002` deliberately left for later.** The Git fingerprint is asked for
+explicitly, by a caller that has already decided the project is in a repository;
+nothing in this release makes that decision for it, and nothing calls
+`Git::fingerprint` yet. So `FINGERPRINTING.md`'s coverage rule — *a file is part
+of the fingerprint if and only if a check could read it* — is, like
+`PROJECT_DISCOVERY.md`'s guarantees, a property of the module and of its tests
+until the check pipeline is the first real consumer. The three `#[cfg(unix)]`
+tests have not run on this machine at all; see the top of this file.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -690,6 +863,36 @@ ignored, which is how the earliest tasks came to record an empty note.
   as text. A mutation to the text sort therefore escapes every test that uses
   ordinary names — which is why the invalid-name test is the one that has to
   exist.
+- **`git status --relative` is unusable on this machine's Git (2.55.0.windows.3):
+  for a repository with changes it prints nothing at all and exits 0.** The first
+  version of `Git::STATUS_ARGUMENTS` used it, and the failure mode is the worst
+  one available — an empty change list, which is indistinguishable from a clean
+  tree, so a dirty project would have fingerprinted as clean and every check
+  keyed to it would have gone green. It was caught by
+  `a_dirty_project_fingerprints_differently_from_a_clean_one`, not by reading the
+  flag list. The replacement is `-- .` plus a separate `git rev-parse
+  --show-prefix`, stripped with `Path::strip_prefix` (a string comparison would
+  confuse a project in `app/` with a sibling `app-old/`). The flag is now
+  forbidden by a comment in the module and by a mutation in `mutate6.py`;
+  `FINGERPRINTING.md` states the prohibition. **No other Git flag is used here
+  without having been run against a real repository first.**
+- **A nested `git init` inside a fixture is reported as one untracked directory**
+  — `? inner/` — even under `--untracked-files=all`, verified by hand. That is
+  what makes the walk in `Reader::tree` reachable and what a test had to
+  construct; without it the whole nested-checkout path is dead code that looks
+  alive.
+- **This machine has no Rust toolchain available for the Unix tests, and that is
+  now CI's job rather than a local one.** Windows cannot create a symbolic link
+  without Developer Mode or administrator rights (both probed, both absent), and
+  the WSL Ubuntu that is installed here has Git 2.53.0 but **no `cargo`**.
+  Installing one would be a 1–2 GB unilateral change to the owner's machine, and
+  `.github/workflows/ci.yml` already runs `cargo test --workspace` on
+  `ubuntu-latest` and `macos-latest` — which `RUST_DESIGN.md` names as the
+  designed verification path for `#[cfg(unix)]` behaviour. So the three
+  `#[cfg(unix)]` tests in `fingerprint_git.rs` get their **first ever execution
+  in CI on the push that carries this file**, and one of the three was rewritten
+  this session without having run anywhere. Read the run before assuming it
+  passed; a green `windows-latest` job says nothing about it.
 - **A "reads no file contents" guarantee can only be tested against the source.**
   `scanning_the_repository_does_not_open_any_file` greps the four `scan/*.rs`
   files for `File::open`, `fs::read(`, `fs::read_to_string`, `read_to_end`,
@@ -782,3 +985,29 @@ ignored, which is how the earliest tasks came to record an empty note.
 
 None. No task has been marked `block-external`. No credential or authorization
 outside this machine has been needed yet.
+
+### One unactioned notification, recorded rather than dropped
+
+At 2026-09-14T11:05Z a background task notification arrived reading
+
+> Push security review found: issue in crates/sure-core/src/config/mod.rs
+
+and the reminder body that followed it, under "address or acknowledge the
+findings below", contained no finding — the text there was
+`[claude-code:unrecognized_model] {"model":"deepseek-flash","query_source":"generate_session_title"}`,
+which is a harness telemetry payload about generating a session title and not a
+statement about the code. **There was nothing to act on and nothing to dismiss:**
+the file was named and the reason was not.
+
+It is recorded here rather than silently dropped because "reviewed, nothing
+found" and "never actually reviewed" are the two states this project keeps apart
+everywhere else, and a notification that arrives with an empty payload is the
+second one wearing the first one's clothes. `crates/sure-core/src/config/mod.rs`
+was read at the time and holds nothing that looks like a finding: it validates
+endpoint URLs, refuses credentials embedded in a URL as userinfo, and
+deliberately does not repeat a credential's value in an error message. That is a
+reader's impression, not a review result, and it is written here as one.
+
+**If a later session finds a real security review waiting, treat this paragraph
+as the acknowledgement and act on the actual finding.** Nothing depends on the
+absent text.

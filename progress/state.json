@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P2",
-  "last_updated": "2026-09-14T16:50:01.550Z",
+  "last_updated": "2026-09-14T17:26:12.630Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -292,13 +292,13 @@
       "notes": ""
     },
     "P2-T012": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T16:50:01.549Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T17:26:12.630Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "Started after P2-T010 was accepted and its chain closed. The task is to record a project-level support level; P2-T007's component graph has no consumer yet and P2-T012 is where phase P2 converges, so it is also the first task that can give the graph one."
+      "notes": "Accepted on run 34873225889 (d5261a6), all five jobs green: Windows 920 / macOS 922 / Ubuntu 923 passed, 0 failed, 1 ignored, each over 38 result lines = 28 parents + 10 children. Windows equals the local Windows run exactly (907 -> 920), and the local Windows multiset is character-for-character the CI Windows one. The +13 is attributed by binary name out of the Windows log rather than by total: sure_core lib 416 -> 420 (+4), sure_domain lib 87 -> 88 (+1), wire_contract 29 -> 30 (+1), and the new support_levels binary (7); the named binaries sum 903 -> 916 against job totals of 907 -> 920, the difference being Doc-tests sure_core unchanged at 4. All 13 new tests were found by name on all three rust jobs. A positional multiset diff was run and is recorded as wrong: it printed six rows and three were artifacts of the parent count going 27 -> 28, each well-formed and each describing a binary nothing had touched; the sound comparison is substitution, and before + {+4, +1, 29->30, one new 7} reproduces the after multiset exactly on all three platforms. Implementation: sure_core::support::classify answers a project-level support level as the weakest of what SURE read and what SURE can do, with CEILING = InspectOnly - this build runs no project code, established by the single read-only Command::new in fingerprint/git/mod.rs - so every project is level C today, deliberately, with the reason naming both levels rather than leaving the gap for a reader to find. ProjectSupport::unrecorded returns a real level and is_recorded is the only door to the difference between nobody-classified-this and this-is-level-C; a stored record with no support field deserializes to unrecorded and wire_contract holds that. Gates at d5261a6: cargo fmt --all --check clean; clippy --workspace --all-targets -- -D warnings clean; cargo test --workspace 920 passed / 0 failed / 1 ignored over 38 result lines; taskctl validate state OK; Preflight-Windows passed. Mutation run target/tmp/mutate13.py: 22 of 22 observable mutations caught by a failing test, 1 declared unobservable and missed as declared, 0 skipped, 0 that failed to compile. Two arms had no test until the mutation list was written and both were closed before the run: what_was_read's \"all of them\" arm, and ProjectSupport::new preserving the level it was handed. One owner decision is left open and recorded in three places (the module comment, SUPPORTED_STACKS.md, and this note) rather than settled: whether the level states what SURE can do, today's answer, or what SURE understands, which would make a readable manifest level B; the change either way is two lines plus the tests that pin today's answer, and the tripwire test fails deliberately if CEILING is raised without rewriting it. classify has no caller outside its tests yet, so Project::support is recorded but not yet filled by a product code path - the acceptance is that a project/report records the level, and what exists is the rule and the record. Decisions are written up in progress/DECISIONS.md."
     },
     "P3-T001": {
       "status": "queued",

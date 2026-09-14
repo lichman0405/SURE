@@ -218,3 +218,52 @@ Not in this task, and said plainly in the architecture document: **nothing route
 through the authority layer yet.** No command builds an `Authority`; wiring it in
 front of the check pipeline is P13-T009, which depends on this. Until then the
 resolution is built and tested on its own.
+
+## P2-T012 — support-level classification
+
+**Phase `P2`'s other tasks recorded their decisions in `progress/HANDOFF.md`
+rather than here; this entry starts making the file current again, and it is
+worth carrying forward.** The decisions in it are the ones a later reader would
+otherwise have to reverse-engineer from the code.
+
+- **The level is derived, not assigned.** Nothing sets `Project::support`; the
+  only rule that fills it is `sure_core::support::classify`, which takes a
+  `Discovery` rather than a path so it cannot disagree with the scan it came from
+  about what was in the project. A field a caller could write directly would let
+  a report claim a level no scan supports.
+- **The level is the weakest of what SURE read and what SURE can do**, and the
+  reason names both. Neither half alone is the answer: reading alone would make a
+  perfectly-read manifest level A, and capability alone would make a directory
+  with no manifest level A too.
+- **`SupportLevel` declares its variants best first, so the weakest is
+  `Ord::max`.** Nothing in the declaration says which end is strong, so the
+  ordering is written on the type and held by
+  `support::tests::the_order_of_the_levels_is_by_strength`. `weakest` is a `max`
+  fold: swapping it to `min` is a one-word change that would promote every project
+  to the strongest thing found in it.
+- **`CEILING` is a constant, and the reason for its value is an evidence claim.**
+  Levels A and B both require *running* checks and this build runs no project
+  code — checkable, because the only `Command::new` in product code is the
+  read-only `git` in `fingerprint/git/mod.rs`. So every project is level C, and
+  the *reason* says so rather than the level alone, because a project with a
+  readable manifest is graded `generic` by discovery and a reader who is not told
+  why would take that for the answer.
+- **`ProjectSupport::unrecorded()` returns a real level, the weakest one, and
+  `is_recorded()` is the only door to the difference.** A caller reading only
+  `level` cannot tell "nobody classified this" from "this is level C". The
+  alternative — an `Option` — was not taken because `unrecorded` is itself a
+  defensible answer to show a user, and because a stored record that predates the
+  field must read as unclassified rather than fail to load; `#[serde(default)]`
+  plus a real default gives both.
+- **A stored record with no `support` field reads as unclassified, not as a
+  claim**, held by a wire-contract test that removes the field from a real
+  serialized record.
+
+**Left open for the owner, not settled here:** whether a project's level states
+what SURE *can do* (this implementation: every project is level C) or what SURE
+*understands* (which would set `CEILING = Generic` and make a readable manifest
+level B). Both readings are defensible, `ECOSYSTEM_DISCOVERY.md` already uses the
+second for its own `grade`, and the change either way is two lines plus the tests
+that pin today's answer. The argument for the first is that
+`plain_description(Generic)` renders *"SURE can find how this project is built
+and run"* and SURE cannot run it.

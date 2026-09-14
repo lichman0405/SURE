@@ -3,10 +3,22 @@
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
 Progress: 28 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (8/12).** `P2-T010` is `accepted`, on a read run,
-and **nothing is `in_progress`** — the next session may start any `READY` task
-without adopting an orphan. What it added is described under "What `P2-T010`
-added" below, and its run is read in "Reading run `34869888350`".
+(11/11), phase P2 in progress (8/12, `P2-T012` started and not yet accepted).**
+`P2-T010` is `accepted`, on a read run. `P2-T012`'s implementation is committed
+and pushed as `d5261a6`, its run `34873225889` is read in full below, and **the
+commit carrying this file is its acceptance** — so once it lands, phase `P2` is
+9 of 12. What the task added is described under "What `P2-T012` added" below.
+
+**The one thing about `P2-T012` a reader should know before the detail: it
+changed what every project is reported as.** `sure_core::support::classify`
+answers a project-level support level, and in this build the answer is
+`inspect_only` for **every** project, because this build runs no project code and
+the product's levels A and B both require running checks. That is a deliberate
+under-claim, it is argued from a checkable evidence anchor in the module comment,
+and **it is an open decision for the owner** — the alternative reading is that the
+level states what SURE *understands*, which would put a project with a readable
+manifest at level B. Both readings are recorded in three places rather than
+settled quietly here. See "What `P2-T012` added".
 
 The commit that follows `0907acf` is not `P2-T010`'s first work: it fixes a
 defect that run `34865716315` exposed, and the reason the fix came first is that
@@ -15,7 +27,8 @@ that run showed it does not always do.
 
 **The branch, in order, from the last accepted task to here:** `0907acf` accepts
 `P2-T007`; `3be88f1` records the run of the fix that `0907acf` follows; `4746c48`
-is `P2-T010`'s implementation; the commit carrying this file is the `P2-T010`
+is `P2-T010`'s implementation; `63278c0` is the `P2-T010` acceptance; `d5261a6`
+is `P2-T012`'s implementation; the commit carrying this file is the `P2-T012`
 acceptance. The acceptance of `P2-T007` is therefore **not** at the tip and never
 was, so the check for it is `git show --stat 0907acf` rather than
 `git log -1 --stat` — the sentence here used to name the wrong command, and a
@@ -72,21 +85,20 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 28, queued: 138 }
-READY: P2-T008, P2-T009, P2-T012, P3-T001, P4-T007, P4-T008, P6-T001, P6-T005,
-       P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 29, queued: 137 }
+READY: P2-T008, P2-T009, P3-T001, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
+       P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T010` is `accepted`**, on run `34869888350`, and **`in_progress` is 0**, so
+**`P2-T012` is `accepted`**, on run `34873225889`, and **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. Phase `P2` is **8 of 12**; `P2-T008`, `P2-T009` and `P2-T012`
-are the three that would finish it.
+adopting an orphan. Phase `P2` is **9 of 12**; `P2-T008` and `P2-T009` are the two
+that would finish it.
 
-**The READY list went 13 → 12 and nothing entered it.** `P2-T010` left the list by
-being accepted, and no task became ready in the same step — which is worth
-noting because the previous two acceptances each admitted new tasks. The list is
-quoted from the command rather than from a prediction, which is why a step that
-changes nothing is visible as nothing rather than as an omission.
+**The READY list went 12 → 11 and nothing entered it.** `P2-T012` left the list by
+being accepted, and no task became ready in the same step. The list is quoted
+from the command rather than from a prediction, which is why a step that changes
+nothing is visible as nothing rather than as an omission.
 
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
@@ -239,6 +251,107 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T012` added
+
+`crates/sure-core/src/support.rs` — the rule — and
+`crates/sure-core/tests/support_levels.rs` — the seven tests that drive it end to
+end over real directories. The record it fills already existed in
+`crates/sure-domain/src/vocabulary.rs` (`Project.support`, a `ProjectSupport` of
+level + reason), and that file gained the one unit test the record was missing.
+Documentation: a new section in `docs/product/SUPPORTED_STACKS.md`, an extended
+`## Project` in `docs/architecture/DOMAIN_MODEL.md`, and a paragraph in
+`docs/architecture/ECOSYSTEM_DISCOVERY.md` separating a *grade* from a *level*.
+
+The acceptance is one sentence: *"Project/report records
+first-class/generic/inspect-only support level."* It is answered by making the
+level a **derived** value with a stated rule rather than a field a caller sets.
+
+### The rule, and why it is the weakest of two things
+
+> **The project's level is the weakest of what SURE read and what SURE can do
+> with it.**
+
+`classify` takes a `Discovery` — not a path, so it cannot disagree with the scan
+it came from about what was in the project, and it opens nothing. What SURE read
+is the weakest grade across the discovered stacks; what SURE can do is `CEILING`;
+the answer is the weaker of those. Neither half alone is the level: a project
+whose manifest SURE read perfectly would still be level A if *reading* were all a
+level claimed, and a project with no manifest at all would still be level A if
+*capability* were all it claimed.
+
+`SupportLevel`'s variants are declared **best first**, so the weakest is `Ord::max`
+and `weakest` is a `max` fold — a one-word difference from a rule that promotes
+every project to the strongest thing found in it. That ordering is load-bearing
+and was previously only implied; it is now written on the type and held by
+`support::tests::the_order_of_the_levels_is_by_strength`.
+
+### `CEILING` is `InspectOnly`, and that is an evidence claim, not a mood
+
+Levels A and B in `docs/product/SUPPORTED_STACKS.md` both include *running*
+something. **This build runs no project code**, and that was established by
+grep rather than by impression: the only child process any product code path
+spawns is `git`, read-only, for the content fingerprint —
+`fingerprint/git/mod.rs` holds the single `Command::new` — and `crate::doctor`
+probes toolchains, which is SURE talking about its own prerequisites.
+
+So every project is reported at level C today. That is a **deliberate
+under-claim**, and the choice behind it is the product priority rather than the
+tidy answer: `SupportLevel::plain_description(Generic)` renders *"SURE can find
+how this project is built and run"*, and SURE cannot run it. **A false green is
+more serious than a visible error**, so the level says what SURE can do and the
+*reason* says what SURE read. `CEILING` is a constant rather than a comment
+because a claim this load-bearing wants a name code can point at:
+`the_ceiling_todays_build_claims_is_never_above_inspect_only` is written as a
+tripwire over every variant, so the day checks land it fails and asks to be
+rewritten deliberately instead of accommodating the change.
+
+### The vocabulary conflict, recorded rather than resolved quietly
+
+`ECOSYSTEM_DISCOVERY.md`'s grade tables award `Generic` to any project with a
+readable manifest, with the reason *"SURE can find how the project is built and
+run"* — that is, SURE can find **the commands**. The product doc's level B is a
+higher bar: finding the commands **and running approved generic checks**. One
+word, two bars, and a project with a readable `Cargo.toml` is graded `generic` and
+reported at level C.
+
+**That difference is not reconciled by silence.** `what_sure_can_do` puts both
+levels in the user's sentence — *"That reading alone would be level B (generic),
+but this build runs no project code… So the project is at level C
+(inspect_only)"* — and the four full sentences are pinned verbatim in the
+integration test, so a reworded one fails there rather than reaching a person
+unreviewed.
+
+### The open decision, which is the owner's and is written up in three places
+
+The alternative reading is that the level states what SURE **understands**: then
+discovery's grade is the whole answer, `CEILING` becomes `Generic`, and a project
+with a readable manifest is level B. It is a real reading, not a straw man — it is
+what `ECOSYSTEM_DISCOVERY.md` already says in so many words. It was not taken
+because of the sentence `plain_description` renders, but **it is a two-line
+change here plus the tests that pin today's answer.** Recorded in the module
+comment, in `SUPPORTED_STACKS.md`, and here, so that whoever settles it finds it
+rather than rediscovering it.
+
+### What the tests can and cannot observe, stated in the file rather than left implied
+
+Because `CEILING` is `InspectOnly`, **every project classifies as level C**, and
+the composition `weakest(understood, CEILING)` cannot be told apart from the
+ceiling alone by anything in the integration test. That is written at the top of
+`support_levels.rs` in those words. It is not hidden and it is not papered over
+with a passing test that looks like it checks the composition: the integration
+tests assert the level **and** the pinned reason, the reason names the reading
+that was capped, and
+`weakest_picks_the_weakest_whatever_order_it_arrives_in` is the unit test holding
+the fold until a check exists to make it observable from outside. The day
+`CEILING` rises, the level assertions in the integration test fail — which is
+what they are for.
+
+One consequence worth carrying: **the reason is the only observable surface for
+most of this rule.** A test that read only `level` would pass against several of
+the mutations the harness applies, which is why every assertion in the
+integration test goes through one `classification()` helper that refuses to
+return a level without the sentence supposed to justify it.
 
 ## What `P2-T010` added
 
@@ -1118,6 +1231,7 @@ Three of the five jobs were failing the whole time.
 | 34865716315 | `906bfb0` — **the `P2-T007` record commit, which edits only this file** | **failure: `rust (ubuntu-latest)`.** The other four jobs green, including `rust (macos-latest)` and `rust (windows-latest)` on **the same commit**. Two tests failed in `sure-core --test store_concurrency`. Detail below — this is the first red run since `c735a2f` and the first ever seen on a documentation-only commit |
 | 34866795192 | `0f7c854` — **the fix for that run** | **all five green, including `rust (ubuntu-latest)`, the job that failed.** Windows **877** / macOS **879** / Ubuntu **880** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. **Windows equals the local Windows run exactly**, and the multiset comparison moved **one position on each of the three platforms** — the lib target, `401→407` on Windows and `398→404` on both Unix jobs. Detail below |
 | 34869888350 | `4746c48` — **the `P2-T010` implementation** | **all five green.** Windows **907** / macOS **909** / Ubuntu **910** passed, 0 failed, 1 ignored, each over **37** result lines = **27** parents + 10 children. The parent count went 26 → 27 because `project_intent_ingest` is a new test binary. **Windows agrees with the local Windows run exactly**, and the +30 is attributed **by binary name** rather than by total. Detail below |
+| 34873225889 | `d5261a6` — **the `P2-T012` implementation** | **all five green.** Windows **920** / macOS **922** / Ubuntu **923** passed, 0 failed, 1 ignored, each over **38** result lines = **28** parents + 10 children. The parent count went 27 → 28 because `support_levels` is a new test binary. **Windows agrees with the local Windows run exactly**, the +13 is attributed **by binary name** to four binaries, and all 13 new tests were read out of all three `rust` logs by name. Detail below — including a **positional multiset diff that was run, produced four well-formed rows, and was wrong** |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
@@ -1200,6 +1314,100 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34873225889`, `P2-T012`'s — and a positional diff that would have been a lie
+
+**All five jobs green.**
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 38 | 28 | 10 | **920** | 0 | 1 |
+| `rust (macos-latest)` | 38 | 28 | 10 | **922** | 0 | 1 |
+| `rust (ubuntu-latest)` | 38 | 28 | 10 | **923** | 0 | 1 |
+
+**920 is the local Windows figure exactly**, measured before the push and not
+predicted from it. The raw sum over all 38 lines is 930 / 932 / 933, which
+over-counts by exactly 10 for the reason recorded above. The platform offsets are
++2 and +3, unchanged.
+
+#### The +13, attributed to four named binaries
+
+Read out of the Windows log by name, the way the previous entry's +30 was:
+
+| binary | before | after | delta |
+|---|---|---|---|
+| `sure_core` (lib) | 416 | **420** | **+4** |
+| `sure_domain` (lib) | 87 | **88** | **+1** |
+| `wire_contract` | 29 | **30** | **+1** |
+| `support_levels` | — | **7** | **+7** (new binary) |
+
+**4 + 1 + 1 + 7 = 13, and every other position is identical** — `sure` 48,
+`sure_protocol` 46, `fingerprint_git` 43, … `sure_testkit` 0, all unchanged. The
+matcher printed **23 `Running` lines matched before and 24 after**, which is the
+check that the pattern is alive: a name matcher that matches nothing prints a
+well-formed table of zeros that reads exactly like "no binary changed". The named
+binaries sum to **903 → 916** against job totals of **907 → 920**; the difference
+is **4 in both**, which is `Doc-tests sure_core`, and the other three doc-test
+targets are the three zeros at the end of each multiset.
+
+The four places match where `P2-T012` put code: four unit tests in
+`sure_core::support`, one in `sure_domain`'s vocabulary, one added to
+`sure-domain`'s `wire_contract` for the `serde(default)` behaviour, and the
+seven-test `support_levels` integration binary.
+
+#### The 13 new tests, read out of all three logs by name
+
+All thirteen were found **exactly once on each of the three `rust` jobs**: the
+seven `support_levels` tests, the four `support::tests`,
+`vocabulary::tests::an_unclassified_project_defaults_to_the_weakest_level_and_says_it_has_no_answer`,
+and `wire_contract`'s
+`a_project_record_stored_before_support_existed_reads_as_unclassified`. None is
+`#[cfg]`-gated, so all three platforms running all thirteen is the expected
+result — and it is checked rather than assumed, because a test that was never
+collected is invisible in a total. `target/tmp/p2t012names.py` prints one row per
+name with the match count per job, and fails if any name is missing from any job.
+
+#### Why there is no position-by-position multiset diff here
+
+The previous two entries compared the sorted multisets position by position, and
+that was sound **because no parent was added in those runs**: both lists were the
+same length, so a differing position meant a differing count. **`P2-T012` adds a
+parent** — 27 → 28, the new `support_levels` binary. The positional diff was run
+anyway, and it produced exactly the table this file exists to refuse:
+
+```
+position  0: 416 -> 420  (+4)     real
+position  1:  87 ->  88  (+1)     real
+position  8:  29 ->  30  (+1)     real
+position 18:   6 ->   7  (+1)     ARTIFACT — the inserted 7, pushing a 6 right
+position 20:   4 ->   6  (+2)     ARTIFACT — a 4 measured against the 6 that moved into its place
+position 23:   0 ->   4  (+4)     ARTIFACT — a doc-test target measured against a real binary
+```
+
+**Three of the six rows name nothing.** They are not merely imprecise: each is
+well-formed, arithmetically consistent, and describes a movement that did not
+happen. Nothing about the output distinguishes them from the three real rows —
+only knowing that a parent was inserted does. So the comparison that is used is
+**substitution**: apply the four Windows-by-name deltas to each platform's
+*before* multiset and ask whether the *after* multiset comes back exactly.
+
+| platform | before + { +4, +1, 29→30, one new 7 } | vs after |
+|---|---|---|
+| `rust (windows-latest)` | `420 88 48 46 43 33 31 30 30 24 23 15 14 12 9 8 8 7 7 6 6 4 4 4 0 0 0 0` | **identical** |
+| `rust (macos-latest)` | `417 88 48 47 46 33 31 30 29 25 24 15 14 12 9 8 8 7 7 6 6 4 4 4 0 0 0 0` | **identical** |
+| `rust (ubuntu-latest)` | `417 88 48 47 46 33 31 30 30 25 24 15 14 12 9 8 8 7 7 6 6 4 4 4 0 0 0 0` | **identical** |
+
+**The caveat from last time still applies and is not softened by this
+succeeding.** Substitution shows the Unix multisets are *consistent with* those
+four deltas; it does not determine them, because a different four deltas could
+also map before onto after. What is supported is "the Unix jobs gained the same
+four positions as Windows", not "the Unix jobs gained those four counts on those
+four binaries". **The Windows name table is what pins the attribution**; the
+multiset is what says the attribution is not a Windows-only story.
+
+The general rule, which is the durable part: **a positional diff of two sorted
+lists is only a comparison when the lists are the same length.** Print the
+lengths beside the rows, or do not print the rows.
 
 ### Reading run `34866795192`, the fix's — and a multiset comparison on all three platforms
 
@@ -1781,6 +1989,34 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P2-T012`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **920 passed, 0 failed, 1 ignored, across 38 result lines = 28 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh -NoProfile -File scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+| `python target/tmp/mutate13.py` | **22 of 22 observable mutations caught, 1 declared unobservable and missed as declared, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` did not fire |
+
+**920 is `4746c48`'s 907 + 13, and the 13 are attributed by binary name rather
+than only by total** — the same three-way reconciliation `P2-T010` established,
+now run the other way round. Locally the multiset moved four positions:
+`sure_core` 416 → 420, `sure_domain` 87 → 88, `wire_contract` 29 → 30, and a new
+`7`. **The local Windows multiset is character-for-character the CI Windows
+multiset** — `420 88 48 46 43 33 31 30 30 24 23 15 14 12 9 8 8 7 7 6 6 4 4 4 0 0 0 0`
+— which is a stronger statement than the totals agreeing and is available
+because the harness prints the whole sorted list. Counting `test result:` lines
+alone would have given 930, which over-counts by exactly 10 for the reason
+recorded above.
+
+The result-line count moved from 37 to 38 because `support_levels.rs` is a new
+test binary, so the parents went from 27 to 28. The four file-level counts match
+the four multiset positions: four unit tests in `support.rs`, one in
+`vocabulary.rs`, one added to `wire_contract.rs`, seven in the new integration
+binary.
 
 ## Gate set, as run on `P2-T010`'s implementation commit
 
@@ -2437,6 +2673,59 @@ read as evidence.**
 ## Adversarial (mutation) verifications on this branch
 
 Each was reverted after confirming the check fires.
+
+### `P2-T012`
+
+`target/tmp/mutate13.py` (git-ignored), 23 mutations over two files, exit 0:
+*"all 22 observable mutations caught by a failing test, and 1 declared
+unobservable as expected"* — 0 `SKIP`, 0 `BUILD`, and the unmutated baseline run
+first was green, which it has to be: a mutation cannot be credited with a failure
+that was already there.
+
+Two families, and the second is the one that is easy to leave untested because
+the type is *silent* when it is wrong:
+
+- **The rule** (15). Every way of getting the level wrong that still reads as
+  helpful: pick the strongest stack instead of the weakest; raise, remove, or
+  compute-but-ignore the ceiling; assume a project with no manifest is `generic`;
+  name the stacks that did **not** set the level; name every stack whatever it was
+  graded; explain the ceiling when it did not apply and hide it when it did;
+  invert the completeness clause so a walk that missed half the project reports as
+  one that saw it all; name what was looked for in the code's vocabulary
+  (`inspect_only`) rather than a person's.
+- **The record** (8). `unrecorded()` returning `FirstClass` rather than the
+  weakest level; `is_recorded()` answering yes for the state that means no answer;
+  `unrecorded()` replaced by an assumed `Generic` classification;
+  `ProjectSupport::new` discarding the level it was handed; a newly built
+  `Project` carrying a classification nobody made; dropping `serde(default)` so a
+  stored record without the field fails to load instead of reading as
+  unclassified. These matter because **a caller reading only `level` cannot tell
+  "nobody classified this" from "this is level C"** — `unrecorded()` returns a
+  real level — so a build that defaulted to `FirstClass` would report every
+  unexamined project as the best-supported one.
+
+**One mutation is a tripwire rather than a bug.** It reorders `SupportLevel`'s
+variants so the strongest sorts highest, which silently inverts every project's
+level because `weakest` is `Ord::max`. Nothing in the enum's declaration says
+which end is strong, so this is exactly the tidy-up a later reader would make,
+and `the_order_of_the_levels_is_by_strength` is the test that stops it. A
+mutation list without it would leave that test's value unmeasured.
+
+**One mutation is declared unobservable, and the first run's `MISSED` verdict on
+it was correct rather than a hole.** It changes the arm under
+`if understood == level` to name `understood` where it names `level` — and inside
+that arm the two hold the *same* value, so no test can tell the versions apart
+because nothing can. It is declared rather than deleted (a mutation left out of
+the list is a gap nobody knows about; one declared here is a claim that the two
+programs are the same program, and the run reports it loudly if that stops being
+true), and **a mutation of the same arm that a test *can* see was added in its
+place** — the reason dropping the level name altogether.
+
+**Two arms had no test until the mutation list was written, and both were closed
+before the run:** `what_was_read`'s "and graded all of them" arm, and
+`ProjectSupport::new` preserving the level it was handed. Writing the mutation
+list is what found them, which is the argument for writing it before the tests
+are called finished rather than after.
 
 ### `P2-T007`
 
@@ -3115,6 +3404,17 @@ it needs a Mac.
   simply be copied — `Manifest` and `PackageSection` had to be split, and the
   commands had to be gated on the document rather than on the package. Both splits
   are pinned by mutations that revert them.
+- `d5261a6` **`P2-T012`** — `crates/sure-core/src/support.rs` (the rule and its
+  four unit tests), `tests/support_levels.rs` (7 tests, the new **24th** test
+  binary — the by-name table counts 23 named binaries before this commit and 24
+  after, and the 4 `Doc-tests` targets are the rest of the 28 parents), the
+  `ProjectSupport` unit test that `sure-domain`'s vocabulary was
+  missing, one added to `tests/wire_contract.rs` for the `serde(default)`
+  behaviour an existing stored record depends on, and three documentation
+  changes. **The one task on this branch that changes what every project is
+  reported as**: every project is now classified `inspect_only`, deliberately and
+  with the argument recorded, because levels A and B both require *running*
+  checks and this build runs no project code.
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -3130,19 +3430,45 @@ it needs a Mac.
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
-   `34869888350`". The acceptance is the commit carrying this file, and **its run
-   is read in the session that took it rather than committed** — the stopping
-   rule at the top of this file.
-2. **The next task is a real choice, and the list is 12 long.**
-   `P2-T008`, `P2-T009`, `P2-T012`, `P3-T001`, `P4-T007`, `P4-T008`, `P6-T001`,
-   `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **8 of
-   12**; `P2-T008`, `P2-T009` and `P2-T012` would finish it. They extend a
-   component graph that is now three commits old and **still has no consumer** —
-   `ComponentGraph` is produced by `P2-T007` and read by nothing — so the argument
-   for them is coherence of a phase rather than a pull from anything downstream.
+   `34869888350`".
+2. **`P2-T012` is implemented, pushed, read, and accepted by the commit carrying
+   this file.** `d5261a6` is the implementation, run `34873225889`, all five jobs
+   green, **920 / 922 / 923** with 0 failed and 1 ignored over **38** result
+   lines = **28 parents + 10 children** — read, attributed by binary name, and
+   with all 13 new tests found by name on all three jobs, in "Reading run
+   `34873225889`". **Its run is read in the session that took it rather than
+   committed** — the stopping rule at the top of this file, so the `P2-T012`
+   chain ends at the acceptance.
+3. **The next task is a real choice, and the list is 11 long.**
+   `P2-T008`, `P2-T009`, `P3-T001`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`,
+   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **9 of 12**;
+   `P2-T008` and `P2-T009` would finish it. They extend a component graph that is
+   now four commits old and **still has no consumer** — `ComponentGraph` is
+   produced by `P2-T007` and read by nothing — so the argument for them is
+   coherence of a phase rather than a pull from anything downstream.
    `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007` and
    `P8-T001` have been on the list since before this file was written. **Read the
    task entry before choosing**; do not choose from this paragraph.
+4. **`P2-T012` left an owner decision open, and it is the first one a reader
+   should look at.** Whether a project's support level states what SURE *can do*
+   (today's answer: every project is level C) or what SURE *understands* (which
+   would make a readable manifest level B). The change is two lines plus the
+   tests that pin today's answer; the argument for each reading is in
+   `crates/sure-core/src/support.rs`'s module comment and in
+   `docs/product/SUPPORTED_STACKS.md`. **Do not settle it in a later task by
+   quietly raising `CEILING`** — `the_ceiling_todays_build_claims_is_never_above_inspect_only`
+   will fail if you do, which is the point of it. **The one thing that would
+   legitimately move it is a check that runs**, and the first prerequisite for
+   that is `P3-T001`, "implement centralized bounded process runner", which is
+   READY and depends only on `P1-T006`. It does not itself raise the ceiling —
+   a runner is not a check — but it is the step that makes running anything
+   possible, so the two tasks are worth reading together.
+5. **`P2-T012` also left the classification with no consumer.** `classify` is
+   called by its tests and by nothing else: `Project::support` is filled by no
+   product code path, so a report does not yet carry the level. That is the same
+   shape as `ComponentGraph` in item 3, and it is recorded rather than implied —
+   the task's acceptance is that a project/report *records* the level, and what
+   exists is the rule and the record, not yet a caller.
 3. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
@@ -3173,16 +3499,16 @@ it needs a Mac.
    the second because a name was carried across a line the pattern had missed and
    labelled another binary's count. Both looked exactly like "no binary changed".
    `target/tmp/bincounts.py` exists so the next session does not rediscover it.
-5. **`project_fingerprint` now has one caller, and it is not a check.**
-   `sure check --goal` fingerprints the project to bind a recorded goal to a
-   state; nothing constructs an `Authority`, nothing runs the check pipeline, and
-   nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
-   rule and the dispatch rule are still properties of the modules and their
-   tests, verified, and **not yet properties of a `sure check`** — the one
-   invocation that reaches the fingerprinter reaches it for a goal, and reports
-   the kind and the digest rather than checking anything. The documentation says
-   so in as many words; do not let a later summary of this branch imply
-   otherwise.
+   **`P2-T012` added the fourth, and it is a condition on the third: the
+   position-by-position multiset diff `P2-T007` introduced is only a comparison
+   when the two runs have the same number of parents.** `P2-T012` adds a test
+   binary, so the lists differ in length by one, and the diff it printed had
+   three rows that were pure alignment artifacts — well-formed, arithmetically
+   consistent, and about binaries nothing had touched. The sound comparison when
+   a parent is added is **substitution**: apply the by-name deltas to the before
+   multiset and ask whether the after multiset comes back exactly.
+   `target/tmp/p2t012delta.py` does it and prints both, so the next session can
+   see why the positional table is not the one to trust.
 5. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and

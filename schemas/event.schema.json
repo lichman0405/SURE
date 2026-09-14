@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SURE Harness Event",
+  "description": "A normalized harness event, as an adapter sends it to SURE. The Rust form is sure_protocol::event::EventEnvelope. See docs/architecture/EVENT_PROTOCOL.md.",
   "type": "object",
   "required": [
     "schema_version",
@@ -8,6 +9,7 @@
     "event_type",
     "timestamp"
   ],
+  "additionalProperties": false,
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -16,7 +18,17 @@
     "source": {
       "type": "string"
     },
+    "capability_tier": {
+      "description": "0 snapshot, 1 observed, 2 protected. Absent means the adapter did not say, which is not the same as 0.",
+      "type": "integer",
+      "enum": [
+        0,
+        1,
+        2
+      ]
+    },
     "session_id": {
+      "description": "The harness's own session identifier. Not a SURE SessionId.",
       "type": [
         "string",
         "null"
@@ -28,6 +40,9 @@
     "timestamp": {
       "type": "string",
       "format": "date-time"
+    },
+    "project_root": {
+      "type": "string"
     },
     "payload": {
       "type": "object"

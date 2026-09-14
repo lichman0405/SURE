@@ -399,12 +399,18 @@ impl Claim {
 }
 
 /// Bounded instructions and acceptance conditions handed to a coding harness.
+///
+/// The wire form is `schemas/repair.schema.json`, and
+/// `docs/architecture/REPAIR_PROTOCOL.md` lists "issue ID" as its first required
+/// field. The field is named `issue_id` here so that the Rust name and the wire
+/// name are the same word, rather than being related by a `serde` attribute that
+/// a reader has to go looking for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepairContract {
     /// Identity of the contract.
     pub id: RepairId,
     /// The finding this contract addresses.
-    pub issue: crate::ids::FindingId,
+    pub issue_id: crate::ids::FindingId,
     /// What is wrong.
     pub problem: String,
     /// Why it matters to the person using the software.
@@ -616,7 +622,7 @@ mod tests {
     fn a_repair_contract_without_acceptance_or_recheck_is_not_actionable() {
         let base = RepairContract {
             id: RepairId::generate(),
-            issue: crate::ids::FindingId::generate(),
+            issue_id: crate::ids::FindingId::generate(),
             problem: "p".to_owned(),
             why_it_matters: "w".to_owned(),
             required_fix: vec!["f".to_owned()],
@@ -679,6 +685,7 @@ mod tests {
                 Severity::MustFix,
                 true,
                 NotCheckedReason::ExecutionNotAuthorized,
+                fingerprint(),
             )],
         };
         assert!(!verdict.is_ready_for_hand_off());

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T09:10:56.827Z",
+  "last_updated": "2026-09-14T09:37:13.254Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -135,22 +135,22 @@
       "notes": ""
     },
     "P1-T006": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
+      "finished_at": "2026-09-14T09:17:16.123Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "crates/sure-core/src/diagnostics/{mod,correlation,field,time}.rs + docs/architecture/DIAGNOSTICS.md + ADR 0012 + redact moved to crate root; Correlation carries run always, session/check when known (unknown omitted, never a placeholder); RunId added as frozen kind 'run' (wire contract test updated, DOMAIN_SEMANTICS_VERSION not bumped - addition, not reinterpretation); message and field keys are &'static str; Field::text redacts on construction, discards by credential-shaped key, Field::redacted takes no value so no secret is ever required; values quoted so a value cannot restructure a line; no stdout sink exists; RFC 3339 UTC timestamps via civil_from_days tested against known instants; 133 sure-core lib tests pass, clippy -D warnings clean, cargo test --workspace green, cross-target clippy clean for x86_64-unknown-linux-gnu and x86_64-apple-darwin; commit ad05ee1"
     },
     "P1-T007": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T09:17:19.460Z",
+      "finished_at": "2026-09-14T09:37:13.253Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "crates/sure-protocol: schema.rs (hand-written validator for exactly the 11 keywords the schemas use; an unsupported keyword is a parse error rather than a silent skip, format:date-time is enforced rather than annotation-only, ANNOTATION_KEYWORDS names which keywords carry no constraint), documents.rs (DocumentKind registry with include_str! so an installed sure.exe validates against the schema its code was built from), event.rs (EventEnvelope, closed with deny_unknown_fields, numeric capability_tier, 4-step read: JSON syntax -> version -> schema -> serde). tests/conformance.rs (12) and tests/round_trip.rs (15). Found and fixed two real contract gaps that were invisible while only enum names were compared: RepairContract serialized its issue as 'issue' while repair.schema.json requires 'issue_id' (field renamed), and CheckResult carried neither evidence_class nor project_fingerprint (both now required, not_run/errored force Unknown). Also fixed a validator bug found by its own test: additionalProperties:false was checked inside the properties lookup, so a closed object with no properties allowed every key; a closed object with no properties now allows none, with a named regression test. Verified non-vacuous by mutation (renaming the domain field back to 'issue' fails 3 tests). New docs/architecture/PROTOCOL.md is the authority for the wire contract; FROZEN_SEMANTICS gap 1 struck through and its enforcement table extended. Gates: cargo fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cross-target clippy clean for x86_64-unknown-linux-gnu and x86_64-apple-darwin; cargo test --workspace 341 passed / 0 failed (sure-protocol 39 lib + 12 conformance + 15 round_trip); node scripts/validate-bootstrap.mjs 17 phases / 166 tasks."
     },
     "P1-T008": {
       "status": "queued",

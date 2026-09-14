@@ -7,7 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::CheckId;
+use crate::evidence::EvidenceClass;
+use crate::ids::{CheckId, FingerprintId};
 use crate::severity::Severity;
 use crate::variants::variants;
 
@@ -217,6 +218,17 @@ impl NotCheckedReason {
 }
 
 /// One checked (or not checked) item, as it reaches the aggregator.
+///
+/// A result is a **statement about a project**, so it carries the same two
+/// things every other statement in SURE carries: how it was established, and
+/// which project state it is about. `docs/architecture/EVIDENCE_MODEL.md` asks
+/// for the first and `docs/architecture/DOMAIN_MODEL.md` for the second.
+///
+/// Both are required rather than optional. A result that does not say how it
+/// was established invites a file read and a live run to be summarised into the
+/// same green, and a result that does not name its state can be read against a
+/// later state — which is how a stale pass becomes a false green. The wire form
+/// is `schemas/check-result.schema.json`, which requires both.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckResult {
     /// Stable identity, usable in the report and in evidence anchors.
@@ -227,6 +239,15 @@ pub struct CheckResult {
     pub status: CheckStatus,
     /// How bad it is if this check is not satisfied.
     pub severity: Severity,
+    /// How this result was established.
+    ///
+    /// Not decoration: a `pass` from reading a file is `DeterministicCheck`, and
+    /// a `pass` from running the project and watching what it did is
+    /// `ObservedFact`. They are different promises, and the truth hierarchy in
+    /// `docs/architecture/EVIDENCE_MODEL.md` ranks them differently.
+    pub evidence_class: EvidenceClass,
+    /// The project state this result applies to.
+    pub project_fingerprint: FingerprintId,
     /// Root cause when `status` is not a result, and why.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_checked_reason: Option<NotCheckedReason>,
@@ -239,13 +260,26 @@ pub struct CheckResult {
 
 impl CheckResult {
     /// A check that ran and passed.
+    ///
+    /// `class` says how it passed, and `fingerprint` says which state it passed
+    /// against. Neither has a default: a caller that does not know one of them
+    /// does not have a result.
     #[must_use]
-    pub fn pass(id: CheckId, title: impl Into<String>, severity: Severity, critical: bool) -> Self {
+    pub fn pass(
+        id: CheckId,
+        title: impl Into<String>,
+        severity: Severity,
+        critical: bool,
+        class: EvidenceClass,
+        fingerprint: FingerprintId,
+    ) -> Self {
         Self {
             id,
             title: title.into(),
             status: CheckStatus::Pass,
             severity,
+            evidence_class: class,
+            project_fingerprint: fingerprint,
             not_checked_reason: None,
             reason: String::new(),
             critical,
@@ -254,14 +288,41 @@ impl CheckResult {
 
     /// A check that ran and failed.
     #[must_use]
-    pub fn fail(id: CheckId, title: impl Into<String>, severity: Severity, critical: bool) -> Self {
+    pub fn fail(
+        id: CheckId,
+        title: impl Into<String>,
+        severity: Severity,
+        critical: bool,
+        class: EvidenceClass,
+        fingerprint: FingerprintId,
+    ) -> Self {
         Self {
             status: CheckStatus::Fail,
-            ..Self::pass(id, title, severity, critical)
+            ..Self::pass(id, title, severity, critical, class, fingerprint)
+        }
+    }
+
+    /// A check that ran and only partly satisfied the project.
+    #[must_use]
+    pub fn warning(
+        id: CheckId,
+        title: impl Into<String>,
+        severity: Severity,
+        critical: bool,
+        class: EvidenceClass,
+        fingerprint: FingerprintId,
+    ) -> Self {
+        Self {
+            status: CheckStatus::Warning,
+            ..Self::pass(id, title, severity, critical, class, fingerprint)
         }
     }
 
     /// A check that could not be run, with the reason.
+    ///
+    /// The evidence class is [`EvidenceClass::Unknown`] and is not a parameter.
+    /// A check that did not run established nothing, and offering a choice here
+    /// would only offer a way to write that down wrongly.
     #[must_use]
     pub fn not_run(
         id: CheckId,
@@ -269,16 +330,27 @@ impl CheckResult {
         severity: Severity,
         critical: bool,
         reason: NotCheckedReason,
+        fingerprint: FingerprintId,
     ) -> Self {
         Self {
             status: CheckStatus::Skipped,
             not_checked_reason: Some(reason),
             reason: reason.plain_explanation().to_owned(),
-            ..Self::pass(id, title, severity, critical)
+            ..Self::pass(
+                id,
+                title,
+                severity,
+                critical,
+                EvidenceClass::Unknown,
+                fingerprint,
+            )
         }
     }
 
     /// A check whose checker itself failed.
+    ///
+    /// [`EvidenceClass::Unknown`], for the same reason as [`CheckResult::not_run`]:
+    /// an error means SURE does not know, never that the project is fine.
     #[must_use]
     pub fn errored(
         id: CheckId,
@@ -286,11 +358,19 @@ impl CheckResult {
         severity: Severity,
         critical: bool,
         reason: impl Into<String>,
+        fingerprint: FingerprintId,
     ) -> Self {
         Self {
             status: CheckStatus::Error,
             reason: reason.into(),
-            ..Self::pass(id, title, severity, critical)
+            ..Self::pass(
+                id,
+                title,
+                severity,
+                critical,
+                EvidenceClass::Unknown,
+                fingerprint,
+            )
         }
     }
 
@@ -607,12 +687,23 @@ impl RequirementClaim {
 mod tests {
     use super::*;
 
+    /// One project state for every result the aggregation tests build.
+    ///
+    /// Fixed rather than generated, so two results are comparable and a failure
+    /// message names a value that does not change between runs. The tests here
+    /// are about statuses; a different state per result would only add noise.
+    fn fingerprint() -> FingerprintId {
+        FingerprintId::parse("fp_00000000000000000000").expect("a well-formed fingerprint id")
+    }
+
     fn check(status: CheckStatus, critical: bool) -> CheckResult {
         CheckResult {
             id: CheckId::generate(),
             title: "t".to_owned(),
             status,
             severity: Severity::MustFix,
+            evidence_class: EvidenceClass::DeterministicCheck,
+            project_fingerprint: fingerprint(),
             not_checked_reason: None,
             reason: String::new(),
             critical,

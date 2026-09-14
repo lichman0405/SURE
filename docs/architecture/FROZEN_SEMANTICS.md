@@ -37,10 +37,13 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | Core domain entities | `docs/architecture/DOMAIN_MODEL.md` | `crates/sure-domain/src/vocabulary.rs` |
 | Entity identity format | this document | `crates/sure-domain/src/ids.rs` |
 | Every wire name | this document, `schemas/` | `crates/sure-domain/tests/wire_contract.rs` |
+| Every document's structure | this document, `schemas/` | `crates/sure-protocol/tests/conformance.rs` |
+| The event format version | this document | `sure_protocol::PROTOCOL_VERSION` |
 | Check statuses | `schemas/check-result.schema.json` | `crates/sure-domain/src/status.rs` |
 | Aggregation and the false-green rule | `MASTER_PROMPT.md` §9 | `sure_domain::status::aggregate` |
 | Severity levels | `docs/product/UX_AND_LANGUAGE.md` | `crates/sure-domain/src/severity.rs` |
 | Evidence classes and truth order | `docs/architecture/EVIDENCE_MODEL.md` | `crates/sure-domain/src/evidence.rs` |
+| A check result declares its evidence class and its project state | `docs/architecture/EVIDENCE_MODEL.md`, `DOMAIN_MODEL.md` | `sure_domain::status::CheckResult` |
 | Claim assessments | `schemas/claim.schema.json` | `sure_domain::evidence::ClaimAssessment` |
 | Intent trust | `docs/architecture/PROJECT_INTENT.md` | `crates/sure-domain/src/intent.rs` |
 | After-the-fact limitation | `docs/product/UX_AND_LANGUAGE.md` | `sure_domain::status::NO_TRUSTED_INTENT_LIMITATION` |
@@ -234,12 +237,30 @@ is not a wire change.
 These are recorded so they are not forgotten. They are resolved by the tasks
 named, not by this document.
 
-1. **Event envelope drift.** `docs/architecture/EVENT_PROTOCOL.md` shows
-   `capability_tier` and `project_root` in the event envelope, but
-   `schemas/event.schema.json` does not define them. Resolved by P1-T007.
+1. ~~**Event envelope drift.**~~ **Resolved by P1-T007.**
+   `schemas/event.schema.json` now defines `capability_tier` and `project_root`,
+   and closes the envelope with `additionalProperties: false` so that an adapter
+   field SURE does not understand is a visible error rather than silence.
+   `docs/architecture/PROTOCOL.md` records the reasoning.
 2. **Fixture metadata vs expectation schema.** The fourteen
    `fixtures/adversarial/*/scenario.json` files carry
    `expected_severity`/`description`/`fixture_status`, while
    `schemas/fixture-expectation.schema.json` requires `required_outcomes`.
    `evaluation/acceptance-manifest.json` lists twenty cases, which is the
    authority for the release corpus. Resolved by P14-T001–T011.
+3. **The six stored documents have no version.** Unlike the event envelope, a
+   finding or a check result cannot say which build wrote it, so a field from a
+   newer SURE is dropped silently on read. Recorded by a test in
+   `crates/sure-protocol/tests/round_trip.rs`. Resolved by P1-T005, because the
+   version belongs on the stored record rather than on the document.
+
+Two gaps were found and closed while writing the P1-T007 conformance test, both
+invisible until then because only the *enum names* in the schemas were being
+compared:
+
+- `RepairContract` serialized its issue as `issue`, and `repair.schema.json`
+  requires `issue_id`. The Rust field is now `issue_id`.
+- `CheckResult` carried neither `evidence_class` nor `project_fingerprint`, both
+  of which `check-result.schema.json` requires.
+
+Both are described in `docs/architecture/PROTOCOL.md`.

@@ -61,6 +61,7 @@ mod tests {
             severity::Severity::MustFix,
             true,
             status::NotCheckedReason::ExecutionNotAuthorized,
+            ids::FingerprintId::generate(),
         );
         assert!(!status::aggregate(&[result]).is_green());
     }

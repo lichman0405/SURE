@@ -792,6 +792,7 @@ Three of the five jobs were failing the whole time.
 | 34855496424 | `37a848a` — **the `P2-T005` acceptance** | **all five green, and the counts are the implementation's to the test**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. A documentation-only commit changing no number is the useful reading — it says the record was added without touching what it records |
 | 34855790124 | `cad9592` — **the record of that acceptance** | **all five green, and the same three figures a third time**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. Read from the log rather than from the job colours: `gh run view` alone gives the conclusion, and the conclusion is the least of what a run says |
 | 34858555861 | `9c931d0` — **the `P2-T006` implementation** | **all five green.** Windows **840** / macOS **842** / Ubuntu **843** passed, 0 failed, 1 ignored, each over **35** result lines = **25** parents + 10 children. The parent count went 24 → 25 because `discover_rust` is a new test binary; the child count is unchanged. **Windows agrees with the local Windows run exactly**, and all 54 new test names were read out of all three `rust` logs by name. Detail below |
+| 34861419193 | `9c6e08d` — **the `P2-T006` tests commit** | **all five green.** Windows **849** / macOS **851** / Ubuntu **852** passed, 0 failed, 1 ignored, each over **35** result lines = **25** parents + 10 children. **+9 on every platform against the row above, which is the nine `pattern.rs` tests and nothing else**, and **Windows again equals the local Windows run exactly**. All nine were read out of all three logs **by name**, detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
@@ -848,6 +849,39 @@ filtered out` — so the ten children can be identified and subtracted with
 confidence. **The figures above are counts over a whole job's step, minus those
 ten.** Per-target counts are quoted in this file **only from the local run**,
 where both streams reach one pipe in write order and the attribution is sound.
+
+### Reading run `34861419193`, the `P2-T006` tests commit's
+
+**All five jobs green**, and the count is the one a tests-only commit has to come
+back with: **849 / 851 / 852 passed, 0 failed, 1 ignored, over 35 result lines =
+25 parents + 10 children on every platform.** Against the row above that is
+**+9 on each of the three**, and +9 is exactly the number of tests the commit
+added — so the commit is what it says it is and nothing else moved. **Windows
+849 equals the local Windows run exactly**, which is the same agreement the
+implementation commit produced and the reason the local gate set is worth running
+at all.
+
+**All nine `pattern.rs` tests were read out of all three `rust` logs by name, and
+`... ok` on each.** That mattered more here than for a normal test: one of the
+nine branches on the platform, and its **Unix half had never executed anywhere**
+before this run. `an_absolute_pattern_is_refused_where_this_platform_says_it_is_absolute`
+asserts that `C:\Windows` is refused on Windows and is **one ordinary file name**
+on Unix, where a backslash is legal in a name and there is no drive letter to
+read. Windows takes the first branch; macOS and Ubuntu took the second for the
+first time, and both passed.
+
+**The Windows multiset is the per-target check, and it came back one for one:**
+`383, 87, 46, 43, 36, 33, 31, 30, 29, 24, 23, 15, 13, 12, 9, 8, 7, 6×2, 4×2,
+0×4` — **25 values for 25 expected binaries.** The only two that moved against
+the previous run are `374 → 383` (the lib, +9) and the unchanged `24`
+(`discover_rust`), and `383` appears exactly once, which is what makes the
+attribution usable rather than merely suggestive. The same caveat as before
+applies: two binaries could in principle share a count, so this is a check that
+would catch a wrong figure and is not a proof.
+
+**The raw sum over all 35 lines is 859 on Windows, over-counting by exactly 10**
+for the reason recorded above; macOS 861 and Ubuntu 862 raw. Every figure in this
+section is the sum over the 25 parent sections.
 
 ### Reading run `34858555861`, `P2-T006`'s — and the arithmetic that bit twice
 

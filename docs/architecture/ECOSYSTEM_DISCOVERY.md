@@ -783,6 +783,20 @@ Recorded so they are not forgotten. None is resolved by a task yet.
     dependency on through `dep:foo` is reported as enabling the string `dep:foo`
     rather than as enabling `foo`, and no feature resolution is attempted at all.
 
+16. **An `exclude` pattern that is refused, or that names nothing, leaves no
+    trace.** The list is resolved only to work out its overlap with the members
+    (`Workspaces::excluded_members`), and a pattern with no overlap contributes
+    nothing — so `exclude = ["../../elsewhere"]` is refused by the same rule that
+    refuses a member pattern, and the refusal is dropped rather than reported.
+    This does **not** misstate membership, which is why it is a gap and not a
+    defect: `excluded_members` means *these resolved members are also named by
+    `exclude`*, and an empty list is true in every one of those cases. What is
+    lost is a reader's ability to tell an `exclude` list SURE could not follow
+    from one that named nothing — and a member list cut off by
+    `max_workspace_members` is the reason the two are worth telling apart, since
+    the overlap is computed against the truncated list. `Workspaces::truncated`
+    is what says the list was cut.
+
 ## Enforced by
 
 Node tests are in `crates/sure-core/tests/discover_node.rs`; Python tests are in
@@ -799,9 +813,12 @@ Node tests are in `crates/sure-core/tests/discover_node.rs`; Python tests are in
 | A byte limit is a refusal, not a partial read | this document | `a_file_too_large_to_read_is_unread_rather_than_half_read`; `a_requirements_file_that_could_not_be_read_is_named_and_not_dropped`; `a_manifest_that_is_oversized_is_reported_rather_than_half_read` |
 | The manifest budget is finite and reported when spent | this document | `a_manifest_sure_ran_out_of_budget_for_is_unread_and_never_absent`, `a_budget_of_zero_reads_nothing_and_says_so_rather_than_reading_anything` |
 | One budget serves every ecosystem, in `Ecosystem::ALL` order | this document | `one_budget_is_shared_by_every_ecosystem_and_reaching_it_says_so`, `a_directory_that_is_every_ecosystem_at_once_is_reported_as_all_of_them` |
-| A pattern cannot leave the project | this document | `a_workspace_pattern_cannot_reach_outside_the_project`, `a_member_pattern_that_would_leave_the_project_is_refused` |
-| A pattern SURE will not expand is reported and not approximated | this document, gaps 4 and 11 | `a_member_pattern_sure_will_not_expand_is_reported_rather_than_dropped` |
-| The root is never its own member | this document | `the_root_is_never_a_member_of_its_own_workspace` |
+| A pattern cannot leave the project | this document | `a_workspace_pattern_cannot_reach_outside_the_project`, `a_member_pattern_that_would_leave_the_project_is_refused`; directly, in `pattern.rs`, `a_pattern_that_would_leave_the_project_is_refused_in_every_position`, `an_absolute_pattern_is_refused_where_this_platform_says_it_is_absolute` |
+| A pattern SURE will not expand is reported and not approximated | this document, gaps 4 and 11 | `a_member_pattern_sure_will_not_expand_is_reported_rather_than_dropped`; directly, `a_pattern_this_cannot_expand_is_refused_rather_than_partly_expanded` |
+| The root is never its own member | this document | `the_root_is_never_a_member_of_its_own_workspace`; directly, `the_root_is_named_by_a_dot_and_is_never_a_member_of_itself` |
+| A pattern names directories, and one directory is one member | this document | `a_star_names_directories_and_never_files`, `two_patterns_that_reach_one_directory_name_it_once` |
+| A refusal is told apart from a pattern that named nothing | this document, gaps 4 and 11 | `a_refusal_is_told_apart_from_a_pattern_that_named_nothing`; the reasons reach a report through `every_reason_a_pattern_can_fail_for_can_be_named_and_described` |
+| A pattern is matched by the platform's case rule, not by a spelling | this document | `a_pattern_is_matched_by_this_platform_s_case_rule_and_not_by_a_spelling` |
 | Two pieces of manager evidence pointing apart is reported | this document | `a_project_that_names_one_manager_and_locks_another_is_reported_not_resolved`, `two_lockfiles_for_two_managers_are_a_disagreement`, `two_lockfiles_for_two_managers_are_a_disagreement_and_two_for_one_are_not` |
 | The same, for installers | this document, `python.rs` | `two_tool_tables_naming_two_installers_are_a_disagreement`, `a_configured_installer_and_a_lockfile_for_another_are_a_disagreement`, `two_lockfiles_are_reported_as_a_disagreement_rather_than_resolved`, `a_configured_installer_and_another_lockfile_are_a_disagreement` |
 | A requirements file is evidence and never a disagreement | this document | `a_requirements_file_is_the_weakest_evidence_and_never_a_disagreement` |
@@ -810,7 +827,7 @@ Node tests are in `crates/sure-core/tests/discover_node.rs`; Python tests are in
 | A virtual manifest's workspace is read from the document | this document, `rust.rs` | `a_workspace_table_is_read_when_there_is_no_package_table`, `a_virtual_manifest_is_a_manifest_and_its_members_are_read`, `an_explicit_workspace_table_with_no_members_is_not_no_workspace_table` |
 | No project string reaches a sentence | this document | the fixed `TOOLS` tables; `Source::says` is `&'static str`; `a_tool_is_named_from_the_table_and_never_from_the_manifest`, `a_project_declares_its_test_and_lint_tooling_and_sure_names_it`, `what_a_finding_names_is_the_tables_own_crate_and_never_the_projects_spelling`, `a_command_names_a_constant_and_never_anything_a_project_wrote` |
 | A value is read without the whitespace around it, and a number is not a name | this document | `a_value_is_read_without_the_whitespace_around_it`, `a_number_in_a_members_list_is_not_turned_into_a_directory_name` |
-| Discovery runs no program | this document, `EXECUTION_SAFETY.md` | `discovery_runs_none_of_the_scripts_it_reads` (Node), `discovery_runs_nothing` (Python, where a `setup.py` and a `conftest.py` would each leave a file behind), and `a_build_script_is_reported_as_a_target_and_never_run` (Rust) |
+| Discovery runs no program | this document, `EXECUTION_SAFETY.md` | `discovery_runs_none_of_the_scripts_it_reads` (Node — a fixture that would leave a file behind if anything ran it, plus a source-text grep over all six files in the module tree that drops whole-line comments, so that a sentence *about* the rule is not read as a breach of it), `discovery_runs_nothing` (Python, where a `setup.py` and a `conftest.py` would each leave a file behind), and `a_build_script_is_reported_as_a_target_and_never_run` (Rust) |
 | A conventional role with no script is still a row | this document | `every_conventional_role_has_a_row_whether_or_not_it_is_declared`; `a_command_is_planned_only_for_a_tool_the_project_declared`; `a_row_exists_for_every_conventional_role_whether_or_not_it_can_run`, `a_row_that_has_no_command_carries_no_reason_for_one` |
 | A planned command names a frontend and not a backend library | this document | `a_build_plan_names_a_frontend_and_never_the_backend_library` |
 | A command is planned only where SURE read a manifest, and `run`/`bench` only where there is something to run | this document | `a_command_is_only_offered_for_a_role_the_project_declared_a_tool_for`, `cargo_run_is_planned_only_where_there_is_a_program_to_run`, `cargo_bench_is_planned_only_where_there_is_a_benchmark_to_run`, `a_benchmark_is_reachable_by_either_kind_of_evidence_and_by_both_together`, `a_member_target_makes_a_role_available_to_the_workspace` |

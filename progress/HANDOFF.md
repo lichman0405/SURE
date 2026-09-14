@@ -2,11 +2,13 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 25 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (5/12).** `P2-T005` is accepted, and its acceptance
-is recorded in `progress/state.json` **in the same commit as this file** — so
-`git log -1 --stat` is the check. If that commit's subject does not name
-`P2-T005`, the acceptance is not recorded and the task is not done.
+Progress: 25 / 166 tasks accepted, 1 in progress. **Phase P0 complete (9/9), phase
+P1 complete (11/11), phase P2 in progress (5/12).** `P2-T006` is `in_progress`:
+its implementation is pushed and green, and its acceptance has not been recorded
+yet. When it is, the acceptance lands in `progress/state.json` **in the same
+commit as this file** — so `git log -1 --stat` is the check. If that commit's
+subject does not name `P2-T006`, the acceptance is not recorded and the task is
+not done.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -36,19 +38,29 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 25, queued: 141 }
-READY: P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001, P12-T008,
-      P13-T001
+{ accepted: 25, in_progress: 1, queued: 140 }
+READY: P2-T010, P3-T001, P6-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-Nothing is `in_progress`: `P2-T005` was accepted at the end of the session that
-wrote this file, and the next task has not been started yet. `P2-T005` is
-described in "What `P2-T005` added" immediately below, and the two things worth
-knowing before touching any of it are that **one `Budget` serves both
-ecosystems** (so a Node-heavy project starves Python by call order, not by
-anything Python's module does) and that **`setup.py` is never read, because it
-is a program**. Everything else on this branch is the `P2-T004`, `P2-T003` and
-`P2-T002` line.
+**A correction, because an earlier draft of this file said `accepted: 26` and
+"nothing is `in_progress`" and both were false.** `progress/state.json` has
+`P2-T006` as `in_progress` with `finished_at: null` and an empty `notes`, which is
+what a task looks like *before* it is accepted. The implementation commit
+`9c931d0` was pushed and its run was read, and neither of those is an acceptance.
+The count was lifted from a summary rather than read out of the file it describes,
+which is the whole failure mode this repository is built against. `P2-T006`'s
+acceptance is the next step below.
+
+`P2-T006` is
+described in "What `P2-T006` added" immediately below. The three things worth
+knowing before touching any of it are that **one `Budget` serves all three
+ecosystems** — and the same one is shared, so a Node-heavy project starves both
+Python and Rust by call order, now measured as exactly two affected files rather
+than asserted; that **a `Cargo.toml` has two sibling tables and either can be
+absent**, so a virtual manifest is a project that declares a great deal; and that
+**`build.rs` is a program and `src/lib.rs` is not read**, only reported as a
+target at that path. Everything else on this branch is the `P2-T005`, `P2-T004`,
+`P2-T003` and `P2-T002` line.
 
 **`P2-T002` (Git project fingerprint) is now the previous session's work.** All
 of it is on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the
@@ -159,6 +171,143 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T006` added
+
+`crates/sure-core/src/discover/rust.rs` (2885 lines, 30 unit tests) and
+`crates/sure-core/tests/discover_rust.rs` (24 tests, the new 21st test binary),
+plus `crates/sure-core/src/discover/pattern.rs` — the member-pattern expansion
+lifted out of `node.rs` so two ecosystems cannot come to expand a `*` two ways.
+`discover/mod.rs` gained `Ecosystem::Rust` and `Findings::Rust`, and
+`MemberManifest` moved up so both Node and Rust name one type; `node.rs` keeps a
+re-export so `node::MemberManifest` still names what it always named.
+`docs/architecture/ECOSYSTEM_DISCOVERY.md` gained a Rust half, its enforced-by
+rows and five new gaps (11–15).
+
+**The one fact the module is arranged around: `[package]` and `[workspace]` are
+sibling tables of one document and either can be absent.** A `Cargo.toml` with
+only `[workspace]` is a *virtual manifest*, and it declares the members, their
+shared dependencies and their shared lint levels. So the workspace tables are held
+on `Manifest` and **not** on `PackageSection`, and `Manifest` is a separate type
+for exactly that reason. Hanging them off the package would drop a virtual
+manifest's entire workspace — the case such a manifest exists for. This was the
+first draft's bug, it was designed out rather than discovered, and mutation 24
+reverts it and is caught. A third fact is kept apart from both: `[dependencies]`
+is meaningful only where `[package]` exists, because Cargo refuses a virtual
+manifest that declares dependencies.
+
+**The same split decides the commands, and this is the second designed-out bug.**
+`command_for` gates on `project.manifest.manifest()?` — the *document* — and
+deliberately not on `package()`. Gating on the package would withhold every
+command from a workspace root, which is a project `cargo build` acts on and
+builds every member of. Mutation 23 deletes the gate and is caught.
+
+The rest, briefly:
+
+- **`exclude` is not subtracted from `members`.** Whether a directory named by
+  both is a member is Cargo's rule and SURE has not read it, so
+  `Workspaces::excluded_members` carries the overlap and neither list is applied.
+  Reporting it is reversible by a reader who knows the rule; silently honouring it
+  would be SURE asserting a rule it cannot cite.
+- **The toolchain pin is read by the file's name, not by what parsed.**
+  `rust-toolchain.toml` holds a `[toolchain]` table; the bare `rust-toolchain` is
+  not TOML and usually holds one token. A `.toml` that carries no `[toolchain]`
+  table is `WrongShape`, a `.toml` that does not parse is `NotParsed`, and only a
+  file that is not TOML falls through to the bare-channel reading. This is the one
+  place a filename changes an answer, and the doc says so.
+- **Seven conventional targets**, reported as what is *at* the path and never as
+  what the file contains. `build.rs` is the one to pause on: Cargo compiles and
+  executes it before the crate, which makes it the only file in a Rust project
+  that runs arbitrary code at build time. It is reported as a `BuildScript` target
+  and nothing here executes or reads it. `src/lib.rs` is reported and never read —
+  this is the one place the module leans on a Cargo convention rather than on a
+  declaration, and it is gap 11.
+- **`Requirement` is four facts, not an `Option`.** `Stated`, `FromWorkspace`,
+  `Unstated`, `NotReadable` — `foo = { workspace = true }` is not a version in
+  this file, and a spec SURE cannot read is not a dependency that is not there.
+- **`grade` is the single place a level and a reason are decided together**, and
+  `is_absent()` is true only for the `Absent` arm, so the one question a caller
+  may collapse is the one that collapses to false for a file that is there but
+  unread.
+- **One `Budget` serves all three ecosystems**, and the same one is shared:
+  `discover()` builds one and passes it to `node::look`, then `python::look`, then
+  `rust::look` in `Ecosystem::ALL` order. A Node-heavy project starves both later
+  ecosystems by call order and not by anything their modules do. Recorded in the
+  doc under "What is bounded" and now **measured rather than asserted**: with
+  `max_manifests(1)` the affected files are exactly two, `pyproject.toml` and
+  `Cargo.toml`.
+
+### What the second `P2-T006` commit added, and the two ways its own tests were wrong
+
+Commit `9c931d0` was green and its run was read, and `P2-T006` was **not** accepted
+on the strength of it. A background security review flagged
+`crates/sure-core/src/discover/pattern.rs`, the module P2-T006 had just lifted out
+of `node.rs`. Reading it independently found the containment rule sound — no
+traversal, no filesystem reach, no unbounded expansion — and found the real,
+actionable gap underneath: **`pattern.rs` had no tests at all**, at 209 lines and
+9 tests' worth of behaviour, and it is the one module in the tree where a
+*project's own text* decides which directories SURE then reads. The same rule was
+reachable through three callers, so it was checked three ways and stated nowhere.
+
+Nine tests were added, plus a fourth family of mutations (28–34) anchored on
+`pattern.rs`, because a test that no mutation can break is a test this repository
+does not count. The rows the new tests pin went into the doc's enforced-by table,
+and the index was re-checked mechanically: **88 backticked identifiers, 87 of them
+`#[test]` functions and one a deliberately named function, 0 found nowhere.**
+
+**The first version of those tests turned the suite red, and the mutation run is
+what said so.** The scratch helper used the process id to make its directory
+unique — the idiom this file had been told to use — and
+`discovery_runs_none_of_the_scripts_it_reads` greps the *text* of all six files in
+the module tree for the process module's name. It reads `#[cfg(test)]` code too.
+The test was failing before any mutation was applied, which means **every
+`CAUGHT` in that run was unattributable** — a mutation cannot be credited with a
+failure that was already there. Had the suite been run only as
+`cargo test --lib discover::pattern`, which is what a person checking their own
+work would run, all nine tests would have passed and the branch would have been
+pushed red.
+
+The fix is in the test and not in the check, because the check was right about the
+file. Uniqueness now comes from `create_dir` failing rather than from a name:
+`AlreadyExists` means try the next number. That is strictly stronger than the
+pid — the pid is unique within one run and says **nothing** across two, so a name
+built from it collides with a previous run's directory when the OS hands out the
+same id, and the test then reads a fixture some earlier run had already written
+into. `create_dir` refuses to adopt a directory that exists, so a stale path is
+skipped whatever else is running.
+
+**And it then turned red a second time, on the sentence explaining the fix.** The
+sentinel searches raw text, so the doc comment saying "no `std::process` here,
+deliberately" tripped the very check it was describing. A **mention is not an
+ability**: the test now drops whole-line comments before searching, so only lines
+that can hold code are read. Only whole-line comments — a trailing comment on a
+line of code is still searched — and the change is documented at the check, since
+the alternative was a trap that would fire on the next author who wrote a sentence
+about the rule.
+
+Neither of these was found by reading the diff. Both were found by running
+something that was expected to pass.
+
+### Two things `P2-T006` found and fixed rather than recorded
+
+**A real gap between `P2-T005` and `P2-T006`.** The "discovery must not start a
+process" source grep in `discover_node.rs` named only Node's three files
+(`discover/mod.rs`, `discover/node.rs`, `discover/read.rs`). `python.rs` therefore
+went unchecked for a whole task, and `rust.rs` would have gone unchecked after
+this one. It now names all six files in the module tree, with a comment saying
+why: the claim is about **discovery**, and a check that named one ecosystem's
+files would have let the next one shell out unnoticed.
+
+**Two tests named in the enforced-by table that do not exist.**
+`a_project_that_is_every_ecosystem_at_once_is_reported_as_all_of_them` (the real
+name says `a_directory_that_is…`) and
+`a_workspace_inherited_dependency_is_read_as_one_that_states_a_version_here`
+(invented outright, replaced with the real
+`a_dependency_sure_cannot_read_is_not_a_dependency_that_is_not_there`). The check
+was mechanical rather than by eye: extract every backticked identifier from the
+table and require `fn <name>` to exist in the corpus. It now reports **79 names,
+0 missing**. A documented index that names a nonexistent test is worse than no
+index — a reader who trusts it believes a property is pinned when it is not.
 
 ## What `P2-T005` added
 
@@ -642,6 +791,7 @@ Three of the five jobs were failing the whole time.
 | 34854388756 | `e10f620` — **the `P2-T005` implementation** | **all five green.** Windows **786** / macOS **788** / Ubuntu **789** passed, 0 failed, each over 34 result lines. Detail below, because **Windows agreeing with the local run exactly is the fact worth having** |
 | 34855496424 | `37a848a` — **the `P2-T005` acceptance** | **all five green, and the counts are the implementation's to the test**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. A documentation-only commit changing no number is the useful reading — it says the record was added without touching what it records |
 | 34855790124 | `cad9592` — **the record of that acceptance** | **all five green, and the same three figures a third time**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. Read from the log rather than from the job colours: `gh run view` alone gives the conclusion, and the conclusion is the least of what a run says |
+| 34858555861 | `9c931d0` — **the `P2-T006` implementation** | **all five green.** Windows **840** / macOS **842** / Ubuntu **843** passed, 0 failed, 1 ignored, each over **35** result lines = **25** parents + 10 children. The parent count went 24 → 25 because `discover_rust` is a new test binary; the child count is unchanged. **Windows agrees with the local Windows run exactly**, and all 54 new test names were read out of all three `rust` logs by name. Detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
@@ -698,6 +848,52 @@ filtered out` — so the ten children can be identified and subtracted with
 confidence. **The figures above are counts over a whole job's step, minus those
 ten.** Per-target counts are quoted in this file **only from the local run**,
 where both streams reach one pipe in write order and the attribution is sound.
+
+### Reading run `34858555861`, `P2-T006`'s — and the arithmetic that bit twice
+
+**All five jobs green**, and the first run in which any **Rust** discovery test
+has executed anywhere.
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 35 | 25 | 10 | **840** | 0 | 1 |
+| `rust (macos-latest)` | 35 | 25 | 10 | **842** | 0 | 1 |
+| `rust (ubuntu-latest)` | 35 | 25 | 10 | **843** | 0 | 1 |
+
+**Windows CI printed exactly the figure the local Windows run printed, 840**, the
+same agreement `P2-T005` had at 786. The section count went 34 → 35 because
+`discover_rust` is a new test binary, so the parents went 24 → 25; the child count
+did not move. The `+2` and `+3` deltas are the `#[cfg(unix)]` tests `P2-T002`
+recorded, unchanged from the previous two runs.
+
+**A trap in the counting, worth writing down because it was stepped in.** The raw
+sum over all 35 result lines is **850** on Windows — and it is wrong by exactly
+**10**. `store_concurrency`'s ten children each print
+`1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out`, and the parent
+section's own line already counts those same tests, so summing every line counts
+them twice. **The figure to report is the sum over the 25 parent sections**, which
+is 840. The first pass of this run's count printed 850 and the number looked
+plausible; it was caught only because it disagreed with the local run. That is the
+argument for having both numbers: a figure read one way and a figure computed
+another way, and the disagreement is the signal.
+
+**All 54 new test names were read out of all three `rust` logs by name** — the 30
+`#[test]`s in `rust.rs` and the 24 in `discover_rust.rs`, each `... ok` in each of
+the Windows, macOS and Ubuntu logs, 54/54 on every platform. The check is
+mechanical rather than by eye: parse the two files for functions carrying a
+`#[test]` attribute, then require `test <name> ... ok` to appear in the job's
+lines. A first attempt at this reported 55 names "missing" on every platform and
+all of them were artifacts of the extraction, not facts about the run: the lib
+target qualifies its test names with the module path
+(`test discover::rust::tests::<name> ... ok`), and the integration file's helper
+`fn listing` is not a test at all. **A name check that has not been checked
+against a name that certainly ran is not evidence**; the two errors here were
+opposite in direction from the count error above, and both were found by the
+number being implausible rather than by being read.
+
+Per-target attribution is still unavailable for the reason recorded above: a
+24-test result line appears **exactly once** in each of the three logs, which is
+consistent with `discover_rust`'s 24 tests, and consistency is all it is.
 
 ### Reading run `34851008124`, the fix for the red acceptance
 
@@ -914,6 +1110,69 @@ nothing local can. Only a run on the platform can.
 consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
+
+## Gate set, as run on the `P2-T006` tests commit (unpushed at the time of writing)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **849 passed, 0 failed, 1 ignored, across 35 result lines = 25 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `python target/tmp/mutate10.py` | **32 of 32 observable mutations caught, 2 declared unobservable, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` did not fire |
+
+**849 is 840 + 9 and 383 is 374 + 9, both measured rather than predicted** — the
+nine are the `pattern.rs` tests and nothing else, which is the arithmetic a
+commit that claims to add only tests has to come back with. The raw sum over all
+35 lines is **859**, which over-counts by exactly 10 for the reason recorded
+above; the figure to report is the sum over the 25 parent sections.
+
+**The important line is the last one, and it is not the mutation count.** The
+harness now runs the suite unmutated first and refuses to report anything if it
+is not green. That check exists because its absence produced a run in which every
+mutation was `CAUGHT` and the verdicts meant nothing — the details are under
+"What the second `P2-T006` commit added". A gate set is only as good as the
+question *what would this have looked like if it were wrong*, and this is the
+second time on this branch that the answer was "exactly the same".
+
+## Gate set, as run at `9c931d0` (`P2-T006`)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **840 passed, 0 failed, 1 ignored, across 35 result lines = 25 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `python target/tmp/mutate10.py` | **26 of 26 observable mutations caught, 1 declared unobservable, 0 SKIP, 0 BUILD** |
+
+Per binary on this platform: `sure-cli` 36 **bin** + 13 `cli_contract`;
+`sure-core` **374 lib** + 9 `config_loading` + 33 `discover_node` + 31
+`discover_python` + **24 `discover_rust`** + 6 `doctor` + 23 `fingerprint_content`
++ 43 `fingerprint_git` + 30 `scan_project` + 6 `store_concurrency` + 4
+`store_packaging`; `sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46
+lib + 12 `conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7
+`integration_thinness` + 8 `repository_shape`; `Doc-tests sure_core` **4**. That
+is 49 + 583 + 116 + 73 + 15 + 4 = 840.
+
+**The arithmetic against 786 at `e10f620` is +54, and both parts are counted
+rather than inferred from the total**: **+30 `#[test]`** in `rust.rs`, which is
+the whole of the lib movement 344 → 374, and **+24** for the new `discover_rust`
+target, which is the **21st test binary** and takes the parent sections from 24 to
+25. 30 + 24 = 54, and `pattern.rs`, `mod.rs`, `node.rs` and `discover_node.rs`
+added **zero** — all four are in the diff and a file being touched is not a test
+being added.
+
+**Those per-binary figures were confirmed against the CI log rather than left as a
+derivation**, and the way it was done is worth keeping because it is the one
+per-target attribution that *is* sound on CI. Proximity is invalid (see above),
+but the **multiset** of result counts is not: take every `test result: ok. N
+passed` line in a job, and compare the multiset of `N` against the per-binary
+counts expected from the local run. On Windows the multiset came back as
+`374, 87, 46, 43, 36, 33, 31, 30, 29, 24, 23, 15, 13, 12, 9, 8, 7, 6×2, 4×2, 0×4`
+— **25 values, matching the 25 expected binaries one for one**, with `374` and
+`24` each appearing exactly once, which is what a unique attribution needs. It is
+still not proof, because two binaries could in principle share a count; it is a
+consistency check, and it is a far stronger one than a colour.
 
 ## Gate set, as run at `e10f620` (`P2-T005`)
 
@@ -1444,6 +1703,118 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P2-T006`
+
+Thirty-four mutations in `target/tmp/mutate10.py` (git-ignored), run against
+`cargo test -p sure-core --lib --test discover_rust --test discover_node --test
+discover_python --no-fail-fast`. **Thirty-two CAUGHT, zero MISSED, zero SKIP,
+zero BUILD**, and **two declared unobservable**, which print `MISSED*` and do not
+fail the script. The script's own last line is the verdict, and it reads *"all 32
+observable mutations caught by a failing test, and 2 declared unobservable as
+expected"* with exit code 0. The figures here are the re-run **on the tree as it
+stands after the `pattern.rs` tests**, after the last edit to either the module or
+the script, and the reverted tree was checked afterwards (`git status` shows only
+the files this commit touches).
+
+**The baseline is now checked by the script, and that is the most important line
+in it.** The run before this one reported `DECLARED UNOBSERVABLE BUT CAUGHT` for
+both of its declared-unreachable mutations — which should be impossible, and was
+not: the suite was **already failing** before the first mutation was applied, so
+every mutation "failed a test" and the verdicts meant nothing. The cause was the
+`pattern.rs` scratch helper's use of the process id (see "What the second
+`P2-T006` commit added"). A mutation cannot be credited with a failure that was
+there before it, so the script now runs the suite unmutated first and stops with
+`BASELINE IS NOT GREEN` if it is not clean. Checking that by hand — which is what
+was done before this run — is a step a person can forget, and it was forgotten.
+
+**The second change is the same rule applied where the code had not followed
+it.** A mutation that stops the code compiling is `BUILD`, but the FAILED lines
+and the compiler-error lines were collected into one list, so an `error:` line
+reaching stdout would have been enough to return `CAUGHT`. The two lists are now
+separate, and only a failing *test* can produce a catch. The rule was written
+first and the code merged its two cases; this is the rule with the merging
+removed.
+
+The families are the three the module is arranged around, and every mutation is a
+plausible **wrong implementation of detection** rather than a random edit:
+*"not there" arriving as "there but unreadable"* and the reverse (1–8); *an
+invented fact* (9–18); and *a weaker source overriding a stronger one, or a rule
+applied that SURE cannot cite* (19–23). The last four cover what counts as a Rust
+project at all and the two lint tools Cargo defines. A **fourth family (28–34)**
+is anchored on `pattern.rs` rather than on `rust.rs`, so the tests added in the
+second commit are shown to be load-bearing rather than counted as coverage: the
+containment rule (28–29), `*` naming directories and not files (30), the root
+never being its own member (31) and never being named twice (32), a refusal told
+apart from a pattern that named nothing (33), and the `Normal`-only guarantee
+(34, declared unobservable).
+
+**Two mutations revert a decision this task made and documented, which makes them
+the most valuable here: they are the bugs that were designed out rather than
+discovered.** Mutation **24** reads `[workspace]` from the wrong key — the exact
+shape of the first draft of `from_json`, where the workspace tables hung off
+`PackageSection`, so a virtual manifest's *entire* workspace would have been
+dropped. Mutation **23** puts a `cargo` command back on a project whose manifest
+SURE never read — the first draft of `command_for` gating on `package()` rather
+than on the document. Both CAUGHT.
+
+**The script found six problems on its first run, and five of them were real test
+gaps closed with five new tests rather than reclassified:**
+
+- a **member whose `Cargo.toml` is a directory**, not a file, was reported as a
+  member with no manifest — a false statement about the project wearing a
+  negative finding's clothes;
+- a **toolchain file that could not be read as a file** — the existing test
+  reached the `toolchain_from_text` error arm and never the `ReadFile::Unread`
+  arm, so a `rust-toolchain.toml` over `max_manifest_bytes` was reported as a
+  project that pins nothing;
+- a **non-string in a `members` list** was turned into a directory name, so
+  `members = [1]` invented a member called `1`;
+- a **value read with the whitespace the file carried**, so `name = "  app  "`
+  reached a finding with its spaces;
+- a `Cargo.toml` that failed to parse could be reported as declaring nothing.
+
+**The sixth is genuinely unreachable and is declared rather than hidden.** The
+arm for a `Manifest::from_json` failure cannot be reached from a file: `read_toml`
+parses with `toml::from_str::<toml::Value>`, and a TOML document **is** a table,
+so `to_json` always yields `Value::Object` and the guard never fires for a caller
+that went through the walk. The guard is pinned directly instead, by
+`a_document_that_is_not_a_table_is_not_read_as_an_empty_manifest`, which hands
+`from_json` the four non-tables a **direct** caller could pass. It stays rather
+than being deleted because deleting it would make `from_json` answer a non-table
+with an empty manifest — the false green this module is arranged against — the
+moment any future caller reaches it by another route. **The second declared-
+unreachable mutation is the matching half in `pattern.rs`** (34): the
+`Component::Normal` arm of `expand` is unreachable because `contained_relative`
+returns only `Normal` components, so `continue` and `return Err` behave the same —
+until mutation 28 breaks the first half, which is why 28 is caught and 34 is not.
+Both arms stay for the same reason: each is a guarantee stated where a future
+caller can read it instead of trusted to a function in another module.
+The script also reports the opposite error: an `UNOBSERVABLE` entry that starts
+being `CAUGHT` is printed as `DECLARED UNOBSERVABLE BUT CAUGHT`, because it means
+the list is now wrong — and that line is what exposed the run whose baseline was
+red, so the check it was written for was never the check that made it useful.
+
+**`BUILD` does not count as caught, and the rule earned its keep immediately —
+against this author.** An edit made while writing the tests used
+`manifest.package()` where `package` is a field, which broke the lib test target,
+and the harness reported **all 27 mutations as `BUILD`**. Had `BUILD` counted as
+caught, that run would have read as full coverage of a suite that did not compile.
+
+**Mutation 7 needed a test edit rather than a test, and that is recorded because a
+mutation caught by a rule other than the one it removes has not been tested.** The
+toolchain-shape test's list already held `channel = "stable"` *with spaces*, but
+that spelling is rejected by the bare-form line-count check even when the
+`WrongShape` guard is deleted — so the mutation was being caught by a different
+rule than the one it removes. `channel="stable"`, one token, which **only** the
+guard can reject, was added to the list.
+
+**Two stale cross-references in the script's own docstring were corrected against
+a mechanical numbering of the list** rather than by eye: it cited *"mutations 1–8,
+28"* where the list has 27 entries and no 28, and called the workspace-from-the-
+wrong-key mutation 13 where it is 24. A scratch file that will be cited as
+evidence is a document, and a document with a wrong number in it is the thing this
+section keeps finding.
+
 ### `P2-T005`
 
 Twenty-three mutations in `target/tmp/mutate9.py` (git-ignored), run against
@@ -1934,6 +2305,19 @@ it needs a Mac.
   refuses to let "not there" arrive as "there but unreadable" survived being
   written a second time, and the one-budget-serves-both fact is recorded rather
   than discovered.
+- `9c931d0` P2-T006 — `crates/sure-core/src/discover/rust.rs` (2885 lines, 30 unit
+  tests), `tests/discover_rust.rs` (24 tests, the new **21st** test binary),
+  `src/discover/pattern.rs` (the member-pattern expansion lifted out of
+  `node.rs`), the Rust half of `docs/architecture/ECOSYSTEM_DISCOVERY.md` with
+  five new gaps, and small extensions to `mod.rs` (`Ecosystem::Rust`,
+  `Findings::Rust`, `MemberManifest` lifted) and `node.rs` (the re-export that
+  keeps its old names). **The third ecosystem closes the trio, and it is the one
+  that put the readers under real pressure**: `Cargo.toml` has a shape neither of
+  the other two has, in that its two top-level tables are siblings either of which
+  can be absent, so the "not there is never there-but-unreadable" rule could not
+  simply be copied — `Manifest` and `PackageSection` had to be split, and the
+  commands had to be gated on the document rather than on the package. Both splits
+  are pinned by mutations that revert them.
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -1945,47 +2329,39 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **`P2-T005` is accepted, and its implementation commit is pushed and read.**
-   `e10f620` in run `34854388756`: **all five jobs green**, Windows **786** —
-   the same number the local Windows run printed — macOS 788, Ubuntu 789, and the
-   first run in which a Python discovery test executed anywhere. State:
-   `{ accepted: 25, queued: 141 }`, phase `P2`, **5 of 12**.
-2. `node scripts/taskctl.mjs start P2-T006` — Rust project discovery, the third
-   ecosystem and the one that finishes the trio `P2-T004` opened. The remaining
-   READY list is `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`,
-   `P8-T001`, `P12-T008`, `P13-T001`; `P2-T010` is `ProjectIntent` ingestion from
-   an explicit goal/spec, which `Config` already carries a slot for.
-   **`P2-T006`'s reader already exists and is already proven.**
-   `discover::read::read_toml` was built for `pyproject.toml` and carries four
-   unit tests of its own in `read.rs` — a TOML document's shape, order and types;
-   a datetime as the text that was written; a number JSON cannot write; and
-   invalid TOML as unread rather than absent. `Cargo.toml` is the same format, so
-   the conversion half of this task is done before it starts, and both manifests
-   say so in the same words: the workspace one that "`Cargo.toml` is `P2-T006`'s
-   reader and not implemented yet", and
-   `crates/sure-core/Cargo.toml` that `toml` is there for "`pyproject.toml` and,
-   from `P2-T006`, `Cargo.toml`". What is *not* done is
-   everything `Cargo.toml` means: `[workspace]` members, `[dependencies]` versus
-   `[dev-dependencies]` versus `[build-dependencies]` versus target-specific
-   tables, the `edition`/`rust-version` claims, and the fact that a
-   `Cargo.toml` with a `[workspace]` section is a **root** while one without may
-   be a member — a shape `node.rs` and `python.rs` have no analogue for.
-   **Correction, 2026-09-14, made while doing `P2-T005`:** a sentence stood here
-   saying `crates/sure-testkit/tests/repository_shape.rs` is where a dependency's
-   category is pinned and that it "is the one that will say whether it was done".
-   That is false. `repository_shape.rs` asserts `member_names()` and
-   `normal_edges()`, both workspace-internal, and its `TestOnlyInProduction`
-   violation fires only for an edge *to* `sure-testkit`; a third-party dependency
-   moving from `[dev-dependencies]` to `[dependencies]` is invisible to it. What
-   actually said whether it was done was `cargo check`, which failed until the
-   move was made. Nothing acted on the false claim, so it is corrected here
-   rather than buried: the pattern to watch for is a handoff sentence that names
-   a test as the authority for a property without the test having been read.
+1. **`P2-T006`'s second commit has to be pushed and its run read before the
+   acceptance is recorded.** The implementation commit `9c931d0` was pushed in
+   run `34858555861`: **all five jobs green**, Windows **840** — the same number
+   the local Windows run printed — macOS 842, Ubuntu 843, over 35 result lines =
+   25 parents + 10 children, and the first run in which a Rust discovery test
+   executed anywhere. The second commit carries the `pattern.rs` tests, the
+   sentinel change, the doc rows and gap 16, so it moves the local total and
+   needs its own run read. State: `{ accepted: 25, in_progress: 1, queued: 140 }`,
+   phase `P2`, **5 of 12**.
+2. `node scripts/taskctl.mjs start P2-T010` — *"Implement `ProjectIntent` ingestion
+   from explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
+   explicit goal without requiring raw transcript recording."* The remaining READY
+   list is `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`,
+   `P13-T001`, and **`P2-T010` finishes phase P2**.
+   Checked rather than assumed, because a handoff that describes the next task
+   wrongly is a handoff that costs a session: the pieces it needs already exist —
+   `sure_domain::intent::ProjectIntent` in `crates/sure-domain/src/intent.rs`,
+   `ProjectIntentConfig` at `crates/sure-core/src/config/mod.rs:145`,
+   `RecordKind::Document(DocumentKind::ProjectIntent)` at
+   `crates/sure-core/src/store/record.rs:75`, and `sure check` as a real CLI
+   subcommand (`crates/sure-cli/src/cli.rs:179`). What is missing is the path
+   between them. **What has *not* been read is whether "a trusted explicit goal"
+   is a phrase with a defined meaning elsewhere** — this entry names where the
+   types live and nothing about their shape, and the first thing to read is
+   `intent.rs`, not this paragraph.
    **Keep the ordering discipline**: push each task's commits, read that run, and
-   only then start the next acceptance. The cost of not doing it is already
-   written down twice in this file. **The `P2-T005` run paid for it once more**:
-   the per-target counts read out of a CI log by proximity were wrong three
-   times, and only the whole-step counts survived.
+   only then start the next acceptance. The cost of not doing it is written down
+   three times in this file now. **The `P2-T006` run paid for it in a new
+   currency**: the per-target counts read out of a CI log by proximity were wrong
+   three times for `P2-T005`, so this time the whole-step count was cross-checked
+   by a **multiset** comparison against the expected per-binary counts — a check
+   that is sound where proximity is not, and that caught nothing only because the
+   first whole-step figure, 850, was itself wrong by exactly 10.
 3. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline

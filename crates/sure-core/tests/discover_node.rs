@@ -522,9 +522,21 @@ fn discovery_runs_none_of_the_scripts_it_reads() {
                 .join(file),
         )
         .unwrap_or_else(|error| panic!("cannot read {file}: {error}"));
+        // Doc and line comments are dropped before the search, because a
+        // **mention is not an ability**. A sentence explaining that this module
+        // must not start a process would otherwise trip the check that says so,
+        // and it did: a first draft of the helper above carried that sentence and
+        // turned this test red without a line of behaviour changing. Only lines
+        // that are entirely a comment are dropped, so every line that can hold
+        // code is still searched.
+        let code: String = source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         for forbidden in ["process::Command", "std::process"] {
             assert!(
-                !source.contains(forbidden),
+                !code.contains(forbidden),
                 "{file} mentions {forbidden}, and discovery must not be able to \
                  start a process"
             );

@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod diagnostics;
+pub mod discover;
 pub mod doctor;
 pub mod fingerprint;
 pub mod paths;

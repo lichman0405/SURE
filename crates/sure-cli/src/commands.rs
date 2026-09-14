@@ -23,12 +23,13 @@
 //!
 //! # Why so few commands work
 //!
-//! Two do, and both are questions about SURE itself rather than about a
-//! project: `version` and `protocol`. Every other command needs the engine, and
-//! the engine is what the phases after this one build. Saying so is not a gap
-//! in this task; it is the task. `docs/architecture/CLI.md` records what each
-//! command is for, and this file is where the ones that cannot run say so to
-//! the user rather than to a reader of the docs.
+//! Three do, and all three answer questions about SURE or about this machine
+//! rather than about a project: `version`, `protocol` and `doctor`. Every other
+//! command needs the engine, and the engine is what the phases after this one
+//! build. Saying so is not a gap in this task; it is the task.
+//! `docs/architecture/CLI.md` records what each command is for, and this file is
+//! where the ones that cannot run say so to the user rather than to a reader of
+//! the docs.
 
 use crate::cli::{Command, HistoryAction};
 use crate::report::{NotYet, Report};
@@ -38,10 +39,15 @@ impl Command {
     #[must_use]
     pub fn report(&self) -> Report {
         match self {
-            // The two this build can answer. Both are questions about SURE, and
-            // neither needs a project, a store or a check.
+            // The three this build can answer. All three are questions about
+            // SURE or about this machine rather than about a project, which is
+            // why none of them needs a check engine.
             Self::Version => Report::Version,
             Self::Protocol => Report::Protocol,
+            // The examination happens here rather than in `Report`, so that the
+            // report stays a value — something a test can build and a renderer
+            // can read — instead of a thing that goes and looks.
+            Self::Doctor => Report::Doctor(Box::new(sure_core::doctor::examine_this_machine())),
 
             // Everything below is a real command with a real job and no
             // implementation yet.
@@ -65,11 +71,6 @@ impl Command {
                 does: "show what SURE has recorded, on this machine and for this project",
                 instead: "Nothing was read from the history, and nothing was deleted.",
             }),
-            Self::Doctor => not_yet(
-                self,
-                "report where SURE keeps its files on this machine, and what it found there",
-                "Nothing about this machine was examined.",
-            ),
             Self::Config { .. } => not_yet(
                 self,
                 "show the settings in effect and which layer each one came from",
@@ -192,23 +193,60 @@ mod tests {
                         not_yet.instead
                     );
                 }
-                Report::Version | Report::Protocol => {}
+                Report::Version | Report::Protocol | Report::Doctor(_) => {}
             }
         }
     }
 
     #[test]
-    fn the_commands_this_build_implements_are_exactly_version_and_protocol() {
-        // Stated as a list, so that making a third command work is a change to
+    fn the_commands_this_build_implements_are_exactly_these_three() {
+        // Stated as a list, so that making a fourth command work is a change to
         // this test rather than a side effect somebody notices later. If a
         // command starts working without this list moving, something returned a
         // success it had not earned.
         let implemented: Vec<&str> = every_command()
             .iter()
-            .filter(|command| matches!(command.report(), Report::Version | Report::Protocol))
+            .filter(|command| !matches!(command.report(), Report::Unavailable(_)))
             .map(Command::name)
             .collect();
-        assert_eq!(implemented, ["protocol", "version"]);
+        assert_eq!(implemented, ["doctor", "protocol", "version"]);
+    }
+
+    #[test]
+    fn a_command_that_runs_never_answers_a_question_it_was_not_asked() {
+        // The refusals are held to the command they were asked by; the commands
+        // that work have to be held to the same rule, and `Report::command` is
+        // where that name lives. A `sure doctor` frame that said `version` would
+        // be a script reading the wrong answer.
+        //
+        // The first word has to match, not the whole name: `sure history delete`
+        // answers as "history delete", because the subcommand is part of what
+        // the user asked for and a refusal that dropped it would be answering
+        // about the wrong thing. See [`history_name`].
+        for command in every_command() {
+            assert_eq!(
+                command.report().command().split(' ').next(),
+                Some(command.name()),
+                "{command:?} answers under a different name than it was asked by"
+            );
+        }
+    }
+
+    #[test]
+    fn a_doctor_that_found_a_problem_does_not_exit_zero() {
+        // The false-green rule applied to this machine's own state. The core
+        // decides what a problem is; what this asserts is that the CLI cannot
+        // turn one into a success on the way out.
+        let report = Command::Doctor.report();
+        let Report::Doctor(doctor) = &report else {
+            panic!("sure doctor is implemented");
+        };
+        if doctor.is_well() {
+            assert_eq!(report.exit_code(), crate::report::exit::OK);
+        } else {
+            assert_eq!(report.exit_code(), crate::report::exit::NOT_GREEN);
+            assert_ne!(report.exit_code(), crate::report::exit::OK);
+        }
     }
 
     #[test]

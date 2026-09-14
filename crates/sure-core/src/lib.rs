@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod diagnostics;
+pub mod doctor;
 pub mod paths;
 pub mod redact;
 pub mod store;
@@ -30,6 +31,13 @@ pub const NAME: &str = PRODUCT_NAME;
 
 /// The product promise shown to users.
 pub const PROMISE: &str = PRODUCT_PROMISE;
+
+/// The version number of this build, without the product name.
+///
+/// Re-exported so that a report naming the build and a `sure version` naming it
+/// cannot disagree: `sure_core::VERSION` is the same constant
+/// [`version_string`] is built from, not a second copy of it.
+pub const VERSION: &str = sure_domain::VERSION;
 
 /// The version string reported by the CLI.
 #[must_use]

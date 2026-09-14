@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T10:14:46.285Z",
+  "last_updated": "2026-09-14T10:15:00.588Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -162,8 +162,8 @@
       "notes": "crates/sure-cli: cli.rs (the grammar as one enum Command plus the three action enums; CLI.md lists the same ten commands and a test compares the doc against what this build parses), report.rs (report::exit — the whole status table and the only place a status is chosen — plus NotYet and Report{Version,Protocol,Unavailable} with human/machine/frame), output.rs (Format and the two output paths; the only module in the crate that names a process stream), commands.rs (Command::report, one exhaustive match with no _ arm and no unreachable!()), main.rs (try_parse rather than Parser::parse so clap's exit status goes through status_of). tests/cli_contract.rs: 11 process-boundary tests over the built binary. Two commands work (version, protocol — both answer questions about SURE, not about a project, so neither needs an engine); every other documented command parses, exits 3 and says so. A bare sure is 2, not 0. Statuses 1 and 4 reserved. clap 4.6.6 is the crate's first dependency. docs/architecture/CLI.md is new; PROTOCOL.md amended so 'everything SURE writes is one of seven documents' stays literally true (the response frame is a container, not a document, and lives in sure-cli because it has one consumer). The refusal deliberately does not name a phase: no test can check that a phase lands and sure history has no owning task. Six mutations run, all six fired; flipping Report::is_an_answer is visible only under --no-fail-fast. Also fixed a false comment in sure-core/tests/store_concurrency.rs: --quiet does not stop a child printing its own test-result summary, so a workspace run shows 28 result lines for 429 tests and the 408 recorded for P1-T005 was a raw sum that overstated the suite by the ten children; the true P1-T005 figure was 396 passed + 1 ignored, and P1-T008 adds 33. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 429 passed / 0 failed / 1 ignored across 14 test binaries; node scripts/validate-bootstrap.mjs 17 phases / 166 tasks. Commit b725fdb."
     },
     "P1-T009": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T10:15:00.587Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

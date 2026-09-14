@@ -25,11 +25,17 @@
 //! # The machine-readable frame
 //!
 //! One JSON object on one line, always with `sure_version`, `protocol_version`,
-//! `command` and `outcome`. The first two are there so that a bug report
-//! containing a captured response says which build produced it — the two things
-//! that make a stored answer unreadable are a newer SURE and a newer protocol,
-//! and a response that does not name either invites the reader to assume the
-//! current ones.
+//! `command`, `outcome` and `exit_code`. The first two are there so that a bug
+//! report containing a captured response says which build produced it — the two
+//! things that make a stored answer unreadable are a newer SURE and a newer
+//! protocol, and a response that does not name either invites the reader to
+//! assume the current ones. `command` and `outcome` are what a reader switches
+//! on, and `exit_code` is the same decision the process returned, so that a
+//! script reading only the body and a script reading only the status are told
+//! the same thing.
+//!
+//! Everything else a command found goes under `details`, one key, written by
+//! that command's own module.
 //!
 //! This frame is **not** one of the seven documents in
 //! `docs/architecture/PROTOCOL.md`. Those are statements about a project or an
@@ -50,16 +56,17 @@ use serde_json::json;
 pub mod exit {
     /// The command did what it says it does.
     pub const OK: u8 = 0;
-    /// The command ran, and the answer is not clear.
+    /// The command ran, and the answer is not a clean one.
     ///
-    /// Reserved. `sure check` returns this once a project can be checked and
-    /// findings are found, so that a pipeline can tell "the project has
-    /// problems" from "SURE broke" — the two need opposite responses, and one
-    /// status for both is how a broken tool gets read as a clean project.
-    #[allow(
-        dead_code,
-        reason = "reserved by docs/architecture/CLI.md; no command can produce a verdict yet"
-    )]
+    /// `sure doctor` returns this when it finds something wrong with this
+    /// installation, and `sure check` will return it once a project can be
+    /// checked and findings are found. That is one code for two things on
+    /// purpose: what a caller does with it is the same — stop — and the report
+    /// says which it was. What must never be merged is this and
+    /// [`UNAVAILABLE`]: "the project has problems" and "SURE cannot do that
+    /// here" need opposite responses from the person reading them, and one
+    /// status for both is how a tool that is broken gets read as a project that
+    /// is clean.
     pub const NOT_GREEN: u8 = 1;
     /// The command line was wrong.
     pub const USAGE: u8 = 2;
@@ -114,12 +121,18 @@ pub struct NotYet {
 }
 
 /// The result of one command.
+///
+/// Boxed where the payload is large, so that a variant carrying a page of
+/// findings does not make every `Report` a page wide. Clippy enforces the
+/// general rule; the box here is the answer to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Report {
     /// `sure version`.
     Version,
     /// `sure protocol`.
     Protocol,
+    /// `sure doctor`, carrying what it found.
+    Doctor(Box<sure_core::doctor::DoctorReport>),
     /// A command whose work lands in a later phase.
     Unavailable(NotYet),
 }
@@ -135,6 +148,18 @@ impl Report {
     pub const fn outcome(&self) -> &'static str {
         match self {
             Self::Version | Self::Protocol => "ok",
+            // A doctor that found something wrong ran perfectly well, and this
+            // says what its answer was rather than what the run did. It reads
+            // the same predicate as `exit_code`, so the two cannot disagree;
+            // they are both here because one is read by a person's script and
+            // the other by anything that can read a status.
+            Self::Doctor(report) => {
+                if report.is_well() {
+                    "ok"
+                } else {
+                    "not_green"
+                }
+            }
             Self::Unavailable(_) => "unavailable",
         }
     }
@@ -144,6 +169,13 @@ impl Report {
     pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Version | Self::Protocol => exit::OK,
+            Self::Doctor(report) => {
+                if report.is_well() {
+                    exit::OK
+                } else {
+                    exit::NOT_GREEN
+                }
+            }
             Self::Unavailable(_) => exit::UNAVAILABLE,
         }
     }
@@ -155,13 +187,14 @@ impl Report {
     /// stdout and a complaint to stderr, which is what makes
     /// `sure history > out.txt` leave the complaint on the terminal.
     ///
-    /// `outcome()` is not the same question: once `sure check` can return a
-    /// not-green verdict, that result is an *answer* — the verdict is the
-    /// product, and the exit status is what carries the bad news.
+    /// `outcome()` is not the same question. A doctor report that found a
+    /// problem is still an *answer* — `sure doctor > report.txt` has to put the
+    /// report in the file, and the exit status is what carries the bad news. A
+    /// complaint is SURE saying it could not do the thing at all.
     #[must_use]
     pub const fn is_an_answer(&self) -> bool {
         match self {
-            Self::Version | Self::Protocol => true,
+            Self::Version | Self::Protocol | Self::Doctor(_) => true,
             Self::Unavailable(_) => false,
         }
     }
@@ -187,6 +220,7 @@ impl Report {
                 "Harness protocol version {}.",
                 sure_core::PROTOCOL_VERSION
             ),
+            Self::Doctor(report) => crate::doctor::human(report, out),
             Self::Unavailable(not_yet) => {
                 let NotYet {
                     command,
@@ -222,17 +256,32 @@ impl Report {
     }
 
     /// The frame [`Report::machine`] writes.
+    ///
+    /// # Why `exit_code` is always here
+    ///
+    /// It was first written only for a refusal, on the idea that a field should
+    /// appear when it says something. That is the wrong test for this one: it is
+    /// one of the two things a caller switches on, and a frame where it is
+    /// sometimes `null` is a frame a script has to special-case. The status the
+    /// process returned is a fact about every run, so it is in every frame.
     fn frame(&self) -> serde_json::Value {
         let mut frame = json!({
             "sure_version": env!("CARGO_PKG_VERSION"),
             "protocol_version": sure_core::PROTOCOL_VERSION,
             "command": self.command(),
             "outcome": self.outcome(),
+            "exit_code": self.exit_code(),
         });
-        if let Self::Unavailable(not_yet) = self {
-            frame["does"] = json!(not_yet.does);
-            frame["instead"] = json!(not_yet.instead);
-            frame["exit_code"] = json!(self.exit_code());
+        match self {
+            Self::Unavailable(not_yet) => {
+                frame["does"] = json!(not_yet.does);
+                frame["instead"] = json!(not_yet.instead);
+            }
+            // Everything a doctor run found, under one key, so that the fields
+            // above keep meaning exactly what the module documentation says
+            // they mean.
+            Self::Doctor(report) => frame["details"] = crate::doctor::machine(report),
+            Self::Version | Self::Protocol => {}
         }
         frame
     }
@@ -246,6 +295,7 @@ impl Report {
         match self {
             Self::Version => "version",
             Self::Protocol => "protocol",
+            Self::Doctor(_) => "doctor",
             Self::Unavailable(not_yet) => not_yet.command,
         }
     }
@@ -274,15 +324,58 @@ mod tests {
         }
     }
 
+    /// A doctor report carrying the given problems.
+    ///
+    /// Built rather than produced by `sure_core::doctor::examine`, because what
+    /// is under test in this module is the frame, the status and the stream —
+    /// not what happens to be in a temporary directory. `is_well` is decided by
+    /// `problems` alone, so this is enough to drive both outcomes, and the
+    /// end-to-end shape is `tests/cli_contract.rs`'s subject.
+    fn a_doctor_report(problems: Vec<sure_core::doctor::Problem>) -> Report {
+        use sure_core::doctor::{Build, DoctorReport, Places, StoreState};
+
+        Report::Doctor(Box::new(DoctorReport {
+            build: Build {
+                version: "0.0.0-test".to_owned(),
+                protocol_version: 1,
+                os: "test",
+                arch: "test",
+                running_from: None,
+            },
+            places: Places::Unknown {
+                what: "its evidence and history",
+                detail: "not this test's subject".to_owned(),
+            },
+            store: StoreState::NotLookedFor,
+            tools: Vec::new(),
+            problems,
+            not_checked: Vec::new(),
+        }))
+    }
+
+    fn a_problem() -> sure_core::doctor::Problem {
+        sure_core::doctor::Problem {
+            what: "SURE has recorded history on this machine and cannot read it.",
+            detail: "the file is not a database".to_owned(),
+        }
+    }
+
+    /// Every report this build can produce.
+    fn every_report() -> Vec<Report> {
+        vec![
+            Report::Version,
+            Report::Protocol,
+            a_doctor_report(Vec::new()),
+            a_doctor_report(vec![a_problem()]),
+            Report::Unavailable(a_refusal()),
+        ]
+    }
+
     #[test]
     fn the_machine_form_is_one_line() {
         // A pipeline reading a stream of responses splits on newlines, so a
         // pretty-printed frame would be a frame and a half of somebody's output.
-        for report in [
-            Report::Version,
-            Report::Protocol,
-            Report::Unavailable(a_refusal()),
-        ] {
+        for report in every_report() {
             let written = text(&report, true);
             assert!(
                 !written.contains('\n'),
@@ -295,11 +388,7 @@ mod tests {
     fn the_machine_form_names_the_build_and_the_protocol() {
         // The two facts that decide whether a captured response can still be
         // read. A frame without them is one a reader has to guess about.
-        for report in [
-            Report::Version,
-            Report::Protocol,
-            Report::Unavailable(a_refusal()),
-        ] {
+        for report in every_report() {
             let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
             assert_eq!(
                 frame["protocol_version"],
@@ -312,6 +401,66 @@ mod tests {
             );
             assert_eq!(frame["command"], json!(report.command()));
             assert_eq!(frame["outcome"], json!(report.outcome()));
+            assert_eq!(frame["exit_code"], json!(report.exit_code()));
+        }
+    }
+
+    #[test]
+    fn every_frame_carries_the_status_the_process_returns() {
+        // Including the ones that are fine. A field that is present only when
+        // something went wrong is a field every reader has to guard, and the
+        // status is a fact about every run.
+        for report in every_report() {
+            let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
+            assert!(
+                frame["exit_code"].is_u64(),
+                "{} produced a frame with no exit_code: {frame}",
+                report.command()
+            );
+        }
+    }
+
+    #[test]
+    fn a_doctor_report_that_found_a_problem_is_still_an_answer() {
+        // The stream depends on whether SURE could do the thing, not on whether
+        // the news is good. `sure doctor > report.txt` has to put the report in
+        // the file; the status is what carries the bad news.
+        let unhappy = a_doctor_report(vec![a_problem()]);
+        assert!(unhappy.is_an_answer());
+        assert_eq!(unhappy.outcome(), "not_green");
+        assert_eq!(unhappy.exit_code(), exit::NOT_GREEN);
+        assert_ne!(
+            unhappy.exit_code(),
+            exit::UNAVAILABLE,
+            "a doctor that found a problem did not fail to run"
+        );
+
+        let happy = a_doctor_report(Vec::new());
+        assert!(happy.is_an_answer());
+        assert_eq!(happy.outcome(), "ok");
+        assert_eq!(happy.exit_code(), exit::OK);
+    }
+
+    #[test]
+    fn a_doctor_report_carries_what_it_found_in_one_place() {
+        // The frame's fixed fields keep meaning what the module says they mean,
+        // and everything a command found goes under `details`.
+        let frame: serde_json::Value =
+            serde_json::from_str(&text(&a_doctor_report(Vec::new()), true)).unwrap();
+        let details = &frame["details"];
+        assert!(details.is_object(), "doctor reported nothing: {frame}");
+        for key in [
+            "build",
+            "places",
+            "store",
+            "tools",
+            "problems",
+            "not_checked",
+        ] {
+            assert!(
+                details.get(key).is_some(),
+                "a doctor report with no {key:?} is one a reader cannot use: {details}"
+            );
         }
     }
 
@@ -351,6 +500,7 @@ mod tests {
         // the complaint on the terminal.
         assert!(Report::Version.is_an_answer());
         assert!(Report::Protocol.is_an_answer());
+        assert!(a_doctor_report(Vec::new()).is_an_answer());
         assert!(!Report::Unavailable(a_refusal()).is_an_answer());
     }
 
@@ -366,26 +516,30 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_carries_the_exit_status_the_process_returns() {
-        // So that a script reading only the body, and a script reading only the
-        // status, are told the same thing.
-        let report = Report::Unavailable(a_refusal());
-        let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
-        assert_eq!(frame["exit_code"], json!(report.exit_code()));
-    }
-
-    #[test]
     fn every_outcome_name_is_one_of_the_documented_ones() {
-        const DOCUMENTED: &[&str] = &["ok", "unavailable"];
-        for report in [
-            Report::Version,
-            Report::Protocol,
-            Report::Unavailable(a_refusal()),
-        ] {
+        const DOCUMENTED: &[&str] = &["ok", "not_green", "unavailable"];
+        for report in every_report() {
             assert!(
                 DOCUMENTED.contains(&report.outcome()),
                 "{} is not an outcome docs/architecture/CLI.md lists",
                 report.outcome()
+            );
+        }
+    }
+
+    #[test]
+    fn the_outcome_and_the_status_tell_the_same_story() {
+        // Two spellings of one decision, and they must not drift. `ok` is the
+        // only outcome that may exit 0; everything else stops a script.
+        for report in every_report() {
+            let clean = report.outcome() == "ok";
+            assert_eq!(
+                clean,
+                report.exit_code() == exit::OK,
+                "{} says {:?} and exits {}",
+                report.command(),
+                report.outcome(),
+                report.exit_code()
             );
         }
     }

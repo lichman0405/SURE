@@ -84,8 +84,30 @@ const EVERY_COMMAND: &[&[&str]] = &[
     &["version"],
 ];
 
-/// The two commands this build can carry out, and the only two.
-const IMPLEMENTED: &[&[&str]] = &[&["protocol"], &["version"]];
+/// The commands this build carries out, and the only three.
+///
+/// Every other command in [`EVERY_COMMAND`] answers `unavailable`, and the
+/// statuses below are only meaningful while that holds.
+const IMPLEMENTED: &[&[&str]] = &[&["doctor"], &["protocol"], &["version"]];
+
+/// The commands whose answer is the same on every machine, and so is a status
+/// this file can demand.
+///
+/// `doctor` is not one of them, and that is the point of it: it reports on the
+/// machine it runs on, and a machine where SURE found something wrong about its
+/// own files earns status 1. Demanding 0 here would turn this file into a claim
+/// that the machine running it is clean, which is a claim about a machine and
+/// not about SURE.
+const ALWAYS_OK: &[&[&str]] = &[&["protocol"], &["version"]];
+
+/// The commands that ran and answered nothing, used where a refusal is the
+/// subject rather than a report.
+const REFUSED: &[&[&str]] = &[
+    &["check"],
+    &["repair"],
+    &["hook", "ingest"],
+    &["history", "delete"],
+];
 
 #[test]
 fn every_documented_command_parses() {
@@ -144,10 +166,10 @@ fn no_command_that_did_nothing_reports_success() {
 }
 
 #[test]
-fn the_two_commands_that_work_report_success() {
+fn the_commands_that_work_report_success() {
     // The other half. A build where nothing exits 0 is a build that has stopped
     // answering, and the previous test would be satisfied by it.
-    for args in IMPLEMENTED {
+    for args in ALWAYS_OK {
         let run = run(args);
         assert!(
             run.succeeded(),
@@ -160,11 +182,64 @@ fn the_two_commands_that_work_report_success() {
 }
 
 #[test]
+fn a_doctor_report_is_an_answer_however_it_turns_out() {
+    // `sure doctor` is the first command whose status depends on what it found,
+    // so it is the first place where the two ways of reading a result can come
+    // apart: the status says whether the answer was clean, and the streams say
+    // whether there was an answer at all. Both are checked against the frame the
+    // same run produced, rather than against what this machine happens to hold.
+    let human = run(&["doctor"]);
+    assert!(
+        matches!(human.status, 0 | 1),
+        "`sure doctor` exited {}. It either answered (0) or answered that something is \
+         wrong (1); anything else means it did not run:\n{}",
+        human.status,
+        human.stderr
+    );
+    assert!(
+        human.stderr.is_empty(),
+        "the report went to standard error, so `sure doctor > report.txt` would leave \
+         the file empty:\n{}",
+        human.stderr
+    );
+    assert!(!human.stdout.trim().is_empty(), "it printed nothing");
+
+    let machine = run(&["--format", "json", "doctor"]);
+    let frame: serde_json::Value = serde_json::from_str(machine.stdout.trim())
+        .unwrap_or_else(|error| panic!("`sure --format json doctor` is not JSON: {error}"));
+    assert_eq!(
+        machine.status, human.status,
+        "the two paths disagree about the status:\n{}",
+        machine.stdout
+    );
+    assert_eq!(
+        frame["outcome"].as_str(),
+        Some(if human.status == 0 { "ok" } else { "not_green" }),
+        "the body and the status disagree about the same run: {frame}"
+    );
+    assert_eq!(
+        frame["exit_code"].as_i64(),
+        Some(i64::from(human.status)),
+        "the frame's own status is not the one the process returned: {frame}"
+    );
+    // The reason a script can act on, and the reason the status is 1: a machine
+    // that is clean reports no problems, and the frame is where that list is.
+    let problems = frame["details"]["problems"]
+        .as_array()
+        .expect("a doctor frame lists what it found wrong, even when the list is empty");
+    assert_eq!(
+        problems.is_empty(),
+        human.status == 0,
+        "the status and the problems disagree: {frame}"
+    );
+}
+
+#[test]
 fn a_refusal_reads_on_the_terminal_and_leaves_standard_output_empty() {
     // `sure check > report.txt` has to put a report in the file and leave the
     // complaint where the person can see it. For a command that produced
     // nothing, the file must therefore be empty rather than full of prose.
-    for args in [&["check"][..], &["doctor"][..], &["history", "delete"][..]] {
+    for args in REFUSED {
         let run = run(args);
         assert!(
             run.stdout.is_empty(),
@@ -227,7 +302,7 @@ fn the_two_paths_disagree_about_nothing_that_matters() {
     // The separation has to be a difference in *shape*, not in *content*. If
     // the machine form and the human form could describe different outcomes,
     // a person and their build script would be reading two different products.
-    for args in [&["check"][..], &["doctor"][..], &["hook", "ingest"][..]] {
+    for args in REFUSED {
         let human = run(args);
         let mut machine: Vec<&str> = vec!["--format", "json"];
         machine.extend_from_slice(args);

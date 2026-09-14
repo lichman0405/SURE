@@ -10,6 +10,7 @@
 //! | what the command line accepts | [`cli`] |
 //! | what a command does in this build | [`commands`] |
 //! | how a result is written | [`report`] |
+//! | what `sure doctor` says, in both forms | [`doctor`] |
 //! | which stream, and which of the two paths | [`output`] |
 //! | the exit status | `report::Report::exit_code` |
 //!
@@ -25,6 +26,7 @@
 
 mod cli;
 mod commands;
+mod doctor;
 mod output;
 mod report;
 

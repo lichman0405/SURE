@@ -42,10 +42,19 @@ pub const PRODUCT_PROMISE: &str = "AI says it's done. Be SURE.";
 /// finding or evidence record changed, and stored records may need reinterpretation.
 pub const DOMAIN_SEMANTICS_VERSION: u32 = 1;
 
+/// The version number of this build, without the product name.
+///
+/// [`version_string`] is a name and this; a caller that already prints the name
+/// takes this one, because the alternative is what happened the first time this
+/// was written: `format!("{NAME} {}", version_string())` rendered as
+/// `SURE SURE 0.0.0-bootstrap`. One spelling of the number, two ways of
+/// presenting it.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The version string reported by the CLI.
 #[must_use]
 pub fn version_string() -> String {
-    format!("{PRODUCT_NAME} {}", env!("CARGO_PKG_VERSION"))
+    format!("{PRODUCT_NAME} {VERSION}")
 }
 
 #[cfg(test)]

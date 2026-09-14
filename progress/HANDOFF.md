@@ -36,15 +36,17 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 23, queued: 143 }
-READY: P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001,
+{ accepted: 24, queued: 142 }
+READY: P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001,
       P12-T008, P13-T001
 ```
 
-Nothing is `in_progress`: `P2-T003` was accepted at the end of the session that
-wrote this file, and the next task has not been started yet. `P2-T003` is
-described in "What `P2-T003` added" below. Everything else on this branch is the
-`P2-T002` line, including the filter hardening.
+Nothing is `in_progress`: `P2-T004` was accepted at the end of the session that
+wrote this file, and the next task has not been started yet. `P2-T004` is
+described in "What `P2-T004` added" below, together with the defect in five test
+scratch helpers that verifying it turned up — fixed in `0a577ca`, and described
+with the one instance that was **proven** separated from the four that were not.
+Everything else on this branch is the `P2-T003` and `P2-T002` line.
 
 **`P2-T002` (Git project fingerprint) is now the previous session's work.** All
 of it is on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the
@@ -97,8 +99,9 @@ project cannot make a check hang, and it has now run somewhere.
 correction.** `P1-T010`'s "19 test binaries" counted `store_concurrency`'s child
 processes; `P1-T011` corrected the count to 15 and said "four doc-test targets
 report 0". Both were true when written and both are now wrong as descriptions of
-the repository: the **15 became 16 and is now 18**, and the doc-test zeros became
-a one and are now **three**. `target/tmp/count_tests.py` **used to skip the
+the repository: the **15 became 16, then 18, and is now 19**, and the doc-test
+zeros became a one, then **three**, and are now **four** (`P2-T004` added
+`discover::discover`'s). `target/tmp/count_tests.py` **used to skip the
 `Doc-tests` sections entirely**, which is why the figure it printed and the
 figure in the handoff disagreed by one until both were changed together. It now
 counts them and prints them separately.
@@ -113,13 +116,24 @@ what a commit added.
 ### Count the parent lines, not the `test result:` lines
 
 **The raw number of `test result: ok` lines overstates this suite.** A workspace
-run now prints **32** of them for **668** tests — 18 test binaries + 4 doc-test
+run now prints **33** of them for **726** tests — 19 test binaries + 4 doc-test
 targets + the **ten** child processes `store_concurrency` spawns (4 writers + 6
 openers), each of which prints its own `test result: ok. 1 passed; … 6 filtered
 out` into the parent's stdout. `--quiet` does not suppress that summary line —
 libtest's `--quiet` drops the `running N tests` line and the per-test lines and
 still prints the summary. The comment in `spawn_child` said otherwise and has
 been corrected.
+
+**So the raw line count can undercount as well as overcount, and it did.** One
+captured log of this suite held **32** result lines where 33 are expected. The
+missing one is identified rather than guessed: it is **`Doc-tests sure_testkit`,
+a section that runs 0 tests**, whose summary line did not survive the capture.
+That is why the arithmetic still looked right — a zero-test section contributes
+0 to a sum — and it is the reason `count_tests.py` takes the **last** result
+inside each `Running …` / `Doc-tests …` section instead of counting lines at
+all. A line count is a property of the capture as much as of the suite, in both
+directions: ten extra lines from the children, and one line fewer from a stream
+that raced.
 
 This matters for the record, not just for tidiness: the figure written into
 `P1-T005`'s acceptance note (**408 passed**) was a raw sum of those lines and is
@@ -143,6 +157,163 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T004` added, and the defect its verification turned up
+
+`crates/sure-core/src/discover/` is new: `mod.rs` (the ecosystem-agnostic shell
+and `discover()`), `read.rs` (one reader for one file, and the reasons a file can
+be unread), and `node.rs` (everything Node-specific). 33 integration tests in
+`tests/discover_node.rs` — the new **19th** test binary — 24 unit tests in the
+module, and one doc test. That is +58, and the workspace total went **668 → 726**
+with the arithmetic closing exactly. `docs/architecture/ECOSYSTEM_DISCOVERY.md`
+is the authority; `P2-T004`'s acceptance note carries the summary.
+
+**The rule the task is built on: the four questions a manifest can be asked are
+answered with an enum, never with an `Option`.** A manifest that is not there, a
+manifest that is there and could not be read, and a manifest that was read are
+three different worlds, and `None` collapses the last two into "no
+dependencies" — a package whose manifest could not be read would be reported as
+a package with nothing in it. So `ReadFile` is `Absent`/`Parsed`/`Unread`,
+`ManifestState` is `Read`/`Absent`/`Unread`, `MemberManifest` is
+`Present`/`Absent`/`NotReadable`, and `UnreadReason` names all seven ways a file
+reaches the third state rather than one. `read.rs` is the only place that decides
+which, and that is what makes the rule structural: a new caller cannot get it
+wrong without adding a variant.
+
+**The package manager is not "the one with a lockfile".** Four managers are
+recognised — npm, yarn, pnpm, bun — and each can be evidenced three ways of
+different strength: a `packageManager` declaration, a lockfile, and an `engines`
+range. `Managers::agreed()` returns the one manager every source points at, and
+`None` when they disagree. Two lockfiles, or a declaration that contradicts the
+lockfile beside it, are reported as a `Disagreement` rather than resolved by a
+precedence rule the reader cannot see. A manager SURE does not recognise is not
+reported as one it does.
+
+**Workspaces are resolved against the directories that are really there.** The
+root is never a member of its own workspace. A pattern that would reach outside
+the project is refused; a pattern that names nothing is reported as naming
+nothing, because the alternative is a workspace list that silently covers less
+than it claims; and a list that was cut short says so. `packages/*` expands one
+level, and each component in turn — see gap 4 below for what that excludes.
+
+**Scripts.** 8 conventional roles, each looked up across the spellings projects
+actually use, and `command_for(manager, role)` renders the command the declared
+manager needs, so the report never proposes `npm run` for a pnpm project. A
+script that is present and has no command does not read as a script that is
+absent — the same distinction as the manifest, one level down.
+
+**Frameworks and tooling are one 67-row table across 11 roles.** The package
+name stored in a `Tooling` always comes from the table and never from the
+manifest, so a project cannot get a role by naming itself something. Two rows
+carry `@biomejs/biome` — it is a linter and a formatter, and one dependency holds
+both roles — which is why `tooling_of_role` returns an iterator rather than one
+entry.
+
+**`discovery_runs_none_of_the_scripts_it_reads`.** This module executes nothing.
+That is the property the module is shaped around rather than a promise added
+afterwards, and it is the same line `FINGERPRINTING.md` and `EXECUTION_SAFETY.md`
+draw.
+
+### The mutation run, and the one hole it found
+
+`target/tmp/mutate8.py` applies **27 mutations; 27 were caught.** Two are
+deliberately not in the script and it records why: a tool-name substitution is
+not expressible, because `collect_tooling` only pushes when the name already
+matches, and the tooling sort is not observable from a single run. Three anchors
+had to be made more specific after the first run — one had matched two identical
+probes (`if matches!(tree.probe(…), Probe::File(_))` at the lockfile and at the
+typescript config, in the same shape), one removing a `seen.insert` left the
+binding unused and so did not compile, and one was a no-op.
+
+**The hole it found was in a suite that was already green.** `Package::dependencies_not_ranges`
+— the field that keeps *declares `left-pad: ^1.3.0`* and *declares `jest: [29]`*
+from reading alike — had **no test anywhere**. The mutation that deletes it was
+MISSED, which is what surfaced it. Two tests close it, and the second is the one
+that matters: a name declared with no range in **two** sections must be named
+**once**, which is what makes the `dedup()` beside the `sort()` load-bearing
+rather than decorative. This is the latest of several times on this branch that a
+mutation found something no test reached — `P2-T001` found two, `P2-T003` found a
+test that was reaching the wrong branch. It is the cheapest way to find one, and
+it keeps being worth running.
+
+### What `P2-T004` does not establish
+
+The five gaps `ECOSYSTEM_DISCOVERY.md` records, none of them closed by this task:
+the byte budget has only been exercised where the manifest itself crossed it (the
+`+ 1` read that catches a file growing *during* the read has never been seen to
+fire); `Unreadable` is reached by a missing path and by an interior NUL, never by
+a file the OS refuses to let this user read; the two spellings `package.json` and
+`Package.json` in one project is constructible only on a case-sensitive
+filesystem, so the Linux and macOS jobs are where it would run; workspace pattern
+expansion is one component at a time and brace expansion is reported as
+`UnsupportedPattern` rather than approximated; and the link-at-the-manifest case
+is a **directory** link, because `mklink /J` needs no privilege here and a file
+symbolic link does, so the file-link arm is one code path by argument rather than
+by test. The last two of those are also where CI could falsify this section, and
+CI has not run on `P2-T004` yet.
+
+## The defect `P2-T004`'s verification found: five scratch paths every run reused
+
+Found while chasing a suite that failed roughly one run in eight, always in a
+different test, always clean on a re-run. It is fixed in `0a577ca` and it is the
+reason that commit exists separately.
+
+**What was wrong.** Five test helpers cleared a scratch directory with
+`let _ = std::fs::remove_dir_all(&path)` and then used the path as though it were
+empty. On Windows that deletion can fail — the previous run's database is still
+open — and the discarded error turned the clear into a wish. The test then read
+somebody else's records as its own.
+
+**The instance that is proven, and the proof.** `tests/store_concurrency.rs`
+reported **200 records where 100 had been written**, and reported a lost write.
+Both numbers are wrong in the same direction: the file had never been cleared, so
+the count was the old run's rows plus the new ones, and the "lost" write was
+there all along. Established by holding a handle open across the clear and
+watching it happen deterministically, not by argument. **The wrong number is the
+point** — the suite did not merely fail to see the truth, it stated the opposite
+of it, which is the kind of report this repository treats as worse than an error.
+
+**The four that are not proven.** All five helpers now name their scratch
+directory after `std::process::id()` — the convention `config/authority.rs`,
+`config/mod.rs` and `discover_node.rs` already followed — and all five keep a
+loud backstop for the case where the id has been reused. But **only the first is
+shown to be that fault**, and the comments in the other four say so:
+
+- `src/store/mod.rs`'s test module — same shape, same file, not separately
+  reproduced.
+- `crates/sure-core/src/doctor.rs` — seen to fail under a loaded run with
+  `the store was readable: NotCreated` and `Unreadable` with `os error 5`, and
+  those stopped once the path was unique; **that is not proof the path caused
+  them**.
+- `crates/sure-core/tests/doctor.rs` — this one fails about **once in ten
+  whole-workspace runs and never once in twelve runs of its binary alone**. The
+  only code in the repository that deletes that path is `scratch` itself.
+  Removing a shared resource is not the same as repairing a proven fault, and the
+  comment in the file says exactly that.
+- `crates/sure-testkit/tests/integration_thinness.rs` — failed with
+  `Os { code: 3, kind: NotFound }` on a write into a directory `create_dir_all`
+  had just made. **The obvious explanation did not survive a probe**: 3000 rounds
+  of that exact shape — fixed name, create, write, remove, repeat — failed zero
+  times, and 3000 with a unique name also failed zero times. So the pending-delete
+  story is falsified as far as this machine can falsify it, and the comment says
+  the cause is not known rather than naming one.
+
+**One fix was tried and abandoned, and it is worth recording.** The first attempt
+kept the fixed path and made the failed clear loud instead of silent. Failures
+went from ~5–9 per ten runs to **9–18**: with the clear now fatal, a hidden lock
+made the test stop instead of quietly reading stale data. Making the symptom
+louder without removing the shared resource made the suite worse. Uniqueness is
+the substantive fix; the backstop is only there for the case uniqueness cannot
+cover.
+
+**Gates for the fix and for `P2-T004` together:** `cargo fmt --all -- --check`
+clean; `cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` **726 passed, 0 failed, 1 ignored** across 19 test
+binaries and 4 doc-test targets; `node scripts/taskctl.mjs validate` = 166 tasks;
+`pwsh scripts/Preflight-Windows.ps1` passed. The flake evidence is
+**16 consecutive piped workspace runs with 0 failures**, under the exact pipeline
+that failed 8 of 8 before the change — recorded as `n` runs clean, not as "fixed",
+because a flake that has stopped appearing has not thereby been explained.
 
 ## What `P2-T003` added, and the false green it found in its own tests
 
@@ -471,6 +642,44 @@ nothing local can. Only a run on the platform can.
 consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
+
+## Gate set, as run at `68e51d8` (`P2-T004`) and `0a577ca`
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **726 passed, 0 failed, 1 ignored, across 19 test binaries and 4 doc-test targets** (all 4 ran a test) |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+
+Per binary on this platform: `sure-cli` 36 **bin** + 13 `cli_contract`;
+`sure-core` **315 lib** + 9 `config_loading` + **33 `discover_node`** + 6
+`doctor` + 23 `fingerprint_content` + 43 `fingerprint_git` + 30
+`scan_project` + 6 `store_concurrency` + 4 `store_packaging`; `sure-domain` 87
+lib + 29 `wire_contract`; `sure-protocol` 46 lib + 12 `conformance` + 15
+`round_trip`; `sure-testkit` 0 lib + 7 `integration_thinness` + 8
+`repository_shape`; `Doc-tests sure_core` **4**. That is 49 + 469 + 116 + 73 +
+15 + 4 = 726.
+
+**The arithmetic against 668 at `7ce90bf` is +58, and every part is measured
+rather than inferred from the total:** **+24** in `sure-core`'s lib target (291
+→ 315), all of them `discover::`, taken from `cargo test -p sure-core --lib --
+--list | grep -c '^discover::'`; **+33** for the new `discover_node` target,
+which is also the **19th test binary**; and **+1** doc-test, `discover::discover`.
+24 + 33 + 1 = 58.
+
+**The 668 in that comparison is right, and three earlier figures in this
+session's working notes were wrong.** They are recorded because the way they were
+wrong is the useful part: `669` came from subtracting the two new *sources* from
+the total and forgetting that one of the additions is a **doc test**, which
+belongs to no new file; `723` was a real measurement of this same tree taken when
+`discover_node` held 30 tests rather than 33, so it is a measurement of a state
+that no longer exists and not a contradiction; and `725` came from believing
+"two tests were added" when **three** were. The rule under "Counting `#[test]`
+attributes" applies to deltas as much as to absolutes: take the number from a
+run, and take the per-target figure from `--list` rather than from a file's
+contents.
 
 ## Gate set, as run at `7ce90bf` (`P2-T003`)
 
@@ -933,6 +1142,56 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P2-T004`
+
+Twenty-seven mutations in `target/tmp/mutate8.py` (git-ignored), run against
+`cargo test -p sure-core --lib --test discover_node --no-fail-fast`. **All
+twenty-seven applied mutations were caught; none was reported MISSED, BUILD or
+SKIP in the final run.**
+
+Each is a plausible wrong *reading* rather than a random edit, and the direction
+that matters is the false green. Grouped by what they attack:
+
+- **Package managers (1–5).** The lockfile is invisible; two lockfiles are read
+  as agreement; a disagreement is answered anyway; an unrecognised manager is
+  guessed at; an `engines` range is ranked as strongly as a lockfile.
+- **Workspaces (6–11).** The root joins its own workspace; a pattern SURE cannot
+  expand is answered as one that named nothing; `**` is expanded as a single `*`
+  instead of being refused; a truncated list keeps quiet; the pnpm workspace file
+  is read and then ignored.
+- **Scripts (12–13, 16).** A conventional role with no script vanishes from the
+  rows; a script with no command is dropped rather than reported; npm is made to
+  use `run` for the two scripts it does not.
+- **Dependencies (14–15).** The one that found the hole — see below.
+- **The enum rule (17–24).** These are the point of the task, and each makes "I
+  could not read this" arrive as "there is nothing here": a link at a manifest's
+  name becomes an absence; a budget refusal and a shape failure live in the state
+  but not in the result; a file over the byte limit is read from the part that
+  fitted; an unread manifest is graded as one SURE can read.
+- **The rest (25–27).** The conclusion stops naming its files; a climbing path is
+  kept rather than refused; the stack for a level is reported as a new word
+  instead of the domain's.
+
+Two mutations are **deliberately absent** and the script's docstring records why,
+rather than leaving a reader to assume the run was exhaustive: substituting a tool
+name is not expressible, because `collect_tooling` only pushes a row when the
+dependency's name already equals it, so there is nothing to substitute; and the
+tooling sort cannot be observed from one run, for the same reason `P2-T003`
+recorded for the fingerprint's sort — one run sees one filesystem's order.
+
+Three anchors were rewritten after the first run, each for a different reason and
+each a real hazard worth naming: one anchor matched **two** identical probes and
+was extended until it matched once; one mutation removed a binding's only use and
+therefore **did not compile**, which the script reports as `BUILD` rather than
+counting as caught; and one was a **no-op** that would have read as a clean miss.
+
+The script reports `SKIP` for an anchor that does not appear exactly once and
+`BUILD` for one that does not compile, and neither is counted as caught. **That
+distinction is what made the one real finding visible**: *"a dependency with no
+range is dropped instead of reported"* came back **MISSED** — not skipped, not a
+build failure. The field simply had no test, and the mutation that deletes it was
+invisible to a suite that was entirely green.
+
 ### `P2-T002`
 
 Twenty mutations at the acceptance, **twenty fired**; **twenty-three at
@@ -1277,20 +1536,44 @@ it needs a Mac.
   of it that is a refactor rather than new behaviour, and it is the part with the
   least new test cover — deliberately, because its cover is the Git kind's tests,
   which did not change and did not need to.
+- `68e51d8` **`P2-T004`** — `crates/sure-core/src/discover/{mod,read,node}.rs`,
+  `tests/discover_node.rs` (33 tests, the new 19th test binary), and the new
+  `docs/architecture/ECOSYSTEM_DISCOVERY.md`. The module is a reader: it executes
+  none of the scripts it reports, which is the property it is shaped around.
+- `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
+  implementation commit and found while verifying it. Five test helpers cleared a
+  scratch directory with `let _ = remove_dir_all` and then treated the path as
+  fresh; on Windows that deletion can fail and the discarded error produced a
+  **false report** — `store_concurrency` announced 200 records where 100 had been
+  written, about a file that was never cleared. One instance is proven, four are
+  not, and the section above says which is which. Nothing about the product's
+  behaviour changes; every file it touches is test code.
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P2-T004` — JS/TS project discovery. **The
-   `P2-T003` run has been pushed and read** (run `34845282962`, table above), so
-   nothing is outstanding behind it. The remaining READY list is `P2-T004`,
-   `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`,
-   `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are Python and Rust discovery,
-   `P2-T010` is `ProjectIntent` ingestion from an explicit goal/spec, which
-   `Config` already carries a slot for.
+1. **Push `0a577ca`, `68e51d8` and the record commit, then read that run.** That
+   is the first action, not the second: `P2-T004` is accepted, and the rule this
+   file has recorded twice already is that a push is not finished until its run
+   has been read. **There is no CI evidence for `P2-T004` yet** — every figure in
+   its section is local. This task adds no platform-gated test, so nothing in it
+   is invisible to a Windows run the way the `#[cfg(unix)]` link tests are; what
+   the five jobs add here is a second and third platform compiling the new module
+   and running the new binary, and a test binary that has never run anywhere else
+   is exactly where the last four CI failures lived.
+2. `node scripts/taskctl.mjs start P2-T005` — Python project discovery. The
+   remaining READY list is `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`,
+   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are
+   Python and Rust discovery, `P2-T010` is `ProjectIntent` ingestion from an
+   explicit goal/spec, which `Config` already carries a slot for.
+   `P2-T005` has one known prerequisite that `P2-T004` did not: it needs a TOML
+   reader, and `toml` is currently a **test-support** dependency of `sure-core`
+   rather than a real one. Promoting it is part of the task, and
+   `crates/sure-testkit/tests/repository_shape.rs` is where a dependency's
+   category is pinned, so that test is the one that will say whether it was done.
    **Keep the ordering discipline**: push each task's commits, read that run, and
    only then start the next acceptance. The cost of not doing it is already
    written down twice in this file.
-2. **Neither fingerprint entry point is called by anything yet**, and that has
+3. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline
    will call first. So `FINGERPRINTING.md`'s coverage rule and the dispatch rule

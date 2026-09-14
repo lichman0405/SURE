@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P0",
-  "last_updated": "2026-09-14T08:33:56.508Z",
+  "last_updated": "2026-09-14T08:39:07.591Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -27,58 +27,58 @@
       "notes": "origin fetch+push both https://github.com/lichman0405/SURE.git; gh auth active as lichman0405; branch claude/v0.1-autonomous tracking origin; added scripts/git-guard.mjs enforcing canonical remote, no-force-push fast-forward check and protected-branch refusal. Three-way guard self-test passes."
     },
     "P0-T003": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:06.964Z",
+      "finished_at": "2026-09-14T08:39:07.019Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "crates/sure-domain/src/vocabulary.rs + ids.rs: typed Project, ProjectIntent, ProjectFingerprint, Session, Event, CheckPlan, CheckResult, Evidence, Claim, Finding, RepairContract, ProjectVerdict, CapabilityTier. Nine typed ID newtypes with prefix validation plus AnyId. EvidenceClass keeps observed_fact/deterministic_check/model_assessment/inference/unknown distinct; truth_rank + can_alone_support_must_fix prevent inference becoming fact. cargo test -p sure-domain: 87 passed."
     },
     "P0-T004": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:07.078Z",
+      "finished_at": "2026-09-14T08:39:07.134Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "status.rs: CheckStatus (pass/fail/warning/skipped/error/unknown) with produced_a_result(); NotCheckedReason separates genuine gaps from honest scope limits; aggregate() cannot return green when a critical check failed, errored, is unknown or was skipped for a non-scope reason. Also: an empty plan and a plan where nothing ran are not_enough_checked. Tests cover every false-green path, including a critical skipped check and a critical checker error."
     },
     "P0-T005": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:07.190Z",
+      "finished_at": "2026-09-14T08:39:07.246Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "intent.rs: IntentSource (explicit_user_goal/observed_user_request/project_spec/agent_claim/inferred) with trust_rank and is_user_requirement; RequirementAuthority derived from source; ProjectIntent::requirement_claim() returns Comparable/AfterTheFact; may_claim_full_fulfilment() is the single gate for 'everything you asked for is done' and requires a trusted source plus fresh evidence for every user requirement. NO_TRUSTED_INTENT_LIMITATION carries the frozen after-the-fact sentence verbatim."
     },
     "P0-T006": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:07.302Z",
+      "finished_at": "2026-09-14T08:39:07.357Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "execution.rs: ExecutionMode (inspect_only/host_confirmed/container); six independent Permission values proved independent by test; ActionKind::required_permission mapping; decide() denies anything ungranted and always routes an arbitrary command to NeedsConsent; HostConsent/ApprovedCommand keep the exact argv; ConsentGrantor::can_grant() refuses project-controlled configuration. host_confirmed grants run_project_code only, never install/network/write/connect."
     },
     "P0-T007": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:07.415Z",
+      "finished_at": "2026-09-14T08:39:07.474Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "capability.rs: CapabilityTier Snapshot/Observed/Protected with documented numbers 0/1/2 and stable names; BlindSpotKind enumerates what an adapter may fail to expose; CapabilityReport::is_self_consistent() rejects a tier claim contradicted by pre_action_control; HookFailureBehaviour records fail_open/fail_closed/not_applicable. CapabilityReport::cli() reports tier 0 honestly."
     },
     "P0-T008": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-14T08:39:07.534Z",
+      "finished_at": "2026-09-14T08:39:07.591Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "No daemon and no hosted model service encoded as architecture, not aspiration: sure-domain has no network or async dependency at all; ExecutionMode::Container is explicit opt-in and grants nothing by itself; the CLI is a short-lived process. Provider abstraction is scheduled at P12-T001 with 'disabled' as the frozen default in sure.example.yaml. Documented in ADR 0003/0006 and docs/architecture/PROVIDER_MODEL.md."
     },
     "P0-T009": {
       "status": "queued",

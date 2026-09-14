@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod doctor;
 pub mod paths;
 pub mod redact;
+pub mod scan;
 pub mod store;
 
 pub use sure_domain::{

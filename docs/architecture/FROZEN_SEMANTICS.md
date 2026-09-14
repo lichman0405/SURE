@@ -60,6 +60,10 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | Correlation fields and their scope | `docs/architecture/DIAGNOSTICS.md` | `sure_core::diagnostics::Correlation` |
 | A log line cannot be restructured by a value | `docs/architecture/DIAGNOSTICS.md` | `crates/sure-core/src/diagnostics/field.rs` |
 | Redaction markers | `docs/security/SECRET_REDACTION.md` | `sure_core::diagnostics::{NOT_RECORDED, redact::REDACTED}` |
+| Why a file is not in a scan | `docs/architecture/PROJECT_DISCOVERY.md` | `crates/sure-core/src/scan/skip.rs` |
+| A skip is a value, not a log line | `docs/architecture/PROJECT_DISCOVERY.md` | `sure_core::scan::Scan::skipped` |
+| A scan that lost something says so | `docs/architecture/PROJECT_DISCOVERY.md` | `sure_core::scan::Scan::is_complete` |
+| Which names are never project content | `docs/architecture/PROJECT_DISCOVERY.md` | `crates/sure-core/src/scan/ignore.rs` |
 
 ## Statuses
 
@@ -231,6 +235,35 @@ is what makes breaking it visible, in three ways:
 
 Order is deliberately not asserted: serde is name-based, and reordering variants
 is not a wire change.
+
+## Closed vocabularies are matched in full
+
+A question about a closed enum — *how strong is this evidence? is this skip a
+loss? which layer may grant this?* — is answered by a `match` with **one arm per
+variant and no wildcard**, never by a `bool` predicate that happens to hold and
+never by the negation of a neighbouring predicate.
+
+Two reasons, and the second is the one that bites:
+
+1. Adding a variant stops every such `match` from compiling until someone decides
+   the answer for the new variant. That is the whole mechanism, and it only works
+   if there is no `_ =>` arm to absorb it.
+2. A negation answers for the variant nobody thought about. It answers `false` —
+   *not a loss*, *not a requirement*, *nothing to grant* — and the quiet answer is
+   the one that turns an unchecked thing into a green one.
+
+The same rule applies to **naming**: do not offer a name for something the code
+cannot produce. `ConsentGrantor` deliberately cannot name organization policy,
+because a source a caller can name but never obtain is how a documented feature
+becomes a believed one (`docs/architecture/CONFIG_AUTHORITY.md`), and
+`SkipReason` deliberately cannot name "outside the project", because a reason a
+caller can handle is a reason a caller believes can occur
+(`docs/architecture/PROJECT_DISCOVERY.md`). A variant that becomes reachable
+arrives with a test that reaches it, in the same change.
+
+Enforced by: `crates/sure-domain/tests/wire_contract.rs` (no wildcard arm),
+`crates/sure-core/src/scan/skip.rs` (both predicates, in full),
+`crates/sure-core/src/config/authority.rs` (no rank 3).
 
 ## Known conformance gaps
 

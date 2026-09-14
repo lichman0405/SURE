@@ -65,11 +65,40 @@ does not help either: `libsqlite3-sys` compiles C for the target and there is no
 `cc` for `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu` on a Windows
 machine.
 
-This is not hypothetical. CI was red from the bootstrap commit through two
-accepted tasks — a comment above a shebang, a helper gated more widely than its
-only caller, and an assertion whose premise holds on Windows and not on Unix —
-because each handoff recorded the local gate set as "the gates" and the run was
-never opened.
+This is not hypothetical. **Every run on this branch failed until `c735a2f`,
+including the runs for both accepted tasks** — the acceptance commit's own run
+was red — because each handoff recorded the local gate set as "the gates" and
+the run was never opened. Four separate causes, in two rounds:
+
+| Cause | Where it showed |
+| --- | --- |
+| a comment above the shebang in `preflight.sh` (SC1128) | `shellcheck-secondary` |
+| a `use` and a helper gated `#[cfg(unix)]` while their only caller excluded macOS | `rust (macos-latest)`, as dead code under `-D warnings` |
+| a test under a bare `#[cfg(unix)]` asserting **Linux's** case rule | `rust (macos-latest)` |
+| a test whose fixture premise — a drive letter with no path semantics — holds only on Windows | `rust (ubuntu-latest)` |
+
+The last two are one mistake seen twice, and it is the one to remember:
+**`#[cfg(unix)]` is a set of platforms, not a statement about the code.** It is
+not "where this is used" and not "where this is true", and macOS is in it while
+behaving differently from Linux about case.
+
+**The first fix was written from local reasoning and did not work.** It named
+three plausible causes, changed three files, and pushed; the same three jobs
+failed again — and it *introduced* a fourth error, because the comment written to
+explain the SC1128 fix began with the word `shellcheck` and was parsed as a
+directive (SC1072/SC1073). Reading `--log-failed` then named all three remaining
+causes exactly, and that is what fixed them. The rule is not "think about CI
+after pushing"; it is that **the log is the diagnosis and reasoning about it is
+not a substitute**.
+
+**Each platform runs a different set of tests, and a green job is not a green
+job.** At `9f13f0d` the Windows run had 628 tests and the Linux run 629, and
+neither number is a subset of the other: 8 test names exist only on Windows (the
+seven in `paths::compare::tests::windows` and one in `fingerprint::git::status`)
+and 9 only on Linux. macOS is a third set again — it runs
+`…folds_case_on_a_case_insensitive_platform` where the others run neither that
+nor `…folds_nothing_on_a_case_sensitive_platform`. Do not compare totals across
+platforms as a check that something ran; compare names.
 
 Two consequences worth knowing when reading a run:
 

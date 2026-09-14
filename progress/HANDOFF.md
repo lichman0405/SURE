@@ -15,6 +15,14 @@ acceptance landed together, so the sentence described a procedure that was not
 the one followed. Stated here because a handoff that is wrong about how to
 verify it is worse than one that says nothing.
 
+**Since that acceptance, `P2-T002` has had three follow-up commits — and the
+first two of them exist because CI had been red since the bootstrap commit and
+nobody had read it.** That is the most important thing in this file: the local
+gate set on this machine cannot see platform-gated code, `P2-T002` was accepted
+while three CI jobs were failing, and the acceptance was sound only by luck. The
+account is in "Continuous integration" below, and the rule that came out of it is
+**a push is not finished until its run has been read**.
+
 Primary development host: Windows 11 x64 / native MSVC.
 
 Canonical remote: `https://github.com/lichman0405/SURE.git`
@@ -41,19 +49,46 @@ deliberately offers no function that picks between the two kinds — choosing by
 looking at the project is the decision `P2-T003` owns, and it is the one that can
 be wrong (a project inside somebody else's repository).
 
-**One thing this session could not verify locally, stated so it is not assumed.**
-`a_link_is_recorded_by_its_target_and_not_by_what_it_points_at`,
+**The thing this session could not verify locally is now verified, and the
+evidence is named rather than assumed.** `a_link_is_recorded_by_its_target_and_not_by_what_it_points_at`,
 `a_change_behind_an_unchanged_link_is_not_a_change` and
 `a_change_to_a_file_sure_cannot_read_has_no_fingerprint` are `#[cfg(unix)]`, and
 the body of the second was **rewritten this session without ever having run on
 this machine** — it previously asserted almost nothing (see the mutation section
 below). Windows cannot create a symbolic link without Developer Mode or
 administrator rights, and both were probed and are absent. WSL Ubuntu exists here
-with Git 2.53.0 but no Rust toolchain, so the intended verification is the
-`ubuntu-latest` and `macos-latest` jobs in `.github/workflows/ci.yml`, which run
-`cargo test --workspace`. **Read the CI result for the commit that carries this
-file**; if the Unix jobs fail there, the failing test is almost certainly one of
-those three and the fix belongs in `fingerprint_git.rs`, not in the product.
+with Git 2.53.0 but no Rust toolchain.
+
+Run `34839532984`, on commit `c735a2f`, is green on all five jobs, and the three
+tests were read out of the log rather than inferred from the job's colour:
+
+```
+test a_change_to_a_file_sure_cannot_read_has_no_fingerprint ... ok
+test a_change_behind_an_unchanged_link_is_not_a_change ... ok
+test a_link_is_recorded_by_its_target_and_not_by_what_it_points_at ... ok
+```
+
+The same run settles the `paths/compare.rs` split, which no local run could:
+the two case-rule tests are **disjoint by platform and each runs only where its
+rule holds**. macOS ran `unix::the_default_entry_point_folds_case_on_a_case_insensitive_platform`;
+Ubuntu ran `unix::the_default_entry_point_folds_nothing_on_a_case_sensitive_platform`;
+neither ran the other's. That is the whole point of the split, and it is now
+observed rather than intended.
+
+`9f13f0d` added a fourth Unix-only test,
+`a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang`, which no local
+run can execute either. Two of its constructs were compiled under `-D warnings`
+on this host in isolation (`Result::is_ok_and` taking `ExitStatus::success`, and
+an un-joined `thread::spawn`) precisely because "gated to another platform" is
+where the last four CI failures lived. Run `34840217454` is green on all five
+jobs, and the test was read out of **both** Unix logs by name:
+
+```
+test a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang ... ok
+```
+
+That is the first test in this repository whose only purpose is to prove a
+project cannot make a check hang, and it has now run somewhere.
 
 **Correction to the previous two entries, and the correction to the
 correction.** `P1-T010`'s "19 test binaries" counted `store_concurrency`'s child
@@ -102,6 +137,68 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
 
+## Continuous integration, and why this section exists
+
+**Every `ci` run on this branch failed until `c735a2f` — including the runs for
+both accepted tasks — and no handoff said so.** Every handoff up to `P2-T002`
+recorded the local gate set — fmt, clippy, the workspace suite,
+`validate-bootstrap` — as "the gates", all of it green, and never opened a run.
+Three of the five jobs were failing the whole time.
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| 34838737260 | `3fea3fa` — **the `P2-T002` acceptance commit** | failure: `rust (ubuntu-latest)`, `rust (macos-latest)`, `shellcheck-secondary` |
+| 34839005174 | `58b3793` — first attempt at a fix | failure: the same three jobs |
+| 34839532984 | `c735a2f` — after reading that run | **all five green.** First green run on this branch, and the first that executes any `#[cfg(unix)]` fingerprint test |
+| 34840217454 | `9f13f0d` | **all five green**, including the new pipe test on both Unix jobs |
+
+The acceptance commit's own run is red. That is the fact this section exists for:
+`P2-T002` was marked accepted, and `progress/state.json` says so, on a commit
+whose CI failed — and the acceptance was sound only because none of the three
+failures happened to touch the behaviour being accepted.
+
+**The first fix was a guess and did not work; reading the log is what fixed it.**
+`58b3793` was written from local reasoning about what could be wrong, touched the
+three files that reasoning named, and pushed. The same three jobs failed again.
+Reading `--log-failed` then named the causes exactly:
+
+| Failure | The log's words | Why the local gate set cannot see it |
+| --- | --- | --- |
+| `preflight.sh` — the fix for SC1128 *introduced* SC1072/SC1073 | `Couldn't parse this shellcheck directive` | nothing on Windows runs `preflight.sh`; the shellcheck job is its only caller, and the file is one of the files its own last line checks. The new error came from a comment whose **first word** was the linter's own name |
+| `scan_project.rs:272` on Linux | `assertion left == right failed` in `a_name_that_is_not_valid_unicode_...` | the assertion expected one U+FFFD; Unix decodes the bytes to three, by the maximal-subpart rule. `58b3793` had fixed this test's *gating* and left its *assertion* |
+| `paths/compare.rs:440` on macOS | `the_platform_rule_is_applied_by_the_default_entry_point` | that test was under a bare `#[cfg(unix)]` asserting **Linux's** case rule. `unix` includes macOS, whose default volume is case-insensitive |
+
+Two of the three are the same shape: **code gated to a set of platforms that is
+not the set it is correct on.** `#[cfg(unix)]` is not "where this is used" and
+not "where this is true"; it is a list of platforms, and the list that compiles a
+helper and the list that can run it have to be the same list. The third was a
+test asserting one platform's answer on another — the same mistake as the
+second, arrived at independently.
+
+A fourth defect was found in the same reading and is unrelated to platforms: a
+path Git reports could **climb out of the project** (see "What the hardening
+added" above). It is recorded here because the local gate set could not see it
+either — nothing in it feeds a hostile repository to the fingerprint.
+
+**The local Windows gate set structurally cannot substitute for CI**, and this
+was established by trying rather than by reasoning: `cargo check -p sure-core
+--target x86_64-unknown-linux-gnu` fails in `cc-rs` with *failed to find tool
+"x86_64-linux-gnu-gcc"*, and this machine has no clang, gcc or zig. A stub `cc`
+emitting empty objects was considered and **rejected**: it could make a real
+failure look green, which is the one thing worse than a red build.
+
+**What can be done locally about platform-gated code** — and was, for `9f13f0d` —
+is to compile the *constructs* rather than the code: a throwaway file on the host
+that uses the same expression shapes under `-D warnings`. That catches a
+type error in a `#[cfg(unix)]` body; it does not catch a wrong *expectation*, and
+nothing local can. Only a run on the platform can.
+
+`docs/development/GITHUB_WORKFLOW.md` now carries the rule this produced —
+**a push is not finished until its run has been read** — with two reading
+consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
+stops at the first failing target, and a green `windows-latest` job says nothing
+whatsoever about the other two.
+
 ## Gate set, as run at `P2-T002`
 
 | Command | Result |
@@ -129,6 +226,46 @@ entry's "16" was right for its commit.
 The single `ignored` is not new and not a gap being hidden: it is
 `store_concurrency.rs:167`, `#[ignore = "spawned by the parent tests, not run on
 its own"]`, and it has read that way since `P1-T005`.
+
+### Gate set, as run at `9f13f0d`
+
+The same commands, after the hardening described under "What `P2-T002` added":
+**628 passed, 0 failed, 1 ignored, across the same 17 test binaries and 4
+doc-test targets** — 624, plus **three** containment tests added to `git/mod.rs`
+by `c735a2f` (`a_path_that_climbs_is_refused_with_or_without_a_prefix`,
+`a_path_inside_the_prefix_is_still_accepted`,
+`the_prefix_comes_off_as_path_components_and_not_as_text`, all in `sure-core`'s
+**lib** target), plus one for the Git safety arguments in the `fingerprint_git`
+integration target. 624 + 3 + 1 = 628, which is what the run printed.
+
+`fingerprint_git` is therefore 35 on Windows and **39 on Unix** — the same 35 plus
+the four `#[cfg(unix)]` bodies, three of which predate this session.
+
+**The two platforms do not run the same number of tests, and the difference is
+now enumerated rather than waved at.** Linux reports **629**, one more than
+Windows, and the arithmetic is a set difference over test *names* — by name and
+not by target, because attributing a result line to its binary depends on the
+`Running …` markers landing in order and in a CI log they do not:
+
+| | Count |
+| --- | --- |
+| names that exist only on Windows | **8** — the seven in `paths::compare::tests::windows`, plus `fingerprint::git::status::tests::a_path_that_is_not_valid_unicode_is_refused_on_windows` |
+| names that exist only on Linux | **9** — the four `#[cfg(unix)]` tests in `fingerprint_git.rs`, the three in `paths::compare::tests::unix`, `doctor::tests::a_path_through_a_file_cannot_be_looked_at`, and `fingerprint::git::status::tests::a_path_that_is_not_valid_unicode_is_the_path_on_unix` |
+| net | **+1 on Linux**, which is 628 + 1 = 629 |
+
+Every one of the seventeen is `ok` on the platform where it ran, and no test on
+either platform is anything but `ok` or `ignored`. The macOS job is a third set
+again: it runs `unix::the_default_entry_point_folds_case_on_a_case_insensitive_platform`
+where Linux and Windows run neither that nor `…_folds_nothing_…`, so **a green
+macOS job and a green Linux job are not the same evidence** even for the same
+file.
+
+`target/tmp/diff_test_names.py` (git-ignored) is what produced this table and is
+worth reusing after any push that touches platform-gated code.
+
+The `21 targets` figure some tooling prints is **17 binaries + 4 doc-test
+targets**; the two are the same number arrived at two ways, not two
+measurements.
 
 ## What `P2-T002` added
 
@@ -178,9 +315,30 @@ the current one is stale). Three files:
 - `docs/architecture/FINGERPRINTING.md` (new) — the rule (**a file is part of the
   fingerprint if and only if a check could read it**), the two-failure-directions
   table, the path in/out table, the link case the rule does not decide, why HEAD
-  is digested and the branch name is not, and **five known coverage gaps**.
+  is digested and the branch name is not, and **six known coverage gaps** now —
+  the sixth, pipes and devices, was added by the hardening below.
   `CHECK_PIPELINE.md` step 3 and `FROZEN_SEMANTICS.md` (a new §"What 'the same
   project state' means") both point at it.
+
+**What the hardening added after the acceptance, and why each one is a defect
+rather than a precaution.** Three commits, all on top of an already-accepted
+task, none of which changes a verdict for a project that is not hostile:
+
+- **`c735a2f` — a path Git reports could climb out of the project.**
+  `relative_to_root` stripped the prefix and joined the result onto the root
+  without checking it, so a path containing `..`, a root or a drive prefix would
+  have been read from outside the folder SURE was asked about. It is not
+  reachable through a well-behaved Git — the pathspec is `-- .` — but the
+  repository is untrusted input and its index is a file in it, which is the same
+  reasoning that puts `--no-optional-locks` in the invocation. The same commit
+  fixed the three CI failures above.
+- **`9f13f0d` — a repository could make fingerprinting run a program, or hang.**
+  `core.fsmonitor` names a hook Git runs, read from the repository being
+  described; `Git::SAFETY_ARGUMENTS` now overrides it and `--no-pager`. And
+  `File::open` on a FIFO with no writer **blocks until a writer appears**, so a
+  project that replaced a tracked file with a pipe could hang a check with no
+  output — a state indistinguishable from "still working". `Reader::read` now
+  answers such a path by kind without opening it.
 
 **What the mutation run found, because the green suite did not.** Three of the
 five tests added this session exist because a mutation survived (the section
@@ -458,10 +616,12 @@ Each was reverted after confirming the check fires.
 
 ### `P2-T002`
 
-Twenty mutations, **twenty fired**, in `target/tmp/mutate6.py` (git-ignored).
-Every one is a plausible *wrong implementation of fingerprinting*, not a random
-edit, and most make the fingerprint ignore something it must not — the
-false-green direction, and the direction the two acceptance criteria are about.
+Twenty mutations at the acceptance, **twenty fired**; **twenty-three at
+`9f13f0d`, all twenty-three caught**, plus one applied and reported `BLIND`, in
+`target/tmp/mutate6.py` (git-ignored). Every one is a plausible *wrong
+implementation of fingerprinting*, not a random edit, and most make the
+fingerprint ignore something it must not — the false-green direction, and the
+direction the two acceptance criteria are about.
 
 The script got two things right that the earlier ones did not, both because of
 failures in its first version:
@@ -529,8 +689,34 @@ to close them:
 unreadable-file paths are `#[cfg(unix)]` in the test file, so no mutation was
 applied to them on this machine — the script's own header says so. That is not
 coverage; it is the reason the `ubuntu-latest` and `macos-latest` CI jobs exist.
-And the mutation list is a list: twenty plausible wrong implementations, not the
-space of wrong implementations.
+And the mutation list is a list: twenty-three plausible wrong implementations,
+not the space of wrong implementations.
+
+**The Unix-only entry is now applied and reported `BLIND`, not omitted.** At
+`9f13f0d` the script gained a second list, `UNIX_ONLY`:
+
+```
+BLIND   a pipe is opened instead of being described: as expected
+NOT OBSERVABLE ON THIS PLATFORM (1), so unverified here:
+  - a pipe is opened instead of being described
+```
+
+It is applied and run anyway, so a stale anchor or a mutation that no longer
+compiles is still caught here; but it is reported as neither `CAUGHT` nor
+`MISSED`, because both would be a claim about a code path that did not execute.
+`MISSED` would be the quiet lie and `CAUGHT` the loud one — a Windows test
+cannot have noticed a Unix-only behaviour, so a failure there would mean
+something *else* broke. Omission was the third option and the worst: the earlier
+header described the gap in prose, and a reader skimming twenty-three `CAUGHT`
+lines does not see it.
+
+Two entries were added at `9f13f0d`, both caught:
+**`core.fsmonitor=false` dropped from `Git::SAFETY_ARGUMENTS`**, and
+**`--no-pager` dropped instead**. They are worth naming because on every
+repository that does not exploit them the fingerprint is *identical* with and
+without them — the only failing test is the one that reads the constant, which
+is the entire reason the constant exists rather than the arguments being written
+inline at the call site.
 
 ### `P2-T001`
 
@@ -750,6 +936,14 @@ it needs a Mac.
   `docs/architecture/FINGERPRINTING.md`, and the `scan/ignore.rs` `left_out`
   extraction. The commit hash is in `progress/state.json`'s `P2-T002` note and in
   `git log --oneline -n 4`.
+- `58b3793`, `c735a2f`, `9f13f0d` — three follow-up commits on the *accepted*
+  `P2-T002`, none of them a new task. `58b3793` and `c735a2f` are the CI fixes
+  (the first was a guess and failed; the second read the log and worked), and
+  `c735a2f` also refuses a path that climbs out of the project. `9f13f0d` stops
+  a repository making Git run a program or hang a check. **`P2-T002`'s acceptance
+  stands over all four**: none of them changes a verdict for a project that is
+  not hostile, and the acceptance run's own red CI is recorded above rather than
+  quietly re-run.
 
 ## Next concrete action
 
@@ -779,8 +973,10 @@ nothing in this release makes that decision for it, and nothing calls
 `Git::fingerprint` yet. So `FINGERPRINTING.md`'s coverage rule — *a file is part
 of the fingerprint if and only if a check could read it* — is, like
 `PROJECT_DISCOVERY.md`'s guarantees, a property of the module and of its tests
-until the check pipeline is the first real consumer. The three `#[cfg(unix)]`
-tests have not run on this machine at all; see the top of this file.
+until the check pipeline is the first real consumer. The `#[cfg(unix)]` tests
+have still not run on this machine and never will; they run on the macOS and
+Linux CI jobs, and four of them were read out of run `34839532984` by name rather
+than inferred from the job's colour. See the top of this file.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -882,17 +1078,33 @@ ignored, which is how the earliest tasks came to record an empty note.
   construct; without it the whole nested-checkout path is dead code that looks
   alive.
 - **This machine has no Rust toolchain available for the Unix tests, and that is
-  now CI's job rather than a local one.** Windows cannot create a symbolic link
+  CI's job rather than a local one.** Windows cannot create a symbolic link
   without Developer Mode or administrator rights (both probed, both absent), and
   the WSL Ubuntu that is installed here has Git 2.53.0 but **no `cargo`**.
   Installing one would be a 1–2 GB unilateral change to the owner's machine, and
   `.github/workflows/ci.yml` already runs `cargo test --workspace` on
   `ubuntu-latest` and `macos-latest` — which `RUST_DESIGN.md` names as the
-  designed verification path for `#[cfg(unix)]` behaviour. So the three
-  `#[cfg(unix)]` tests in `fingerprint_git.rs` get their **first ever execution
-  in CI on the push that carries this file**, and one of the three was rewritten
-  this session without having run anywhere. Read the run before assuming it
-  passed; a green `windows-latest` job says nothing about it.
+  designed verification path for `#[cfg(unix)]` behaviour. As of run
+  `34839532984` that path is **observed working**, not merely intended: the three
+  `#[cfg(unix)]` fingerprint tests from `P2-T002` passed there, and the two
+  case-rule tests in `paths/compare.rs` ran one per platform as designed.
+- **`mkfifo` is how a test puts a pipe in a working tree**, and it is an external
+  program rather than a `libc` call because the workspace is
+  `unsafe_code = "forbid"`. It exists on both CI Unix images. A test that cannot
+  create its fixture must **fail, not skip** — a skip that reads as a pass is the
+  thing this repository keeps finding.
+- **The two facts about Git and pipes, measured in WSL with Git 2.53.0 and worth
+  not re-deriving.** A tracked path whose working-tree entry is replaced by a
+  pipe **is** reported, as an ordinary modified file (`1 .M N... 100644 100644
+  100644 …`), so it reaches `Reader::read`. An *untracked* pipe is **not** in
+  `git status --porcelain=v2 -uall` output at all. Anything concluded from a
+  pipe's absence from a fingerprint is concluded about Git first.
+- **A throwaway `rustc -D warnings` file is the only local check available for a
+  `#[cfg(unix)]` body**, and it is worth using: it catches a type or lint error
+  (it was used for `Result::is_ok_and(ExitStatus::success)` and for an un-joined
+  `thread::spawn`, and confirmed `JoinHandle` is not `#[must_use]`). It cannot
+  catch a wrong *expectation* — that is what the runner is for. Compile the
+  construct, not the code, and do not let it stand in for the run.
 - **A "reads no file contents" guarantee can only be tested against the source.**
   `scanning_the_repository_does_not_open_any_file` greps the four `scan/*.rs`
   files for `File::open`, `fs::read(`, `fs::read_to_string`, `read_to_end`,

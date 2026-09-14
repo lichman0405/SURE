@@ -379,15 +379,51 @@ Three of the five jobs were failing the whole time.
 | 34839532984 | `c735a2f` — after reading that run | **all five green.** First green run on this branch, and the first that executes any `#[cfg(unix)]` fingerprint test |
 | 34840217454 | `9f13f0d` | **all five green**, including the new pipe test on both Unix jobs |
 | 34843216260 | `5705444` — the filter hardening | **all five green.** The eight new refusal tests were read out of the log **by name on all three `rust` jobs**, not inferred from the job colours; `a_program_reached_through_an_included_file_is_refused_too` and `a_program_in_the_worktree_configuration_is_refused_too` ran twice each on Windows, Linux and macOS |
+| 34840594638 | `91e8838` — the CI-outage record | all five green |
+| 34843455162 | `9850a9a` — the filter-hardening record | all five green |
+| 34845282962 | `7ce90bf` + `1cda5a0` — **the `P2-T003` acceptance** | **all five green.** Detail below, because the colour is the least of it |
 
-**`P2-T003`'s rows are not in this table yet, and the reason is not an
-oversight.** `7ce90bf` carries the code, `9850a9a`-style commits carry the
-handoff and the acceptance, and the run for them only exists once they are
-pushed — so the row is added by the commit *after* that one, which reads the run.
-**If you are reading this file and there is no `P2-T003` row in the table above,
-the run has not been read and this branch is in the state this whole section
-exists to describe.** That is a deliberate, visible hole rather than a sentence claiming a
-green run that nobody opened.
+**The last two of the `P2-T002` runs above were missing from this table and are
+added with `P2-T003`'s.** They were green and went unrecorded, which is the same
+shape of gap this section exists to name — a run nobody opened is a run nobody
+can describe, and "it was green" written from memory is exactly what the red
+acceptance commit was written from.
+
+### Reading run `34845282962`, `P2-T003`'s
+
+Not the colour — the log. Four things were taken out of it:
+
+- **The totals differ by platform, and two independent readings agree.** Windows
+  **668** passed, Linux **671**, macOS **670**, with 0 failed and 1 ignored on
+  each. Every job's log has 32 `test result:` lines, which is 18 binaries + 4
+  doc-test targets + `store_concurrency`'s **10 children**; the children account
+  for exactly 10 of the "passed" sum, and 678 − 10 = 668 is the figure the local
+  Windows run printed as well. That agreement is what makes the Linux and macOS
+  figures trustworthy rather than merely plausible.
+- **The two new `#[cfg(unix)]` tests ran on both Unix jobs**, read by name:
+  `a_link_is_recorded_by_where_it_points_and_never_read_through` and
+  `a_pipe_in_the_project_is_refused_rather_than_opened` are `ok` in the Ubuntu
+  and the macOS log, and absent from the Windows one. The second exists for the
+  same anti-hang reason the Git kind's does, and it has now run somewhere.
+- **The platform set difference is measured, and it is what was predicted.**
+  Windows-only names: **8**, unchanged. Linux-only: **11** — the nine of
+  `9f13f0d` plus the two above. Net **+3 on Linux**, and 668 + 3 = 671, which is
+  the total the log printed. macOS against Windows is **12**, net **+2**, and
+  668 + 2 = 670. The gate-set section predicted "+3"; it was right, and it was
+  checked rather than left standing as a prediction.
+- **Nothing was silently skipped on any platform.** Every test function in
+  `fingerprint_content.rs` and `fingerprint_git.rs` was looked for **by name** in
+  each of the three jobs' lists, and the only ones missing are that platform's
+  `#[cfg]` gates — `23 + 2` on Unix and `43 + 4` on Windows. That is the check
+  that would catch a target quietly running nothing, and it is the reason to
+  count names rather than to read the summary lines.
+
+`target/tmp/diff_names.py` (git-ignored, ad hoc) is the extractor. It reads
+doctest lines as source paths, so its retained-name list carries a few junk
+tokens; those are identical on every platform and cancel in the set difference,
+but anyone reusing it should filter on the path separators rather than trust its
+counts. The `23 + 2` and `43 + 4` above were counted from the source, not from
+it.
 
 The acceptance commit's own run is red. That is the fact this section exists for:
 `P2-T002` was marked accepted, and `progress/state.json` says so, on a commit
@@ -475,11 +511,12 @@ lines" applies; the per-file *delta* is exact and the absolute figure is not.
 more than it did.** Both new `#[cfg(unix)]` tests are in `fingerprint_content`, so
 that target is 23 here and **25 on Unix**, and `fingerprint_git` is 43 here and
 **47 on Unix**. The set-difference table below was measured at `9f13f0d` and is
-therefore **stale** — the Linux-only set gains those two names, which should make
-the net **+3 on Linux** (668 + 3 = 671). "Should" is the honest word: nothing on
-this machine can run them, and `target/tmp/diff_test_names.py` reads the names out
-of a run's logs. The measured table replaces that paragraph in the commit that
-records the run.
+therefore **stale** — the Linux-only set gains those two names, and the
+prediction written here was **net +3 on Linux, 668 + 3 = 671**. Nothing on this
+machine could run them, and `target/tmp/diff_test_names.py` reads the names out of
+a run's logs. **Run `34845282962` measured it and the prediction held**: 671 on
+Linux, 670 on macOS, and the sets are 8 Windows-only and 11 Linux-only. See
+"Reading run `34845282962`" below for the arithmetic.
 
 ## Gate set, as run at `P2-T002`
 
@@ -1243,18 +1280,17 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **Push, then read the run, then add its row to the CI table above.** The push
-   is done by the session that wrote this file; reading it is a commit of its
-   own. Do not start a task before that row exists — the whole point of this
-   section's ordering is that the two acceptance commits on this branch were
-   merged over red CI and nobody could tell.
-2. `node scripts/taskctl.mjs start P2-T004` — JS/TS project discovery. The
-   remaining READY list is `P2-T004`, `P2-T005`, `P2-T006`, `P2-T010`,
-   `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`;
-   `P2-T005` and `P2-T006` are Python and Rust discovery, `P2-T010` is
-   `ProjectIntent` ingestion from an explicit goal/spec, which `Config` already
-   carries a slot for.
-3. **Neither fingerprint entry point is called by anything yet**, and that has
+1. `node scripts/taskctl.mjs start P2-T004` — JS/TS project discovery. **The
+   `P2-T003` run has been pushed and read** (run `34845282962`, table above), so
+   nothing is outstanding behind it. The remaining READY list is `P2-T004`,
+   `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`,
+   `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are Python and Rust discovery,
+   `P2-T010` is `ProjectIntent` ingestion from an explicit goal/spec, which
+   `Config` already carries a slot for.
+   **Keep the ordering discipline**: push each task's commits, read that run, and
+   only then start the next acceptance. The cost of not doing it is already
+   written down twice in this file.
+2. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline
    will call first. So `FINGERPRINTING.md`'s coverage rule and the dispatch rule
@@ -1274,8 +1310,9 @@ until the check pipeline is the first real consumer.
 
 The `#[cfg(unix)]` tests have still not run on this machine and never will; they
 run on the macOS and Linux CI jobs. Four were read out of run `34839532984` by
-name rather than inferred from the job's colour, and `P2-T003` added two more
-that no local run can execute. See the top of this file.
+name rather than inferred from the job's colour, and `P2-T003` added two more —
+both read out of run `34845282962` **on both Unix jobs** by name, in the section
+above. See the top of this file.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.

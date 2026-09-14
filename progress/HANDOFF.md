@@ -38,10 +38,15 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 26, queued: 140 }
-READY: P2-T007, P2-T010, P3-T001, P4-T008, P6-T001, P6-T007, P8-T001, P12-T008,
-P13-T001
+{ accepted: 26, in_progress: 1, queued: 139 }
+READY: P2-T010, P3-T001, P4-T008, P6-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
+
+**`P2-T007` is `in_progress`** (started 2026-09-14), which is why it is no longer
+in `READY`. It was started on dependency-graph grounds rather than list order: it
+consumes all three discovery modules and unblocks `P2-T008`, `P2-T009` and
+`P2-T012`, while `P2-T010` — which also sits in `READY` and depends only on
+long-accepted tasks — unblocks nothing.
 
 **A correction that was made and then overtaken, kept because both halves are
 worth having.** An earlier draft of this file said `accepted: 26` and "nothing is
@@ -59,8 +64,8 @@ could start until Cargo discovery existed. That is the dependency graph doing it
 job, and it is the reason the list is quoted from the command rather than
 remembered.
 
-Nothing is `in_progress`: `P2-T006` has been accepted and the next task has not
-been started. `P2-T006` is described in "What `P2-T006` added" immediately below.
+`P2-T007` (the component graph) is `in_progress` and described in "What `P2-T007`
+added" below. `P2-T006` is `accepted` and described in "What `P2-T006` added".
 The three things worth
 knowing before touching any of it are that **one `Budget` serves all three
 ecosystems** — and the same one is shared, so a Node-heavy project starves both
@@ -180,6 +185,63 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T007` added
+
+`crates/sure-core/src/components.rs` (a module of `sure-core`, beside `discover`)
+and `crates/sure-core/tests/components_graph.rs`, plus
+`docs/architecture/COMPONENT_GRAPH.md`.
+
+`ComponentGraph::of(&Discovery)` is a **view** — it opens no file, and
+`the_component_graph_opens_no_file_and_starts_no_process` enforces that against
+the source rather than trusting the module comment that says it. It produces a
+list of components (the root, then every directory a workspace declaration
+named), the containment edges between them, and one `EcosystemResolution` per
+ecosystem.
+
+The task's second acceptance criterion — *"unknown stack details remain
+inference"* — is carried by the type rather than by a convention:
+
+- `Component::manifests` holds **one `ComponentManifest` per ecosystem**, never a
+  merged verdict. Node and Rust can name the same directory, one may have read a
+  manifest there and the other not, and a single field would have to pick — losing
+  a fact silently in one direction or the other. Keeping both removes the merge
+  decision rather than guarding it, and `Component::stack()` is a derivation over
+  the list.
+- `Stack` is `Read` / `Partial` / `Unknown`, with **no `Option` anywhere**. There
+  is no shape a caller can render as "no stack", and no plain value it can render
+  as a fact.
+- `ManifestReading` has five arms because discovery established five different
+  things. The pair most easily collapsed by accident is `NotOpened` (*there is a
+  `package.json` SURE did not open*) versus `NoManifest` (*there is nothing
+  there*); collapsing them tells a reader either that a file is missing when it
+  is not, or that a file was read when it was not.
+- `Members` has a `NotRead` arm that **must not be rendered as "no members"**,
+  and `Members::is_known_single()` is the single question a report asks before
+  saying "one component". It returns `false` for `NotRead`.
+
+Three things worth knowing before touching it:
+
+1. **`NotRead` is returned for every Python project.** `python.rs` reads no
+   member list at all — `[tool.uv.workspace]` and `[tool.pdm.workspace]` are not
+   parsed — so SURE cannot tell a one-package Python project from a fifty-package
+   one. This is gap 8 of `docs/architecture/ECOSYSTEM_DISCOVERY.md`, and the
+   component graph is where it would otherwise become a false claim. A Python
+   monorepo therefore reports as **one component with a caveat**, and the caveat
+   is in `plain_description` so a caller that never reads `resolution` still
+   cannot lose it.
+2. **`contains` is not a dependency graph.** `"@app/ui": "workspace:*"` is a
+   request to a resolver SURE has not run. Only containment (a fact about paths)
+   and declaration (a fact about files read, carrying its `Source`) are here.
+3. **A Rust member that `exclude` names is still a component.** Discovery reports
+   those in `Workspaces::excluded_members` and deliberately does not subtract
+   them; the graph inherits that and offers no way to see which they are. That is
+   recorded as gap 1 in `COMPONENT_GRAPH.md`.
+
+The order of `components` is `Path`'s own order — component by component, so the
+root is first. An earlier draft sorted by depth and then by path, and the depth
+key was removed rather than tested: every fixture was one level deep, so the
+mechanism was doing nothing any test could see.
 
 ## What `P2-T006` added
 
@@ -1157,6 +1219,30 @@ consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
 
+## Gate set, as run on the `P2-T007` commit (unpushed at the time of writing)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **871 passed, 0 failed, 1 ignored, across 36 result lines = 26 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `python target/tmp/mutate11.py` | **20 of 20 observable mutations caught, 0 declared unobservable, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` did not fire |
+
+**871 is 849 + 22 and 401 is 383 + 18, and the two numbers are different on
+purpose.** The lib gains 18: sixteen module tests plus the two added to close the
+mutation holes. The workspace gains 22: those 18, plus the four in the new
+`components_graph` integration test binary. Counting `test result:` lines alone
+would have given 881, which over-counts by exactly 10 for the reason recorded
+above — the figure to report is the sum over the 26 parent sections.
+
+The result-line count itself moved from 35 to 36 because `components_graph.rs` is
+a new test binary, so the parents went from 25 to 26. The per-binary multiset —
+the only sound way to attribute a count to a target — is now
+`401, 87, 46, 43, 36, 33, 31, 30, 29, 24, 23, 15, 13, 12, 9, 8, 7, 6×2, 4×3, 0×4`:
+26 values for 26 expected binaries, with `401` appearing exactly once and `4×3`
+where it was `4×2` before, which is the new binary and nothing else.
+
 ## Gate set, as run on the `P2-T006` tests commit (unpushed at the time of writing)
 
 | Command | Result |
@@ -1748,6 +1834,66 @@ read as evidence.**
 ## Adversarial (mutation) verifications on this branch
 
 Each was reverted after confirming the check fires.
+
+### `P2-T007`
+
+`target/tmp/mutate11.py` (git-ignored), **20 mutations, 20 observable, 0 declared
+unobservable**, exit 0: *"all 20 observable mutations caught by a failing test,
+and 0 declared unobservable as expected"*.
+
+Four families, and the second is the one the task's second acceptance criterion
+is about:
+
+- **A stack SURE did not read, presented as one** (9). `Partial` and `Unknown`
+  widened into `Read`; `is_read` answering `true` everywhere; a member whose
+  manifest *was* read reported as one that was not.
+- **"I did not look" presented as "there are none"** (3). Python's unread member
+  list answered as `NoWorkspace`; `is_known_single` answering `true` for
+  everything; a truncated member list reported as complete. Each turns a caveat
+  into a finding.
+- **One place reported as two, or as the wrong place** (5). The merge removed so
+  a directory two ecosystems name becomes two components; containment decided by
+  the text of a path rather than by its path components; containment to the
+  outermost rather than the nearest component; the root contained by itself.
+- **An absent fact invented, or a real one dropped** (3). A root manifest
+  reported as read whatever it was; an ecosystem that was never found reported as
+  one that read a declaration and named nobody; `root_component` handing back the
+  last component.
+
+**The first run was not clean, and the three holes it found were real.** Three
+mutations came back `MISSED`:
+
+1. *a pyproject.toml SURE could not read is reported as no manifest* —
+   `python_root_reading` has an arm that prefers a recorded failure over a
+   missing file, and nothing tested it. Fixed by
+   `a_pyproject_toml_that_could_not_be_read_is_unread_rather_than_no_manifest`.
+   The Node case had a test; the Python case had none, and the Python case is the
+   one with two root files and a preference rule between them.
+2. *a member list that was cut short is reported as complete* — nothing set
+   `max_workspace_members` low enough to observe truncation. Fixed by
+   `a_member_list_that_was_cut_short_is_not_reported_as_complete`.
+3. *the root is reported as contained by itself* — every containment test found
+   edges **by looking one up**, so an extra edge nobody asked about was invisible.
+   Fixed by asserting the total: `contains.len() == members().count()`.
+
+The third is the one worth remembering: a test that looks an edge up by its key
+cannot see a duplicate, and a test that asserts the count can. The first two are
+the same shape as each other — a rule with a dedicated arm and no test aimed at
+that arm, in a module where every other arm had one.
+
+One mutation was written and then **replaced before it ran**: *a dependency
+naming a workspace package is turned into a component* was a no-op edit that
+would have come back `MISSED` and proved nothing, because a mutation can only
+replace text and this bug needs code added. A mutation that cannot fail is not
+evidence, and leaving it in would have produced a `MISSED` that looked like a
+hole in the tests rather than a hole in the harness.
+
+The harness carries `mutate10.py`'s three counting rules unchanged — a
+non-unique anchor is `SKIP` and counts as nothing, a compile error is `BUILD` and
+never `CAUGHT`, and **the suite is run unmutated first and a red baseline ends
+the run**. The baseline guard is copied into this file rather than shared,
+because a harness that depends on another harness is one more thing that can be
+missing when it is needed.
 
 ### `P2-T006`
 

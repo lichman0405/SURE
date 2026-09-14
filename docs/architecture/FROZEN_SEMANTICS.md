@@ -64,6 +64,10 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | A skip is a value, not a log line | `docs/architecture/PROJECT_DISCOVERY.md` | `sure_core::scan::Scan::skipped` |
 | A scan that lost something says so | `docs/architecture/PROJECT_DISCOVERY.md` | `sure_core::scan::Scan::is_complete` |
 | Which names are never project content | `docs/architecture/PROJECT_DISCOVERY.md` | `crates/sure-core/src/scan/ignore.rs` |
+| A component SURE did not read a manifest at has no stack | `docs/architecture/COMPONENT_GRAPH.md` | `sure_core::components::Stack` |
+| An unread manifest is not an absent one | `docs/architecture/COMPONENT_GRAPH.md` | `sure_core::components::ManifestReading` |
+| An ecosystem that did not look does not answer the single-component question | `docs/architecture/COMPONENT_GRAPH.md` | `sure_core::components::Members::is_known_single` |
+| Containment is by path component, not by text | `docs/architecture/COMPONENT_GRAPH.md` | `ComponentGraph::contains` |
 
 ## Statuses
 

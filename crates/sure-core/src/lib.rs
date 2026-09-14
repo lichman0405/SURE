@@ -6,6 +6,7 @@
 //! single import path, and so that the crate boundary is exercised from the
 //! first commit rather than introduced later.
 
+pub mod components;
 pub mod config;
 pub mod diagnostics;
 pub mod discover;

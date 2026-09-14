@@ -48,6 +48,25 @@ serde_yaml_ng = "0.10.0"
 # a library that already does it is the only way to be right on all three
 # platforms rather than only on the one that was tested.
 dirs = "6.0.0"
+# The one hash SURE computes, for project fingerprints.
+#
+# A fingerprint's whole job is to be the *same value* for the same project state
+# and a *different* value for a different one, on every run, on every machine, on
+# every platform and under every version of SURE. `std::hash::DefaultHasher` is
+# explicitly documented as not stable across Rust releases, so it cannot be it: a
+# fingerprint that changes when the toolchain is upgraded marks good evidence
+# stale, and one that collides marks stale evidence fresh.
+#
+# The algorithm is SHA-256 rather than a faster non-cryptographic hash because
+# two different project states sharing a digest is exactly the false green this
+# product exists to prevent, and an adversary choosing the collision is in scope
+# — the project being checked is written by a coding agent.
+#
+# Written here rather than by hand in the crate: the failure mode of a
+# home-rolled SHA-256 is a plausible-looking wrong digest, which is silent.
+# `docs/architecture/FINGERPRINTING.md` is the rule; `sure_core::fingerprint` is
+# where it becomes code.
+sha2 = "0.11.0"
 # Local record storage. `bundled` compiles SQLite from its own C source into the
 # binary, which is what makes "storage packages without requiring system SQLite"
 # true: an installation carries its own database engine rather than linking

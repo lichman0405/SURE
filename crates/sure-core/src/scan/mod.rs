@@ -66,7 +66,9 @@ pub mod ignore;
 pub mod skip;
 
 pub use error::ScanError;
-pub use ignore::{IGNORED_DIRECTORIES, IGNORED_FILES, IgnoreRule, matching_rule, table_for};
+pub use ignore::{
+    IGNORED_DIRECTORIES, IGNORED_FILES, IgnoreRule, left_out, matching_rule, table_for,
+};
 pub use skip::{SkipReason, Skipped};
 
 use std::ffi::{OsStr, OsString};

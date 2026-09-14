@@ -48,6 +48,8 @@
 //! same directory and the same answer. On Linux there is, and a directory called
 //! `NODE_MODULES` there is a directory the project made.
 
+use std::path::Path;
+
 use crate::paths::CaseSensitivity;
 
 use super::{EntryKind, SkipReason};
@@ -260,6 +262,42 @@ pub fn matching_rule(
     table_for(kind)
         .iter()
         .find(|rule| name_matches(rule.name, name, case))
+}
+
+/// The rule that leaves a whole path out, for a path from somewhere other than
+/// the walk.
+///
+/// The walk applies a table to each name as it meets it, so a rule matching a
+/// component leaves out everything below: it never lists `target/`, so it never
+/// reaches `target/debug/app`. This answers the same question about a path that
+/// arrived whole — from `git status`, which names files rather than walking to
+/// them — and it answers it with the same tables and the same comparison, so a
+/// file the walk would not have looked at is a file this says was left out.
+///
+/// Every component but the last is a directory by construction. The last is
+/// whatever `kind` says, and the caller is the one that knows: the walk learns
+/// it from the directory entry, and the fingerprint learns it from Git's mode
+/// fields or from the filesystem. That distinction is why there are two tables
+/// in the first place — see the module comment.
+#[must_use]
+pub fn left_out(
+    path: &Path,
+    kind: EntryKind,
+    case: CaseSensitivity,
+) -> Option<&'static IgnoreRule> {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        let last = components.peek().is_none();
+        let kind = if last { kind } else { EntryKind::Directory };
+        // `.` and `..` are components of a path but not names of anything, and
+        // no rule is spelled either way — `no_rule_is_empty_or_a_path` holds
+        // that — so neither can match here.
+        let rule = matching_rule(&component.as_os_str().to_string_lossy(), kind, case);
+        if rule.is_some() {
+            return rule;
+        }
+    }
+    None
 }
 
 /// Whether an ignore rule's name matches a real directory entry's name.
@@ -543,6 +581,104 @@ mod tests {
         // still matches, and so does the ASCII spelling in another case.
         assert!(name_matches("kotlin-build", "kotlin-build", INSENSITIVE));
         assert!(name_matches("kotlin-build", "KOTLIN-BUILD", INSENSITIVE));
+    }
+
+    #[test]
+    fn a_path_is_left_out_by_a_name_anywhere_in_it() {
+        // The walk applies the tables as it descends, so it never reaches a
+        // file under a directory it declined. This answers the same question
+        // about a path that arrived whole, which is how the fingerprint sees
+        // one.
+        let cases = [
+            ("target/debug/app", SkipReason::BuildOutput),
+            (
+                "packages/app/node_modules/left-pad/index.js",
+                SkipReason::Vendored,
+            ),
+            (".sure/evidence/current.json", SkipReason::SureCache),
+            ("src/__pycache__/mod.pyc", SkipReason::Cache),
+        ];
+        for (path, reason) in cases {
+            assert_eq!(
+                left_out(Path::new(path), FILE, INSENSITIVE).map(|rule| rule.reason),
+                Some(reason),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_is_not_left_out_for_a_name_that_only_counts_as_a_directory() {
+        // The tables are two, and applying the wrong one is how a hand-written
+        // script called `build` gets dropped from a fingerprint. Every
+        // component but the last is a directory; the last is what the caller
+        // says it is.
+        for name in ["build", "target", "dist", "vendor", "coverage"] {
+            assert!(
+                left_out(Path::new(name), FILE, INSENSITIVE).is_none(),
+                "{name} as a file was left out"
+            );
+            assert!(
+                left_out(Path::new(name), DIR, INSENSITIVE).is_some(),
+                "{name} as a directory was kept"
+            );
+            // And as a component of something below it, it is a directory
+            // however the caller describes what is at the end.
+            assert!(
+                left_out(Path::new(&format!("{name}/app.js")), FILE, INSENSITIVE).is_some(),
+                "{name}/app.js was kept"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordinary_path_is_kept_whole() {
+        for path in [
+            "src/main.rs",
+            "packages/app/src/index.ts",
+            "docs/architecture/RUST_DESIGN.md",
+            "third_party/vendored.c",
+        ] {
+            assert!(
+                left_out(Path::new(path), FILE, INSENSITIVE).is_none(),
+                "{path} was left out"
+            );
+            assert!(
+                left_out(Path::new(path), DIR, INSENSITIVE).is_none(),
+                "{path} as a directory was left out"
+            );
+        }
+    }
+
+    #[test]
+    fn the_case_rule_reaches_every_component_and_not_only_the_first() {
+        // The rule is the platform's and applies at every level, so a path
+        // through `NODE_MODULES` is the same question as one through
+        // `node_modules` on the platforms where those are one directory.
+        assert_eq!(
+            left_out(
+                Path::new("src/NODE_MODULES/pkg/index.js"),
+                FILE,
+                INSENSITIVE
+            )
+            .map(|rule| rule.reason),
+            Some(SkipReason::Vendored)
+        );
+        assert!(
+            left_out(Path::new("src/NODE_MODULES/pkg/index.js"), FILE, SENSITIVE).is_none(),
+            "a case-sensitive platform must not fold this"
+        );
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_of_itself_is_answered_rather_than_panicked_over() {
+        // Not a path the walk can produce — its paths are built by joining one
+        // name onto a path that is already inside. Git's are not, so this
+        // function can be handed one, and a `..` component has to be a name
+        // that matches nothing rather than a name that resolves to something.
+        assert!(left_out(Path::new("../secrets/key.pem"), FILE, INSENSITIVE).is_none());
+        assert!(left_out(Path::new("src/../src/main.rs"), FILE, INSENSITIVE).is_none());
+        assert!(left_out(Path::new("./src/main.rs"), FILE, INSENSITIVE).is_none());
     }
 
     #[test]

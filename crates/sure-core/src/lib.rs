@@ -9,6 +9,7 @@
 pub mod config;
 pub mod diagnostics;
 pub mod doctor;
+pub mod fingerprint;
 pub mod paths;
 pub mod redact;
 pub mod scan;

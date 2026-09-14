@@ -218,6 +218,66 @@ finding or evidence record is reinterpreted by a new kind existing, and
 `docs/adr/0010-frozen-domain-semantics-in-code.md` requires a bump for a change
 of meaning, not for an addition.
 
+## What "the same project state" means
+
+A fingerprint answers one question — *is the evidence I have still about the
+project in front of me?* — and the answer is a `bool` that a stored verdict
+inherits. So what counts as "the same state" is not an implementation detail: it
+decides whether a green is still a green. The full rule is
+`docs/architecture/FINGERPRINTING.md`; what is frozen here is the vocabulary and
+the three semantic choices that no later task may quietly reverse.
+
+**`matches` compares `kind` and `digest`, never `id`.** The `id` is fresh on
+every computation, because two fingerprints have to be distinguishable by value
+when they differ; the `digest` is what two states share when they are the same
+state. Comparing `id` would answer "no" always, which is safe and useless;
+comparing `digest` alone would let a `Content` digest and a `Git` digest be
+compared as though they were the same kind of claim about a project.
+
+**There is no partial fingerprint, and no "unknown" one.** `FingerprintKind` has
+two variants and neither means "I could not tell". A fingerprint that cannot be
+computed is an `Err` (`crates/sure-core/src/fingerprint/error.rs`), never a value
+with an empty or truncated digest — a wrong answer wearing the shape of a right
+one is exactly the false green this product exists to prevent. The same rule
+reaches the limits: exceeding `max_files` or `max_bytes` is `TooManyFiles` or
+`TooManyBytes`, not a digest over the part that fitted.
+
+**The digest is a claim with a version, not a number.** Each kind's digest is
+opened by a domain tag — currently `sure.git-fingerprint.v1` — and the tag is
+part of what the value means. A change to **what goes into** a digest is a change
+of meaning and takes a new tag; it is never made silently, because stored
+fingerprints outlive the build that wrote them and a digest has no way to say
+which rule produced it. Adding a field that is not digested, or recording one
+that is not compared, is not such a change.
+
+Three consequences that a reader may expect to go the other way, and do not:
+
+| Choice | The reader's expectation | Why it is the other way |
+| --- | --- | --- |
+| The branch name is recorded but not digested | a rename is a change to the project | no file moved; a fingerprint that moved would teach a person to ignore the word *stale*, which is how the dangerous direction gets missed |
+| HEAD is digested | a checkout of a different commit with the same tree is the same content | it is the same **content** and a different **state** — evidence was produced against one commit, and SURE cannot know what a later check will read |
+| A tracked file under `target/` is not covered | it is in the repository, so it is part of the project | no check reads it, so changing it cannot change any answer; covering it would mark every result stale when a committed artefact was rebuilt |
+
+The third is the one place the fingerprint is narrower than "everything Git
+tracks", and the narrowing is published rather than silent: a file is covered if
+and only if a check could read it.
+
+`crates/sure-domain/src/vocabulary.rs` holds `FingerprintKind`, `GitState` and
+`ProjectFingerprint`; their wire names are in the tables above and are held still
+by `crates/sure-domain/tests/wire_contract.rs` in the same way as every other
+enum.
+
+Enforced by: `crates/sure-domain/src/vocabulary.rs` (`matches`, both variants
+named), `crates/sure-domain/tests/wire_contract.rs` (no wildcard arm),
+`crates/sure-core/tests/fingerprint_git.rs`
+(`renaming_the_branch_is_not_a_change_to_the_project`,
+`two_different_commits_of_one_tree_are_two_fingerprints`,
+`a_tracked_file_in_a_build_directory_is_not_in_the_fingerprint`,
+`a_project_with_more_changes_than_the_limit_has_no_fingerprint`,
+`a_project_with_more_content_than_the_limit_has_no_fingerprint`),
+`crates/sure-core/src/fingerprint/digest.rs`
+(`a_digest_of_one_kind_is_never_a_digest_of_another`).
+
 ## How the wire names are held still
 
 The tables above are the contract. `crates/sure-domain/tests/wire_contract.rs`

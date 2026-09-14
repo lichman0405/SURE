@@ -641,6 +641,7 @@ Three of the five jobs were failing the whole time.
 | 34851008124 | `650852e` — the fix for that | **all five green**, and the test that failed was read out of all three `rust` logs **by name** |
 | 34854388756 | `e10f620` — **the `P2-T005` implementation** | **all five green.** Windows **786** / macOS **788** / Ubuntu **789** passed, 0 failed, each over 34 result lines. Detail below, because **Windows agreeing with the local run exactly is the fact worth having** |
 | 34855496424 | `37a848a` — **the `P2-T005` acceptance** | **all five green, and the counts are the implementation's to the test**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. A documentation-only commit changing no number is the useful reading — it says the record was added without touching what it records |
+| 34855790124 | `cad9592` — **the record of that acceptance** | **all five green, and the same three figures a third time**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. Read from the log rather than from the job colours: `gh run view` alone gives the conclusion, and the conclusion is the least of what a run says |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same

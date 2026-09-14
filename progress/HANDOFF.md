@@ -1,18 +1,25 @@
 # Autonomous handoff
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
 Progress: 27 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (7/12).** `P2-T007` is accepted and recorded in
-`progress/state.json` **in the same commit as this file** — so `git log -1 --stat`
-is the check. If that commit's subject does not name `P2-T007`, the acceptance is
-not recorded and the task is not done.
+(11/11), phase P2 in progress (7/12).** `P2-T010` is `in_progress` — started, and
+its start is in `progress/state.json` — but **the commit after `0907acf` is not
+`P2-T010`'s first work**: it fixes a defect that run `34865716315` exposed, and
+the reason the fix came first is that `P2-T010`'s acceptance requires the store to
+open reliably, which is the thing that run showed it does not always do.
 
-**`P2-T007`'s implementation went in first, on its own commit, with its own run
-read before the acceptance was taken.** `586d3a3`, run `34864498113`, all five
-jobs green; `435181f` records that run. The two-commit shape is deliberate and is
-not the four-commit shape `P2-T006` used: the acceptance could not be written
-honestly until the run existed, and once it did, only the acceptance was left.
+**`P2-T007` is accepted and its acceptance is in `0907acf`, with this file.** The
+check is `git show --stat 0907acf`, not `git log -1 --stat` — that sentence was
+written when the acceptance was expected to be the tip of the branch, and the
+commit that fixes the red run follows it. A handoff that names the wrong
+verification command is worse than one that names none.
+
+**`P2-T007`'s implementation went in on its own commit, with its own run read
+before the acceptance was taken.** `586d3a3`, run `34864498113`, all five jobs
+green; `435181f` records that run. The two-commit shape was deliberate and is not
+the four-commit shape `P2-T006` used: the acceptance could not be written honestly
+until the run existed, and once it did, only the acceptance was left.
 
 **Where the chain stops, stated because the paragraph here said the opposite
 until it was corrected.** This file previously read *"the commit after it records
@@ -907,12 +914,119 @@ Three of the five jobs were failing the whole time.
 | 34864498113 | `586d3a3` — **the `P2-T007` implementation** | **all five green.** Windows **871** / macOS **873** / Ubuntu **874** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. The parent count went 25 → 26 because `components_graph` is a new test binary. **Windows agrees with the local Windows run exactly**, all 22 new test names were read out of all three `rust` logs **by name**, and the multisets were compared against the run before this one. Detail below |
 | 34865169857 | `435181f` — the `P2-T007` run record | **all five green**, and **871 / 873 / 874 with 0 failed, 1 ignored, 26 parents** — the implementation's figures to the test, unchanged. A commit that adds only prose to this file changing no count is the reading a record commit is for |
 | 34865317166 | `0907acf` — **the `P2-T007` acceptance** | **all five green**, and **871 / 873 / 874 again**, unchanged, `26` parents each. The acceptance touches only `progress/state.json` and this file, so the implementation's evidence survived its own recording. **This run is the end of the `P2-T007` chain and is reported in the session rather than committed** — see the rule stated at the top of this file |
+| 34865716315 | `906bfb0` — **the `P2-T007` record commit, which edits only this file** | **failure: `rust (ubuntu-latest)`.** The other four jobs green, including `rust (macos-latest)` and `rust (windows-latest)` on **the same commit**. Two tests failed in `sure-core --test store_concurrency`. Detail below — this is the first red run since `c735a2f` and the first ever seen on a documentation-only commit |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34865716315` — red, on a commit that changed only this file
+
+**This is the run that showed a defect, and the shape of the run is most of the
+diagnosis.** `906bfb0` edits `progress/HANDOFF.md` and nothing else. There is no
+Rust in it. It came back:
+
+| job | conclusion |
+|---|---|
+| `shellcheck-secondary` | success |
+| `bootstrap-validate-windows` | success |
+| `rust (windows-latest)` | **success** |
+| `rust (macos-latest)` | **success** |
+| `rust (ubuntu-latest)` | **failure** |
+
+Two tests failed, both in `sure-core --test store_concurrency`:
+
+```text
+thread 'child_writer' (5763) panicked at crates/sure-core/tests/store_concurrency.rs:222:49:
+the store opens: Migration(Foreign { tables: ["records"] })
+thread 'many_processes_opening_a_fresh_file_do_not_report_a_broken_history' (5751) panicked at crates/sure-core/tests/store_concurrency.rs:470:9:
+opener 5 failed with exit status: 101
+```
+
+**The message is the finding.** `records` is the table SURE's own migration 1
+creates. SURE told the user that SURE's own history file was a SQLite database
+somebody else had made, and named SURE's own table as the evidence.
+
+**Three platforms on one commit is what rules out a broken test.** A test that is
+wrong is wrong everywhere; this failed on one of three. The two that passed are
+not a second opinion — they are the same defect with a scheduler that did not
+open the window. Every earlier run of this branch was green, so the window is
+narrow, which is exactly why it survived `P2-T002` through `P2-T007`.
+
+#### The window, and why "it is only a race" was not good enough to leave
+
+`migrations::apply` read the version, then read the table list, with nothing
+between them:
+
+```rust
+let current = version(connection)?;          // (1) what version is this?
+...
+if current == 0 {
+    let tables = user_tables(connection)?;   // (2) does it already have tables?
+```
+
+Two processes open a file that does not exist yet and both read version 0 at (1).
+One of them migrates it — the DDL and the `user_version` write are a single
+transaction, so the file goes from *(0, no tables)* to *(1, `records`)* with no
+bad half-state in between. The other then asks (2) and is told there is a table.
+The two answers describe two different moments, and the conclusion drawn from
+them — "this file is not mine" — is false.
+
+`apply_one` already re-read the version *inside* its write transaction, and its
+doc comment says why at length. The foreign-database check had no such protection
+and no comment saying it needed one. **The module documented the race it had
+thought about, in the function that did not have it.**
+
+#### The fix, and the part of it no test can reach
+
+`resolve_fresh_database(connection, seen)` now does the check, reading the
+version and the tables **inside one read transaction**. Two things in it are
+load-bearing and they are not the same thing:
+
+- the version is read **again** inside, which corrects a `seen` that went stale
+  before the call — the shape the failing run had;
+- the two reads are **bracketed**, which stops a commit landing between them.
+
+**Only the first is reachable from a test**, and this was measured rather than
+assumed: deleting the bracketing and re-running left **all 20 tests passing**.
+So there is now a test that fails when the bracketing is removed and on nothing
+else — `the_check_reads_the_file_in_one_transaction`, which asks the function to
+run where it must not (inside a transaction) and asserts that it refuses. It is
+written from the outside because the inside needs a writer to commit in the
+middle of a function, which is the race itself. That is stated in the module doc
+and in the test, not left for a reader to discover.
+
+A file that moved to a *newer* schema in the window is now `NewerSchema`. It used
+to be `Foreign { tables: ["records"] }` — the same wrong answer, with the version
+that actually moved left unsaid.
+
+`MigrationError::Inspect` is new, for a statement SURE ran to *look* at the file
+rather than to change it, and the mapping is unit-tested against errors SQLite
+really produced (a genuine `SQLITE_BUSY` from a second `BEGIN IMMEDIATE`, and a
+genuine syntax error) rather than against errors built to match the pattern.
+
+#### How the reproduction was made deterministic, and why it had to be
+
+The failing test is a race, and **a flaky test cannot tell a fix from a lucky
+run** — that is the whole reason the fix is justified by a unit test instead. The
+sequence was: extract the two reads into a named function with **today's
+behaviour unchanged**, write the test, and watch it go red with the same string
+CI printed —
+
+```text
+called `Result::unwrap()` on an `Err` value: Foreign { tables: ["records"] }
+```
+
+— before writing any fix. Then fix, then green. The stale version is *passed in*
+rather than provoked, because it is the same input the race produces and it does
+not depend on the scheduler being unkind.
+
+The `store_concurrency` test was also run **8 times** after the fix with no
+failure. That is a smoke check and is recorded as one: eight green runs of a test
+that fails roughly one run in five proves very little, and it is not offered as
+evidence. The deterministic test is the evidence.
 
 ### Reading run `34864498113`, `P2-T007`'s — and a comparison against the run before it
 
@@ -1325,6 +1439,26 @@ nothing local can. Only a run on the platform can.
 consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
+
+## Gate set, as run on the fix for run `34865716315`
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **877 passed, 0 failed, 1 ignored, across 36 result lines = 26 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| mutation check, 5 mutations over the new branches | **5 of 5 caught**, baseline green first; one printed `SKIP` on the first pass because its anchor appeared twice, and was re-anchored rather than counted |
+
+**877 is 871 + 6, and the six are the tests this fix adds and nothing else.**
+Measured, not predicted: the count was taken from the parent sections before the
+fix was written and again after. The raw sum over all 36 lines is **887**, which
+over-counts by exactly 10 for the reason recorded above.
+
+The fix also ran `sure-core --test store_concurrency` **8 times** with no failure.
+Recorded here so the number is not mistaken for evidence: a test that fails about
+one run in five passing eight times is a smoke check, and the deterministic unit
+test is what justifies the fix.
 
 ## Gate set, as run on the `P2-T007` commit `586d3a3`
 
@@ -2630,18 +2764,31 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **`P2-T007` is accepted, its two commits are pushed and read, and the next
-   action is to start the next task — nothing is in flight.** `586d3a3` the
-   implementation in run `34864498113` — **all five jobs green**, Windows **871** /
-   macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36 result lines = 26
-   parents + 10 children, Windows equal to the local Windows run; `435181f` the
-   run record. `node scripts/taskctl.mjs status` now reads
-   `{ accepted: 27, queued: 139 }`, phase `P2`, **7 of 12**, with **`in_progress:
-   0`**.
-2. **The READY list is now 13 long and two of its entries were not predicted:
-   `P2-T008`, `P2-T009`, `P2-T010`, `P2-T012`, `P3-T001`, `P4-T007`, `P4-T008`,
-   `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`.** The
-   order to consider is `P2-T010` — *"Implement `ProjectIntent` ingestion from
+1. **The immediate action is to push this fix and read its run — it is not
+   finished until then, and the run it answers was red.** The run to expect is
+   `rust (ubuntu-latest)` in particular: it is the job that failed, and the two
+   that passed are not the ones to check. Confirm all five green and confirm
+   **877 / 879 / 880** with 0 failed and 1 ignored over 36 result lines = 26
+   parents + 10 children — the Windows figure locally measured is 877, and the
+   platform offsets have been +2 and +3 for many runs.
+2. **Then `P2-T010`**, which is `in_progress` with its start recorded in
+   `progress/state.json` and **no work committed yet**. The red run is why it was
+   not started: its acceptance is "`sure check` can receive/store a trusted
+   explicit goal", and `sure check` opens the store.
+3. **`P2-T007` is accepted, its two commits are pushed and read.**
+   `586d3a3` the implementation in run `34864498113` — **all five jobs green**,
+   Windows **871** / macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36
+   result lines = 26 parents + 10 children, Windows equal to the local Windows
+   run; `435181f` the run record; `0907acf` the acceptance.
+   `node scripts/taskctl.mjs status` reads `{ accepted: 27, queued: 138,
+   in_progress: 1 }`, phase `P2`, **7 of 12**.
+4. **The READY list is 13 long, and the sentence that used to introduce it said
+   "two of its entries were not predicted" about `P4-T007` and `P6-T005` — which
+   was true when it was written and is left here as the number it became.** The
+   list: `P2-T008`, `P2-T009`, `P2-T010`, `P2-T012`, `P3-T001`, `P4-T007`,
+   `P4-T008`, `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`,
+   `P13-T001` — with `P2-T010` already taken. The order to consider is `P2-T010` —
+   *"Implement `ProjectIntent` ingestion from
    explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
    explicit goal without requiring raw transcript recording"* — because **it
    finishes phase P2**, against `P2-T008`/`P2-T009`/`P2-T012` which extend a graph
@@ -2669,7 +2816,7 @@ it needs a Mac.
    the next increment**: the multiset was compared against the previous run's
    multiset position by position, which is the only form of that check that can
    tell a difference this commit made from one that was already there.
-3. **Neither fingerprint entry point is called by anything yet**, and that has
+5. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline
    will call first. So `FINGERPRINTING.md`'s coverage rule and the dispatch rule

@@ -28,6 +28,11 @@
 //! is a SQLite database, but not one SURE made, and the alternative — running
 //! migration 1 against it and reporting the `table records already exists`
 //! error — sends the reader looking for a problem in the wrong place.
+//!
+//! That check is the one part of this module that two processes can race on,
+//! because it is the one part that asks two questions about the file and needs
+//! them to be about the same moment. [`resolve_fresh_database`] says what went
+//! wrong when they were not.
 
 use std::fmt;
 
@@ -73,6 +78,18 @@ pub enum MigrationError {
     Foreign {
         /// The tables it already had.
         tables: Vec<String>,
+    },
+    /// SURE could not look at the file in order to decide whether it may update
+    /// it.
+    ///
+    /// Distinct from [`MigrationError::Failed`] because no migration ran and
+    /// none was named: this is the check that runs *before* the first one, and
+    /// it failed, so SURE does not know what the file is. Distinct from
+    /// [`MigrationError::Busy`] because waiting would not have helped, and a
+    /// reader sent to wait for a process that is not there learns nothing.
+    Inspect {
+        /// What SQLite said.
+        message: String,
     },
     /// Another process held the write lock for longer than the caller waited.
     ///
@@ -126,6 +143,16 @@ impl fmt::Display for MigrationError {
                  SURE stopped rather than add its tables to a file it does not own.\n\n\
                  Move the file, or point SURE at a different data directory.",
                 named_tables(tables)
+            ),
+            Self::Inspect { message } => write!(
+                f,
+                "SURE could not look at its history file to decide whether it is one SURE may \
+                 update.\n\n\
+                 {message}\n\n\
+                 Nothing was written. SURE stopped rather than open the file assuming it was \
+                 its own: if it is not, the first thing SURE would do is add its own tables to \
+                 somebody else's database.\n\n\
+                 Run the command again."
             ),
             Self::Busy { message } => write!(
                 f,
@@ -223,25 +250,20 @@ pub fn version(connection: &Connection) -> Result<u32, MigrationError> {
 /// [`MigrationError::NewerSchema`] for a newer file, [`MigrationError::Foreign`]
 /// for a SQLite database SURE did not make, [`MigrationError::OutOfOrder`] if
 /// [`MIGRATIONS`] has a gap, [`MigrationError::Busy`] if another process held
-/// the write lock for longer than the connection's busy timeout, and
-/// [`MigrationError::Failed`] if a migration's SQL failed — in which case that
-/// migration was rolled back and the database is left at the version it had.
+/// the write lock for longer than the connection's busy timeout,
+/// [`MigrationError::Inspect`] if the file could not be read well enough to
+/// decide whether it is SURE's, and [`MigrationError::Failed`] if a migration's
+/// SQL failed — in which case that migration was rolled back and the database is
+/// left at the version it had.
 pub fn apply(connection: &Connection) -> Result<u32, MigrationError> {
     check_order()?;
-    let current = version(connection)?;
+    let current = resolve_fresh_database(connection, version(connection)?)?;
 
     if current > LATEST {
         return Err(MigrationError::NewerSchema {
             found: current,
             supported: LATEST,
         });
-    }
-
-    if current == 0 {
-        let tables = user_tables(connection)?;
-        if !tables.is_empty() {
-            return Err(MigrationError::Foreign { tables });
-        }
     }
 
     for migration in MIGRATIONS.iter().filter(|m| m.version > current) {
@@ -261,6 +283,124 @@ pub fn apply(connection: &Connection) -> Result<u32, MigrationError> {
         });
     }
     Ok(final_version)
+}
+
+/// The version a database is at, having settled whether a version-0 file is
+/// SURE's to migrate.
+///
+/// `seen` is what [`version`] returned a moment ago and is used as-is unless it
+/// is zero: only a file at version 0 can be a file SURE did not make.
+///
+/// # The window this closes
+///
+/// "What version is this?" and "does it already have tables?" have to be two
+/// questions about one moment in the file's life. Asked one after the other with
+/// nothing between them, they are not, and here is what that produced:
+///
+/// - Two processes open a history file that does not exist yet, and both read
+///   version 0.
+/// - One of them migrates it. The DDL and the `user_version` write are a single
+///   transaction, so the file goes from *(0, no tables)* to *(1, `records`)* with
+///   no state in between — there is no bad half-state here to find.
+/// - The other process asks its second question and is told there is a table.
+///
+/// It concludes the file belongs to somebody else, and tells the user that
+/// SURE's own history file is not one SURE made. **This was observed, not
+/// imagined**: one CI platform of three, one run in five, with `records` — the
+/// table this file's own migration creates — named back at the user as a
+/// stranger's. The two platforms that passed it were not a second opinion; they
+/// were the same bug with a scheduler that did not open the window.
+///
+/// Reading inside a transaction is what makes the two answers describe one
+/// moment. It is a *read* transaction and takes no write lock, so it does not
+/// serialise the several simultaneous opens this store exists to survive: in WAL
+/// mode both reads come from one snapshot, and in the rollback-journal mode a
+/// filesystem that cannot do WAL leaves behind, the read lock is held from the
+/// first read until the commit, which is a lock a writing process must have
+/// released before it can commit.
+///
+/// # Two things here are load-bearing, and only one of them is easy to test
+///
+/// The version is read again *inside* the transaction, and the two reads are
+/// bracketed by one. Neither alone is the fix. The re-read is what corrects a
+/// `seen` that went stale before this function was entered — the shape the
+/// failing run had, and the one a test can inject. The bracketing is what stops
+/// a commit landing *between* the re-read and the table read, which is the same
+/// false report one statement further in and is not reachable from a test
+/// without a hook into the middle of a function.
+///
+/// So the injected-version tests pass with the bracketing deleted — checked, by
+/// deleting it — and `the_check_reads_the_file_in_one_transaction` is there
+/// because that is otherwise a fix nothing would notice being removed.
+///
+/// A file that reached a *newer* schema in that window is now reported as
+/// [`MigrationError::NewerSchema`]. It used to be reported as foreign, naming
+/// SURE's own table as the reason — the same wrong answer, with the version
+/// that actually moved left unsaid.
+///
+/// # Errors
+///
+/// [`MigrationError::Foreign`] if the file has tables and reports version 0,
+/// [`MigrationError::Inspect`] if it could not be read that way, and
+/// [`MigrationError::Busy`] if another process held the file for longer than the
+/// connection's busy timeout.
+fn resolve_fresh_database(connection: &Connection, seen: u32) -> Result<u32, MigrationError> {
+    if seen != 0 {
+        return Ok(seen);
+    }
+
+    // `BEGIN` and not `BEGIN IMMEDIATE`: nothing here writes, and taking the
+    // write lock would make every fresh open queue behind every other one.
+    connection
+        .execute_batch("BEGIN")
+        .map_err(|error| inspect_failed(&error))?;
+
+    // As in `apply_one`, every way out of this match either commits or rolls
+    // back. Returning with the transaction open would leave the connection
+    // unusable for the migration that follows, which cannot begin inside one.
+    let outcome: Result<u32, MigrationError> = match version(connection) {
+        Err(error) => Err(error),
+        Ok(0) => match user_tables(connection) {
+            Ok(tables) if tables.is_empty() => Ok(0),
+            Ok(tables) => Err(MigrationError::Foreign { tables }),
+            Err(error) => Err(error),
+        },
+        // Another process got there first. What it left is a version, and the
+        // caller decides whether this build understands it.
+        Ok(current) => Ok(current),
+    };
+
+    match outcome {
+        Ok(current) => connection
+            .execute_batch("COMMIT")
+            .map(|()| current)
+            .map_err(|error| inspect_failed(&error)),
+        Err(error) => {
+            // The rollback's own failure is ignored on purpose, for the reason
+            // `apply_one` gives: the caller needs the reason the check failed,
+            // and a rollback that also failed leaves the connection unusable
+            // either way.
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+/// The error for a statement SURE ran to look at the file rather than to change
+/// it.
+///
+/// Contention is reported as contention, the same way [`failed`] reports it and
+/// for the same reason: a reader sent to look for a bug in SURE when the answer
+/// is "try again" has been told something untrue.
+fn inspect_failed(error: &rusqlite::Error) -> MigrationError {
+    if is_busy(error) {
+        return MigrationError::Busy {
+            message: error.to_string(),
+        };
+    }
+    MigrationError::Inspect {
+        message: error.to_string(),
+    }
 }
 
 /// Run one migration and move the version with it, or neither.
@@ -382,9 +522,171 @@ fn check_order() -> Result<(), MigrationError> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::Duration;
 
     fn memory() -> Connection {
         Connection::open_in_memory().expect("an in-memory database")
+    }
+
+    /// Two connections to one database file that does not exist yet.
+    ///
+    /// A file rather than `:memory:`, because two in-memory connections are two
+    /// separate databases, and the whole point of the tests below is what one
+    /// connection sees of what another has written.
+    ///
+    /// The directory name carries the process id, for the reason
+    /// `store::tests::scratch` records: freshness must not depend on a deletion
+    /// succeeding, because on Windows a file another process holds cannot be
+    /// deleted. A unique name cannot be stale, and the clear that follows covers
+    /// the one case uniqueness does not — a reused process id — by stopping the
+    /// test rather than letting it read a database that is not new.
+    fn two_connections_on_one_new_file(name: &str) -> (Connection, Connection) {
+        let directory =
+            crate::store::scratch_root().join(format!("migrations-{name}-{}", std::process::id()));
+        match fs::remove_dir_all(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!(
+                "cannot clear {}: {error}. This process id was used before and its \
+                 database is still on disk, so a file these tests believe is new is not.",
+                directory.display()
+            ),
+        }
+        fs::create_dir_all(&directory).expect("a scratch directory");
+
+        let path = directory.join("sure.db");
+        (
+            Connection::open(&path).expect("the first connection"),
+            Connection::open(&path).expect("the second connection"),
+        )
+    }
+
+    #[test]
+    fn a_file_another_connection_migrated_before_the_check_is_not_reported_as_foreign() {
+        // The interleaving that made a run red, made deterministic.
+        //
+        // `second` has already been told the file is at version 0, which is what
+        // it was when it looked. By the time it asks its second question — does
+        // this file already have tables? — the first connection has migrated it,
+        // and the answer is yes. Believing that answer, SURE reports its own
+        // history file as one it did not make.
+        //
+        // The stale version is passed in rather than provoked. Reaching the same
+        // window with two processes and a timetable is a race that passes when
+        // the scheduler is kind, and no run of a flaky test can tell a fix from
+        // a lucky one — which is why the run that found this reported it once in
+        // five attempts, on one platform of three.
+        let (first, second) = two_connections_on_one_new_file("migrated-before-the-check");
+        assert_eq!(
+            version(&second).unwrap(),
+            0,
+            "the file does not start empty"
+        );
+
+        apply(&first).unwrap();
+
+        assert_eq!(
+            resolve_fresh_database(&second, 0).unwrap(),
+            LATEST,
+            "SURE's own history file was reported as one SURE did not make"
+        );
+        assert!(
+            second.is_autocommit(),
+            "the check left a transaction open, which the migration that follows \
+             cannot start inside"
+        );
+    }
+
+    #[test]
+    fn a_file_that_moved_to_a_newer_schema_before_the_check_is_reported_as_newer() {
+        // The same window, with the other thing that can commit in it. The table
+        // found here is SURE's own and the version is what has moved, so
+        // `Foreign` — which names SURE's own table back at the user as somebody
+        // else's — is the wrong answer twice over.
+        let (first, second) = two_connections_on_one_new_file("newer-before-the-check");
+        apply(&first).unwrap();
+        first
+            .pragma_update(None, "user_version", LATEST + 1)
+            .unwrap();
+
+        assert_eq!(resolve_fresh_database(&second, 0).unwrap(), LATEST + 1);
+    }
+
+    #[test]
+    fn a_file_with_somebody_elses_table_is_still_refused() {
+        // The check the interleaving must not cost: a file that really is not
+        // SURE's is still refused, and by name.
+        let (first, second) = two_connections_on_one_new_file("somebody-elses-table");
+        first
+            .execute_batch("CREATE TABLE notes (body TEXT)")
+            .unwrap();
+
+        assert_eq!(
+            resolve_fresh_database(&second, 0),
+            Err(MigrationError::Foreign {
+                tables: vec!["notes".to_owned()],
+            })
+        );
+        assert!(second.is_autocommit(), "the check left a transaction open");
+    }
+
+    #[test]
+    fn the_check_reads_the_file_in_one_transaction() {
+        // **The only test here that fails if the transaction is removed**, which
+        // is why it exists. The two tests above inject a stale version at the
+        // call, and re-reading the version satisfies them whether or not the two
+        // reads are bracketed — checked, by deleting the transaction and
+        // watching all twenty of these pass. What the bracketing adds is that
+        // nothing can commit *between* the version read and the table read: the
+        // same false report as the original bug, one statement further in.
+        //
+        // Written from the outside, because the inside is not reachable from a
+        // test — reaching it needs a writer to commit in the middle of a
+        // function, which is the race itself. The function is therefore asked to
+        // run where it must not, and refusing is the observable consequence of
+        // having opened a transaction of its own.
+        let connection = memory();
+        connection.execute_batch("BEGIN").unwrap();
+        assert!(matches!(
+            resolve_fresh_database(&connection, 0),
+            Err(MigrationError::Inspect { .. })
+        ));
+    }
+
+    #[test]
+    fn a_statement_sure_ran_to_look_reports_contention_as_contention() {
+        // The mapping, with failures SQLite really produced rather than ones
+        // built to match a pattern. Contention is the one case where the reader
+        // should wait and try again, and telling them apart is the whole reason
+        // `Busy` is a separate variant from `Failed`.
+        let (first, second) = two_connections_on_one_new_file("inspect-failed");
+        second.busy_timeout(Duration::from_millis(0)).unwrap();
+        first.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let busy = second.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+        assert!(
+            is_busy(&busy),
+            "SQLite did not call this contention: {busy}"
+        );
+        assert!(matches!(inspect_failed(&busy), MigrationError::Busy { .. }));
+
+        first.execute_batch("ROLLBACK").unwrap();
+        let other = second.execute_batch("SELECT nonsense").unwrap_err();
+        assert!(!is_busy(&other), "a syntax error was read as contention");
+        assert!(matches!(
+            inspect_failed(&other),
+            MigrationError::Inspect { .. }
+        ));
+    }
+
+    #[test]
+    fn a_file_that_reported_a_version_is_not_looked_at_again() {
+        // Only version 0 needs the question asked, and the answer must not
+        // depend on the file: a version that was read has already settled it.
+        let connection = memory();
+        assert_eq!(resolve_fresh_database(&connection, 4).unwrap(), 4);
+        assert!(connection.is_autocommit(), "the check opened a transaction");
     }
 
     #[test]
@@ -641,6 +943,9 @@ mod tests {
             },
             MigrationError::Foreign {
                 tables: vec!["notes".to_owned()],
+            },
+            MigrationError::Inspect {
+                message: "disk I/O error".to_owned(),
             },
             MigrationError::Failed {
                 version: 2,

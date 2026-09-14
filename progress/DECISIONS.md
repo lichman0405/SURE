@@ -267,3 +267,50 @@ second for its own `grade`, and the change either way is two lines plus the test
 that pin today's answer. The argument for the first is that
 `plain_description(Generic)` renders *"SURE can find how this project is built
 and run"* and SURE cannot run it.
+
+## P2-T008 — environment and configuration references
+
+The decisions in it are the ones a later reader would otherwise have to
+reverse-engineer from the code. The first is the acceptance itself.
+
+- **The value rule is enforced by the shape of the types, not by a check.**
+  `SECRET_REDACTION.md` asks SURE to avoid logging raw environment values, so no
+  field on `Reference` or `Declaration` can hold one, and `key_from_env_line`
+  takes a single `&str` and returns an owned `String` key with nowhere for the
+  right-hand side to go. A redaction step would have been easier to write and
+  would have failed open; a shape fails closed. The corollary is that the module
+  must never *need* the value: it does not decide whether a key is a secret, and
+  a key named `AWS_SECRET_ACCESS_KEY` is the finding rather than something to
+  redact.
+- **`.env` is not read, and it is not reported as unread either.** Not reading
+  the file the values are in is a decision, so it is not a loss, so
+  `is_complete()` stays true for a project SURE deliberately skipped. Reporting
+  those files in `unread()` would tell a caller the pass was incomplete when
+  nothing was lost — the same "do not render a decision as an absence" rule that
+  `components::Members::NotRead` exists to hold.
+- **A key SURE assembled is not a key the project stated.** `process.env[prefix +
+  "_URL"]` is not a read, and neither is `process.env["API_"+SUFFIX]`. The
+  second is the one worth naming: with a space, the space alone rejects it, so
+  only the unspaced spelling exercises the rule, and it was the mutation that
+  found the untested case.
+- **The two one-sided statuses describe the two lists, not the project.**
+  `ReadButNotDeclared` says SURE read a key and found no declaration for it; it
+  does not say the project is missing anything, because a project can set an
+  environment variable in a deployment system SURE did not read. Same reason as
+  `Members::NotRead`, and it is a wording decision with a test on it
+  (`the_two_one_sided_statuses_do_not_claim_the_project_has_nothing`).
+- **The module reads what the scan found and nothing else.** It takes a
+  `&Discovery` and opens only paths the `Scan` listed, so "can a project make
+  SURE read a file outside itself?" is answered by `scan::Walk` rather than here —
+  and `scan::Walk` answers it by never yielding a link as an entry
+  (`scan/mod.rs:490-498`). That is why no `symlink_metadata` guard was added to
+  this module's reader: it would be unreachable code that no test can exercise,
+  and it would imply the sibling readers that lack it are unsafe. The residual
+  TOCTOU window is gap 6 and is shared with `discover/read.rs`.
+- **`found.sort()` in `candidates` is kept although it currently changes
+  nothing**, and the mutation that removes it is declared unobservable **with the
+  reason and the condition that would falsify it**. `Scan::files` already yields
+  component-lexicographic order because the walker sorts siblings by name and
+  recurses inline. The sort is what keeps this module's read order — and so which
+  file runs out of budget — from depending on a traversal order this module does
+  not own.

@@ -2,15 +2,27 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 28 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (8/12, `P2-T012` started and not yet accepted).**
-`P2-T010` is `accepted`, on a read run. `P2-T012`'s implementation is committed
-and pushed as `d5261a6`, its run `34873225889` is read in full below, and **the
+Progress: 29 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (9/12, `P2-T008` started and not yet accepted).**
+`P2-T012` is `accepted`, on a read run. `P2-T008`'s implementation is committed
+and pushed as `ec8456d`, its run `34877928915` is read in full below, and **the
 commit carrying this file is its acceptance** — so once it lands, phase `P2` is
-9 of 12. What the task added is described under "What `P2-T012` added" below.
+10 of 12. What the task added is described under "What `P2-T008` added" below.
 
-**The one thing about `P2-T012` a reader should know before the detail: it
-changed what every project is reported as.** `sure_core::support::classify`
+**The one thing about `P2-T008` a reader should know before the detail: the
+`.env` file is never opened, and that is a decision rather than a failure.** The
+acceptance asks for the keys a project requires without collecting values, and
+the module enforces that in the type — no field on `Reference` or `Declaration`
+can hold a value, and `key_from_env_line` takes one `&str` and returns an owned
+key with nowhere for the right-hand side to go. `.env.example` and its siblings
+are read for the keys they declare; `.env`, `.env.local` and `.env.production`
+are not candidates **and do not appear in `unread()` either**, so a pass that
+skipped them still reports itself complete. That is correct — nothing was lost —
+and it is stated here because a reader who expected those files in `unread()`
+would be reading a loss that never happened. See "What `P2-T008` added".
+
+**The thing about `P2-T012` a reader should still know: it changed what every
+project is reported as.** `sure_core::support::classify`
 answers a project-level support level, and in this build the answer is
 `inspect_only` for **every** project, because this build runs no project code and
 the product's levels A and B both require running checks. That is a deliberate
@@ -28,7 +40,8 @@ that run showed it does not always do.
 **The branch, in order, from the last accepted task to here:** `0907acf` accepts
 `P2-T007`; `3be88f1` records the run of the fix that `0907acf` follows; `4746c48`
 is `P2-T010`'s implementation; `63278c0` is the `P2-T010` acceptance; `d5261a6`
-is `P2-T012`'s implementation; the commit carrying this file is the `P2-T012`
+is `P2-T012`'s implementation; `481066f` is the `P2-T012` acceptance; `ec8456d`
+is `P2-T008`'s implementation; the commit carrying this file is the `P2-T008`
 acceptance. The acceptance of `P2-T007` is therefore **not** at the tip and never
 was, so the check for it is `git show --stat 0907acf` rather than
 `git log -1 --stat` — the sentence here used to name the wrong command, and a
@@ -85,20 +98,24 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 29, queued: 137 }
-READY: P2-T008, P2-T009, P3-T001, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
+{ accepted: 30, queued: 136 }
+READY: P2-T009, P3-T001, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
        P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T012` is `accepted`**, on run `34873225889`, and **`in_progress` is 0**, so
+**`P2-T008` is `accepted`**, on run `34877928915`, and **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. Phase `P2` is **9 of 12**; `P2-T008` and `P2-T009` are the two
-that would finish it.
+adopting an orphan. Phase `P2` is **10 of 12**; `P2-T009` is the one that would
+finish it.
 
-**The READY list went 12 → 11 and nothing entered it.** `P2-T012` left the list by
-being accepted, and no task became ready in the same step. The list is quoted
-from the command rather than from a prediction, which is why a step that changes
-nothing is visible as nothing rather than as an omission.
+**The READY list went 11 → 11, and the membership changed.** `P2-T008` left the
+list by being accepted and `P4-T006` entered it in the same step, so the count is
+unchanged while the list is not — which is exactly why the list is quoted from
+the command rather than compared by length. `P4-T006` was blocked on `P2-T008`,
+so the dependency edge is now visible as this task's own effect rather than as
+P2-T008's. The list is quoted from the command rather than from a prediction,
+which is why a step that changes nothing is visible as nothing rather than as an
+omission.
 
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
@@ -251,6 +268,77 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T008` added
+
+Acceptance: *"Finds required keys without collecting values"* and *"Can compare
+references with examples/docs."* One module, its integration tests, and no
+change to any other module's behaviour.
+
+`crates/sure-core/src/references.rs` — `ReferenceReport::of(&Discovery)` and
+`with_options`, a view over a `Scan` the way `components::ComponentGraph` is, so
+it opens no file it was not handed and cannot disagree with the discovery it came
+from about what was in the project. It reads the project's source files for the
+five forms a key is asked for in, reads its example files and documents for the
+keys they declare, and compares the two into one `KeyReport` per key, each with a
+three-armed `KeyStatus`. `crates/sure-core/tests/config_references.rs` holds 18
+integration tests; the module holds 25 unit tests.
+
+### The value rule is in the type, and that is the acceptance's first sentence
+
+`SECRET_REDACTION.md` asks SURE to "avoid logging raw environment values".
+**No field on `Reference` or `Declaration` can hold a value**, and
+`key_from_env_line` takes one `&str` and returns an owned `String` key with
+nowhere for the right-hand side to go. So the rule is not a promise the module
+keeps — it is a shape the module has.
+
+A structural claim of this kind is exactly the one that passes vacuously, so the
+canary tests are built so that absence alone cannot pass them: each asserts the
+key *was* found **and** the file *was* read **and** the canary value is absent
+from `format!("{report:?}")`. A further control, named for what it proves rather
+than for what it checks —
+`the_helper_that_looks_for_the_canary_can_see_a_value_that_did_reach_the_report`
+— puts the canary in a **filename** and asserts the helper finds it in a rendered
+path, so the helper is known to be capable of failing. Without that control, a
+helper that always returned "absent" would make every other canary test green.
+
+### `.env` is never opened, and that is a decision rather than a loss
+
+`.env`, `.env.local`, `.env.production` and `.env.test` are not candidates. They
+are also **not pushed to `unread()`**, so `is_complete()` stays true for a
+project SURE deliberately did not read the values of. That is the right answer
+and it is worth being explicit about, because the alternative — reporting them as
+unread — would tell a caller the pass was incomplete when nothing was lost.
+
+It is held by a matched pair that differs in one byte of a filename:
+`the_file_the_values_are_in_is_never_opened` against
+`an_example_file_with_the_same_contents_is_read_and_says_so`. A pass that read
+`.env` and skipped `.env.example` fails the second; a pass that skipped both
+fails the second; a pass that read both fails the first. This is the same
+mutation-resistant-pair technique the repository has used before, and it exists
+because a single test asserting "`.env` was not read" is also passed by a pass
+that reads nothing at all.
+
+### The pass is textual, and both limits are pinned by a test that states them
+
+A read inside a comment is reported as a read
+(`a_mention_inside_a_comment_is_still_a_read`); a key documented in prose with no
+assignment is not a declaration; a key the code assembles at run time is not a
+read even where it is decidable. The module doc says what it does not do —
+it does not parse, it does not know what a key means, it does not read the
+environment, it does not read `.env`, and **it does not decide whether a key is a
+secret**: `redact::looks_like_credential_name` exists for SURE's own messages,
+and a key named `AWS_SECRET_ACCESS_KEY` is the finding, not something to redact.
+
+### The two one-sided arms name the two lists, not the project
+
+`ReadButNotDeclared` and `DeclaredButNotRead` are worded to describe what the two
+lists contain rather than what the project lacks — the same distinction
+`components::Members::NotRead` draws, and for the same reason. `is_complete()`
+gates the sentence that says whether the reading finished, and
+`the_sentence_counts_each_side_and_not_the_keys_there_are` pins both counts in a
+fixture where they differ from the total (2 read, 3 declared, 4 exist), because a
+sentence built from the total would state how many keys the project has.
 
 ## What `P2-T012` added
 
@@ -1315,6 +1403,50 @@ pins it.** Recorded at this length because the tempting sentence — "the multis
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
 
+### Reading run `34877928915`, `P2-T008`'s — and a by-name counter that was quietly 22 long
+
+Run `34877928915`, commit `ec8456d`. All five jobs green. The three rust jobs
+each report **39 result lines = 29 parents + 10 children, 0 failed, 1 ignored**:
+Windows 963, macOS 965, Ubuntu 966. Windows CI equals the local Windows run
+**exactly**, value for value, as a multiset:
+
+```
+0 0 0 0 4 4 4 6 6 7 7 8 8 9 12 14 15 18 23 24 30 30 31 33 43 46 48 88 445
+```
+
+The three platforms differ from one another only by the pre-existing
+platform-conditional tests — macOS and Ubuntu carry `442 24 25 47` where Windows
+carries `443 23 46` — which is the same cross-platform shape `P2-T012`'s run
+showed, and is why the multiset is sound on all three while only Windows supports
+per-name attribution.
+
+**A wrong comparison was built and thrown away before this one, and the way it
+was caught is the reusable part.** The first attempt built the after-multiset out
+of a `collections.Counter` keyed by the `Running` line's target name. That
+collapses every crate's `unittests src\lib.rs` into one row, so the multiset came
+back **22 values long against 29 parents** — and the substitution check reported
+`False`. The check was wrong, not the code. **What caught it was printing
+`len(after)` next to `len(before)`**: a multiset comparison between two lists of
+different lengths is not a comparison, which is the same positional-diff rule
+`P2-T012`'s entry below records, arriving from the other direction. The counter
+was replaced by a list built from `(path, crate)` read out of the `Running` line's
+`.exe` basename.
+
+The +43 against the last accepted state, attributed by binary:
+`920 at 481066f` → `963`, being **+23** lib tests in `references`, **+17** in the
+new `config_references` binary, then **+2** and **+1** more added to those same
+two binaries after the first mutation run found them uncovered. The parent count
+went 28 → 29 in the first step and stayed there in the second, which is what the
+two steps should look like: a new test binary adds a parent, and test functions
+added to existing binaries do not.
+
+The 25 `references::tests::*` names and all 18 `config_references` names were
+read out of **all three** logs by name, 0 `FAILED` on each, including the three
+tests this session added:
+`a_key_written_beside_another_piece_of_text_is_not_a_key`,
+`a_quoted_argument_that_is_not_a_key_is_not_a_read` and
+`the_sentence_counts_each_side_and_not_the_keys_there_are`.
+
 ### Reading run `34873225889`, `P2-T012`'s — and a positional diff that would have been a lie
 
 **All five jobs green.**
@@ -1989,6 +2121,59 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P2-T008`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all --check` | `FMT CLEAN` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **963 passed, 0 failed, 1 ignored, across 39 result lines = 29 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh -NoProfile -File scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+| `python target/tmp/mutate14.py` | **21 of 21 observable mutations caught, 3 declared unobservable and all 3 missed as declared, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` did not fire |
+
+**963 is `481066f`'s 960 + 3, and the 3 are attributed by binary name rather than
+only by total.** Locally the multiset moved two positions: `unittests src\lib.rs`
+for `sure-core` 443 → 445, and `tests\config_references.rs` 17 → 18. The local
+Windows multiset is character-for-character the CI Windows multiset —
+`0 0 0 0 4 4 4 6 6 7 7 8 8 9 12 14 15 18 23 24 30 30 31 33 43 46 48 88 445` —
+which is a stronger statement than the totals agreeing.
+
+The result-line count stayed at 39 because no new test binary was added in this
+step: the two unit tests went into a binary that already existed, as did the one
+integration test. That is the check that the +3 is three test functions and not a
+new target.
+
+**This harness's first run was not clean and is recorded rather than discarded.**
+It reported 1 `SKIP`, 1 `BUILD`, and 4 `MISSED`, and all four holes were real:
+
+- The `SKIP` was an anchor that `cargo fmt` had reformatted — a `boolean && chain`
+  that `mutate14.py` had written across two lines and the formatter had collapsed
+  onto one. **The mutation was therefore never applied, and the only sign was the
+  word `SKIP`.** Had the harness counted a non-application as a catch, or had the
+  anchor been silently treated as satisfied, this would have read as a passing
+  mutation list with one entry never tested.
+- The `BUILD` was a `while let` → `if let` rewrite that left `end` unbound. It
+  compiled only after binding the variable; a non-zero exit with no `FAILED` line
+  says nothing about whether a test would have noticed the behaviour, which is why
+  `BUILD` is kept out of the caught count rather than folded into it.
+- Three mutations survived and were closed with tests rather than reclassified:
+  a `+`-concatenated argument written **without** a space (`"API_"+SUFFIX`, which
+  the spaced spelling hides because the space alone rejects it), a quoted argument
+  that is not a name at all (`""`, `"not a key"`, `"1BAD"`), and the sentence's
+  declared count. The third is the one worth noting: the sentence test asserted
+  only `starts_with("SURE found 0")`, so a mutation making the sentence report
+  *every* key as declared was invisible.
+- The fourth survivor, removing `found.sort()` in `candidates`, is **unobservable
+  for a reason that lives in another module**, and it is declared as such with the
+  reason written down: `Scan::files` already yields paths in that order, because
+  `scan::Walk` sorts each directory's children by name (`scan/mod.rs:465`) and
+  recurses into a subdirectory inline (`scan/mod.rs:515`), and pre-order
+  depth-first over name-sorted siblings is component-lexicographic order, which is
+  what `Path`'s `Ord` compares. The sort duplicates a guarantee this module does
+  not own, which is why it stays — and the declaration states the condition that
+  would falsify it.
 
 ## Gate set, as run on `P2-T012`'s implementation commit
 
@@ -2673,6 +2858,54 @@ read as evidence.**
 ## Adversarial (mutation) verifications on this branch
 
 Each was reverted after confirming the check fires.
+
+### `P2-T008`
+
+`target/tmp/mutate14.py` (git-ignored), 24 mutations over one file, exit 0:
+*"all 21 observable mutations caught by a failing test, and 3 declared
+unobservable as expected"* — 0 `SKIP`, 0 `BUILD`, and the unmutated baseline run
+first was green, which it has to be: a mutation cannot be credited with a failure
+that was already there.
+
+**The first run of this harness was not clean, and that run is the more useful
+artefact.** It reported 1 `SKIP`, 1 `BUILD` and 4 `MISSED`. Every one of the four
+holes was real and was closed by adding a test, not by reclassifying the
+mutation:
+
+- The `SKIP` was an anchor `cargo fmt` had collapsed from two lines onto one, so
+  the mutation was never applied. **A zero-count anchor and a dead pattern are the
+  same output**, which is why the harness prints `SKIP` as its own verdict rather
+  than treating it as a catch.
+- The `BUILD` was a `while let` → `if let` rewrite that left the bound offset
+  unused and would not compile. It was rewritten to bind it. A non-zero exit with
+  no `FAILED` line says nothing about whether a test would have noticed the
+  behaviour, so it stays out of the caught count.
+- Three mutations survived for want of a test, and each is now held by one:
+  a `+`-concatenated argument written **without** a space — the spaced spelling is
+  rejected by the space alone, so only the unspaced form exercises the rule — a
+  quoted argument that is not a name (`""`, `"not a key"`, `"1BAD"`), and the
+  sentence's declared count, which no test had ever read because the only
+  assertion on that sentence was `starts_with("SURE found 0")`.
+- The fourth survivor is declared unobservable: removing `found.sort()` in
+  `candidates`. The reason was **checked rather than assumed**, by reading
+  `scan::Walk` — it sorts each directory's children by name and recurses inline,
+  so `Scan::files` already yields component-lexicographic order, which is what
+  `Path`'s `Ord` compares. The declaration records that it is unobservable *only*
+  while the walker keeps doing that, which is the condition that would make the
+  declaration wrong.
+
+Two families, matching the acceptance's two sentences:
+
+- **The extraction** (11 observable). Every way of finding a key that is not one —
+  a name the code built at run time, a needle inside a longer identifier, an
+  argument whose terminator was never checked, a quoted argument that is not a
+  name — or of losing a key that is one: stopping at the first read on a line,
+  counting lines from zero, reporting every Node read as a property read.
+- **The record** (10 observable + 1 unobservable). Every way of letting a value
+  reach the report, and every way of making the comparison say more than it can:
+  an extractor returning the rest of the line, `.env` becoming a template, a
+  document read as source, an incomplete reading reporting as complete, the
+  sentence dropping its clause, the reads left in derived order.
 
 ### `P2-T012`
 
@@ -3415,6 +3648,15 @@ it needs a Mac.
   reported as**: every project is now classified `inspect_only`, deliberately and
   with the argument recorded, because levels A and B both require *running*
   checks and this build runs no project code.
+- `ec8456d` **`P2-T008`** — `crates/sure-core/src/references.rs` (25 unit tests)
+  and `tests/config_references.rs` (18 tests, the new **25th** named test binary —
+  the count of `Running` lines goes 24 → 25, and the 4 `Doc-tests` targets make up
+  the rest of the 29 parents). **The one task on this branch whose rule is
+  enforced by a type rather than by a check**: no field on `Reference` or
+  `Declaration` can hold a value, and `key_from_env_line` returns an owned key
+  with nowhere for the right-hand side to go. `.env` is never opened and is not
+  reported as unread either, so `is_complete()` stays true — a decision, not a
+  loss. Reads no file it was not handed, and changes no other module's behaviour.
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -3431,24 +3673,27 @@ it needs a Mac.
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-2. **`P2-T012` is implemented, pushed, read, and accepted by the commit carrying
-   this file.** `d5261a6` is the implementation, run `34873225889`, all five jobs
-   green, **920 / 922 / 923** with 0 failed and 1 ignored over **38** result
-   lines = **28 parents + 10 children** — read, attributed by binary name, and
-   with all 13 new tests found by name on all three jobs, in "Reading run
-   `34873225889`". **Its run is read in the session that took it rather than
-   committed** — the stopping rule at the top of this file, so the `P2-T012`
+2. **`P2-T008` is implemented, pushed, read, and accepted by the commit carrying
+   this file.** `ec8456d` is the implementation, run `34877928915`, all five jobs
+   green, **963 / 965 / 966** with 0 failed and 1 ignored over **39** result
+   lines = **29 parents + 10 children** — read, attributed by binary name, and
+   with all 25 + 18 new test names found by name on all three jobs, in "Reading
+   run `34877928915`". **Its run is read in the session that took it rather than
+   committed** — the stopping rule at the top of this file, so the `P2-T008`
    chain ends at the acceptance.
 3. **The next task is a real choice, and the list is 11 long.**
-   `P2-T008`, `P2-T009`, `P3-T001`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`,
-   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **9 of 12**;
-   `P2-T008` and `P2-T009` would finish it. They extend a component graph that is
-   now four commits old and **still has no consumer** — `ComponentGraph` is
-   produced by `P2-T007` and read by nothing — so the argument for them is
-   coherence of a phase rather than a pull from anything downstream.
-   `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007` and
-   `P8-T001` have been on the list since before this file was written. **Read the
-   task entry before choosing**; do not choose from this paragraph.
+   `P2-T009`, `P3-T001`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`,
+   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **10 of 12**;
+   `P2-T009` alone would finish it. **`P4-T006` is new on this list and it is
+   this task's doing** — its `depends_on` names `["P2-T008"]`, so accepting
+   `P2-T008` is what made it ready. `P2-T009` extends the same family as this
+   task and the component graph that is **still read by nothing** —
+   `ComponentGraph` is produced by `P2-T007` and consumed by no binary — so the
+   argument for finishing phase `P2` is coherence of a phase rather than a pull
+   from anything downstream. `P4-T007` and `P6-T005` remain **unread by any
+   session**, and `P6-T007` and `P8-T001` have been on the list since before this
+   file was written. **Read the task entry before choosing**; do not choose from
+   this paragraph.
 4. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
@@ -3774,6 +4019,70 @@ ignored, which is how the earliest tasks came to record an empty note.
 
 None. No task has been marked `block-external`. No credential or authorization
 outside this machine has been needed yet.
+
+### A third review, two findings, and the one that was read out of a file mid-mutation
+
+At 2026-09-15, during the `P2-T008` work, a background security review reported
+two `MEDIUM` findings in `crates/sure-core/src/references.rs`. **Both were
+assessed from the code rather than from the finding text, and the first is a
+false positive with a cause worth recording.**
+
+**Finding 1 — "fail-open security gate / sensitive file access", against
+`is_env_template`.** The review quoted this, verbatim:
+
+```rust
+    if rest.is_empty() || rest == ".local" || rest == ".production" {
+        return true;
+    }
+```
+
+That text **does not exist in the committed code and never did.** It is mutation
+13 of `target/tmp/mutate14.py`, applied to the file for the length of one test
+suite run and then reverted by the harness's `finally`. The review sampled the
+tree inside that window. The real code is `name.strip_prefix(".env.")` guarded by
+a marker check, so `.env`, `.env.local` and `.env.production` are **not**
+candidates — which is exactly the fix the finding asks for, already implemented
+and already tested by `the_file_the_values_are_in_is_never_opened` against its
+matched control. The file was checked afterwards against eight sentinel strings
+after the harness's last revert, all present exactly once.
+
+The re-usable part: **a background review that samples the tree while a mutation
+harness owns a file reports findings about code that does not exist, and cannot
+distinguish a mutated tree from a real one.** The remedy is not to stop running
+either tool; it is to check the finding against the committed file before acting
+on it, which is what the sentinel grep does.
+
+**Finding 2 — symlink bypass of the sensitive-file exclusion, against
+`Reader::read`.** This one names real code: `discovery.root.join(&candidate.path)`
+followed by `fs::metadata` and `fs::read`, all of which follow links. It is
+**not reachable**, and the chain is closed at three points in `scan`:
+
+1. `scan/mod.rs:447` — `entry.file_type()` does not follow a link, with the
+   comment saying so.
+2. `scan/mod.rs:490-498` — a link is answered **before** the ignore tables are
+   consulted and pushed to `skipped` as `SkipReason::NotFollowed`. Every symlink,
+   file or directory, goes there; none reaches `entries`. The comment states the
+   intent: *"What it points at is not in the scan whatever it is called."*
+3. `scan/mod.rs:229-231` — `Scan { entries: Vec<Entry> }` is private and `Scan`
+   has no public constructor, so no caller can forge entries. `..` cannot appear
+   either, since the names come from directory listings.
+
+That is also the repository's reader idiom rather than a shortcut taken here:
+`discover/read.rs:571` does the same `File::open(root.join(entry))` with no
+symlink check, and the fingerprint readers use `symlink_metadata` **because they
+walk entries directly** rather than taking a `Scan`.
+
+**The fix was declined, and the reason is the repository's own evidence rule.**
+A `symlink_metadata` guard in `references.rs` would be **unreachable code that no
+test can exercise** — it cannot be made to fire through any `Scan` a caller can
+construct — and an unexercisable guard creates the appearance of a boundary
+without being one, while implying that the sibling readers which lack it are
+unsafe. What remains is the same TOCTOU window already recorded as
+`ECOSYSTEM_DISCOVERY.md` gap 6: a file swapped for a link between the scan and the
+read is read through. **`references.rs`'s reader is a second instance of gap 6,
+not a new gap.** It is recorded here so the window is fixed once, for all readers,
+by whoever owns gap 6 — rather than patched in one module where the patch would
+look like a fix and test like nothing at all.
 
 ### A second review notification, this one acknowledged by inspecting the file
 

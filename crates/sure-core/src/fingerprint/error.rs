@@ -133,6 +133,34 @@ pub enum FingerprintError {
         /// What the walk said about the first thing it lost.
         detail: String,
     },
+    /// The repository's own configuration names programs Git runs over the
+    /// project's files.
+    ///
+    /// A content filter is the one mechanism of this kind that SURE **cannot**
+    /// override. It comes in two halves, both of which a project supplies: a
+    /// tracked `.gitattributes` names a driver, and the driver's command is a
+    /// setting in the repository's configuration. Git runs the command to
+    /// compare a file against the version it has stored, which is what a status
+    /// is, so the command runs while SURE is reading the project.
+    ///
+    /// There is no flag that turns this off — `core.fsmonitor` and `core.pager`
+    /// can be overridden because their names are fixed and known in advance,
+    /// and a filter's name is not. Overriding it anyway would be worse than
+    /// refusing: with the filter disabled Git would compare a file's raw bytes
+    /// against a stored version that was written through the filter, and call
+    /// every such file modified. So SURE stops.
+    ///
+    /// This is the one place the promise that inspecting a project does not
+    /// execute it is kept by refusing rather than by overriding, and the reason
+    /// it is worth the cost is in `docs/architecture/EXECUTION_SAFETY.md`:
+    /// `inspect_only` is defined as running no project code, and a project is
+    /// untrusted input by assumption.
+    RepositoryRunsPrograms {
+        /// The directory SURE was pointed at.
+        root: PathBuf,
+        /// The settings that name the programs, as `key = value`, sorted.
+        settings: Vec<String>,
+    },
 }
 
 impl fmt::Display for FingerprintError {
@@ -249,6 +277,27 @@ impl fmt::Display for FingerprintError {
                  files change.",
                 path.display()
             ),
+            Self::RepositoryRunsPrograms { root, settings } => {
+                let listed: String = settings
+                    .iter()
+                    .map(|setting| format!("\n  {setting}"))
+                    .collect();
+                write!(
+                    f,
+                    "SURE did not fingerprint \"{}\".\n\n\
+                     The project's own repository configuration names programs that Git runs over \
+                     its files:{listed}\n\n\
+                     Git runs those to compare a file against the version it has stored, which is \
+                     what a fingerprint is made of — and SURE inspects a project without running \
+                     it. There is no way to switch this off while still getting the right answer: \
+                     the program's name is in a file the project supplies, and comparing files \
+                     without the program would report every one of them as changed.\n\n\
+                     So there is no fingerprint rather than one taken by running the project. If \
+                     you trust this project, remove those settings from its Git configuration. A \
+                     project that needs them can still be fingerprinted by content.",
+                    root.display()
+                )
+            }
         }
     }
 }
@@ -300,6 +349,10 @@ mod tests {
                 path: path.clone(),
                 detail: "SURE did not look at src/gen because it is a link.".to_owned(),
             },
+            FingerprintError::RepositoryRunsPrograms {
+                root: path.clone(),
+                settings: vec!["filter.lfs.clean = git-lfs clean -- %f".to_owned()],
+            },
         ]
     }
 
@@ -309,15 +362,28 @@ mod tests {
         // reads as "here is a fingerprint, minus a bit" is the failure, so each
         // is checked for the sentence that rules it out.
         let all = all();
-        assert_eq!(all.len(), 11, "a variant was not checked");
+        assert_eq!(all.len(), 12, "a variant was not checked");
         for error in &all {
             let text = error.to_string();
             assert!(
                 text.contains("fingerprint"),
                 "{error:?} does not mention a fingerprint: {text}"
             );
+            // The messages are written as a Rust string continuation, which eats
+            // the newline and keeps the indentation. Two spaces in a row is what
+            // that looks like when the backslash is missing.
+            let body = match &error {
+                // The one message with a list in it, whose entries are indented
+                // on purpose.
+                FingerprintError::RepositoryRunsPrograms { .. } => text
+                    .lines()
+                    .filter(|line| !line.starts_with("  filter."))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => text.clone(),
+            };
             assert!(
-                !text.contains("  "),
+                !body.contains("  "),
                 "{error:?} has a run-together continuation line: {text}"
             );
         }
@@ -350,6 +416,17 @@ mod tests {
                     message: "fatal: detected dubious ownership".to_owned(),
                 },
                 "fatal: detected dubious ownership",
+            ),
+            // The setting as Git holds it, command and all. A message that said
+            // "this project uses a content filter" would leave the person
+            // reading it to work out which one, and the whole of what they have
+            // to act on is the command.
+            (
+                FingerprintError::RepositoryRunsPrograms {
+                    root: PathBuf::from("/work/project"),
+                    settings: vec!["filter.lfs.clean = git-lfs clean -- %f".to_owned()],
+                },
+                "filter.lfs.clean = git-lfs clean -- %f",
             ),
         ] {
             assert!(
@@ -432,6 +509,13 @@ mod tests {
                     detail: String::new(),
                 },
                 "vendor",
+            ),
+            (
+                FingerprintError::RepositoryRunsPrograms {
+                    root: path.clone(),
+                    settings: Vec::new(),
+                },
+                "/work/project",
             ),
         ];
         // `MissingHead` is not in the list: it carries nothing but what is

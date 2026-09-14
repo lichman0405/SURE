@@ -13,6 +13,27 @@ Allowed:
 - Git/file fingerprinting;
 - other read-only analysis that does not invoke project-controlled executable code.
 
+This mode is a claim about what SURE does *not* run, so it is only as true as the
+tools SURE drives are obedient. Git is not: a repository carries configuration
+Git reads and obeys, and several of those settings name **programs**. SURE turns
+off every one it can — the `core.fsmonitor` hook, the pager, the
+`post-index-change` hook — and **refuses the project** for the one it cannot, a
+content filter named by a tracked `.gitattributes` whose command is a
+`filter.<name>.clean` setting. Without that refusal, fingerprinting a project
+would be the same act as running whatever the project says to run, in the mode
+that exists to say otherwise.
+
+The boundary is what the *project* names. A filter from the machine's own
+configuration is the user's installed tooling rather than the project's doing,
+and is out of scope — and a repository can still **ask for** one of those, by
+naming a driver in a tracked `.gitattributes` that the machine's configuration
+defines. This was measured, not reasoned about: on a machine with Git LFS
+installed, a `git status` on such a repository runs `git-lfs`. It is inside the
+`inspect_only` line as written above — the project cannot choose the program, so
+what runs is not project-controlled code — but it is a route, and
+`docs/architecture/FINGERPRINTING.md` has it in full rather than leaving a reader
+to assume the refusal is total.
+
 ### host_confirmed
 The user explicitly allows a planned set/category of project commands to execute on the host.
 

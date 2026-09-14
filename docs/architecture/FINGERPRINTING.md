@@ -120,18 +120,33 @@ is fresh on every computation so that two results can be told apart by value; th
 
 ### What Git is asked
 
-One invocation, through one abstraction (`Git`, and `Git::STATUS_ARGUMENTS` and
-`Git::SAFETY_ARGUMENTS` are read by tests, one of which fails if a second place
-starts Git):
+Three invocations, all through one abstraction (`Git`; `Git::STATUS_ARGUMENTS`,
+`Git::SAFETY_ARGUMENTS` and `Git::CONFIG_ARGUMENTS` are read by tests, one of
+which fails if a second place starts Git). In the order they are made:
+
+```
+git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> \
+    rev-parse --show-prefix
+```
+
+which is also how "there is no repository here" is detected;
+
+```
+GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=<root>/.git/config/sure-no-global-configuration \
+    git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> \
+    config --list --includes -z
+```
+
+which asks whether the project names a program, and refuses if it does; and
 
 ```
 git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> status \
     --porcelain=v2 -z --branch --untracked-files=all --no-renames -- .
 ```
 
-plus `git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> \
-rev-parse --show-prefix`, which is also how "there is no repository here" is
-detected.
+The order is not incidental. `rev-parse` is measured not to run a filter, so it
+is safe before the check. `status` is measured **to** run one, so the check has
+to come before it — a check that came after would be a report.
 
 | Flag | Why it is there |
 | --- | --- |
@@ -147,28 +162,149 @@ detected.
 
 ### A repository is not allowed to make Git run a program
 
-`core.fsmonitor` names a hook that Git runs to ask which paths changed. It is
-read **from the repository being described**, and a project is untrusted input
-by assumption here — it may have been written by a coding agent, or cloned from
-anywhere. Without the override, fingerprinting a project would be the same act
-as running whatever that project says to run, which is the opposite of what SURE
-promises: it inspects a project without executing it.
+A project is untrusted input by assumption here — it may have been written by a
+coding agent, or cloned from anywhere — and a repository carries configuration
+that Git reads and obeys. Some of that configuration names **programs**, and
+where it does, fingerprinting a project would be the same act as running that
+project's code. SURE's premise is that it inspects a project without executing
+it, so every route of that kind has to be closed or refused.
 
-`core.pager` names a program too. Git does not page into a pipe, so `--no-pager`
-changes nothing today; it is passed so that it cannot start to matter if this
-output ever stops being one. `--no-optional-locks` already closes the third
-route of the same kind, the `post-index-change` hook, by removing the index
-refresh that would fire it.
+**The earlier version of this section was wrong, and this is the correction.**
+It said the flags below bought the guarantee. They do not. A review of the commit
+that added it found the route they miss, and the claim is retracted here rather
+than quietly narrowed.
 
-Three further settings are made for the same reason — that a check must not be
-stoppable by the thing it checks. `GIT_TERMINAL_PROMPT=0` and a null stdin mean
-a Git that wants to ask a question fails rather than waiting for an answer
-nobody will give, and the settings are on `SAFETY_ARGUMENTS` rather than written
-into the command so that a test can read them. **That test is the only thing
-that would notice their removal**: on every repository that does not exploit
-them, dropping them changes no output, fails nothing, and produces exactly the
-same fingerprint. The one case where it matters is the one case where noticing
-afterwards is too late.
+#### The routes, measured rather than reasoned about
+
+Every row was established by running Git 2.55.0 with a marker program and
+checking whether the marker appeared, with a positive control in each case — a
+probe that reports `RAN` for everything is a probe that measured its own fixture
+setup. `target/tmp/filter_probe.sh` is the script, kept out of the repository
+because its job is done but not deleted because the next reader will want it.
+
+| Route | Closed by | Measured |
+| --- | --- | --- |
+| `core.fsmonitor` hook | `-c core.fsmonitor=false` | the control fires the hook, the flag stops it |
+| `core.pager` | `--no-pager` | Git does not page into a pipe, so this changes nothing today; passed so it cannot start to matter if this output ever stops being one |
+| `post-index-change` hook | `--no-optional-locks` | the control fires the hook, the flag stops it, because the index refresh it depends on does not happen |
+| `diff.<n>.textconv` | nothing — out of reach, and measured not to run | `status` does not run it |
+| `git rev-parse` in general | nothing — measured not to run one | the prefix invocation does not run a filter |
+| **`filter.<n>.clean\|smudge\|process`, defined by the repository** | **the repository is refused** | **the control fires it during a plain `git status` with nothing modified** |
+| `filter.<n>.*` defined by the *machine*, named by a `.gitattributes` the repository carries | nothing — left open on purpose | `filter_probe.sh`, then `boundary_probe.sh` when the first version of this document implied it was closed; see "What is deliberately not covered" |
+
+The last row is the one the earlier version missed, and it is the one that
+cannot be closed from the command line.
+
+#### Why a content filter cannot be overridden, only refused
+
+It comes in two halves, and **both are the project's**. A tracked
+`.gitattributes` names a driver — `*.psd filter=lfs` — and the command is a
+`filter.<name>.clean` setting in the repository's own configuration. The name is
+therefore known only after Git has read the project, so there is no fixed
+`-c filter.<name>.clean=` to pass.
+
+There is also no switch that turns in-tree `.gitattributes` off. That was
+checked rather than assumed: `git help --config` lists `core.attributesFile`,
+which is the *global* file, and nothing that disables the tracked one.
+
+Neutralising it anyway would be worse than refusing. With the filter disabled,
+Git compares a file's raw bytes against a stored version that was written
+*through* the filter, and reports every such file as modified. That fingerprint
+is wrong — and a wrong fingerprint marks real evidence stale or stale evidence
+current, which is the failure this product exists to prevent. So the answer is
+`FingerprintError::RepositoryRunsPrograms`, and it names the settings it found.
+
+#### What is deliberately not covered
+
+**Only the repository's own configuration is refused** — `include.path` targets
+and the worktree config included. A filter defined by the *machine's* own config
+is not, and the reason is that it is the user's installed tooling rather than the
+project's doing: refusing every repository on a developer machine with Git LFS
+installed would make SURE useless on exactly the machines most likely to have it,
+and would be refusing on the strength of a fact the project did not supply. The
+boundary is the same one `EXECUTION_SAFETY.md` draws: what SURE declines to run
+is what the *project* names.
+
+**That boundary is narrower than it sounds, and the difference was measured.**
+A project supplies half of the pair on its own: a tracked `.gitattributes` can
+say `*.psd filter=lfs`, and Git then looks up `filter.lfs.clean` in whatever
+configuration it reads — **including the machine's**. `target/tmp/boundary_probe.sh`
+puts a machine-scope filter command behind a driver name the repository does not
+define, and a plain `git status` runs it. On the machine this was measured on,
+`C:/Program Files/Git/etc/gitconfig` and `~/.gitconfig` both carry
+`filter.lfs.{clean,smudge,process}` and `git-lfs` is on the `PATH`, so this is a
+live route here and not a hypothetical one.
+
+It is left open, and the distinction that makes that defensible is **who chooses
+the program**. The project cannot name one: it can only ask for a driver, and the
+command comes from a configuration the user wrote. So the set of programs a
+project can reach is exactly the set of filters already installed on the machine
+— on this one, `git-lfs` and whatever else the user added. That is not
+project-controlled executable code, which is the line `EXECUTION_SAFETY.md`
+actually draws, and it is why this is recorded as a boundary rather than as a
+defect. A reader who thinks the refusal is total should read this paragraph
+twice: SURE can be made to run `git-lfs` by a repository, and cannot be made to
+run anything the repository chose.
+
+Closing it would mean reading the driver names out of the project's attributes —
+`.gitattributes`, `$GIT_DIR/info/attributes` — and refusing when any of them
+resolves in any scope. That is a real design decision with a real cost
+(`git check-attr` over every path, and a refusal for every repository that uses
+Git LFS legitimately), so it is named here to be decided deliberately and not
+folded into a fix for something else. It is **not** the defect the review named:
+that one let a *repository* choose the program, which is arbitrary code execution
+by the project, and it is closed. This one cannot be made to run anything the
+project chose. No task covers it yet — it is new — and it is raised in
+`progress/HANDOFF.md` for the owner to promote or dismiss.
+
+#### How the question is asked
+
+One invocation, before the status and not after — the status is the invocation
+that runs these, so a check that came afterwards would be a report rather than a
+prevention:
+
+```
+GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=<root>/.git/config/sure-no-global-configuration \
+    git config --list --includes -z
+```
+
+| Part | Why |
+| --- | --- |
+| `--list` | the driver name is the project's to choose, so the answer has to be found rather than guessed |
+| `--includes` | **redundant today, kept on purpose.** A repository reaches a filter through `include.path` as easily as through its own file — but includes are followed whenever Git searches all its files, so with no scope named, `--list` already reads them. Measured: the included filter was found with the flag and without it. It stays so the property is stated in the invocation rather than inherited from a default, and so a scope added later cannot silently stop includes being read |
+| `-z` | a setting's value is an arbitrary program with arbitrary arguments, including newlines; `-z` means reading the setting rather than parsing Git's escaping of it |
+| `GIT_CONFIG_NOSYSTEM=1` | drops the system scope |
+| `GIT_CONFIG_GLOBAL=…` | drops the global scope. The path is under `.git/config`, which is a **file** in every repository Git makes — including linked worktrees and submodules, where `.git` is a file — so nothing can exist at that path and no project can add settings to the answer about itself. It also needs no `/dev/null`, which is not a Windows name |
+
+`--local` is *not* used, and the reason is measured: `--local --list` does not
+follow `include.path` without `--includes`, and even with it misses
+`.git/config.worktree`. Both are scopes the repository itself supplies. Naming
+no scope at all gets all three. The `-z` record format is `key\nvalue\0`,
+verified by counting separators rather than by reading the documentation.
+
+**A correction on `--includes`.** The first version of this section said the
+flag was load-bearing, on the reasoning that includes are off as soon as a scope
+is named. That reasoning is right about `--local` and wrong about this
+invocation: `--list` with **no** scope names already follows includes, so the
+flag changes nothing here. It was measured after a mutation showed that dropping
+it failed only the test pinning the flag and no behavioural test. The flag is
+kept — stating the property beats inheriting it from a default — but the comment
+that called it necessary was false and is corrected here, in the source, and in
+the test that pins it.
+
+#### A project cannot make Git wait for an answer either
+
+`GIT_TERMINAL_PROMPT=0` and a null stdin mean a Git that wants to ask a question
+fails instead of waiting for one nobody will give. These are on the process, not
+on `SAFETY_ARGUMENTS`, and they are the other half of the same rule: a check must
+not be stoppable by the thing it checks, and a check that never returns cannot be
+told apart from one that is still working.
+
+The flags are named constants rather than written into the command so that tests
+can read them, and **those tests are the only thing that would notice a removal**:
+on every repository that does not exploit them, dropping them changes no output,
+fails nothing, and produces exactly the same fingerprint. The one case where it
+matters is the one case where noticing afterwards is too late.
 
 ### `--relative` is not used, and must not be
 
@@ -334,6 +470,17 @@ Each is recorded so it is not forgotten, with the reason it is not closed.
    concluded from its absence from a fingerprint — it is absent from Git's
    answer first.
 
+7. **The machine-config boundary is not tested through the product's entry
+   point.** `the_two_switches_keep_a_machines_own_filter_out_of_the_answer`
+   supplies a machine configuration and checks that two switches hide it and
+   leave the repository's, but it drives `git config` directly. Driving
+   `git_fingerprint` with an environment variable set would need
+   `std::env::set_var`, which is **unsafe** since edition 2024, and this
+   workspace forbids unsafe code. So the refusal path is covered end to end and
+   the mechanism the boundary rests on is covered directly, but no single test
+   holds both at once — they are joined by the unit test that pins the two
+   variable *names*, which is the part a change could silently break.
+
 Gaps 1, 3, 4 and 6 are stated in the module comment of
 `crates/sure-core/tests/fingerprint_git.rs`, which is where a reader looks for
 what a test file does *not* cover; that comment also names a fourth untested
@@ -346,7 +493,9 @@ design that reads files after asking Git about them, and no test can pin it.
 Gap 6's Unix test is the one that can hang, so it runs on a worker thread and
 fails by name after a timeout rather than sitting there — a hang is a failure
 that reports nothing, and the point of the test is that a project must not be
-able to cause one.
+able to cause one. Gap 7 is the one gap here that is a property of the language
+rather than of the platform, and it is the only one that will still be a gap if
+SURE is ever run on a machine unlike this one.
 
 The same asymmetry runs through the "Enforced by" table below: the rows marked
 (Unix) are the ones with no Windows test, and they are the rows about links,
@@ -382,7 +531,14 @@ about a file that cannot be read, and about pipes.
 | A refusal is never an empty fingerprint | this document | `a_directory_that_is_not_in_a_repository_has_no_fingerprint`, `git_that_will_not_start_is_a_refusal_and_not_an_empty_fingerprint`, `a_relative_root_is_refused_rather_than_resolved_against_the_current_directory`, `a_change_to_a_file_sure_cannot_read_has_no_fingerprint` (Unix) |
 | Git is started in exactly one place | `RUST_DESIGN.md` §Git | `git_is_started_in_exactly_one_place` |
 | `--relative` is never used | this document | `the_status_arguments_are_the_ones_the_module_doc_explains` |
-| A repository cannot make Git run a program | this document | `the_settings_that_stop_a_repository_running_a_program_are_still_passed` |
+| A repository cannot make Git run a hook or a pager | this document | `the_settings_that_stop_a_repository_running_a_program_are_still_passed`, `the_config_arguments_are_the_ones_the_module_doc_explains` |
+| A repository that names a program is refused | this document | `a_repository_that_names_a_program_to_run_is_refused_and_the_program_does_not_run` |
+| …and without the program running first | this document | the same test, whose control runs the status and finds the marker, and whose second half finds it gone |
+| …whether or not the machine has that program | this document | `a_repository_that_names_a_program_the_machine_does_not_have_is_still_refused` |
+| A file naming a filter nothing defines is not a program | this document | `a_file_that_names_a_filter_nothing_defines_is_not_a_program` |
+| A repository that stops naming one is ordinary again | this document | `a_repository_that_stops_naming_the_program_is_fingerprinted_like_any_other` |
+| The refusal is over the setting's shape, not a list of names | this document | `every_shape_of_filter_setting_that_can_run_a_program_is_reported`, `a_setting_that_names_no_program_is_not_reported` |
+| The machine's own filters are out of scope | gap 7 above | `the_two_switches_keep_a_machines_own_filter_out_of_the_answer` (drives Git directly), `the_variable_that_hides_the_machines_configuration_is_the_documented_one` |
 | A pipe is described and not opened | this document | `a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang` (Unix) |
 | The digest is a correct SHA-256 | this document | `the_published_sha256_vectors_come_out_right` |
 | Fields cannot be re-split across a boundary | this document | `the_framing_separates_a_split_in_a_different_place` |

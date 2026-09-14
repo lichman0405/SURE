@@ -1529,3 +1529,430 @@ fn the_settings_that_stop_a_repository_running_a_program_are_still_passed() {
         );
     }
 }
+
+#[test]
+fn the_config_arguments_are_the_ones_the_module_doc_explains() {
+    // The check that refuses a repository naming a program is only as good as
+    // the invocation it reads the answer from, and the failure of each flag
+    // here is silent in the same way `SAFETY_ARGUMENTS` is: dropping one changes
+    // no output on any repository that does not hide its filter where that flag
+    // would have looked. It refuses one repository too few, and the only place
+    // that shows up is the repository that was written to get past it.
+    let arguments = Git::CONFIG_ARGUMENTS;
+    for required in ["config", "--list", "--includes", "-z"] {
+        assert!(
+            arguments.contains(&required),
+            "CONFIG_ARGUMENTS is missing {required:?}: {arguments:?}"
+        );
+    }
+
+    // `--includes` is redundant here and is pinned anyway, which is worth
+    // spelling out because the obvious reason for it is wrong. Measured on Git
+    // 2.55.0: `--list` with no scope named already follows `include.path`, so
+    // an included filter is found with this flag **and** without it. What
+    // actually makes the flag matter is naming a scope — `--local` does not
+    // follow includes without it. So this assertion is not "the flag does the
+    // work"; it is "the flag is not removed by a tidy-up", and the assertion
+    // below is the one with teeth.
+    assert!(
+        arguments.contains(&"--includes"),
+        "CONFIG_ARGUMENTS no longer states that includes are read: {arguments:?}"
+    );
+
+    // No scope is named at all, and that is the load-bearing part: the scope is
+    // chosen by the two environment variables instead, so that what comes back
+    // is everything the repository supplies and nothing the machine does.
+    // Naming one here would silently narrow the answer to a scope that misses
+    // either `include.path` targets or the worktree config, and every test that
+    // puts a filter in the repository's own file would still pass.
+    for scope in ["--local", "--global", "--system", "--worktree", "--file"] {
+        assert!(
+            !arguments.contains(&scope),
+            "{scope} narrows the answer to one scope and the environment \
+             variables already choose it; see the note on CONFIG_ARGUMENTS"
+        );
+    }
+}
+
+/// Run the status command exactly as the product runs it, outside the product.
+///
+/// Used only as a control: it is how a test shows that a fixture would run the
+/// program the product is refusing to run. Nothing in `sure-core` calls it.
+fn raw_status(repo: &Repo) -> String {
+    let output = Command::new("git")
+        .arg("--no-optional-locks")
+        .args(Git::SAFETY_ARGUMENTS)
+        .arg("-C")
+        .arg(repo.path())
+        .args(Git::STATUS_ARGUMENTS)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("these tests need Git on the path");
+    assert!(
+        output.status.success(),
+        "the control command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// Turn a path into something `sh` will read as one path, with `>` after it.
+///
+/// The command below is run by Git through a shell, on every platform, so the
+/// quoting is not decoration: the fixture directory has a space and two
+/// non-ASCII characters in its name, and an unquoted path would come apart at
+/// the space and write the file somewhere else — where the assertion that it
+/// does not exist would pass for the wrong reason.
+fn shell_path(path: &Path) -> String {
+    let text = sure_core::scan::display_path(path);
+    assert!(
+        !text.contains('\'') && !text.contains('"'),
+        "the fixture path cannot be quoted for a shell: {text}"
+    );
+    text
+}
+
+#[test]
+fn a_repository_that_names_a_program_to_run_is_refused_and_the_program_does_not_run() {
+    // The one mechanism of this kind that `SAFETY_ARGUMENTS` cannot switch off,
+    // and the reason the security review of `9f13f0d` was right that the fix
+    // was incomplete.
+    //
+    // A content filter comes in two halves and a project supplies both: a
+    // **tracked** `.gitattributes` names a driver, and a setting in the
+    // repository's own configuration gives that driver a command. Git runs the
+    // command to compare a file against the version it has stored, which is
+    // what a status is — so the command runs while SURE is reading the project,
+    // and the name of the command is not known until Git has read it.
+    //
+    // Two things are asserted, and the second is the one that matters. That SURE
+    // refuses is the product's answer; **that the program did not run** is the
+    // property the refusal exists for. A future change could keep every message
+    // reading correctly and lose it.
+    let repo = Repo::new("filter");
+    let marker = repo.path().join("the-program-ran");
+    let quoted = shell_path(&marker);
+
+    repo.write(".gitattributes", "*.txt filter=probe\n");
+    repo.git(&[
+        "config",
+        "filter.probe.clean",
+        &format!("sh -c 'printf ran > \"{quoted}\"'"),
+    ]);
+    repo.write("notes.txt", "one\n").commit("first");
+    repo.write("notes.txt", "two\n");
+
+    // The control, and the reason the assertion further down means anything:
+    // run the same command SURE runs, with the same safety arguments, and check
+    // that this fixture really does run the program. Without it, "the program
+    // did not run" would be indistinguishable from a command that never
+    // worked — which is the shape of a test that passes because its premise did
+    // not hold.
+    //
+    // The marker is removed immediately before, because the `git add` inside
+    // `commit` runs the filter too. The first version of the probe that found
+    // this ran `git add` after configuring the hook and read its own setup as
+    // the answer.
+    let _ = std::fs::remove_file(&marker);
+    raw_status(&repo);
+    assert!(
+        marker.exists(),
+        "the fixture does not run its own filter, so nothing below is being \
+         tested: `git status` on this repository did not execute {quoted}"
+    );
+
+    let _ = std::fs::remove_file(&marker);
+    match repo.fingerprint_with(Repo::options()) {
+        Err(FingerprintError::RepositoryRunsPrograms { settings, .. }) => {
+            assert_eq!(settings.len(), 1, "{settings:?}");
+            assert!(
+                settings[0].starts_with("filter.probe.clean = "),
+                "the setting is not named as Git holds it: {settings:?}"
+            );
+        }
+        other => panic!(
+            "a repository naming a program to run was fingerprinted anyway: \
+             {other:?}"
+        ),
+    }
+    assert!(
+        !marker.exists(),
+        "SURE ran the program the repository named. This is the whole of what \
+         the refusal is for: a project is untrusted input, and inspecting it \
+         must not execute it."
+    );
+}
+
+#[test]
+fn a_repository_that_names_a_program_the_machine_does_not_have_is_still_refused() {
+    // The check is over what the repository *declares*, not over what Git would
+    // manage to run. Here the filter's command is a program that does not
+    // exist, so nothing would have happened — and the fingerprint is refused
+    // anyway.
+    //
+    // That is deliberate and it is the conservative direction. Deciding by
+    // trying would mean the check itself runs the program, and a check that
+    // works by executing the thing it is checking for is not a check.
+    let repo = Repo::new("filter-missing");
+    repo.write(".gitattributes", "*.txt filter=probe\n");
+    repo.git(&[
+        "config",
+        "filter.probe.clean",
+        "a-program-that-does-not-exist-anywhere -- %f",
+    ]);
+    repo.write("notes.txt", "one\n").commit("first");
+    repo.write("notes.txt", "two\n");
+
+    match repo.fingerprint_with(Repo::options()) {
+        Err(FingerprintError::RepositoryRunsPrograms { settings, .. }) => {
+            assert_eq!(
+                settings,
+                vec!["filter.probe.clean = a-program-that-does-not-exist-anywhere -- %f"]
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_file_that_names_a_filter_nothing_defines_is_not_a_program() {
+    // The other side of the same line, and the case that decides whether an
+    // ordinary project can be fingerprinted at all: `.gitattributes` is a
+    // tracked file that may say anything, and on its own it names no program.
+    // Git passes the file through unchanged when no command is configured for
+    // the driver, and SURE fingerprints it as it would any other project.
+    //
+    // Without this test the check could be written as "does the project mention
+    // a filter", which refuses on the strength of a file that cannot run
+    // anything — and which would be indistinguishable from the correct check in
+    // every test above.
+    let repo = Repo::new("filter-undefined");
+    repo.write(".gitattributes", "*.txt filter=nobody-defines-this\n");
+    repo.write("notes.txt", "one\n").commit("first");
+    let before = repo.fingerprint();
+
+    repo.write("notes.txt", "two\n");
+    let after = repo.fingerprint();
+    assert!(
+        !same(&before, &after),
+        "a project whose attribute names an undefined filter is fingerprinted \
+         like any other, and editing it is a change"
+    );
+}
+
+#[test]
+fn a_repository_that_stops_naming_the_program_is_fingerprinted_like_any_other() {
+    // The other side of the refusal, and the reason the message can tell
+    // somebody what to do: the check is over the *setting*, so a repository
+    // that stops carrying one is an ordinary project again. Without this, a
+    // check that refused on the attribute — or on the word `filter` anywhere —
+    // would pass every test above.
+    let repo = Repo::new("filter-removed");
+    repo.write(".gitattributes", "*.txt filter=probe\n");
+    repo.git(&["config", "filter.probe.clean", "probe -- %f"]);
+    repo.write("notes.txt", "one\n").commit("first");
+    assert!(matches!(
+        repo.fingerprint_with(Repo::options()),
+        Err(FingerprintError::RepositoryRunsPrograms { .. })
+    ));
+
+    repo.git(&["config", "--unset", "filter.probe.clean"]);
+    let before = repo.fingerprint();
+    repo.write("notes.txt", "two\n");
+    assert!(!same(&before, &repo.fingerprint()));
+}
+
+#[test]
+fn a_program_reached_through_an_included_file_is_refused_too() {
+    // A repository reaches a filter through `include.path` as easily as through
+    // its own file, and from the outside the two are indistinguishable — the
+    // setting arrives in the same answer either way. What this pins is that the
+    // *check* does not care which of the two it was, which is a property worth
+    // having independent of how the invocation is spelled.
+    //
+    // It is **not** a test of `--includes`. That was the first version's claim
+    // and it is false: `--list` with no scope named already follows includes,
+    // so this test passes with the flag and without it. Measured, after a
+    // mutation showed the flag's removal failed only the pinning test.
+    let repo = Repo::new("filter-included");
+    let marker = repo.path().join("the-program-ran");
+    let quoted = shell_path(&marker);
+    let included = repo.path().join("included.cfg");
+
+    repo.write("included.cfg", "");
+    repo.git(&[
+        "config",
+        "include.path",
+        &sure_core::scan::display_path(&included),
+    ]);
+    repo.git(&[
+        "config",
+        "filter.probe.clean",
+        &format!("sh -c 'printf ran > \"{quoted}\"'"),
+    ]);
+    repo.write(".gitattributes", "*.txt filter=probe\n");
+    repo.write("notes.txt", "one\n").commit("first");
+    repo.write("notes.txt", "two\n");
+
+    // The control again: this fixture must really run its filter through the
+    // include, or `--includes` is being tested by nothing.
+    let _ = std::fs::remove_file(&marker);
+    raw_status(&repo);
+    assert!(
+        marker.exists(),
+        "the fixture does not run the filter it reaches through an included \
+         file, so nothing below is being tested"
+    );
+
+    let _ = std::fs::remove_file(&marker);
+    match repo.fingerprint_with(Repo::options()) {
+        Err(FingerprintError::RepositoryRunsPrograms { settings, .. }) => {
+            assert!(
+                settings
+                    .iter()
+                    .any(|setting| setting.starts_with("filter.probe.clean = ")),
+                "the included setting is not named: {settings:?}"
+            );
+        }
+        other => panic!("a filter reached through include.path was not refused: {other:?}"),
+    }
+    assert!(
+        !marker.exists(),
+        "SURE ran a program the repository reached through an included file"
+    );
+}
+
+#[test]
+fn a_program_in_the_worktree_configuration_is_refused_too() {
+    // The second scope that is the repository's own doing and that `--local`
+    // cannot see, even with `--includes`: `.git/config.worktree`, which exists
+    // only once `extensions.worktreeConfig` is on. That was measured, not
+    // assumed — `git config --local --list --includes` misses it, and it is a
+    // file the repository's own checkout can carry.
+    let repo = Repo::new("filter-worktree");
+    let marker = repo.path().join("the-program-ran");
+    let quoted = shell_path(&marker);
+
+    repo.write(".gitattributes", "*.txt filter=probe\n");
+    repo.git(&["config", "extensions.worktreeConfig", "true"]);
+    repo.git(&[
+        "config",
+        "--worktree",
+        "filter.probe.clean",
+        &format!("sh -c 'printf ran > \"{quoted}\"'"),
+    ]);
+    repo.write("notes.txt", "one\n").commit("first");
+    repo.write("notes.txt", "two\n");
+
+    let _ = std::fs::remove_file(&marker);
+    raw_status(&repo);
+    assert!(
+        marker.exists(),
+        "the fixture does not run the filter in its worktree configuration, so \
+         nothing below is being tested"
+    );
+
+    let _ = std::fs::remove_file(&marker);
+    match repo.fingerprint_with(Repo::options()) {
+        Err(FingerprintError::RepositoryRunsPrograms { settings, .. }) => {
+            assert!(
+                settings
+                    .iter()
+                    .any(|setting| setting.starts_with("filter.probe.clean = ")),
+                "the worktree setting is not named: {settings:?}"
+            );
+        }
+        other => panic!("a filter in the worktree configuration was not refused: {other:?}"),
+    }
+    assert!(
+        !marker.exists(),
+        "SURE ran a program the repository put in its worktree configuration"
+    );
+}
+
+#[test]
+fn the_two_switches_keep_a_machines_own_filter_out_of_the_answer() {
+    // What is refused is the configuration that travelled with the project, and
+    // not the tooling on the machine. A machine's own `filter.lfs.clean =
+    // git-lfs clean -- %f` is a program the user installed for their own
+    // reasons; refusing every repository on a machine that has Git LFS would
+    // make SURE useless there, and it would not be describing anything the
+    // project did.
+    //
+    // **This drives Git directly rather than through `Git::fingerprint`, and
+    // that is a real limitation.** The call path is covered by the tests above,
+    // and what this covers is the mechanism that path relies on: that these two
+    // switches hide the machine's configuration and leave the repository's.
+    // They are held together by the unit test pinning the switch *names*; a
+    // test that put an environment variable into the child process SURE spawns
+    // would need `std::env::set_var`, which is unsafe since edition 2024, and
+    // this workspace forbids unsafe code.
+    //
+    // The machine's configuration is supplied here rather than found, so this
+    // means the same thing on a runner that has one and on a runner that does
+    // not.
+    let repo = Repo::new("machine-filter");
+    let machine = repo.path().join("machine-global-config");
+    std::fs::write(&machine, "[filter \"machine\"]\n\tclean = machine -- %f\n")
+        .expect("the fixture can be written");
+    repo.git(&["config", "filter.probe.clean", "probe -- %f"]);
+
+    // The same expression `without_the_machines_configuration` builds: a path
+    // below `.git/config`, which is a file, so nothing can exist there. The
+    // unit test in the module owns the exact name; this asserts the property
+    // that makes it safe.
+    let nowhere = repo
+        .path()
+        .join(".git")
+        .join("config")
+        .join("sure-no-global-configuration");
+    assert!(
+        !nowhere.exists(),
+        "the suppressed global path exists: {}",
+        nowhere.display()
+    );
+
+    let settings = |global: &Path| -> String {
+        let output = Command::new("git")
+            .arg("--no-optional-locks")
+            .args(Git::SAFETY_ARGUMENTS)
+            .arg("-C")
+            .arg(repo.path())
+            .args(Git::CONFIG_ARGUMENTS)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", global)
+            .output()
+            .expect("these tests need Git on the path");
+        assert!(
+            output.status.success(),
+            "git config failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    // With the machine's configuration read, both filters are there — so the
+    // assertion below is about the switch and not about a filter that was never
+    // in the output.
+    let read = settings(&machine);
+    assert!(
+        read.contains("filter.machine.clean"),
+        "the fixture's machine configuration was not read, so the switch below \
+         is not being tested: {read:?}"
+    );
+    assert!(read.contains("filter.probe.clean"), "{read:?}");
+
+    // With the machine's configuration hidden — exactly what SURE passes — the
+    // repository's own setting survives and the machine's is gone.
+    let hidden = settings(&nowhere);
+    assert!(
+        !hidden.contains("filter.machine.clean"),
+        "a machine's own filter reached the answer: {hidden:?}"
+    );
+    assert!(
+        hidden.contains("filter.probe.clean"),
+        "hiding the machine's configuration hid the repository's too, which \
+         would make the check refuse nothing: {hidden:?}"
+    );
+}

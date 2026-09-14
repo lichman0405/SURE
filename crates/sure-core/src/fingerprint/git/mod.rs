@@ -67,7 +67,7 @@
 
 pub mod status;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -167,8 +167,7 @@ impl Git {
     ///   repository can name a program and have Git start it. Describing a
     ///   project would then be the same act as running that project's code, and
     ///   SURE's whole premise is that it inspects a project without executing
-    ///   it. Turning it off costs a slower `status` on repositories that use it,
-    ///   and buys the guarantee that fingerprinting a project cannot execute it.
+    ///   it. Turning it off costs a slower `status` on repositories that use it.
     /// - `--no-pager` — `core.pager` names a program too. Git does not page into
     ///   a pipe, so this changes nothing today; it is here so that it cannot
     ///   start to matter if this output ever stops being one.
@@ -178,6 +177,29 @@ impl Git {
     /// that hangs with no output, and a check with no output is indistinguishable
     /// from one that is still working.
     ///
+    /// # This is not the whole of it, and saying so is the point
+    ///
+    /// An earlier version of this comment claimed these two settings bought the
+    /// guarantee that fingerprinting a project cannot execute it. **They do
+    /// not**, and a security review of that commit was right to say so.
+    ///
+    /// A content filter names a program as well, and it is the one of these that
+    /// cannot be turned off from here. Its name is not fixed: a tracked
+    /// `.gitattributes` says `*.psd filter=lfs`, and the command is a
+    /// `filter.<name>.clean` setting in the repository's own configuration. Both
+    /// halves come from the project, and the name is only known once Git has
+    /// read the project — so there is nothing to pass `-c` for. Nor could it be
+    /// overridden even if the name were known: with the filter off, Git would
+    /// compare a file's raw bytes against a stored version that was written
+    /// *through* the filter, and report every such file as changed. The answer
+    /// would be wrong, which is worse than absent.
+    ///
+    /// So a repository that names one is refused instead — see
+    /// [`Self::CONFIG_ARGUMENTS`] and [`FingerprintError::RepositoryRunsPrograms`].
+    /// What that check covers, what it deliberately does not, and the four
+    /// routes that were measured rather than reasoned about are in
+    /// `docs/architecture/FINGERPRINTING.md`.
+    ///
     /// Kept as a named constant rather than written inline so that a test can
     /// read it, the same way [`Self::STATUS_ARGUMENTS`] is read. A setting that
     /// quietly stopped being passed is exactly the change no test would
@@ -185,6 +207,54 @@ impl Git {
     /// that does not exploit it.
     pub const SAFETY_ARGUMENTS: &'static [&'static str] =
         &["-c", "core.fsmonitor=false", "--no-pager"];
+
+    /// How SURE asks what programs the repository itself is configured to run.
+    ///
+    /// Run before the status, because the status is the invocation that runs
+    /// them. `docs/architecture/FINGERPRINTING.md` has the measurements: `status`
+    /// runs a repository's filter on every path it has to compare, and
+    /// `rev-parse` — the other invocation — does not.
+    ///
+    /// - `config` — the question.
+    /// - `--list` — every setting, not one named in advance. SURE does not know
+    ///   which filter a project uses, and the answer has to be found rather than
+    ///   guessed.
+    /// - `--includes` — redundant *today*, and kept on purpose. A repository
+    ///   reaches a filter through `include.path` as easily as through its own
+    ///   file, and the two cannot be told apart from the outside — but Git
+    ///   follows includes whenever it searches all its files, so with no scope
+    ///   named, `--list` already reads them. This was **measured rather than
+    ///   assumed**, and the first version of this comment claimed the opposite:
+    ///   an included filter was found with the flag and without it, and only
+    ///   `--local` changes the answer. The flag stays because the property is
+    ///   worth stating in the invocation rather than inheriting from a default,
+    ///   and because a scope added later would silently stop includes being read
+    ///   without it. `the_config_arguments_are_the_ones_the_module_doc_explains`
+    ///   pins it so that removing it is a decision and not a tidy-up.
+    /// - `-z` — no quoting and no line splitting. A setting's value is an
+    ///   arbitrary program with arbitrary arguments in it, and reading that
+    ///   back out of a format that escapes things means parsing Git's escaping
+    ///   rather than the setting.
+    ///
+    /// The scope matters as much as the flags, and it is two environment
+    /// settings rather than one: see [`without_the_machines_configuration`].
+    pub const CONFIG_ARGUMENTS: &'static [&'static str] = &["config", "--list", "--includes", "-z"];
+
+    /// The settings that name a program Git runs over the contents of a file.
+    ///
+    /// Matched as `filter.<anything>.<one of these>` on the *shape* and not on a
+    /// list of driver names, because the name is the project's to choose. A
+    /// check against known names — `lfs` and the handful of others that ship
+    /// with something — is the check a project gets past by calling its filter
+    /// something else.
+    ///
+    /// `clean` is the one measured to run during a status; `process` is the same
+    /// machinery in its long-running form. `smudge` is here because the question
+    /// this list answers is "does the repository declare a program to run over
+    /// its files?", and the answer does not depend on which of SURE's commands
+    /// happens to reach it today. Enumerating that per command is how the next
+    /// command quietly runs one.
+    const FILTER_PROGRAM_SUFFIXES: &'static [&'static str] = &["clean", "smudge", "process"];
 
     /// The Git the operating system will run when asked for `git`.
     #[must_use]
@@ -229,12 +299,30 @@ impl Git {
         // derived from `--show-toplevel`, which returns a path whose spelling
         // and letter case need not match the caller's — and comparing two
         // Windows paths as text is how a strip that should succeed fails.
+        //
+        // This is deliberately the *first* invocation, before the check below,
+        // because it is the one of the three that was measured not to run a
+        // filter: it reads the repository's index and not its working tree, so
+        // there is nothing for a filter to convert. The order is therefore
+        // checker, then the invocation that runs programs, and nothing runs
+        // before the check.
         let prefix = self.prefix(root)?;
+
+        // Before the status, and not after: the status is the invocation that
+        // runs these, so a check that came afterwards would be a report.
+        let programs = self.named_programs(root)?;
+        if !programs.is_empty() {
+            return Err(FingerprintError::RepositoryRunsPrograms {
+                root: root.to_path_buf(),
+                settings: programs,
+            });
+        }
 
         let output = self.stdout(
             root,
             "read the status of this working tree",
             Self::STATUS_ARGUMENTS,
+            &[],
         )?;
         let status = status::parse(&output)?;
         let head = status.head()?.to_owned();
@@ -325,6 +413,7 @@ impl Git {
             root,
             "find the repository this folder is in",
             &["rev-parse", "--show-prefix"],
+            &[],
         ) {
             Ok(output) => output,
             // This is the check that asks whether there is a repository at all,
@@ -363,7 +452,38 @@ impl Git {
         status::path_from_git_bytes(text)
     }
 
+    /// The programs this repository's own configuration tells Git to run over
+    /// the project's files, as `key = value` for each, sorted.
+    ///
+    /// Empty when the repository names none, which is the ordinary case and the
+    /// only case in which a fingerprint is taken.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Self::stdout`] returns. A repository whose configuration SURE
+    /// cannot read is not a repository SURE can say is free of them, so this is
+    /// not a place to carry on with an empty answer.
+    fn named_programs(&self, root: &Path) -> Result<Vec<String>, FingerprintError> {
+        let environment = without_the_machines_configuration(root);
+        let borrowed: Vec<(&str, &OsStr)> = environment
+            .iter()
+            .map(|(key, value)| (*key, value.as_os_str()))
+            .collect();
+        let output = self.stdout(
+            root,
+            "read what this repository is configured to run",
+            Self::CONFIG_ARGUMENTS,
+            &borrowed,
+        )?;
+        Ok(filter_programs(&output))
+    }
+
     /// Run one Git command inside `root` and return what it wrote to stdout.
+    ///
+    /// `environment` is added to the child's environment, on top of the two
+    /// settings every invocation gets. It is a parameter rather than something
+    /// written at each call site so that the one invocation that needs it is
+    /// visible as the one invocation that needs it.
     ///
     /// # Errors
     ///
@@ -376,6 +496,7 @@ impl Git {
         root: &Path,
         operation: &'static str,
         arguments: &[&str],
+        environment: &[(&str, &OsStr)],
     ) -> Result<Vec<u8>, FingerprintError> {
         let output = Command::new(&self.program)
             // Read-only, and it says so. Without this, `status` refreshes the
@@ -398,6 +519,7 @@ impl Git {
             // Nobody is there to answer a question. A Git that stops to ask one
             // would hang a check with no output.
             .env("GIT_TERMINAL_PROMPT", "0")
+            .envs(environment.iter().copied())
             .stdin(Stdio::null())
             .output()
             .map_err(|error| FingerprintError::GitUnavailable {
@@ -426,6 +548,85 @@ pub fn git_fingerprint(
     options: &FingerprintOptions,
 ) -> Result<ProjectFingerprint, FingerprintError> {
     Git::system().fingerprint(root, options)
+}
+
+/// The environment that hides the two configuration scopes the *machine*
+/// supplies, leaving the invocation reading only what the repository supplies.
+///
+/// The question the check asks is narrow on purpose: **did this repository name
+/// a program?** A `filter.lfs.clean = git-lfs clean -- %f` in the system
+/// configuration is the user's own tool, installed for their own reasons, and
+/// refusing every repository on a machine that has Git LFS would make SURE
+/// useless on that machine. What matters is the configuration that travelled
+/// with the project.
+///
+/// So both machine scopes are suppressed, and each for its own reason:
+///
+/// - `GIT_CONFIG_NOSYSTEM=1` — the documented switch for the system file. The
+///   machine this was written on has `filter.lfs.*` in Git for Windows' own
+///   system config, so without this the check would report it for every
+///   repository on the machine.
+/// - `GIT_CONFIG_GLOBAL` — pointed at a path that **cannot exist**, which is how
+///   Git is told to read no global configuration. `NUL` on Windows and
+///   `/dev/null` on Unix would both do, and neither is a name this workspace is
+///   willing to hard-code for the other platform. The path chosen is
+///   `<root>/.git/config/<name>`: `.git/config` is a *file* in every repository
+///   Git makes, and is a file even in the two cases where `.git` itself is not a
+///   directory — a linked worktree and a submodule — so nothing can ever exist
+///   below it. A path that merely did not exist yet would be one a project could
+///   create, and then a repository could add settings to the answer about
+///   itself.
+///
+/// Git tolerates a missing global file rather than failing, which is not assumed
+/// here: it was measured, along with the rest of this check's behaviour, and the
+/// measurements are in `docs/architecture/FINGERPRINTING.md`.
+fn without_the_machines_configuration(root: &Path) -> [(&'static str, OsString); 2] {
+    let nowhere = root
+        .join(".git")
+        .join("config")
+        .join("sure-no-global-configuration");
+    [
+        ("GIT_CONFIG_NOSYSTEM", OsString::from("1")),
+        ("GIT_CONFIG_GLOBAL", nowhere.into_os_string()),
+    ]
+}
+
+/// The `filter.<name>.<what>` settings in a repository's configuration, as
+/// `key = value`, sorted.
+///
+/// The input is `git config --list --includes -z`: NUL between settings, and a
+/// newline between a setting's key and its value. Splitting on the **first**
+/// newline of each record rather than on the last is what makes a value that
+/// contains one survive — a filter command is an arbitrary program with
+/// arbitrary arguments, and a `--format` with a newline in it is a value, not
+/// two settings.
+///
+/// Sorted so that the message a person reads is the same on every run, for the
+/// same reason the fingerprint's own lists are sorted.
+fn filter_programs(config: &[u8]) -> Vec<String> {
+    let mut found = Vec::new();
+    for record in config.split(|byte| *byte == 0) {
+        let (key, value) = match record.iter().position(|byte| *byte == b'\n') {
+            Some(at) => (&record[..at], &record[at + 1..]),
+            None => (record, [].as_slice()),
+        };
+        let key = String::from_utf8_lossy(key);
+        let Some(named) = key.strip_prefix("filter.") else {
+            continue;
+        };
+        // From the right, because a driver name may itself contain dots: Git
+        // writes the setting for `[filter "a.b"]` as `filter.a.b.clean`, and
+        // only the last component is the one of these three.
+        let Some((_, what)) = named.rsplit_once('.') else {
+            continue;
+        };
+        if !Git::FILTER_PROGRAM_SUFFIXES.contains(&what) {
+            continue;
+        }
+        found.push(format!("{key} = {}", String::from_utf8_lossy(value)));
+    }
+    found.sort();
+    found
 }
 
 /// What Git said, as text for a message, cut short if it said a great deal.
@@ -801,5 +1002,126 @@ mod tests {
             Err(FingerprintError::OutsideRoot { .. }) => {}
             other => panic!("a string prefix would have answered {other:?}"),
         }
+    }
+
+    /// The bytes `git config --list --includes -z` writes, from settings.
+    ///
+    /// NUL between settings and a newline between a setting's key and its
+    /// value — measured, not read off a manual, and the two are one character
+    /// apart from the other obvious arrangement.
+    fn config_bytes(settings: &[(&str, &str)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (key, value) in settings {
+            out.extend_from_slice(key.as_bytes());
+            out.push(b'\n');
+            out.extend_from_slice(value.as_bytes());
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn every_shape_of_filter_setting_that_can_run_a_program_is_reported() {
+        // The shape and not a list of known driver names, because the name is
+        // the project's to choose: a check against `lfs` and the handful of
+        // others that ship with something is a check a project gets past by
+        // calling its filter something else.
+        let found = filter_programs(&config_bytes(&[
+            ("filter.probe.clean", "probe -- %f"),
+            ("filter.probe.smudge", "probe -- %f"),
+            ("filter.probe.process", "probe -- %f"),
+            // Git writes `[filter "a.b"]` as `filter.a.b.clean`, so the driver
+            // name can contain the separator the shape is matched on.
+            ("filter.a.b.clean", "probe -- %f"),
+            ("filter.whatever.smudge", ""),
+        ]));
+        assert_eq!(
+            found,
+            vec![
+                "filter.a.b.clean = probe -- %f",
+                "filter.probe.clean = probe -- %f",
+                "filter.probe.process = probe -- %f",
+                "filter.probe.smudge = probe -- %f",
+                "filter.whatever.smudge = ",
+            ],
+            "sorted, and every one of them present"
+        );
+    }
+
+    #[test]
+    fn a_setting_that_names_no_program_is_not_reported() {
+        // The other half of the rule, and the half that decides whether an
+        // ordinary project can be fingerprinted at all. `filter.lfs.required`
+        // ships in Git for Windows' system configuration, and a check that
+        // refused on the word `filter` would refuse everything.
+        let found = filter_programs(&config_bytes(&[
+            ("filter.lfs.required", "true"),
+            ("core.fsmonitor", "true"),
+            ("core.pager", "less"),
+            ("diff.probe.textconv", "probe"),
+            ("merge.probe.driver", "probe %O %A %B"),
+            // One character past the end of a suffix is a different setting.
+            ("filter.probe.cleanish", "probe"),
+            ("filter.probe", "probe"),
+            // `filter.` has to be the start of the key, not somewhere inside it.
+            ("core.filter.probe.clean", "probe"),
+            ("user.name", "probe"),
+        ]));
+        assert_eq!(found, Vec::<String>::new(), "{found:?}");
+    }
+
+    #[test]
+    fn a_setting_whose_value_is_empty_is_still_a_setting() {
+        // `[filter "probe"] clean =` is a setting Git will read, and what Git
+        // does with an empty command is not something this module is willing to
+        // bet a project's safety on. The question asked is whether the
+        // repository declared a program, and declaring one badly is declaring
+        // one.
+        assert_eq!(
+            filter_programs(&config_bytes(&[("filter.probe.clean", "")])),
+            vec!["filter.probe.clean = "]
+        );
+    }
+
+    #[test]
+    fn a_command_with_a_newline_in_it_survives_being_read_back() {
+        // The record is `key\nvalue`, so the key is everything before the
+        // **first** newline and the value is everything after. Splitting on the
+        // last would make this two settings, the first of them a key that does
+        // not exist — and the setting it really is would go unreported.
+        let found = filter_programs(&config_bytes(&[(
+            "filter.probe.clean",
+            "probe --format=one\ntwo -- %f",
+        )]));
+        assert_eq!(
+            found,
+            vec!["filter.probe.clean = probe --format=one\ntwo -- %f"]
+        );
+    }
+
+    #[test]
+    fn the_variable_that_hides_the_machines_configuration_is_the_documented_one() {
+        // Two switches, and each is the only one Git offers for its scope. A
+        // change to either name would not fail anything else: the check would
+        // simply start reporting the machine's own filters as the project's, or
+        // stop reporting the project's.
+        let environment = without_the_machines_configuration(Path::new("/work/project"));
+        let keys: Vec<&str> = environment.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, vec!["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL"]);
+
+        let nowhere = &environment[1].1;
+        // A path under `.git/config`, which is a *file* in every repository Git
+        // makes — including the two where `.git` itself is not a directory, a
+        // linked worktree and a submodule. So nothing can exist there, which is
+        // the whole of why this path and not any other: a path that merely did
+        // not exist yet is one a project could create, and then a repository
+        // could add settings to the answer about itself.
+        let tail = Path::new(".git")
+            .join("config")
+            .join("sure-no-global-configuration");
+        assert!(
+            Path::new(nowhere).ends_with(&tail),
+            "{nowhere:?} does not end with {tail:?}"
+        );
     }
 }

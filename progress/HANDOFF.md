@@ -3,11 +3,17 @@
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
 Progress: 26 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (6/12).** `P2-T006` is accepted, and its acceptance
-is recorded in `progress/state.json` **in the same commit as this file** — so
-`git log -1 --stat` is the check. If that commit's subject does not name
-`P2-T006`, the acceptance is not recorded and the task is not done. The commit
-after it records the acceptance commit's own run, because a push is not finished
+(11/11), phase P2 in progress (6/12).** `P2-T006` is accepted and recorded in
+`progress/state.json`, and the runs for its acceptance and for the commit that
+recorded it are rows in the table below.
+
+**`P2-T007` is the task in hand, and as this commit lands it is not accepted.**
+Its implementation is pushed as `586d3a3`, run `34864498113` is green on all five
+jobs and has been read — counts, per-binary multiset, and all 22 new test names
+by name on all three `rust` logs. **The acceptance is outstanding**, so the honest
+reading of `progress/state.json` at this commit is `P2-T007: in_progress`, which
+is what "Exact current state" below says. The acceptance, and the correction it
+forces on that block, land in the commit after this one. A push is not finished
 until its run has been read.
 
 A correction to the two entries before this one: each said `progress/state.json`
@@ -65,7 +71,8 @@ job, and it is the reason the list is quoted from the command rather than
 remembered.
 
 `P2-T007` (the component graph) is `in_progress` and described in "What `P2-T007`
-added" below. `P2-T006` is `accepted` and described in "What `P2-T006` added".
+added" below, with its implementation run read in "Reading run `34864498113`".
+`P2-T006` is `accepted` and described in "What `P2-T006` added".
 The three things worth
 knowing before touching any of it are that **one `Budget` serves all three
 ecosystems** — and the same one is shared, so a Node-heavy project starves both
@@ -867,12 +874,80 @@ Three of the five jobs were failing the whole time.
 | 34861757296 | `1638414` — the `P2-T006` run record | **all five green**, and **849 / 851 / 852 with 0 failed, 1 ignored** — identical to the row above. That is the reading a documentation-only commit is for: the record was added without changing what it records |
 | 34862091063 | `48d1057` — **the `P2-T006` acceptance** | **all five green**, and **849 / 851 / 852 again**, unchanged. The acceptance touches only `progress/state.json` and this file, so the counts are the implementation's to the test and the three green runs together say the task's evidence survived its own recording |
 | 34862387972 | `809c738` — the acceptance run's record | all five green. **This is where the chain stops**, and the stopping rule is stated rather than left implicit: every commit's run is read, but the run of the commit that *records* runs is read and reported in the session rather than enshrined in a further commit. Otherwise "read the run" never terminates. The rule was not written down before `P2-T006` and the last two tasks each ended with an unrecorded final run |
+| 34864498113 | `586d3a3` — **the `P2-T007` implementation** | **all five green.** Windows **871** / macOS **873** / Ubuntu **874** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. The parent count went 25 → 26 because `components_graph` is a new test binary. **Windows agrees with the local Windows run exactly**, all 22 new test names were read out of all three `rust` logs **by name**, and the multisets were compared against the run before this one. Detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34864498113`, `P2-T007`'s — and a comparison against the run before it
+
+**All five jobs green**: `shellcheck-secondary`, `bootstrap-validate-windows`,
+`rust (windows-latest)`, `rust (macos-latest)`, `rust (ubuntu-latest)`.
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 36 | 26 | 10 | **871** | 0 | 1 |
+| `rust (macos-latest)` | 36 | 26 | 10 | **873** | 0 | 1 |
+| `rust (ubuntu-latest)` | 36 | 26 | 10 | **874** | 0 | 1 |
+
+**Windows CI printed exactly the figure the local Windows run printed, 871** —
+the same agreement every run on this branch has produced, and the reason the
+local gate set is worth running at all. The parent count went 25 → 26 because
+`components_graph.rs` is a new test binary; the child count is unchanged at 10.
+The `+2` macOS and `+3` Ubuntu deltas are the `#[cfg(unix)]` tests `P2-T002`
+recorded, unchanged from the two runs before this one.
+
+**The 22 new tests were read out of all three `rust` logs by name, not inferred
+from the job colours.** Each of the 18 `components::tests::*` names and each of
+the 4 `components_graph` names is `... ok` on Windows, macOS and Ubuntu, and the
+count of `FAILED` lines matching those names is **0 on all three**. That check is
+the one the counts cannot make.
+
+**The name that most needed it is `the_component_graph_opens_no_file_and_starts_no_process`.**
+Unlike the other three, which build a fixture under `target/tmp` and discover it,
+this one reads `crates/sure-core/src/components.rs` through
+`sure_testkit::repository_root()` — so it depends on the checkout layout rather
+than on the fixture machinery. A path-dependent test that passes locally is
+exactly the kind that can pass nowhere else, and it is `ok` on all three
+platforms. Reading it by name is what makes that a fact.
+
+**The Windows multiset came back one for one:**
+`401, 87, 46, 43, 36, 33, 31, 30, 29, 24, 23, 15, 13, 12, 9, 8, 7, 6×2, 4×3,
+0×4` — **26 values for 26 expected binaries**, with `401` appearing exactly once
+and `4×3` where it was `4×2`.
+
+**This run was compared against the run before it, which is a stronger check
+than either multiset alone.** Both counts were taken the same way, over the
+parent sections of each `rust` job's log, so the two are comparable:
+
+| position | `34858555861` (`9c931d0`) | `34864498113` (`586d3a3`) | moved |
+|---|---|---|---|
+| lib, Windows | 374 | **401** | +27 |
+| lib, macOS and Ubuntu | 371 | **398** | +27 |
+| the `4` binary | `4×2` | **`4×3`** | +1 binary, 4 tests |
+| **every other position** | — | — | **identical** |
+
+**+27 is 9 + 18 and it is the two test-adding commits that sit between the two
+runs, not one.** `374 → 383` was `P2-T006`'s nine `pattern.rs` tests, whose own
+reading is below; `383 → 401` is this task's eighteen. 840 + 9 = 849 and
+849 + 22 = 871, and 22 is 18 module tests plus the 4 in the new binary.
+
+**The four positions where Windows and the Unix jobs differ were already
+different, in the same places, in the run before this one.** Windows carries
+`43` and `23` where the Unix jobs carry `47` and `25`, and macOS replaces
+Windows' single `30` with a second `29`. All four are unchanged between the two
+runs, so they are pre-existing platform-gated tests and **not something
+`P2-T007` introduced** — which is the thing a single run's multiset cannot say,
+because a difference with nothing to compare it to looks the same whether it is
+old or new. This file still does **not** attribute any of the four to a named
+test.
+
+**The raw sum over all 36 lines is 881 on Windows**, over-counting by exactly 10
+for the reason recorded above; macOS 883 and Ubuntu 884 raw. Every figure in this
+section is the sum over the 26 parent sections.
 
 ### Reading run `34854388756`, `P2-T005`'s — and a counting method that is only sound where it was used
 
@@ -1219,7 +1294,7 @@ consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
 
-## Gate set, as run on the `P2-T007` commit (unpushed at the time of writing)
+## Gate set, as run on the `P2-T007` commit `586d3a3`
 
 | Command | Result |
 | --- | --- |
@@ -1243,7 +1318,7 @@ the only sound way to attribute a count to a target — is now
 26 values for 26 expected binaries, with `401` appearing exactly once and `4×3`
 where it was `4×2` before, which is the new binary and nothing else.
 
-## Gate set, as run on the `P2-T006` tests commit (unpushed at the time of writing)
+## Gate set, as run on the `P2-T006` tests commit `9c6e08d`
 
 | Command | Result |
 | --- | --- |
@@ -1854,7 +1929,9 @@ is about:
 - **One place reported as two, or as the wrong place** (5). The merge removed so
   a directory two ecosystems name becomes two components; containment decided by
   the text of a path rather than by its path components; containment to the
-  outermost rather than the nearest component; the root contained by itself.
+  outermost rather than the nearest component; the root contained by itself; the
+  components left in the order the ecosystems named them instead of sorted by
+  path.
 - **An absent fact invented, or a real one dropped** (3). A root manifest
   reported as read whatever it was; an ecosystem that was never found reported as
   one that read a declaration and named nobody; `root_component` handing back the
@@ -2521,24 +2598,34 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **`P2-T006` is accepted, and all three of its commits are pushed and read.**
-   `9c931d0` the implementation in run `34858555861`, `9c6e08d` the `pattern.rs`
-   tests in run `34861419193`, `1638414` the run record in run `34861757296` —
-   **all five jobs green every time**. Windows **840 → 849 → 849**; the first
-   step is the nine new tests and the second is a documentation-only commit
-   changing no number, which is the useful reading for a record commit. State:
-   `{ accepted: 26, queued: 140 }`, phase `P2`, **6 of 12**.
-2. `node scripts/taskctl.mjs start P2-T010` — *"Implement `ProjectIntent` ingestion
-   from explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
-   explicit goal without requiring raw transcript recording."* The remaining READY
-   list is `P2-T007`, `P2-T010`, `P3-T001`, `P4-T008`, `P6-T001`, `P6-T007`,
-   `P8-T001`, `P12-T008`, `P13-T001`, and **`P2-T010` finishes phase P2**.
-   `P2-T007` and `P4-T008` appear here for the first time because `P2-T006` was
-   their blocker, and neither has been read yet — so the choice below is a choice
-   between `P2-T010` and two tasks nobody in this session has looked at.
+1. **`P2-T007` is implemented and pushed, its run is read, and the acceptance is
+   the next action.** `586d3a3` in run `34864498113` — **all five jobs green**,
+   Windows **871** / macOS **873** / Ubuntu **874**, 0 failed, 1 ignored, over 36
+   result lines = 26 parents + 10 children. Run the acceptance with a note written
+   to a file and passed as `--note "$(cat …)"`, then commit the acceptance and
+   read that run too. **`P2-T006` is accepted and all three of its commits are
+   pushed and read.** Windows **840 → 849 → 849**; the first step is the nine new
+   `pattern.rs` tests and the second is a documentation-only commit changing no
+   number, which is the useful reading for a record commit. The `P2-T007` chain is
+   deliberately **two** commits rather than `P2-T006`'s four, and the stopping
+   rule is the one recorded above: the acceptance commit's run is read and
+   reported in the session rather than enshrined in a further commit. State at
+   this commit: `{ accepted: 26, in_progress: 1, queued: 139 }`, phase `P2`,
+   **6 of 12**.
+2. **After the acceptance, the READY list is `P2-T010`, `P3-T001`, `P4-T008`,
+   `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001` — and accepting
+   `P2-T007` adds `P2-T008`, `P2-T009` and `P2-T012`, which depend on it.** The
+   order to consider is `P2-T010` — *"Implement `ProjectIntent` ingestion from
+   explicit goal/spec"*, acceptance *"`sure check` can receive/store a trusted
+   explicit goal without requiring raw transcript recording"* — because **it
+   finishes phase P2**, against `P2-T008`/`P2-T009`/`P2-T012` which extend a graph
+   that is one commit old and has no consumer yet. `P3-T001` is blocked on
+   nothing here but is a phase change; `P4-T008` has still not been read by any
+   session.
    Checked rather than assumed, because a handoff that describes the next task
-   wrongly is a handoff that costs a session: the pieces it needs already exist —
-   `sure_domain::intent::ProjectIntent` in `crates/sure-domain/src/intent.rs`,
+   wrongly is a handoff that costs a session: the pieces `P2-T010` needs already
+   exist — `sure_domain::intent::ProjectIntent` in
+   `crates/sure-domain/src/intent.rs`,
    `ProjectIntentConfig` at `crates/sure-core/src/config/mod.rs:145`,
    `RecordKind::Document(DocumentKind::ProjectIntent)` at
    `crates/sure-core/src/store/record.rs:75`, and `sure check` as a real CLI
@@ -2549,12 +2636,13 @@ it needs a Mac.
    `intent.rs`, not this paragraph.
    **Keep the ordering discipline**: push each task's commits, read that run, and
    only then start the next acceptance. The cost of not doing it is written down
-   three times in this file now. **The `P2-T006` run paid for it in a new
-   currency**: the per-target counts read out of a CI log by proximity were wrong
-   three times for `P2-T005`, so this time the whole-step count was cross-checked
-   by a **multiset** comparison against the expected per-binary counts — a check
-   that is sound where proximity is not, and that caught nothing only because the
-   first whole-step figure, 850, was itself wrong by exactly 10.
+   three times in this file now. **`P2-T006` paid for it in a new currency**: the
+   per-target counts read out of a CI log by proximity were wrong three times for
+   `P2-T005`, so since then the whole-step count is cross-checked by a **multiset**
+   comparison — a check that is sound where proximity is not. **`P2-T007` added
+   the next increment**: the multiset was compared against the previous run's
+   multiset position by position, which is the only form of that check that can
+   tell a difference this commit made from one that was already there.
 3. **Neither fingerprint entry point is called by anything yet**, and that has
    now been true for two tasks: nothing constructs an `Authority`, nothing runs
    the check pipeline, and `project_fingerprint` is the function the pipeline

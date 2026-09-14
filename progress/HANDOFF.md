@@ -6,17 +6,25 @@ Progress: 27 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 in progress (7/12).** `P2-T007` is accepted and recorded in
 `progress/state.json` **in the same commit as this file** — so `git log -1 --stat`
 is the check. If that commit's subject does not name `P2-T007`, the acceptance is
-not recorded and the task is not done. The commit after it records the acceptance
-commit's own run, because a push is not finished until its run has been read —
-and that last run is where this task's chain stops, so it is reported in the
-session rather than enshrined in yet another commit.
+not recorded and the task is not done.
 
 **`P2-T007`'s implementation went in first, on its own commit, with its own run
 read before the acceptance was taken.** `586d3a3`, run `34864498113`, all five
 jobs green; `435181f` records that run. The two-commit shape is deliberate and is
 not the four-commit shape `P2-T006` used: the acceptance could not be written
-honestly until the run existed, and once it did, the only remaining commits are
-the acceptance and the record of its own run.
+honestly until the run existed, and once it did, only the acceptance was left.
+
+**Where the chain stops, stated because the paragraph here said the opposite
+until it was corrected.** This file previously read *"the commit after it records
+the acceptance commit's own run"* — which is a rule that never terminates, since
+that commit's run would need a commit too. **The rule that is actually followed,
+and was followed for `P2-T006`: every substantive commit's run is read before the
+next work starts, and the run of the commit that records runs is read and reported
+in the session rather than enshrined in a further commit.** `P2-T007`'s chain
+therefore ends at `0907acf`, the acceptance, whose run is read in the session that
+took it. The two runs that had not been recorded when the acceptance landed —
+`34865169857` on `435181f` and `34865317166` on `0907acf` — are rows in the table
+below, added by the commit whose own run stops the chain.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -897,6 +905,8 @@ Three of the five jobs were failing the whole time.
 | 34862091063 | `48d1057` — **the `P2-T006` acceptance** | **all five green**, and **849 / 851 / 852 again**, unchanged. The acceptance touches only `progress/state.json` and this file, so the counts are the implementation's to the test and the three green runs together say the task's evidence survived its own recording |
 | 34862387972 | `809c738` — the acceptance run's record | all five green. **This is where the chain stops**, and the stopping rule is stated rather than left implicit: every commit's run is read, but the run of the commit that *records* runs is read and reported in the session rather than enshrined in a further commit. Otherwise "read the run" never terminates. The rule was not written down before `P2-T006` and the last two tasks each ended with an unrecorded final run |
 | 34864498113 | `586d3a3` — **the `P2-T007` implementation** | **all five green.** Windows **871** / macOS **873** / Ubuntu **874** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. The parent count went 25 → 26 because `components_graph` is a new test binary. **Windows agrees with the local Windows run exactly**, all 22 new test names were read out of all three `rust` logs **by name**, and the multisets were compared against the run before this one. Detail below |
+| 34865169857 | `435181f` — the `P2-T007` run record | **all five green**, and **871 / 873 / 874 with 0 failed, 1 ignored, 26 parents** — the implementation's figures to the test, unchanged. A commit that adds only prose to this file changing no count is the reading a record commit is for |
+| 34865317166 | `0907acf` — **the `P2-T007` acceptance** | **all five green**, and **871 / 873 / 874 again**, unchanged, `26` parents each. The acceptance touches only `progress/state.json` and this file, so the implementation's evidence survived its own recording. **This run is the end of the `P2-T007` chain and is reported in the session rather than committed** — see the rule stated at the top of this file |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same

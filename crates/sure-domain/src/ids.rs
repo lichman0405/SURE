@@ -24,6 +24,13 @@ pub enum IdKind {
     Session,
     /// A normalized harness event.
     Event,
+    /// One execution of SURE itself.
+    ///
+    /// Distinct from [`IdKind::Session`], which is a *harness* session that
+    /// SURE observed. A run is SURE's own work: it exists whether or not a
+    /// harness was present, and it is what a stored verdict, a diagnostic line
+    /// and a history entry are all correlated by.
+    Run,
     /// A planned check.
     Check,
     /// A material user-facing finding.
@@ -41,6 +48,7 @@ variants!(IdKind {
     Fingerprint,
     Session,
     Event,
+    Run,
     Check,
     Finding,
     Repair,
@@ -57,6 +65,7 @@ impl IdKind {
             Self::Fingerprint => "fp",
             Self::Session => "ses",
             Self::Event => "evt",
+            Self::Run => "run",
             Self::Check => "chk",
             Self::Finding => "fnd",
             Self::Repair => "rep",
@@ -194,6 +203,11 @@ define_id!(
     /// Identity of one normalized harness event.
     EventId,
     IdKind::Event
+);
+define_id!(
+    /// Identity of one execution of SURE.
+    RunId,
+    IdKind::Run
 );
 define_id!(
     /// Identity of one planned or executed check.
@@ -349,6 +363,7 @@ any_id_from!(
     FingerprintId,
     SessionId,
     EventId,
+    RunId,
     CheckId,
     FindingId,
     RepairId,

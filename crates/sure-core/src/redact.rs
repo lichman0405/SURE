@@ -1,16 +1,23 @@
 //! Keeping secrets out of anything SURE prints or stores.
 //!
+//! This sits at the crate root rather than inside [`crate::config`] because
+//! redaction is not a config concern: [`crate::diagnostics`] applies it to
+//! every field of every recorded line, and the full-recording path will apply
+//! it to captured process output. Config was simply its first caller.
+//!
 //! The primary defence is structural, not this module: [`crate::config::Config`]
-//! has no field that accepts a credential, and a project-controlled
-//! `sure.yaml` may not carry one (`docs/architecture/CONFIG_AUTHORITY.md`).
-//! Redaction is the second line — it covers the value a user pasted into a
-//! field that *is* allowed, such as a provider endpoint.
+//! has no field that accepts a credential, a project-controlled `sure.yaml` may
+//! not carry one (`docs/architecture/CONFIG_AUTHORITY.md`), and a diagnostic
+//! field cannot be built from a credential without going through
+//! [`crate::diagnostics::Field`]. Redaction is the second line — it covers the
+//! value a user pasted into a field that *is* allowed, such as a provider
+//! endpoint.
 //!
 //! `docs/security/SECRET_REDACTION.md` is explicit that detection is imperfect,
 //! and this code does not pretend otherwise. It recognises a fixed list of
 //! credential shapes and a fixed list of credential-ish names. It will miss
 //! secrets written in shapes nobody has thought of yet, which is why the
-//! structural rule above matters more than the patterns below.
+//! structural rules above matter more than the patterns below.
 
 /// What a redacted span is replaced with.
 pub const REDACTED: &str = "***";
@@ -79,22 +86,31 @@ pub fn looks_like_credential_name(name: &str) -> bool {
         .any(|fragment| normalised.contains(fragment))
 }
 
-/// Render a value for a diagnostic without risking a secret in the output.
+/// Remove secrets from a value, leaving everything else exactly as it was.
 ///
 /// Three passes, in order:
 ///
-/// 1. a password inside a URL authority, `https://user:secret@host` → `**:*`;
+/// 1. a password inside a URL authority, `https://user:secret@host` → `***@host`;
 /// 2. the value of anything assigned to a credential-ish name, `api_key=...`;
 /// 3. a run of characters matching a known token shape.
 ///
-/// Control characters are then escaped, so a value cannot forge structure in a
-/// multi-line message by containing newlines of its own.
+/// Line structure is left alone, because a caller may be redacting a block of
+/// output rather than a single field. [`redact_for_diagnostic`] is this plus
+/// escaping, and is what a caller that is building one line of prose wants.
 #[must_use]
-pub fn redact_for_diagnostic(value: &str) -> String {
+pub fn redact(value: &str) -> String {
     let value = redact_url_authorities(value);
     let value = redact_assignments(&value);
-    let value = redact_tokens(&value);
-    escape_control_characters(&value)
+    redact_tokens(&value)
+}
+
+/// Render a value for a diagnostic without risking a secret in the output.
+///
+/// [`redact`], then control characters escaped, so a value cannot forge
+/// structure in a multi-line message by containing newlines of its own.
+#[must_use]
+pub fn redact_for_diagnostic(value: &str) -> String {
+    escape_control_characters(&redact(value))
 }
 
 /// Replace the userinfo of every `scheme://user:pass@host` with [`REDACTED`].
@@ -238,7 +254,11 @@ fn bearer_token_length(rest: &str, out: &mut String) -> Option<usize> {
 
 /// Render control characters as escapes so a value cannot add lines to a
 /// message, or start a new "line" that looks like it came from SURE.
-fn escape_control_characters(text: &str) -> String {
+///
+/// Shared with [`crate::diagnostics::Field`], which escapes quotes and
+/// backslashes as well and needs the same treatment of the newline in the
+/// middle of a value.
+pub(crate) fn escape_control_characters(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         if ch == '\n' {

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T09:06:32.417Z",
+  "last_updated": "2026-09-14T09:10:56.827Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -117,13 +117,13 @@
       "notes": "sure.yaml model + loader: privacy/protection/execution/analysis/project_intent/checks/report all parse; every invalid-config path stops the run with a message naming the setting, the expected values, a typo suggestion and the file; requested_privileges/scope_reductions enumerate every privileged and scope-reducing setting; no config field accepts a credential and values reaching diagnostics are redacted. 70 sure-core tests + 9 filesystem tests. Gates: fmt, check, clippy -D warnings, test --workspace, validate-bootstrap, git-guard all clean."
     },
     "P1-T004": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T09:06:32.416Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T09:10:56.827Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "OS-native per-user data/config paths plus the authoritative-evidence boundary"
+      "notes": "docs/architecture/STORAGE_AND_DATA_PATHS.md + crates/sure-core/src/paths/{mod,compare}.rs; dirs 6.0.0 for OS-native known folders (SHGetKnownFolderPath needs unsafe, forbidden workspace-wide); data=%LOCALAPPDATA%\\SURE, config=%APPDATA%\\SURE asked separately; Paths::ensure_outside refuses a project root containing the store (home-directory case); Paths::from_roots refuses relative; compare.rs is component-wise, case-folds where the platform folds, and unifies \\?\\ canonical spellings; 40 tests in paths (Windows), clippy clean for x86_64-unknown-linux-gnu and x86_64-apple-darwin; commit b6a14b4"
     },
     "P1-T005": {
       "status": "queued",

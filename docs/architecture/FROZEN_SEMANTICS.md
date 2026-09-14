@@ -26,6 +26,7 @@ decisions *mean* and where that meaning is enforced.
 | 0009 | Explicit execution trust |
 | 0010 | Frozen domain semantics live in code |
 | 0011 | Project configuration is a request, not a grant |
+| 0012 | Diagnostics are records, not a logging framework |
 
 Each of those ADRs carries a "Frozen semantics" section pointing back here.
 
@@ -52,6 +53,10 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | Storage locations | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `crates/sure-core/src/paths/mod.rs` |
 | Authoritative evidence is outside the project | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `sure_core::paths::Paths::ensure_outside` |
 | Path comparison direction | `docs/architecture/STORAGE_AND_DATA_PATHS.md` | `crates/sure-core/src/paths/compare.rs` |
+| A diagnostic is never evidence | `docs/architecture/DIAGNOSTICS.md` | `crates/sure-core/src/diagnostics/` |
+| Correlation fields and their scope | `docs/architecture/DIAGNOSTICS.md` | `sure_core::diagnostics::Correlation` |
+| A log line cannot be restructured by a value | `docs/architecture/DIAGNOSTICS.md` | `crates/sure-core/src/diagnostics/field.rs` |
+| Redaction markers | `docs/security/SECRET_REDACTION.md` | `sure_core::diagnostics::{NOT_RECORDED, redact::REDACTED}` |
 
 ## Statuses
 
@@ -187,6 +192,7 @@ Every entity ID is `<prefix>_<body>`, where body is lowercase
 | Fingerprint | `fp` |
 | Session | `ses` |
 | Event | `evt` |
+| Run | `run` |
 | Check | `chk` |
 | Finding | `fnd` |
 | Repair | `rep` |
@@ -197,6 +203,13 @@ The narrow alphabet is a deliberate choice: an ID is safe in a file name, a URL
 fragment and a terminal report without escaping. Generated IDs use a counter
 plus a per-process seed and are not cryptographic. They are local identifiers,
 never security tokens.
+
+A run is not a session. A run is one execution of SURE; a session is observed
+harness activity, and either can exist without the other. `run` was added in
+P1-T006 and `DOMAIN_SEMANTICS_VERSION` was not bumped: no stored verdict,
+finding or evidence record is reinterpreted by a new kind existing, and
+`docs/adr/0010-frozen-domain-semantics-in-code.md` requires a bump for a change
+of meaning, not for an addition.
 
 ## How the wire names are held still
 

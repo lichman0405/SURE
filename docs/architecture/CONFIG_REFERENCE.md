@@ -199,7 +199,11 @@ Nothing here restates them; this file can only narrow them or ask for them.
 | `mod.rs` | the model, `from_yaml`, `load`, validation, the request and reduction lists |
 | `values.rs` | the seven enums, their wire names and what each one means |
 | `error.rs` | every message a bad file can produce |
-| `redact.rs` | the second line of defence against a secret reaching a message |
+
+`crates/sure-core/src/redact.rs` is the second line of defence against a secret
+reaching a message. It lives at the crate root rather than here because
+`diagnostics` applies it to every recorded field as well; see
+`docs/architecture/DIAGNOSTICS.md`.
 
 `crates/sure-core/tests/config_loading.rs` covers the filesystem path — spaces
 and non-ASCII directory names, byte-order marks, CRLF, a non-UTF-8 file, the

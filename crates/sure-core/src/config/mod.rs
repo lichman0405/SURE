@@ -23,7 +23,6 @@
 mod values;
 
 pub mod error;
-pub mod redact;
 
 pub use error::{ConfigError, ErrorKind, Location};
 pub use values::{
@@ -34,6 +33,7 @@ pub use values::{
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use crate::redact;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 use sure_domain::execution::ExecutionMode;

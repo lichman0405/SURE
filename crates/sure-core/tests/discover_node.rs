@@ -504,7 +504,18 @@ fn discovery_runs_none_of_the_scripts_it_reads() {
     // start a process at all. **This catches the apparatus and not the
     // guarantee** — an implementation that shelled out through a helper in
     // another module would pass this and fail the check above.
-    for file in ["discover/mod.rs", "discover/node.rs", "discover/read.rs"] {
+    // Every file in the module tree, not only Node's three. Python and Rust
+    // joined the list when `discover/pattern.rs` became a module all three
+    // ecosystems share: the claim is about *discovery*, and a check that named
+    // one ecosystem's files would have let the next one shell out unnoticed.
+    for file in [
+        "discover/mod.rs",
+        "discover/node.rs",
+        "discover/pattern.rs",
+        "discover/python.rs",
+        "discover/read.rs",
+        "discover/rust.rs",
+    ] {
         let source = std::fs::read_to_string(
             sure_testkit::repository_root()
                 .join("crates/sure-core/src")

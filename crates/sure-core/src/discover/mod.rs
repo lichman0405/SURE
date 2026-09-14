@@ -54,8 +54,10 @@
 //! for the same reason [`crate::diagnostics`] gives.
 
 pub mod node;
+mod pattern;
 pub mod python;
 mod read;
+pub mod rust;
 
 use std::path::{Path, PathBuf};
 
@@ -64,8 +66,10 @@ use sure_domain::vocabulary::{StackClassification, SupportLevel};
 use crate::scan::{Scan, ScanError, ScanOptions, Skipped};
 
 pub use node::NodeProject;
+pub use pattern::{Unresolved, UnresolvedReason};
 pub use python::PythonProject;
 pub use read::UnreadReason;
+pub use rust::RustProject;
 
 /// One ecosystem this build knows how to look for.
 ///
@@ -80,11 +84,13 @@ pub enum Ecosystem {
     /// Python: `pyproject.toml`, `Pipfile`, `requirements*.txt`, and the
     /// lockfiles beside them.
     Python,
+    /// Rust: `Cargo.toml`, `Cargo.lock`, and the toolchain pin beside them.
+    Rust,
 }
 
 impl Ecosystem {
     /// Every ecosystem this build looks for, in a fixed order.
-    pub const ALL: &'static [Self] = &[Self::Node, Self::Python];
+    pub const ALL: &'static [Self] = &[Self::Node, Self::Python, Self::Rust];
 
     /// The stable name, used in output and in the reason a level was assigned.
     #[must_use]
@@ -92,6 +98,7 @@ impl Ecosystem {
         match self {
             Self::Node => "node",
             Self::Python => "python",
+            Self::Rust => "rust",
         }
     }
 
@@ -101,6 +108,7 @@ impl Ecosystem {
         match self {
             Self::Node => "JavaScript or TypeScript",
             Self::Python => "Python",
+            Self::Rust => "Rust",
         }
     }
 }
@@ -117,6 +125,8 @@ pub enum Findings {
     Node(Box<NodeProject>),
     /// What a Python project declares.
     Python(Box<PythonProject>),
+    /// What a Rust project declares.
+    Rust(Box<RustProject>),
 }
 
 /// What SURE concluded about one ecosystem, and why.
@@ -180,6 +190,27 @@ impl Source {
             says,
         }
     }
+}
+
+/// Whether a workspace member has a manifest of its own.
+///
+/// Answered without reading it, so this is about what is at the name rather than
+/// about what it says. It is the cheap summary that lets a member be described
+/// even when the manifest budget ran out before SURE reached it.
+///
+/// Here rather than in one ecosystem's module because every ecosystem that has
+/// workspaces asks the same question about a member and answers it from the same
+/// [`Probe`](read::Probe) — Node with `package.json`, Cargo with `Cargo.toml` —
+/// and a member that could be `Present` in one module's vocabulary and
+/// `NotReadable` in another would be one directory described two ways.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberManifest {
+    /// There is a manifest at the member's expected name.
+    Present,
+    /// There is nothing at that name.
+    Absent,
+    /// There is something at that name that SURE does not read.
+    NotReadable(&'static str),
 }
 
 /// Everything step 1 found out.
@@ -370,6 +401,9 @@ pub fn discover(root: &Path, options: &DiscoverOptions) -> Result<Discovery, Sca
     if let Some(report) = python::look(root, &scan, options, &mut budget, &mut unread) {
         ecosystems.push(report);
     }
+    if let Some(report) = rust::look(root, &scan, options, &mut budget, &mut unread) {
+        ecosystems.push(report);
+    }
 
     Ok(Discovery {
         root: root.to_path_buf(),
@@ -392,9 +426,10 @@ mod tests {
         }
         // The list is the answer to "did SURE look?", so a list that omitted
         // one would make an untouched ecosystem look like an absent one.
-        assert_eq!(Ecosystem::ALL.len(), 2);
+        assert_eq!(Ecosystem::ALL.len(), 3);
         assert!(Ecosystem::ALL.contains(&Ecosystem::Node));
         assert!(Ecosystem::ALL.contains(&Ecosystem::Python));
+        assert!(Ecosystem::ALL.contains(&Ecosystem::Rust));
         // Distinct, so that `report(ecosystem)` can find at most one and two
         // ecosystems cannot answer to one name.
         let names: std::collections::BTreeSet<&str> =

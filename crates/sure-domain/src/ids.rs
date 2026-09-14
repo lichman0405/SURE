@@ -9,6 +9,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::variants::variants;
 use serde::{Deserialize, Serialize};
 
 /// Which kind of entity an identifier refers to.
@@ -35,20 +36,19 @@ pub enum IdKind {
     Evidence,
 }
 
-impl IdKind {
-    /// Every kind.
-    pub const ALL: [Self; 9] = [
-        Self::Project,
-        Self::Fingerprint,
-        Self::Session,
-        Self::Event,
-        Self::Check,
-        Self::Finding,
-        Self::Repair,
-        Self::Claim,
-        Self::Evidence,
-    ];
+variants!(IdKind {
+    Project,
+    Fingerprint,
+    Session,
+    Event,
+    Check,
+    Finding,
+    Repair,
+    Claim,
+    Evidence
+});
 
+impl IdKind {
     /// The canonical string prefix for this kind.
     #[must_use]
     pub const fn prefix(self) -> &'static str {
@@ -68,7 +68,7 @@ impl IdKind {
     /// Resolve a prefix back to its kind.
     #[must_use]
     pub fn from_prefix(prefix: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.prefix() == prefix)
+        Self::ALL.iter().copied().find(|k| k.prefix() == prefix)
     }
 }
 
@@ -377,7 +377,7 @@ mod tests {
         let prefixes: std::collections::BTreeSet<_> =
             IdKind::ALL.iter().map(|k| k.prefix()).collect();
         assert_eq!(prefixes.len(), IdKind::ALL.len());
-        for kind in IdKind::ALL {
+        for &kind in IdKind::ALL {
             assert_eq!(IdKind::from_prefix(kind.prefix()), Some(kind));
         }
     }
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn any_id_accepts_every_kind_and_round_trips() {
-        for kind in IdKind::ALL {
+        for &kind in IdKind::ALL {
             let value = format!("{}_abc123", kind.prefix());
             let any = AnyId::parse(&value).expect("valid");
             assert_eq!(any.kind(), kind);

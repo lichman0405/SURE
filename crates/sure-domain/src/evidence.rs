@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AnyId, EvidenceId, FingerprintId};
 use crate::severity::Severity;
+use crate::variants::variants;
 
 /// How much weight a piece of evidence carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -26,16 +27,12 @@ pub enum EvidenceClass {
     Unknown,
 }
 
-impl EvidenceClass {
+variants!(
     /// Every class, strongest first.
-    pub const ALL: [Self; 5] = [
-        Self::ObservedFact,
-        Self::DeterministicCheck,
-        Self::ModelAssessment,
-        Self::Inference,
-        Self::Unknown,
-    ];
+    EvidenceClass { ObservedFact, DeterministicCheck, ModelAssessment, Inference, Unknown }
+);
 
+impl EvidenceClass {
     /// The stable wire name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -175,6 +172,21 @@ pub enum AnchorSubject {
     Runtime,
 }
 
+variants!(AnchorSubject {
+    File,
+    Directory,
+    LineRange,
+    Command,
+    Output,
+    Check,
+    Event,
+    Config,
+    Database,
+    Documentation,
+    Git,
+    Runtime
+});
+
 /// One captured piece of evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
@@ -244,15 +256,12 @@ pub enum ClaimAssessment {
     NotCheckable,
 }
 
-impl ClaimAssessment {
+variants!(
     /// Every assessment.
-    pub const ALL: [Self; 4] = [
-        Self::Confirmed,
-        Self::Contradicted,
-        Self::CannotConfirm,
-        Self::NotCheckable,
-    ];
+    ClaimAssessment { Confirmed, Contradicted, CannotConfirm, NotCheckable }
+);
 
+impl ClaimAssessment {
     /// The stable wire name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -299,6 +308,12 @@ pub enum StalenessReason {
     /// The evidence carries no fingerprint, so it applies to nothing in particular.
     UnknownProvenance,
 }
+
+variants!(StalenessReason {
+    FingerprintChanged,
+    SupersededByLaterChange,
+    UnknownProvenance
+});
 
 impl StalenessReason {
     /// Plain-language explanation for the report.
@@ -366,11 +381,11 @@ mod tests {
 
     #[test]
     fn wire_names_match_the_schemas() {
-        for class in EvidenceClass::ALL {
+        for &class in EvidenceClass::ALL {
             let json = serde_json::to_string(&class).expect("serialize");
             assert_eq!(json, format!("\"{}\"", class.as_str()));
         }
-        for assessment in ClaimAssessment::ALL {
+        for &assessment in ClaimAssessment::ALL {
             let json = serde_json::to_string(&assessment).expect("serialize");
             assert_eq!(json, format!("\"{}\"", assessment.as_str()));
         }

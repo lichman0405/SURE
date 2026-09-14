@@ -5,6 +5,7 @@
 //! SURE may invent a fifth level or a numeric confidence score: uncertainty is
 //! expressed as `cannot_confirm`, never as a percentage.
 
+use crate::variants::variants;
 use serde::{Deserialize, Serialize};
 
 /// How much a finding matters to the person receiving the report.
@@ -28,15 +29,12 @@ pub enum Severity {
     Note,
 }
 
-impl Severity {
+variants!(
     /// Every level, most serious first.
-    pub const ALL: [Self; 4] = [
-        Self::MustFix,
-        Self::ShouldFixFirst,
-        Self::CanFixLater,
-        Self::Note,
-    ];
+    Severity { MustFix, ShouldFixFirst, CanFixLater, Note }
+);
 
+impl Severity {
     /// The stable wire name used by the JSON schemas.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -102,7 +100,7 @@ mod tests {
         assert_eq!(Severity::ShouldFixFirst.as_str(), "should_fix_first");
         assert_eq!(Severity::CanFixLater.as_str(), "can_fix_later");
         assert_eq!(Severity::Note.as_str(), "note");
-        for severity in Severity::ALL {
+        for &severity in Severity::ALL {
             let json = serde_json::to_string(&severity).expect("serialize");
             assert_eq!(json, format!("\"{}\"", severity.as_str()));
         }
@@ -131,7 +129,7 @@ mod tests {
             assert!(pair[0].rank() > pair[1].rank());
         }
         assert_eq!(
-            Severity::ALL.into_iter().max(),
+            Severity::ALL.iter().copied().max(),
             Some(Severity::MustFix),
             "max must be the most serious level"
         );

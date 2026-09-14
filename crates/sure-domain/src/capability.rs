@@ -4,6 +4,7 @@
 //! actually achieved, and what it could not see, so that a blind spot is never
 //! mistaken for a clean result.
 
+use crate::variants::variants;
 use serde::{Deserialize, Serialize};
 
 /// How much of a coding session an integration can observe or influence.
@@ -18,10 +19,12 @@ pub enum CapabilityTier {
     Protected,
 }
 
-impl CapabilityTier {
+variants!(
     /// Every tier, weakest first.
-    pub const ALL: [Self; 3] = [Self::Snapshot, Self::Observed, Self::Protected];
+    CapabilityTier { Snapshot, Observed, Protected }
+);
 
+impl CapabilityTier {
     /// The numeric tier, as used in the event envelope's `capability_tier`.
     #[must_use]
     pub const fn number(self) -> u8 {
@@ -98,6 +101,17 @@ pub enum BlindSpotKind {
     /// The harness exposes nothing beyond the project snapshot.
     NoSessionVisibility,
 }
+
+variants!(BlindSpotKind {
+    UserGoalNotExposed,
+    CompletionClaimNotExposed,
+    ToolCallsNotExposed,
+    FailuresNotExposed,
+    FileEditsNotExposed,
+    GitActivityNotExposed,
+    NoPreActionControl,
+    NoSessionVisibility
+});
 
 impl BlindSpotKind {
     /// Plain-language explanation, used when a caller has nothing more specific.
@@ -223,6 +237,12 @@ pub enum HookFailureBehaviour {
     NotApplicable,
 }
 
+variants!(HookFailureBehaviour {
+    FailOpen,
+    FailClosed,
+    NotApplicable
+});
+
 impl HookFailureBehaviour {
     /// The stable wire name.
     #[must_use]
@@ -257,7 +277,7 @@ mod tests {
         assert_eq!(CapabilityTier::Snapshot.number(), 0);
         assert_eq!(CapabilityTier::Observed.number(), 1);
         assert_eq!(CapabilityTier::Protected.number(), 2);
-        for tier in CapabilityTier::ALL {
+        for &tier in CapabilityTier::ALL {
             assert_eq!(CapabilityTier::from_number(tier.number()), Some(tier));
         }
         assert_eq!(CapabilityTier::from_number(3), None);

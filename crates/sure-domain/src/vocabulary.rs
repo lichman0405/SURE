@@ -14,6 +14,7 @@ use crate::ids::{CheckId, ClaimId, EventId, FingerprintId, ProjectId, RepairId, 
 use crate::intent::ProjectIntent;
 use crate::severity::Severity;
 use crate::status::{Aggregate, CheckResult, NotCheckedReason};
+use crate::variants::variants;
 
 /// A local software project or workspace under inspection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +56,12 @@ pub enum SupportLevel {
     /// reliable way to run it.
     InspectOnly,
 }
+
+variants!(SupportLevel {
+    FirstClass,
+    Generic,
+    InspectOnly
+});
 
 impl SupportLevel {
     /// The letter used in the product documentation.
@@ -112,6 +119,8 @@ pub enum FingerprintKind {
     /// Derived from a deterministic content manifest, for projects without Git.
     Content,
 }
+
+variants!(FingerprintKind { Git, Content });
 
 impl FingerprintKind {
     /// The stable wire name.
@@ -277,6 +286,13 @@ pub enum FindingStatus {
     /// SURE cannot tell whether the problem is still there.
     CannotConfirm,
 }
+
+variants!(FindingStatus {
+    Open,
+    Resolved,
+    AcceptedRisk,
+    CannotConfirm
+});
 
 impl FindingStatus {
     /// The stable wire name.

@@ -45,6 +45,11 @@ Specifically:
    finding by itself.
 7. `docs/architecture/FROZEN_SEMANTICS.md` indexes every rule to the code that
    enforces it and records known conformance gaps.
+8. Every wire name is pinned by a literal in
+   `crates/sure-domain/tests/wire_contract.rs`, whose matches have no wildcard
+   arm. A variant cannot be added without deciding its wire name, and the six
+   enums that also appear in a JSON schema are compared against that schema, so
+   the two statements of the contract cannot drift apart.
 
 `DOMAIN_SEMANTICS_VERSION` marks the meaning of stored records. Changing any of
 the above in a way that reinterprets an existing stored verdict, finding or

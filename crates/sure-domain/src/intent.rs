@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::EvidenceId;
 use crate::status::RequirementClaim;
+use crate::variants::variants;
 
 /// Where a stated requirement or goal came from.
 ///
@@ -35,16 +36,12 @@ pub enum IntentSource {
     Inferred,
 }
 
-impl IntentSource {
+variants!(
     /// Every source, most authoritative first.
-    pub const ALL: [Self; 5] = [
-        Self::ExplicitUserGoal,
-        Self::ObservedUserRequest,
-        Self::ProjectSpec,
-        Self::AgentClaim,
-        Self::Inferred,
-    ];
+    IntentSource { ExplicitUserGoal, ObservedUserRequest, ProjectSpec, AgentClaim, Inferred }
+);
 
+impl IntentSource {
     /// The stable wire name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -124,6 +121,13 @@ pub enum RequirementAuthority {
     /// SURE guessed. SURE may not report on it as a requirement at all.
     NotARequirement,
 }
+
+variants!(RequirementAuthority {
+    UserRequirement,
+    DocumentedInstruction,
+    AgentAssertion,
+    NotARequirement
+});
 
 impl RequirementAuthority {
     /// Derive the authority of a statement from its source.
@@ -297,7 +301,7 @@ mod tests {
 
     #[test]
     fn wire_names_match_the_project_intent_schema() {
-        for source in IntentSource::ALL {
+        for &source in IntentSource::ALL {
             let json = serde_json::to_string(&source).expect("serialize");
             assert_eq!(json, format!("\"{}\"", source.as_str()));
         }
@@ -312,7 +316,7 @@ mod tests {
 
     #[test]
     fn only_explicit_and_observed_sources_are_user_requirements() {
-        for source in IntentSource::ALL {
+        for &source in IntentSource::ALL {
             let expected = matches!(
                 source,
                 IntentSource::ExplicitUserGoal | IntentSource::ObservedUserRequest
@@ -387,7 +391,7 @@ mod tests {
 
     #[test]
     fn only_observed_user_requests_need_full_recording() {
-        for source in IntentSource::ALL {
+        for &source in IntentSource::ALL {
             let expected = source == IntentSource::ObservedUserRequest;
             assert_eq!(source.requires_full_recording(), expected, "{source:?}");
         }

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T08:41:23.665Z",
+  "last_updated": "2026-09-14T08:45:28.790Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -90,17 +90,17 @@
       "notes": ""
     },
     "P1-T001": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-14T08:41:23.664Z",
-      "finished_at": null,
+      "finished_at": "2026-09-14T08:45:18.842Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
       "notes": ""
     },
     "P1-T002": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T08:45:28.790Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

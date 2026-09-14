@@ -34,6 +34,7 @@ Each of those ADRs carries a "Frozen semantics" section pointing back here.
 | --- | --- | --- |
 | Core domain entities | `docs/architecture/DOMAIN_MODEL.md` | `crates/sure-domain/src/vocabulary.rs` |
 | Entity identity format | this document | `crates/sure-domain/src/ids.rs` |
+| Every wire name | this document, `schemas/` | `crates/sure-domain/tests/wire_contract.rs` |
 | Check statuses | `schemas/check-result.schema.json` | `crates/sure-domain/src/status.rs` |
 | Aggregation and the false-green rule | `MASTER_PROMPT.md` §9 | `sure_domain::status::aggregate` |
 | Severity levels | `docs/product/UX_AND_LANGUAGE.md` | `crates/sure-domain/src/severity.rs` |
@@ -189,6 +190,24 @@ The narrow alphabet is a deliberate choice: an ID is safe in a file name, a URL
 fragment and a terminal report without escaping. Generated IDs use a counter
 plus a per-process seed and are not cryptographic. They are local identifiers,
 never security tokens.
+
+## How the wire names are held still
+
+The tables above are the contract. `crates/sure-domain/tests/wire_contract.rs`
+is what makes breaking it visible, in three ways:
+
+1. Every enum's `ALL` is declared by `variants!` in the module that defines the
+   enum, so nothing that needs to visit the whole vocabulary can quietly skip a
+   variant.
+2. The test spells every wire name out as a literal and matches on each enum
+   with **no wildcard arm**. Adding a variant stops the test crate from
+   compiling until someone decides what the new variant is called on the wire.
+3. For the six enums that also appear in a JSON schema, the test reads the
+   schema's `enum` array and compares it to the Rust list, so the two statements
+   of the contract cannot drift apart.
+
+Order is deliberately not asserted: serde is name-based, and reordering variants
+is not a wire change.
 
 ## Known conformance gaps
 

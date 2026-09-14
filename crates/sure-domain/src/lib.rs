@@ -24,6 +24,7 @@ pub mod ids;
 pub mod intent;
 pub mod severity;
 pub mod status;
+mod variants;
 pub mod vocabulary;
 
 /// The product name.

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::CheckId;
 use crate::severity::Severity;
+use crate::variants::variants;
 
 /// The outcome of a single check.
 ///
@@ -38,17 +39,12 @@ pub enum CheckStatus {
     Unknown,
 }
 
-impl CheckStatus {
+variants!(
     /// Every status, in report order.
-    pub const ALL: [Self; 6] = [
-        Self::Pass,
-        Self::Fail,
-        Self::Warning,
-        Self::Skipped,
-        Self::Error,
-        Self::Unknown,
-    ];
+    CheckStatus { Pass, Fail, Warning, Skipped, Error, Unknown }
+);
 
+impl CheckStatus {
     /// The stable wire name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -99,6 +95,14 @@ pub enum CriticalState {
     /// It did not run and SURE does not know whether it needed to.
     Uncertain,
 }
+
+variants!(CriticalState {
+    Passed,
+    Failed,
+    NotRun,
+    CheckerError,
+    Uncertain
+});
 
 impl CriticalState {
     /// Classify a check status for a check that was required for this project state.
@@ -157,6 +161,19 @@ pub enum NotCheckedReason {
     /// SURE has no rule for deciding.
     UnknownReason,
 }
+
+variants!(NotCheckedReason {
+    ExecutionNotAuthorized,
+    UserDeclined,
+    DependencyInstallNotPermitted,
+    NetworkNotPermitted,
+    ToolUnavailable,
+    UnsupportedStack,
+    NotApplicable,
+    DisabledByConfiguration,
+    ExternalServiceUnavailable,
+    UnknownReason
+});
 
 impl NotCheckedReason {
     /// Whether this reason reflects a genuine gap in what SURE was able to check.
@@ -329,6 +346,13 @@ pub enum AggregateSeverity {
     /// SURE could not check enough to make any recommendation.
     NotEnoughChecked,
 }
+
+variants!(AggregateSeverity {
+    Green,
+    NeedsAttention,
+    NotReady,
+    NotEnoughChecked
+});
 
 impl AggregateSeverity {
     /// The stable wire name.
@@ -562,6 +586,11 @@ pub enum RequirementClaim {
     AfterTheFact,
 }
 
+variants!(RequirementClaim {
+    Comparable,
+    AfterTheFact
+});
+
 impl RequirementClaim {
     /// The caveat the report must include, if any.
     #[must_use]
@@ -603,7 +632,7 @@ mod tests {
 
     #[test]
     fn only_three_statuses_mean_the_project_was_actually_checked() {
-        for status in CheckStatus::ALL {
+        for &status in CheckStatus::ALL {
             let expected = matches!(
                 status,
                 CheckStatus::Pass | CheckStatus::Fail | CheckStatus::Warning
@@ -775,7 +804,7 @@ mod tests {
 
     #[test]
     fn a_wire_round_trip_preserves_every_status() {
-        for status in CheckStatus::ALL {
+        for &status in CheckStatus::ALL {
             let json = serde_json::to_string(&status).expect("serialize");
             assert_eq!(json, format!("\"{}\"", status.as_str()));
         }

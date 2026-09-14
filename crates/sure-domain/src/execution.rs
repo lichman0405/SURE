@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::CheckId;
+use crate::variants::variants;
 
 /// The category of an action, used for trust classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -49,6 +50,26 @@ pub enum ActionKind {
     /// Connecting to an external service.
     ExternalService,
 }
+
+variants!(ActionKind {
+    ReadFile,
+    ListDirectory,
+    ReadMetadata,
+    StaticAnalysis,
+    RunTests,
+    Build,
+    TypeCheck,
+    Lint,
+    StartService,
+    LocalProbe,
+    BrowserProbe,
+    InstallDependencies,
+    NetworkAccess,
+    WriteProjectFile,
+    DeleteProjectFile,
+    ArbitraryCommand,
+    ExternalService
+});
 
 impl ActionKind {
     /// Whether performing this action executes project-controlled code.
@@ -127,17 +148,12 @@ pub enum Permission {
     ConnectService,
 }
 
-impl Permission {
+variants!(
     /// Every permission, in the order shown to a user.
-    pub const ALL: [Self; 6] = [
-        Self::Inspect,
-        Self::RunProjectCode,
-        Self::InstallDependencies,
-        Self::Network,
-        Self::WriteProject,
-        Self::ConnectService,
-    ];
+    Permission { Inspect, RunProjectCode, InstallDependencies, Network, WriteProject, ConnectService }
+);
 
+impl Permission {
     /// The stable wire name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -241,7 +257,8 @@ impl ExecutionPermissions {
     #[must_use]
     pub fn granted(&self) -> Vec<Permission> {
         Permission::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|permission| self.allows(*permission))
             .collect()
     }
@@ -267,6 +284,12 @@ pub enum ExecutionMode {
     /// are evaluated and reported, not assumed safe.
     Container,
 }
+
+variants!(ExecutionMode {
+    InspectOnly,
+    HostConfirmed,
+    Container
+});
 
 impl ExecutionMode {
     /// The stable wire name, matching `sure.yaml`'s `execution.mode`.
@@ -378,6 +401,13 @@ pub enum ConsentGrantor {
     ProjectRequestEscalated,
 }
 
+variants!(ConsentGrantor {
+    InteractiveUser,
+    UserConfiguration,
+    OrganizationPolicy,
+    ProjectRequestEscalated
+});
+
 impl ConsentGrantor {
     /// Whether this grantor is allowed to grant execution authority at all.
     ///
@@ -403,6 +433,12 @@ pub enum ExecutionDecision {
     /// The permission is not granted and no prompt can be made here.
     Denied,
 }
+
+variants!(ExecutionDecision {
+    Allowed,
+    NeedsConsent,
+    Denied
+});
 
 impl ExecutionDecision {
     /// Whether the action may proceed.
@@ -479,14 +515,14 @@ mod tests {
 
     #[test]
     fn every_permission_is_independent_of_the_others() {
-        for permission in Permission::ALL {
+        for &permission in Permission::ALL {
             let mut permissions = ExecutionPermissions::inspect_only();
             if permission == Permission::Inspect {
                 continue;
             }
             permissions.set(permission, true);
             assert!(permissions.allows(permission));
-            for other in Permission::ALL {
+            for &other in Permission::ALL {
                 if other == permission || other == Permission::Inspect {
                     continue;
                 }

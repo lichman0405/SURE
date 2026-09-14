@@ -103,14 +103,51 @@ fingerprint, and that is the deliberate direction of error.
 
 | Kind | When | Where |
 | --- | --- | --- |
-| `FingerprintKind::Git` | the project is in a working tree | `sure_core::fingerprint::git_fingerprint`, P2-T002 |
-| `FingerprintKind::Content` | the project is not under version control | P2-T003 |
+| `FingerprintKind::Git` | the project is at the root of its own working tree | `sure_core::fingerprint::git_fingerprint` (P2-T002) |
+| `FingerprintKind::Content` | anything else | `sure_core::fingerprint::content_fingerprint` (P2-T003) |
 
-There is deliberately no function that picks between them. Choosing by looking at
-the project is a decision with a wrong answer — a project inside a repository
-that is not the project is exactly the case where the obvious check is wrong, and
-the wrong answer is a fingerprint of somebody else's state. P2-T003 owns making
-that decision with its own evidence.
+### Which one a project gets, and why "is it in a repository" is the wrong test
+
+`sure_core::fingerprint::project_fingerprint` is the one function that chooses.
+The rule it applies is not "is this directory inside a repository" but **"is this
+directory at the root of the working tree that contains it"** — Git reports a
+path from the top of the working tree to where the question was asked
+(`rev-parse --show-prefix`), and that path is empty exactly when the two are the
+same directory.
+
+The obvious test answers `yes` for a directory one component deep in somebody
+else's checkout, and everything Git would then contribute is about the *other*
+project. `HEAD` is the outer repository's — the Git fingerprint digests it on
+purpose, because a checkout of a different commit is a different state — so a
+commit anywhere else in the repository moves the subdirectory's fingerprint
+although not one of its files changed. Evidence would be marked stale over and
+over for a project nobody touched, which is how a person learns to stop reading
+the word "stale", and the failure that teaches them to ignore is the dangerous
+one. `-- .` and `--show-prefix` scope the *change list* correctly; what they
+cannot do is make the repository the project's.
+
+A content manifest has none of that: it reads the project and only the project,
+so nothing outside can move it. It costs more, and that is the deliberate
+direction.
+
+This is measured rather than argued, in
+`the_git_kind_moves_for_a_commit_the_project_is_not_part_of_and_the_content_kind_does_not`
+— which asserts both halves, so that neither can quietly stop being true and
+leave the reason looking like folklore.
+
+### A machine without Git is an error, not a content fingerprint
+
+`FingerprintError::GitUnavailable` is **not** turned into a fallback. The kind a
+project gets has to be a function of the project and not of the machine: falling
+back would mean one unchanged directory produced a `Git` fingerprint on a
+developer's laptop and a `Content` fingerprint on a build agent without Git, and
+those two values are not equal — `matches` compares `kind`. Every stored result
+would be reported stale on the other machine, and a project checked in both
+places would never agree with itself.
+
+A caller who knows the project is not a repository, or wants the manifest for a
+reason of their own, calls `content_fingerprint` directly. That escape hatch is
+explicit on purpose: it is a decision, so somebody makes it.
 
 `ProjectFingerprint::matches` compares `kind` and `digest`, never `id`. The `id`
 is fresh on every computation so that two results can be told apart by value; the
@@ -410,6 +447,62 @@ stale. That is accepted because the alternative — trusting that the tree is th
 only thing that matters — is a claim about what future checks will read, made
 today, by a component that cannot know.
 
+## The content fingerprint
+
+`content_fingerprint` walks the project and hashes what it finds. It needs no
+Git, no repository and no history, and it is the kind every project gets that is
+not at the root of its own working tree.
+
+It is the same rule applied to a different source of paths. The walk is
+`crate::scan` — the same ignore tables, the same comparison, the same limits — so
+"generated and vendored churn is excluded" is not a claim made here and checked
+somewhere else. `target/`, `node_modules/`, `vendor/`, `dist/`, `__pycache__`,
+`.git/` and SURE's own `.sure/` are out for the reason the scan records beside
+each of them, and `the_excluded_list_is_the_scans_and_not_a_second_copy_of_it`
+pins the agreement rather than the list.
+
+What is at each path is `read.rs`'s answer, shared with the Git kind: one
+implementation of "what is at this path", not two that agree today.
+
+**A link is in the manifest, and the scan did not put it there.** The scan skips
+a link and records the skip as a *loss*, because a check does not read through
+one and something could be hidden behind it. The content manifest resolves that
+skip instead: the link is recorded by its target, exactly as the Git kind records
+a tracked one. Leaving it out would be the dangerous direction — a link is a path
+in the project and its target is the whole of what it is, so retargeting one is a
+change, and a manifest that ignored links would report evidence about the old
+target as current for the new one.
+
+Every other loss **is** a loss: a directory that could not be listed, a level the
+depth limit stopped, the point the entry budget ran out, a pipe met inside a
+directory. Those become `IncompleteTree`, never a shorter digest.
+
+### The digest, and the one property no test can hold it to
+
+Same construction as the Git kind, with its own domain tag,
+`sure.content-fingerprint.v1`, and the same four determinism decisions — the
+paths are sorted before hashing, written with `/` on every platform, the branch
+name is not a thing here, and every limit produces an error rather than a partial
+manifest.
+
+**The sort is held in place by its reason and not by a test, and saying so is the
+point.** Removing it changes no observable behaviour in a single run: the digest
+is a value, the sort exists to make that value independent of the order the walk
+happened to produce, and one test run sees one filesystem's order and no other.
+No two things a test can compare would differ. The Git kind's sort has the same
+status. A mutation was applied that removed it and nothing failed; the verdict is
+recorded in `target/tmp/mutate7.py` beside the property, and the reason is written
+next to the code — which is the whole of what holds it.
+
+The **domain tag** is in the same position, for a different reason: a mutation
+that set it to the Git kind's was applied and every behavioural test still
+passed, because the two digests cannot collide even with one tag — the Git kind
+opens with `head` and this one with `manifest`. So the tag is belt and braces
+over the field structure rather than the thing that keeps the kinds apart. It is
+pinned by a constant assertion instead, which catches no behaviour and does
+establish that changing it is a decision: the tag is part of the format of every
+fingerprint already stored.
+
 ## Known coverage gaps
 
 Each is recorded so it is not forgotten, with the reason it is not closed.
@@ -483,21 +576,43 @@ Each is recorded so it is not forgotten, with the reason it is not closed.
    holds both at once — they are joined by the unit test that pins the two
    variable *names*, which is the part a change could silently break.
 
+8. **Two properties of the content manifest are held by reasoning and not by a
+   test.** The sort before hashing, and the domain tag
+   `sure.content-fingerprint.v1`. A mutation that removed the sort passed every
+   test, because one run sees one filesystem's order and a digest is a value —
+   there is nothing for a test to compare two of. A mutation that set the tag to
+   the Git kind's also passed every behavioural test, because the two digests
+   cannot collide even with one tag: the Git kind opens with `head` and the
+   content kind with `manifest`. The first is held by the reason written beside
+   it; the second is also pinned by a constant assertion, which catches no
+   behaviour and does establish that changing the tag is a decision, since it is
+   part of the format of every fingerprint already stored. Both verdicts are in
+   `target/tmp/mutate7.py` rather than inferred from a green run — a property
+   that looks covered and is not is the shape of failure this document exists to
+   prevent. The Git kind's sort has the same status, which is why `mutate6.py`
+   does not mutate it either.
+
 Gaps 1, 3, 4 and 6 are stated in the module comment of
 `crates/sure-core/tests/fingerprint_git.rs`, which is where a reader looks for
 what a test file does *not* cover; that comment also names a fourth untested
 case, `core.symlinks=false`, which is a branch of gap 1 rather than a separate
-entry here. Gap 2's tests are themselves Unix-only, since producing a link on
-Windows is the thing gap 1 says this machine cannot do — so on Windows the whole
-of the link behaviour, wider and blind alike, is asserted by no test at all, and
-this document is the only place it is written down. Gap 5 is a property of any
-design that reads files after asking Git about them, and no test can pin it.
-Gap 6's Unix test is the one that can hang, so it runs on a worker thread and
-fails by name after a timeout rather than sitting there — a hang is a failure
-that reports nothing, and the point of the test is that a project must not be
-able to cause one. Gap 7 is the one gap here that is a property of the language
-rather than of the platform, and it is the only one that will still be a gap if
-SURE is ever run on a machine unlike this one.
+entry here. Gaps 1 and 6 are stated a second time, with the same cause and the
+same platform, in the module comment of
+`crates/sure-core/tests/fingerprint_content.rs` — the content kind's own link and
+pipe tests are Unix-only for exactly those two reasons, so it is one missing
+cover reached from two files rather than two gaps. Gap 2's tests are themselves
+Unix-only, since producing a link on Windows is the thing gap 1 says this machine
+cannot do — so on Windows the whole of the link behaviour, wider and blind alike,
+is asserted by no test at all, and this document is the only place it is written
+down. Gap 5 is a property of any design that reads files after asking Git about
+them, and no test can pin it. Gap 6's Unix test is the one that can hang, so it
+runs on a worker thread and fails by name after a timeout rather than sitting
+there — a hang is a failure that reports nothing, and the point of the test is
+that a project must not be able to cause one. Gap 7 is the one gap here that is a
+property of the language rather than of the platform, and it is the only one that
+will still be a gap if SURE is ever run on a machine unlike this one. Gap 8 is
+the only one that is a property of the *design* rather than of a platform or a
+language.
 
 The same asymmetry runs through the "Enforced by" table below: the rows marked
 (Unix) are the ones with no Windows test, and they are the rows about links,
@@ -544,8 +659,31 @@ about a file that cannot be read, and about pipes.
 | A pipe is described and not opened | this document | `a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang` (Unix) |
 | The digest is a correct SHA-256 | this document | `the_published_sha256_vectors_come_out_right` |
 | Fields cannot be re-split across a boundary | this document | `the_framing_separates_a_split_in_a_different_place` |
-| A Git digest is never a content digest | this document | `a_digest_of_one_kind_is_never_a_digest_of_another` |
+| A Git digest is never a content digest | this document | `a_digest_of_one_kind_is_never_a_digest_of_another`, `the_two_kinds_cannot_produce_the_same_digest` |
 | An absent half is not an empty one | this document | `an_absent_field_is_not_an_empty_one` |
+
+The content kind, P2-T003:
+
+| Statement | Where the meaning lives | Enforced by |
+| --- | --- | --- |
+| The same project read twice is the same manifest | this document | `the_same_project_read_twice_is_the_same_fingerprint`, `two_copies_of_one_project_are_one_fingerprint` |
+| Excluded churn moves nothing, and a covered file moves it | this document | `churn_in_every_excluded_kind_of_directory_changes_nothing` and its control |
+| The excluded list is the scan's, not a second copy | this document | `the_excluded_list_is_the_scans_and_not_a_second_copy_of_it` |
+| A repository's own storage is out, so a commit moves nothing | this document | `a_repositorys_own_storage_is_out_so_a_commit_does_not_move_the_manifest` |
+| A file's path is digested beside its contents | this document | `moving_a_file_without_changing_a_byte_of_it_is_a_change`, `swapping_two_names_is_a_change_even_though_no_bytes_moved` |
+| A directory that was walked contributes what is inside it | this document | `a_directory_the_walk_did_not_descend_into_is_still_covered_by_what_it_holds`, `a_nested_checkout_within_a_project_is_covered_by_the_outer_manifest` |
+| A missing project is refused, not read as empty | this document | `a_project_that_is_not_there_is_refused_rather_than_read_as_empty` |
+| An empty project is a fingerprint and not a refusal | this document | `an_empty_project_is_fingerprinted_rather_than_refused` |
+| A limit is an error, never a partial manifest | this document | `a_level_the_depth_limit_stopped_is_refused`, `a_walk_that_ran_out_of_budget_is_refused`, `more_files_than_the_limit_is_refused_rather_than_truncated`, `more_bytes_than_the_limit_is_refused_rather_than_truncated`, `the_byte_budget_is_spent_by_the_whole_manifest_and_not_by_each_file` |
+| A relative root is refused | this document | `a_relative_root_is_refused` |
+| A link is in the manifest, by its target, unread | this document | `a_link_is_recorded_by_where_it_points_and_never_read_through` (Unix) |
+| A pipe is refused rather than opened | this document | `a_pipe_in_the_project_is_refused_rather_than_opened` (Unix) |
+| A project at the root of its own repository is fingerprinted by Git | this document | `a_project_at_the_root_of_its_own_repository_is_fingerprinted_by_git` |
+| A project in no repository is fingerprinted by content | this document | `a_project_in_no_repository_at_all_is_fingerprinted_by_content` — on a fixture that asserts it is outside one |
+| A project inside somebody else's repository is fingerprinted by content | this document | `a_project_inside_somebody_elses_repository_is_fingerprinted_by_content`, `the_git_kind_moves_for_a_commit_the_project_is_not_part_of_and_the_content_kind_does_not` |
+| …and that the Git kind would not do | this document | the same test, which asserts the Git kind *does* move for the same commit |
+| A machine without Git is an error, not a fallback | this document | `a_machine_without_git_is_refused_rather_than_read_by_content` (a unit test — it needs a Git that is not installed) |
+| The domain tag is the one stored fingerprints were written under | this document | `the_domain_tag_is_the_one_stored_fingerprints_were_written_under` — a constant assertion, and gap 8 says what that is and is not worth |
 
 ## Related decisions
 

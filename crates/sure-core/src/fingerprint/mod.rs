@@ -54,18 +54,27 @@
 //! every check to declare its inputs up front, which
 //! `docs/architecture/EVIDENCE_MODEL.md` leaves to the tasks that build them.
 //!
-//! # The two kinds
+//! # The two kinds, and which one a project gets
 //!
-//! [`FingerprintKind::Git`] is what a project under version control gets, and it
-//! is cheaper because Git already knows which tracked files differ. It is
-//! [`git::git_fingerprint`]. A project that is not under version control gets
-//! [`FingerprintKind::Content`], which is a manifest over what the walk found;
-//! that is P2-T003.
+//! [`FingerprintKind::Git`] is what a project at the root of its own working tree
+//! gets, and it is cheaper because Git already knows which tracked files differ.
+//! It is [`git::git_fingerprint`]. Everything else gets
+//! [`FingerprintKind::Content`], a manifest over what the walk found, which is
+//! [`content::content_fingerprint`].
 //!
-//! There is deliberately no function here that picks between them. Choosing by
-//! looking at the project is a decision with a wrong answer — a project inside a
-//! repository that is not the project is the case where the obvious check is
-//! wrong — and P2-T003 owns making it.
+//! [`project_fingerprint`] is the one function that chooses, and
+//! [`choose`] gives the reason it chooses the way it does. The short version is
+//! that the obvious test — "is this directory inside a repository?" — answers
+//! `yes` for a directory one component deep in somebody else's checkout, where
+//! the `HEAD` a Git fingerprint digests is that other project's.
+//!
+//! The three functions are all public and none is a fallback for another. A
+//! caller who knows which kind they want calls for it and gets exactly it;
+//! a caller who does not calls [`project_fingerprint`] and gets the kind the
+//! project calls for. What no caller gets is a project whose kind depends on
+//! what was installed on the machine that took the fingerprint, which is why
+//! [`FingerprintError::GitUnavailable`] stays an error rather than becoming a
+//! content manifest.
 //!
 //! # Determinism
 //!
@@ -101,10 +110,15 @@
 //! already applied it. The ignore tables here are a second and different
 //! question — what a check reads — and both apply.
 
+pub mod choose;
+pub mod content;
 mod digest;
 pub mod error;
 pub mod git;
+mod read;
 
+pub use choose::project_fingerprint;
+pub use content::content_fingerprint;
 pub use error::FingerprintError;
 pub use git::{Git, git_fingerprint};
 

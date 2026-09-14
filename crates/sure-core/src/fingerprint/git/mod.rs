@@ -75,11 +75,12 @@ use std::process::{Command, Stdio};
 
 use sure_domain::vocabulary::{GitState, ProjectFingerprint};
 
-use crate::scan::{EntryKind, ScanError, ignore, scan};
+use crate::scan::{EntryKind, ignore};
 
 use super::FingerprintOptions;
-use super::digest::{self, Digest, HashError};
+use super::digest::Digest;
 use super::error::FingerprintError;
+use super::read::{Contents, Reader};
 
 /// The name of this kind of fingerprint, and the version of what goes into it.
 ///
@@ -332,7 +333,7 @@ impl Git {
         // implementation and not of the project.
         records.sort_by(|a, b| a.bytes.cmp(&b.bytes));
 
-        let mut reader = Reader::new(options);
+        let mut reader = Reader::new(options, DOMAIN);
         let mut tracked = Vec::new();
         let mut untracked = Vec::new();
         for record in &records {
@@ -408,7 +409,15 @@ impl Git {
     ///
     /// Empty when the directory *is* the repository root, which is the ordinary
     /// case. Git writes it with `/` and a trailing one.
-    fn prefix(&self, root: &Path) -> Result<PathBuf, FingerprintError> {
+    ///
+    /// `pub(super)` rather than private because the choice between the two kinds
+    /// of fingerprint is made by asking this question, and the chooser is
+    /// [`super::choose`] rather than this module. It is not `pub`: a caller
+    /// outside this crate having the project's place inside somebody else's
+    /// repository is not a thing any of them has a use for, and the two
+    /// functions that do have a use for it are `super::project_fingerprint` and
+    /// [`Self::fingerprint`].
+    pub(super) fn prefix(&self, root: &Path) -> Result<PathBuf, FingerprintError> {
         let output = match self.stdout(
             root,
             "find the repository this folder is in",
@@ -642,6 +651,35 @@ fn message_from(stderr: &[u8]) -> String {
     cut
 }
 
+/// One path Git named, together with what was found at it.
+struct Hashed<'a> {
+    /// Git's own bytes for the path.
+    bytes: &'a [u8],
+    /// Which part of the status it came from.
+    kind: status::RecordKind,
+    /// What is at it.
+    contents: Contents,
+}
+
+/// Write a list of changes as one digest.
+///
+/// `None` rather than the digest of an empty list, so that "this project is
+/// clean" and "this project has an empty change list" are two states and not
+/// one. They are the same state here and will not be for ever; the domain type
+/// says so with an `Option` and this follows it.
+fn list_digest(label: &str, records: &[Hashed<'_>]) -> Option<String> {
+    if records.is_empty() {
+        return None;
+    }
+    let mut digest = Digest::new(DOMAIN);
+    digest.field(label);
+    for record in records {
+        digest.field(record.bytes).field(record.kind.as_str());
+        record.contents.write(&mut digest);
+    }
+    Some(digest.finish())
+}
+
 /// A path relative to the repository root, as a path relative to the project.
 ///
 /// SURE asks Git about one subtree and Git answers with the repository root's
@@ -679,267 +717,6 @@ fn relative_to_root<'a>(path: &'a Path, prefix: &Path) -> Result<&'a Path, Finge
         return Ok(path);
     }
     path.strip_prefix(prefix).map_err(|_| outside())
-}
-
-/// What is at one of the paths Git named.
-enum Contents {
-    /// A file, and the digest of its bytes.
-    File(String),
-    /// A directory, and the digest of everything the walk found inside it.
-    Tree(String),
-    /// A link, and the path it points at.
-    ///
-    /// The target as text rather than the file it names: reading through a link
-    /// is the thing every other part of SURE refuses to do, and a link that
-    /// points somewhere else is a different link whatever is at the other end.
-    Link(String),
-    /// Something that is neither a file nor a directory nor a link, named by its
-    /// kind: a pipe, a socket, a device.
-    ///
-    /// The kind is recorded rather than any contents, because there are none to
-    /// read and because opening it is what would not return. See the arm in
-    /// [`Reader::read`] that produces this.
-    Special(&'static str),
-    /// Nothing. Git named a path that is not in the working tree — a deletion,
-    /// or a staged change whose file has since gone.
-    Gone,
-}
-
-impl Contents {
-    /// Write this into a digest, with a tag so that no two kinds can collide.
-    fn write(&self, digest: &mut Digest) {
-        match self {
-            Self::File(hex) => {
-                digest.field("file").field(hex);
-            }
-            Self::Tree(hex) => {
-                digest.field("tree").field(hex);
-            }
-            Self::Link(target) => {
-                digest.field("link").field(target);
-            }
-            Self::Special(kind) => {
-                digest.field("special").field(kind);
-            }
-            Self::Gone => {
-                digest.field("gone");
-            }
-        }
-    }
-}
-
-/// What kind of not-a-file something is, as a name that goes in a digest.
-///
-/// The names are this module's own and are never printed to anybody, so they are
-/// stable across platforms on purpose: `fifo` means the same state on Linux and
-/// on macOS, and a digest taken on one is the digest the other would take. On
-/// Windows a pipe is not a filesystem entry and Git cannot report one as a
-/// tracked path, so the fall-through is what Windows returns.
-fn file_kind(file_type: &fs::FileType) -> &'static str {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::FileTypeExt as _;
-        if file_type.is_fifo() {
-            return "fifo";
-        }
-        if file_type.is_socket() {
-            return "socket";
-        }
-        if file_type.is_char_device() {
-            return "char-device";
-        }
-        if file_type.is_block_device() {
-            return "block-device";
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = file_type;
-    "other"
-}
-
-/// One path Git named, together with what was found at it.
-struct Hashed<'a> {
-    /// Git's own bytes for the path.
-    bytes: &'a [u8],
-    /// Which part of the status it came from.
-    kind: status::RecordKind,
-    /// What is at it.
-    contents: Contents,
-}
-
-/// Write a list of changes as one digest.
-fn list_digest(label: &str, records: &[Hashed<'_>]) -> Option<String> {
-    if records.is_empty() {
-        // `None` rather than the digest of an empty list, so that "this project
-        // is clean" and "this project has an empty change list" are two states
-        // and not one. They are the same state here and will not be for ever;
-        // the domain type says so with an `Option` and this follows it.
-        return None;
-    }
-    let mut digest = Digest::new(DOMAIN);
-    digest.field(label);
-    for record in records {
-        digest.field(record.bytes).field(record.kind.as_str());
-        record.contents.write(&mut digest);
-    }
-    Some(digest.finish())
-}
-
-/// Reads the content of the paths Git named, within the budget it was given.
-///
-/// The budget is spent here rather than checked afterwards because the point of
-/// a limit is not to notice a project that is too big — it is to not read it.
-struct Reader<'a> {
-    options: &'a FingerprintOptions,
-    files: usize,
-    bytes: u64,
-}
-
-impl<'a> Reader<'a> {
-    fn new(options: &'a FingerprintOptions) -> Self {
-        Self {
-            options,
-            files: 0,
-            bytes: 0,
-        }
-    }
-
-    /// What is at `relative`, which Git named and which lives at `entry`.
-    fn read(
-        &mut self,
-        relative: &Path,
-        entry: &Path,
-        found: Option<&fs::Metadata>,
-    ) -> Result<Contents, FingerprintError> {
-        let Some(metadata) = found else {
-            return Ok(Contents::Gone);
-        };
-        // A link is answered before anything reads through it. `read_link`
-        // returns what the link says, and does not follow it — which is the only
-        // kind of reading a link gets anywhere in SURE.
-        if metadata.file_type().is_symlink() {
-            let target = fs::read_link(entry).map_err(|error| FingerprintError::Unreadable {
-                path: relative.to_path_buf(),
-                message: error.to_string(),
-            })?;
-            return Ok(Contents::Link(display_path(&target)));
-        }
-        if metadata.is_dir() {
-            return self.tree(relative, entry);
-        }
-        if !metadata.is_file() {
-            // Neither a file, nor a directory, nor a link: a pipe, a socket, a
-            // device. **This is answered without opening it, because opening it
-            // is the thing that does not return.** `File::open` on a FIFO with
-            // no writer blocks until one appears, and SURE reading a project
-            // must not be stoppable by the project: a repository that tracks
-            // `f` and whose working tree has a FIFO at `f` would otherwise hang
-            // a check with no output and no way to tell it from a slow one.
-            //
-            // What is recorded is the kind, and not "no contents". A file
-            // replaced by a pipe is a change, and a pipe replaced by a socket is
-            // a change; recording both as `Gone` would make them one state. This
-            // is the same decision as [`Contents::Link`] — describe what is
-            // there, do not read through it — and it is why a special file named
-            // by Git is *covered* while one met inside a walked directory is a
-            // loss the walk refuses on. The walk cannot tell what else a
-            // directory it could not fully read contains; Git has named exactly
-            // one path, and its kind is knowable without opening it.
-            self.take_file(relative)?;
-            return Ok(Contents::Special(file_kind(&metadata.file_type())));
-        }
-        self.read_bytes(relative, entry)
-    }
-
-    /// A file's digest.
-    fn read_bytes(&mut self, relative: &Path, entry: &Path) -> Result<Contents, FingerprintError> {
-        self.take_file(relative)?;
-        let remaining = self.options.max_bytes.saturating_sub(self.bytes);
-        match digest::hash_file(entry, remaining) {
-            Ok(hashed) => {
-                self.bytes += hashed.bytes;
-                Ok(Contents::File(hashed.hex))
-            }
-            Err(HashError::TooLarge) => Err(FingerprintError::TooManyBytes {
-                limit: self.options.max_bytes,
-                path: relative.to_path_buf(),
-            }),
-            Err(HashError::Io(source)) => Err(FingerprintError::Unreadable {
-                path: relative.to_path_buf(),
-                message: source.to_string(),
-            }),
-        }
-    }
-
-    /// A directory's digest: everything the walk found inside it, with the
-    /// walk's own ignore tables applied.
-    ///
-    /// This is the case a nested repository lands in — a checkout cloned into
-    /// the project without being added, which Git reports as one untracked
-    /// directory and does not descend into. Its files are files a check can
-    /// read, so they are files the fingerprint covers; the alternative is a
-    /// fingerprint that calls an old result current when somebody edits them.
-    fn tree(&mut self, relative: &Path, entry: &Path) -> Result<Contents, FingerprintError> {
-        let walked = scan(entry, self.options.scan).map_err(|error| match error {
-            ScanError::Unreadable { message, .. } => FingerprintError::Unreadable {
-                path: relative.to_path_buf(),
-                message,
-            },
-            other => FingerprintError::Unreadable {
-                path: relative.to_path_buf(),
-                message: other.to_string(),
-            },
-        })?;
-
-        // A walk that lost something is not a walk whose result can be hashed.
-        // The files it did not reach are files a check can still read, and
-        // leaving them out is how this fingerprint would come to mean less than
-        // it appears to.
-        if let Some(lost) = walked.losses().next() {
-            return Err(FingerprintError::IncompleteTree {
-                path: relative.to_path_buf(),
-                detail: lost.plain_description(),
-            });
-        }
-
-        let mut files: Vec<_> = walked.files().collect();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-
-        let mut digest = Digest::new(DOMAIN);
-        digest.field("tree");
-        for file in files {
-            let contents = self.read_bytes(&file.path, &entry.join(&file.path))?;
-            // The path is in the digest as well as the contents, so that moving
-            // a file and changing nothing in it is a change. Two files swapping
-            // names leaves every set of bytes exactly where it was.
-            digest.field(display_path(&file.path).as_bytes());
-            contents.write(&mut digest);
-        }
-        Ok(Contents::Tree(digest.finish()))
-    }
-
-    /// Spend one file from the budget.
-    fn take_file(&mut self, relative: &Path) -> Result<(), FingerprintError> {
-        if self.files >= self.options.max_files {
-            return Err(FingerprintError::TooManyFiles {
-                limit: self.options.max_files,
-                path: relative.to_path_buf(),
-            });
-        }
-        self.files += 1;
-        Ok(())
-    }
-}
-
-/// A path with `/` on every platform, for a digest.
-///
-/// The digest has to be the same value for the same project on Windows, macOS
-/// and Linux, and `Display for Path` gives backslashes on Windows. This is the
-/// same normalisation `crate::scan` applies to a path it reports, and it is
-/// deliberately the same function rather than the same idea: a link target
-/// recorded here and a path reported there are the same kind of thing.
-fn display_path(path: &Path) -> String {
-    crate::scan::display_path(path)
 }
 
 #[cfg(test)]

@@ -38,6 +38,21 @@ serde_yaml_ng = "0.10.0"
 # a library that already does it is the only way to be right on all three
 # platforms rather than only on the one that was tested.
 dirs = "6.0.0"
+# Local record storage. `bundled` compiles SQLite from its own C source into the
+# binary, which is what makes "storage packages without requiring system SQLite"
+# true: an installation carries its own database engine rather than linking
+# whatever `sqlite3.dll` happens to be on the machine. Linking the system one
+# would make SURE's locking behaviour depend on a library the user did not
+# install for SURE and cannot tell us about.
+#
+# `bundled` needs a C compiler at build time and nothing at run time. That is
+# the intended trade: this repository already requires the MSVC toolchain on
+# Windows and a system compiler on the macOS and Linux CI runners.
+#
+# `docs/architecture/STORAGE_AND_DATA_PATHS.md` is the rule; `sure_core::store`
+# is where it becomes code, including the concurrency contract that depends on
+# this choice.
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

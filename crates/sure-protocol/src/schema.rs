@@ -596,7 +596,15 @@ fn type_matches(name: &str, instance: &Value) -> bool {
     }
 }
 
-fn type_name(instance: &Value) -> &'static str {
+/// The name of a value's JSON type, as a schema would spell it.
+///
+/// Public because [`ViolationKind::WrongType`] carries one and because a caller
+/// that has to build a violation of its own — `sure_core::store` does, for a
+/// document with no schema to check against — must describe the value it got
+/// the same way the validator would, or the two would read as different
+/// problems.
+#[must_use]
+pub fn type_name(instance: &Value) -> &'static str {
     match instance {
         Value::Null => "null",
         Value::Bool(_) => "boolean",

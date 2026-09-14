@@ -44,6 +44,14 @@ pub const USER_CONFIG_FILE: &str = "sure.yaml";
 /// The directory a project may keep regenerable state in.
 pub const PROJECT_CACHE_DIR: &str = ".sure";
 
+/// The name of the local record store, inside the data directory.
+///
+/// The name is here rather than in `crate::store` so that every fact about
+/// *where* SURE puts things stays in one module, and so that a caller cannot
+/// assemble a path to the store by hand — [`Paths::store_file`] is the only way
+/// to name it.
+pub const STORE_FILE: &str = "sure.db";
+
 /// Why the user-level locations could not be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathError {
@@ -177,6 +185,17 @@ impl Paths {
     #[must_use]
     pub fn user_config_file(&self) -> PathBuf {
         self.config.join(USER_CONFIG_FILE)
+    }
+
+    /// The local record store.
+    ///
+    /// In the data directory rather than the configuration directory, because
+    /// history is machine-local: a roaming profile should carry the user's
+    /// settings between machines, and should not carry the evidence one machine
+    /// gathered about projects it has and the other does not.
+    #[must_use]
+    pub fn store_file(&self) -> PathBuf {
+        self.data.join(STORE_FILE)
     }
 
     /// Refuse a project that contains SURE's own evidence store.

@@ -10,6 +10,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod paths;
 pub mod redact;
+pub mod store;
 
 pub use sure_domain::{
     PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,

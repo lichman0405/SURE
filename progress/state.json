@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T09:37:13.254Z",
+  "last_updated": "2026-09-14T09:37:44.400Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -126,8 +126,8 @@
       "notes": "docs/architecture/STORAGE_AND_DATA_PATHS.md + crates/sure-core/src/paths/{mod,compare}.rs; dirs 6.0.0 for OS-native known folders (SHGetKnownFolderPath needs unsafe, forbidden workspace-wide); data=%LOCALAPPDATA%\\SURE, config=%APPDATA%\\SURE asked separately; Paths::ensure_outside refuses a project root containing the store (home-directory case); Paths::from_roots refuses relative; compare.rs is component-wise, case-folds where the platform folds, and unifies \\?\\ canonical spellings; 40 tests in paths (Windows), clippy clean for x86_64-unknown-linux-gnu and x86_64-apple-darwin; commit b6a14b4"
     },
     "P1-T005": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T09:37:44.399Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

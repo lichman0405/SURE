@@ -43,7 +43,15 @@ impl Command {
             // SURE or about this machine rather than about a project, which is
             // why none of them needs a check engine.
             Self::Version => Report::Version,
-            Self::Protocol => Report::Protocol,
+            // Asked with nothing, this is what SURE speaks. Asked with
+            // `--speaks`, it is whether SURE can talk to that caller — and the
+            // answer is `sure_core::negotiate`'s, the same function the event
+            // reader uses to refuse a document. A CLI that decided this for
+            // itself could tell an adapter yes and then refuse its events.
+            Self::Protocol { speaks: None } => Report::Protocol,
+            Self::Protocol {
+                speaks: Some(caller),
+            } => Report::Handshake(sure_core::negotiate(*caller)),
             // The examination happens here rather than in `Report`, so that the
             // report stays a value — something a test can build and a renderer
             // can read — instead of a thing that goes and looks.
@@ -158,7 +166,14 @@ mod tests {
                 action: HookAction::Ingest,
             },
             Command::Explain { id: None },
-            Command::Protocol,
+            Command::Protocol { speaks: None },
+            Command::Protocol {
+                speaks: Some(sure_core::PROTOCOL_VERSION),
+            },
+            Command::Protocol {
+                speaks: Some(sure_core::PROTOCOL_VERSION + 1),
+            },
+            Command::Protocol { speaks: Some(0) },
             Command::Version,
         ]
     }
@@ -193,7 +208,11 @@ mod tests {
                         not_yet.instead
                     );
                 }
-                Report::Version | Report::Protocol | Report::Doctor(_) => {}
+                // Neither a refusal nor a report: the command ran and answered.
+                // What it answered is held to its own contract below, and to
+                // `a_command_that_runs_never_answers_a_question_it_was_not_asked`
+                // for the name it answers under.
+                Report::Version | Report::Protocol | Report::Handshake(_) | Report::Doctor(_) => {}
             }
         }
     }
@@ -204,11 +223,17 @@ mod tests {
         // this test rather than a side effect somebody notices later. If a
         // command starts working without this list moving, something returned a
         // success it had not earned.
-        let implemented: Vec<&str> = every_command()
+        //
+        // By name, once each: a command can be asked more than one way —
+        // `sure protocol` with and without `--speaks` — and a name appearing
+        // twice says nothing more than it appearing once.
+        let mut implemented: Vec<&str> = every_command()
             .iter()
             .filter(|command| !matches!(command.report(), Report::Unavailable(_)))
             .map(Command::name)
             .collect();
+        implemented.sort_unstable();
+        implemented.dedup();
         assert_eq!(implemented, ["doctor", "protocol", "version"]);
     }
 
@@ -247,6 +272,56 @@ mod tests {
             assert_eq!(report.exit_code(), crate::report::exit::NOT_GREEN);
             assert_ne!(report.exit_code(), crate::report::exit::OK);
         }
+    }
+
+    #[test]
+    fn asking_whether_a_caller_can_talk_asks_the_rule_rather_than_restating_it() {
+        // The CLI does not own this decision and this test is written so that it
+        // cannot quietly take it over: for a spread of versions, what the
+        // command answers is what `sure_core::negotiate` says — the same
+        // function the event reader refuses a document with. A comparison
+        // written here instead would agree with it today and stop agreeing the
+        // day one of them changed.
+        for caller in [
+            0,
+            sure_core::PROTOCOL_VERSION.saturating_sub(1),
+            sure_core::PROTOCOL_VERSION,
+            sure_core::PROTOCOL_VERSION + 1,
+            99,
+        ] {
+            let report = Command::Protocol {
+                speaks: Some(caller),
+            }
+            .report();
+            let Report::Handshake(handshake) = &report else {
+                panic!("`sure protocol --speaks {caller}` did not answer with a handshake");
+            };
+            assert_eq!(*handshake, sure_core::negotiate(caller));
+            assert_eq!(
+                report.exit_code(),
+                if handshake.is_agreed() {
+                    crate::report::exit::OK
+                } else {
+                    crate::report::exit::UNAVAILABLE
+                },
+                "protocol {caller} was answered with the wrong status"
+            );
+            assert_ne!(
+                report.exit_code(),
+                crate::report::exit::FAILED,
+                "a version SURE will not speak is not SURE failing at its own job"
+            );
+        }
+    }
+
+    #[test]
+    fn asking_for_the_protocol_without_a_version_is_still_just_the_version() {
+        // The two forms of one command: `--speaks` is what turns a statement
+        // into a negotiation, and asking for neither must not become a
+        // handshake against a version nobody named.
+        let report = Command::Protocol { speaks: None }.report();
+        assert_eq!(report, Report::Protocol);
+        assert_eq!(report.exit_code(), crate::report::exit::OK);
     }
 
     #[test]

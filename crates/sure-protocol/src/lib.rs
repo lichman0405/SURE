@@ -1,8 +1,9 @@
 //! The versioned wire contract between SURE and everything outside it.
 //!
-//! Three things live here and nothing else: the documents SURE writes down
-//! ([`documents`]), the envelope a harness sends ([`event`]), and the schema
-//! checker that keeps the two honest ([`schema`]).
+//! Four things live here and nothing else: the documents SURE writes down
+//! ([`documents`]), the envelope a harness sends ([`event`]), the schema checker
+//! that keeps the two honest ([`schema`]), and the handshake that decides
+//! whether two sides can talk at all ([`handshake`]).
 //!
 //! # Why it is a separate crate
 //!
@@ -44,6 +45,7 @@
 
 pub mod documents;
 pub mod event;
+pub mod handshake;
 pub mod schema;
 
 /// The event format version this build speaks.

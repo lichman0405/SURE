@@ -92,3 +92,55 @@ For architectural decisions with lasting impact, also add an ADR under `docs/adr
 - **`clap::Parser::parse` is not used.** It exits the process, which would put
   one row of the documented status table in a library's hands. `try_parse` plus
   `status_of` keeps the whole table in `crates/sure-cli/src/report.rs`.
+
+## P1-T010 — the protocol version handshake
+
+- **One function, not two comparisons.** `sure_protocol::handshake::negotiate`
+  is the whole version rule, and `EventEnvelope::from_json` calls it rather than
+  comparing numbers itself. Written separately they would drift, and the drift
+  would be invisible: the CLI would tell an adapter "yes" and the reader would
+  refuse its first event, which looks like a broken adapter and sends somebody
+  looking in the wrong place. A test in `event.rs` drives both over
+  `0..=PROTOCOL_VERSION + 3` and requires the same answer.
+- **The rule is exact equality, and there is no compatibility table.** A version
+  changes exactly when an older reader would get the format wrong, so a mismatch
+  means a document that would be misread — and a misread event becomes wrong
+  evidence about a project. A table of "older versions this build still reads"
+  with one row would be a policy invented to look thorough; when a second
+  version exists the list arrives with it.
+- **A refusal is status 3, not 4.** 4 is reserved for a decision grounded in the
+  user's configuration, and no setting makes this build speak a protocol it was
+  not compiled with. 3 is documented as "this build cannot carry it out", and in
+  the newer-caller direction the remedy is literally a newer build.
+- **The mismatch says which side has to move.** The two directions are not the
+  same answer, and a caller that has just been refused will otherwise try the
+  fix that cannot work first. `Handshake`'s `Display` is the only copy of that
+  sentence.
+- **The frame carries structure, not the sentence.** `sure_speaks`,
+  `caller_speaks`, `agreed` and `update` (`"sure"` / `"caller"`). A script that
+  read prose would break the first time the prose was improved, and the prose
+  here is written to be read by a person.
+- **`caller_speaks` is `None` when the two agreed**, not the agreed number. The
+  agreed number is this build's, and reporting it twice under two names invites
+  a reader to treat them as two facts.
+- **An agreed handshake is an answer; a refused one is a complaint.** So the
+  agreed sentence goes to stdout and the refusal to stderr, by the same
+  `Report::is_an_answer` predicate that decides every other command's stream.
+  The machine form goes to stdout either way, because a script asked for it.
+- **The rule lives in `sure-protocol` and reaches the CLI through `sure-core`.**
+  `sure-cli` has exactly one edge into the engine (ADR 0001, and the note in its
+  manifest), so a new protocol type is re-exported rather than added as a
+  dependency. `sure_core::negotiate` is the same function, not a copy.
+- **`protocol` grew a flag rather than gaining a second command.** `--speaks` is
+  what turns a statement into a negotiation; asking for neither is still just
+  the version, and a test keeps it that way.
+- **The version is checked before the shape.** `from_json` already did this, and
+  the order is now enforced through `negotiate` rather than by a comparison that
+  happened to sit above the schema check. A newer document is reported as a
+  version mismatch, not as a broken adapter.
+- **The CLI test reads the version out of the frame** instead of carrying its
+  own copy. A hard-coded number would keep passing after what SURE announces and
+  what it accepts had drifted apart, which is the failure it exists to catch.
+- **A word where a version belongs is a wrong command line (2),** not a refusal
+  (3). `--speaks latest` reads as a version that exists and is refused; that is
+  the wrong thing to tell an adapter.

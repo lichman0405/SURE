@@ -41,6 +41,7 @@ use sure_domain::capability::CapabilityTier;
 
 use crate::PROTOCOL_VERSION;
 use crate::documents::DocumentKind;
+use crate::handshake::negotiate;
 use crate::schema::Violation;
 
 /// A normalized harness event, in the shape an adapter sends it.
@@ -285,7 +286,11 @@ impl EventEnvelope {
         let Some(found) = probe.schema_version else {
             return Err(EnvelopeError::MissingVersion);
         };
-        if found != PROTOCOL_VERSION {
+        // The rule is `handshake::negotiate`'s, not a comparison written here.
+        // The CLI answers a caller that asks *before* it sends anything, and it
+        // asks the same function, so the two cannot tell a caller "yes" and then
+        // refuse the document that follows.
+        if !negotiate(found).is_agreed() {
             return Err(EnvelopeError::UnsupportedVersion {
                 found,
                 supported: PROTOCOL_VERSION,
@@ -449,6 +454,37 @@ mod tests {
             EventEnvelope::from_json(&text).unwrap_err(),
             EnvelopeError::MissingVersion
         );
+    }
+
+    #[test]
+    fn the_reader_and_the_handshake_refuse_the_same_versions() {
+        // Two places decide whether SURE and a caller can talk: this reader,
+        // when a document has already arrived, and `handshake::negotiate`, when
+        // the CLI is asked before anything is sent. If they could disagree, an
+        // adapter that the CLI told "yes" would then be refused at the document,
+        // and the person would go looking for a bug in the adapter.
+        //
+        // Every version compared, including ones no SURE ever spoke, so that the
+        // rule is checked rather than sampled.
+        for version in 0..=PROTOCOL_VERSION + 3 {
+            let text = json!({
+                "schema_version": version,
+                "source": "x",
+                "event_type": "y",
+                "timestamp": "2026-09-14T09:10:56Z"
+            })
+            .to_string();
+
+            let refused = matches!(
+                EventEnvelope::from_json(&text),
+                Err(EnvelopeError::UnsupportedVersion { .. })
+            );
+            assert_eq!(
+                refused,
+                !negotiate(version).is_agreed(),
+                "the reader and the handshake disagree about protocol {version}"
+            );
+        }
     }
 
     #[test]

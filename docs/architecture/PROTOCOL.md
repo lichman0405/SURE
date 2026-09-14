@@ -59,6 +59,42 @@ A version changes when the format changes in a way an older reader would get
 *wrong*. Adding an optional field does not; removing a field, renaming one, or
 reinterpreting one does.
 
+## The handshake
+
+A caller that is about to send events asks SURE what it speaks before it sends
+anything: `sure protocol --speaks VERSION`, or `sure_protocol::handshake::negotiate`
+for a caller written in Rust. Both go through one function, and so does
+`EventEnvelope::from_json` when it refuses a document — which is the point.
+Written twice, the two would drift, and the drift would be invisible: each would
+keep answering its own question correctly while an adapter that the CLI told
+"yes" was refused at its first event. That failure looks like a broken adapter,
+and sends somebody looking in the wrong place.
+
+**The rule is exact equality.** This build reads one version: `PROTOCOL_VERSION`,
+its own. A version changes exactly when an older reader would get the format
+wrong, so a mismatch means a document that would be misread, and a misread event
+becomes wrong evidence about a project. There is no "still close enough" range,
+and there is no table of older versions this build can still read — there has
+only ever been one version, and a compatibility table with a single row is a
+policy invented to look thorough. When a second version exists, the list arrives
+with it, and `crates/sure-protocol/src/handshake.rs` is where it goes.
+
+A mismatch says **which side has to move**, because the two directions are not
+the same answer and a caller that has just been refused will otherwise try the
+fix that cannot work:
+
+| Caller speaks | What happens | Who changes |
+| --- | --- | --- |
+| this build's version | agreed | nobody |
+| an older version | refused, status 3 | the caller — a newer SURE will not take it either |
+| a newer version | refused, status 3 | SURE — this build cannot be taught it from here |
+
+The sentence is `Handshake`'s `Display` and exists once. The machine form
+carries `sure_speaks`, `caller_speaks`, `agreed` and `update` (which side moves)
+rather than the sentence, because a script that read prose would break the first
+time the prose was improved. `crates/sure-cli/src/report.rs` builds that frame
+from the same value the sentence is printed from.
+
 ## Reading an event
 
 `EventEnvelope::from_json` does four things in this order, and the order is what
@@ -136,6 +172,9 @@ schema its own code was built from.
 | The validator can fail | same file, `every_required_key_is_actually_enforced_for_every_document` and `a_wrongly_typed_required_field_is_refused_for_every_document` |
 | A new schema cannot go unchecked | same file, `every_document_in_the_registry_is_covered_by_this_test_or_excused` |
 | Every document survives a read | `crates/sure-protocol/tests/round_trip.rs` |
+| The handshake and the event reader refuse the same versions | `crates/sure-protocol/src/event.rs`, `the_reader_and_the_handshake_refuse_the_same_versions` |
+| A refused caller is told which side has to move | `crates/sure-protocol/src/handshake.rs`, `a_mismatch_says_which_side_has_to_move` |
+| The version SURE reports is the one it will talk to | `crates/sure-cli/tests/cli_contract.rs`, `the_protocol_version_sure_reports_is_the_one_it_will_talk_to` |
 | Wire names are frozen | `crates/sure-domain/tests/wire_contract.rs` |
 | The version and the schema agree | `crates/sure-protocol/src/lib.rs`, `the_version_is_the_one_the_schemas_advertise` |
 
@@ -175,11 +214,9 @@ resolved: the schema now defines `capability_tier` and `project_root`.
    `round_trip.rs` so that it is a recorded decision rather than an accident of
    serde's defaults. P1-T005 owns the fix, because the version belongs on the
    stored record.
-2. **The handshake is not wired up yet.** `EventEnvelope::from_json` refuses a
-   version it does not know, and nothing calls it. P1-T010 connects the CLI, the
-   hook and the MCP adapter to it.
-3. **`sure protocol` prints the version and nothing negotiates with it.**
-   P1-T008 added the command: it prints `PROTOCOL_VERSION`, and
-   `--format json` carries it in the response frame as `protocol_version`. What
-   an adapter *does* with the answer — the handshake — is P1-T010's, and
-   `docs/architecture/CLI.md` records that this build stops short of it.
+2. **Two of the three adapters do not exist yet.** The handshake rule is
+   implemented and reachable — `sure protocol --speaks VERSION`, and the event
+   reader refusing through the same function — but a caller running
+   `sure hook` or the MCP server has nothing to run yet, because those commands
+   are not implemented. See `docs/architecture/CLI.md` §`sure protocol` for what
+   the CLI half does today.

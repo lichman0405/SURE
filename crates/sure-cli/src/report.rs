@@ -131,6 +131,8 @@ pub enum Report {
     Version,
     /// `sure protocol`.
     Protocol,
+    /// `sure protocol --speaks N`, carrying what SURE can say to that caller.
+    Handshake(sure_core::Handshake),
     /// `sure doctor`, carrying what it found.
     Doctor(Box<sure_core::doctor::DoctorReport>),
     /// A command whose work lands in a later phase.
@@ -148,6 +150,17 @@ impl Report {
     pub const fn outcome(&self) -> &'static str {
         match self {
             Self::Version | Self::Protocol => "ok",
+            // A refusal to speak a caller's protocol is not this build failing;
+            // it is this build saying it cannot carry that out, which is what
+            // `unavailable` means everywhere else on this surface. The message
+            // says which side has to change.
+            Self::Handshake(handshake) => {
+                if handshake.is_agreed() {
+                    "ok"
+                } else {
+                    "unavailable"
+                }
+            }
             // A doctor that found something wrong ran perfectly well, and this
             // says what its answer was rather than what the run did. It reads
             // the same predicate as `exit_code`, so the two cannot disagree;
@@ -169,6 +182,20 @@ impl Report {
     pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Version | Self::Protocol => exit::OK,
+            // 3, not 4. `docs/architecture/CLI.md` reserves 4 for a refusal that
+            // is a *decision about authority* — a project asking for privileges
+            // it cannot be granted — where the user is the one who changes the
+            // answer. This is not a decision about anything the user configured:
+            // it is this build saying it cannot speak that protocol, and for one
+            // of the two directions the remedy is literally a newer build, which
+            // is what 3 is documented to mean.
+            Self::Handshake(handshake) => {
+                if handshake.is_agreed() {
+                    exit::OK
+                } else {
+                    exit::UNAVAILABLE
+                }
+            }
             Self::Doctor(report) => {
                 if report.is_well() {
                     exit::OK
@@ -191,10 +218,16 @@ impl Report {
     /// problem is still an *answer* — `sure doctor > report.txt` has to put the
     /// report in the file, and the exit status is what carries the bad news. A
     /// complaint is SURE saying it could not do the thing at all.
+    ///
+    /// A handshake that did not agree is a complaint by that rule: there is no
+    /// report to put in a file, and a caller that piped the output somewhere
+    /// meant to read whether the two can talk. The *machine* form still goes to
+    /// stdout, because a script asked for it in so many words.
     #[must_use]
     pub const fn is_an_answer(&self) -> bool {
         match self {
             Self::Version | Self::Protocol | Self::Doctor(_) => true,
+            Self::Handshake(handshake) => handshake.is_agreed(),
             Self::Unavailable(_) => false,
         }
     }
@@ -212,14 +245,17 @@ impl Report {
         match self {
             Self::Version => writeln!(out, "{}", sure_core::version_string()),
             // What an adapter needs in order to decide whether it can talk to
-            // this build, and nothing else. `docs/architecture/PROTOCOL.md`
-            // assigns the *handshake* — what an adapter does with the answer —
-            // to P1-T010, which owns this command's output from there.
+            // this build, and nothing else.
             Self::Protocol => writeln!(
                 out,
                 "Harness protocol version {}.",
                 sure_core::PROTOCOL_VERSION
             ),
+            // One sentence, whichever way it went, and it is the handshake's own
+            // — the same sentence the event reader's refusal builds on. A
+            // renderer that wrote its own could word the same answer another
+            // way, and the two would then be two explanations of one rule.
+            Self::Handshake(handshake) => writeln!(out, "{handshake}"),
             Self::Doctor(report) => crate::doctor::human(report, out),
             Self::Unavailable(not_yet) => {
                 let NotYet {
@@ -281,6 +317,22 @@ impl Report {
             // above keep meaning exactly what the module documentation says
             // they mean.
             Self::Doctor(report) => frame["details"] = crate::doctor::machine(report),
+            // A caller that asked whether it can talk needs the two numbers side
+            // by side and which side has to move. Deliberately no sentence here:
+            // the frame is what a script reads, and a script that acts on prose
+            // is a script that breaks when the prose is improved.
+            Self::Handshake(handshake) => {
+                frame["details"] = json!({
+                    "sure_speaks": handshake.sure_speaks(),
+                    "caller_speaks": handshake.caller_speaks(),
+                    "agreed": handshake.is_agreed(),
+                    "update": match handshake {
+                        sure_core::Handshake::Agreed { .. } => None,
+                        sure_core::Handshake::CallerIsOlder { .. } => Some("caller"),
+                        sure_core::Handshake::CallerIsNewer { .. } => Some("sure"),
+                    },
+                });
+            }
             Self::Version | Self::Protocol => {}
         }
         frame
@@ -294,7 +346,7 @@ impl Report {
     pub const fn command(&self) -> &'static str {
         match self {
             Self::Version => "version",
-            Self::Protocol => "protocol",
+            Self::Protocol | Self::Handshake(_) => "protocol",
             Self::Doctor(_) => "doctor",
             Self::Unavailable(not_yet) => not_yet.command,
         }
@@ -361,10 +413,18 @@ mod tests {
     }
 
     /// Every report this build can produce.
+    ///
+    /// Every *shape* of report, which is what the frame, the outcome and the
+    /// stream are decided by — not every value any of them can carry. The one
+    /// shape with a value worth varying is the handshake, where both directions
+    /// are here because both have to be renderable.
     fn every_report() -> Vec<Report> {
         vec![
             Report::Version,
             Report::Protocol,
+            Report::Handshake(sure_core::negotiate(sure_core::PROTOCOL_VERSION)),
+            Report::Handshake(sure_core::negotiate(sure_core::PROTOCOL_VERSION + 1)),
+            Report::Handshake(sure_core::negotiate(0)),
             a_doctor_report(Vec::new()),
             a_doctor_report(vec![a_problem()]),
             Report::Unavailable(a_refusal()),
@@ -501,7 +561,80 @@ mod tests {
         assert!(Report::Version.is_an_answer());
         assert!(Report::Protocol.is_an_answer());
         assert!(a_doctor_report(Vec::new()).is_an_answer());
+        assert!(
+            Report::Handshake(sure_core::negotiate(sure_core::PROTOCOL_VERSION)).is_an_answer()
+        );
+        assert!(
+            !Report::Handshake(sure_core::negotiate(sure_core::PROTOCOL_VERSION + 1))
+                .is_an_answer()
+        );
         assert!(!Report::Unavailable(a_refusal()).is_an_answer());
+    }
+
+    #[test]
+    fn a_handshake_that_did_not_agree_stops_a_caller_and_says_which_side_moves() {
+        // The reason the handshake exists: an adapter that is told "no" has to
+        // be able to tell whether to update itself or SURE, and it has to be
+        // stopped from sending anything in the meantime. Status 3 is what stops
+        // it, and it is not 0.
+        for caller in [0, sure_core::PROTOCOL_VERSION + 1] {
+            let report = Report::Handshake(sure_core::negotiate(caller));
+            assert_eq!(report.exit_code(), exit::UNAVAILABLE);
+            assert_ne!(report.exit_code(), exit::OK);
+            assert_eq!(report.outcome(), "unavailable");
+            assert!(!report.is_an_answer());
+            assert_eq!(report.command(), "protocol");
+
+            let sentence = text(&report, false);
+            assert!(
+                sentence.contains(&caller.to_string()),
+                "the caller is not told what it spoke: {sentence}"
+            );
+            assert!(
+                sentence.contains(&format!("speaks {}", sure_core::PROTOCOL_VERSION)),
+                "the caller is not told what SURE speaks: {sentence}"
+            );
+
+            let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
+            let expected = if caller < sure_core::PROTOCOL_VERSION {
+                "caller"
+            } else {
+                "sure"
+            };
+            assert_eq!(
+                frame["details"]["update"], expected,
+                "the frame does not say which side has to move: {frame}"
+            );
+            assert_eq!(frame["details"]["caller_speaks"], json!(caller));
+            assert_eq!(frame["details"]["agreed"], json!(false));
+        }
+    }
+
+    #[test]
+    fn a_handshake_that_agreed_is_an_answer_a_caller_can_act_on() {
+        // The other half, and the one a working adapter sees on every run: exit
+        // 0, on stdout, with both numbers present so that a caller can check
+        // what it was told rather than take it on faith.
+        let report = Report::Handshake(sure_core::negotiate(sure_core::PROTOCOL_VERSION));
+
+        assert_eq!(report.exit_code(), exit::OK);
+        assert_eq!(report.outcome(), "ok");
+        assert!(report.is_an_answer());
+
+        let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
+        assert_eq!(frame["details"]["agreed"], json!(true));
+        assert_eq!(
+            frame["details"]["sure_speaks"],
+            json!(sure_core::PROTOCOL_VERSION)
+        );
+        assert!(
+            frame["details"]["update"].is_null(),
+            "an agreement says nothing has to be updated: {frame}"
+        );
+        assert!(
+            frame["details"]["caller_speaks"].is_null(),
+            "the agreed version is SURE's own and is already in the frame: {frame}"
+        );
     }
 
     #[test]

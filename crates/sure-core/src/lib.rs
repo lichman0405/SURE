@@ -21,9 +21,9 @@ pub use sure_domain::{
 /// The integration protocol version this core build speaks.
 ///
 /// Re-exported rather than restated, so a core that has not been taught a newer
-/// protocol cannot claim to speak it. The handshake that uses this lands in
-/// P1-T010; declaring it here is what makes the `sure-core -> sure-protocol`
-/// boundary a real edge from the first commit rather than a manifest line.
+/// protocol cannot claim to speak it. Declaring it here is what makes the
+/// `sure-core -> sure-protocol` boundary a real edge rather than a manifest
+/// line; [`negotiate`] is the rule that uses it.
 pub const PROTOCOL_VERSION: u32 = sure_protocol::PROTOCOL_VERSION;
 
 /// The product name.
@@ -31,6 +31,16 @@ pub const NAME: &str = PRODUCT_NAME;
 
 /// The product promise shown to users.
 pub const PROMISE: &str = PRODUCT_PROMISE;
+
+/// The version rule, re-exported from the crate that owns the wire contract.
+///
+/// The CLI answers a caller that asks whether the two can talk, and the event
+/// reader refuses a document in a version this build does not speak. They are
+/// the same rule, so they are the same function rather than two comparisons that
+/// happen to agree today. Re-exported rather than reached directly because
+/// `sure-cli` has one edge into the engine, not two (ADR 0001, and the note in
+/// its manifest).
+pub use sure_protocol::handshake::{Handshake, negotiate};
 
 /// The version number of this build, without the product name.
 ///

@@ -111,7 +111,17 @@ pub enum Command {
     },
 
     /// Print the version of the harness protocol this build speaks.
-    Protocol,
+    Protocol {
+        /// Check whether this build can talk to a caller that speaks this
+        /// protocol version.
+        ///
+        /// A caller that already knows what it was built against asks with
+        /// this, and SURE answers — so that the rule about which versions can
+        /// talk lives in one place instead of in every adapter's language. See
+        /// `sure_protocol::handshake`.
+        #[arg(long, value_name = "VERSION")]
+        speaks: Option<u32>,
+    },
 
     /// Print the version of this build.
     Version,
@@ -174,7 +184,7 @@ impl Command {
             Self::Config { .. } => "config",
             Self::Hook { .. } => "hook",
             Self::Explain { .. } => "explain",
-            Self::Protocol => "protocol",
+            Self::Protocol { .. } => "protocol",
             Self::Version => "version",
         }
     }

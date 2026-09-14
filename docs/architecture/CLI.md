@@ -7,7 +7,8 @@ reimplementing them.
 
 P1-T008 built the framework: what SURE accepts, and how a result reaches a
 person and a script. P1-T009 added the first command whose answer depends on
-what it found. Three commands do their work. The rest are recognised, and say
+what it found; P1-T010 made `sure protocol` answer a caller that asks whether
+the two can talk. Three commands do their work. The rest are recognised, and say
 so.
 
 ## The commands
@@ -22,7 +23,7 @@ so.
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
 | `sure hook ingest` | record one event from a coding harness | recognised, not implemented |
 | `sure explain [ID]` | explain one recorded result in plain language | recognised, not implemented |
-| `sure protocol` | print the harness protocol version this build speaks | works |
+| `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
 | `sure version` | print the version of this build | works |
 
 "Recognised, not implemented" is not a euphemism for a stub. The command parses
@@ -79,6 +80,49 @@ safe to paste into a bug report:
 `sure doctor` is also the first command whose status is not the same on every
 machine: 0 when it found nothing wrong, 1 when it did. That is the false-green
 rule applied to SURE's own installation — `sure doctor || fix it` has to work.
+
+## `sure protocol`
+
+Asked with nothing, it prints the version of the harness protocol this build
+speaks — the same number every response frame carries as `protocol_version`.
+
+Asked with `--speaks VERSION`, it answers whether this build can talk to a
+caller that speaks `VERSION`. This is the handshake an adapter runs before it
+sends anything, and the reason it is a command rather than a sentence in each
+adapter's own language: the rule about which versions can talk lives in
+`crates/sure-protocol/src/handshake.rs`, in one function that the event reader
+also uses to refuse a document. An adapter reading the answer cannot be told
+"yes" by the CLI and then refused at the first event, which is a failure that
+would look like a broken adapter and send somebody looking in the wrong place.
+
+The rule is **exact equality**. A protocol version changes exactly when an older
+reader would get the format *wrong*, so a version mismatch means a document that
+would be misread — and a misread event becomes wrong evidence about a project.
+There is no range of "still close enough".
+
+The two directions are not the same answer, and the message says which one it
+is, because a caller that has just been refused will otherwise try the fix that
+cannot work:
+
+| Caller speaks | Status | What the caller has to do |
+| --- | --- | --- |
+| this build's version | 0 | nothing; both sides speak it |
+| an older version | 3 | update itself — a newer SURE will not accept it either |
+| a newer version | 3 | update SURE |
+
+Status **3**, not 4. A version SURE will not speak is a command this build
+cannot carry out, which is what 3 means everywhere else on this surface, and in
+the newer-caller direction the remedy is literally a newer build. 4 is reserved
+for a refusal grounded in the user's configuration — what SURE's own settings
+say it is allowed to do — and no setting makes this build speak a protocol it
+was not compiled with.
+
+The machine form carries the numbers and which side moves, and not the sentence:
+a script that read prose would break the first time the prose was improved.
+
+```json
+{"command":"protocol","details":{"agreed":false,"caller_speaks":2,"sure_speaks":1,"update":"sure"},"exit_code":3,"outcome":"unavailable","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
+```
 
 ## Two output paths, and no third
 
@@ -145,7 +189,10 @@ could not do the thing at all, and that goes to stderr.
 
 Anything a command found goes under `details`, one key, written by that command's
 own module. The five fields above then keep meaning exactly what this section
-says they mean, whatever a command has to report.
+says they mean, whatever a command has to report. `sure protocol --speaks` is
+the case that shows why: it answers with a complaint — `unavailable`, status 3 —
+and still has three facts to hand over, so they go under `details` rather than
+becoming three more top-level fields that only one command ever writes.
 
 **This frame is not one of the seven documents in
 `docs/architecture/PROTOCOL.md`.** Those are statements about a project or an
@@ -168,7 +215,7 @@ real second consumer in hand.
 | 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `--help`, `--version` |
 | 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `sure check` once it can check |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
-| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented" |
+| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
 | 5 | the command tried and did not finish | anything, including a result that could not be written out |
 
@@ -238,8 +285,11 @@ by adding one and watching the build fail in both places, not argued.
   exists, the report format.
 - **What a hook receives.** `docs/architecture/EVENT_PROTOCOL.md` and
   `docs/integrations/`.
-- **What `sure protocol` should print for a handshake.** `PROTOCOL.md` assigns
-  the handshake to P1-T010; this task made the command exist.
+- **Who has to run the handshake.** The rule is here and
+  `docs/architecture/PROTOCOL.md` states it; the hook and the MCP adapter are
+  commands SURE does not implement yet, so nothing but a caller's own shell has
+  used it. They arrive with the phases that build them, and they have to use the
+  same function rather than their own comparison.
 - **How `sure doctor` decides what a problem is.** That is
   `crates/sure-core/src/doctor.rs`, which says what each state means and why a
   fresh installation is not one of them.

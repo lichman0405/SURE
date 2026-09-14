@@ -235,6 +235,94 @@ fn a_doctor_report_is_an_answer_however_it_turns_out() {
 }
 
 #[test]
+fn the_protocol_version_sure_reports_is_the_one_it_will_talk_to() {
+    // The handshake rule is exact equality, so the number SURE prints and the
+    // number that gets a yes have to be the same number. Taken from the frame
+    // rather than written here: a copy in this file would keep passing after the
+    // two had drifted apart, and a build that announced one version while
+    // accepting another is the failure a handshake exists to prevent.
+    let reported: serde_json::Value =
+        serde_json::from_str(run(&["--format", "json", "protocol"]).stdout.trim())
+            .expect("`sure protocol` answers with a frame");
+    let speaks = u32::try_from(reported["protocol_version"].as_u64().expect("a version"))
+        .expect("a protocol version this build can speak");
+
+    let agreed = run(&["protocol", "--speaks", &speaks.to_string()]);
+    assert!(
+        agreed.succeeded(),
+        "this build speaks protocol {speaks} and would not agree to talk to it:\n{}",
+        agreed.stderr
+    );
+    assert!(
+        agreed.stderr.is_empty(),
+        "a caller that can talk to SURE was handed a complaint as well as an answer, and a \
+         complaint on that stream is how an adapter decides to give up:\n{}",
+        agreed.stderr
+    );
+    assert!(!agreed.stdout.trim().is_empty(), "it printed nothing");
+
+    // Both directions of the refusal, because they are not the same answer. A
+    // build that said no to everything would pass a check that only ever asked
+    // about one number, and a caller told the wrong direction retries with the
+    // fix that cannot work.
+    assert!(
+        speaks > 0,
+        "the older-caller direction has no version below {speaks} to be asked about"
+    );
+    for (other, moves) in [(speaks + 1, "sure"), (speaks - 1, "caller")] {
+        let other_text = other.to_string();
+        let args = ["protocol", "--speaks", other_text.as_str()];
+
+        let refused = run(&args);
+        assert_eq!(
+            refused.status, 3,
+            "`sure protocol --speaks {other}` returned {}. A protocol this build will not \
+             speak is a command it cannot carry out; a caller that read 0 would send events \
+             SURE then refuses:\n{}",
+            refused.status, refused.stderr
+        );
+        assert!(
+            refused.stdout.is_empty(),
+            "the complaint went to standard output, where a caller reading an answer would \
+             take it for one:\n{}",
+            refused.stdout
+        );
+        assert!(
+            refused.stderr.contains(&other_text) && refused.stderr.contains(&speaks.to_string()),
+            "`sure protocol --speaks {other}` does not name both versions, so the person \
+             reading it cannot tell which one to change:\n{}",
+            refused.stderr
+        );
+
+        let mut machine: Vec<&str> = vec!["--format", "json"];
+        machine.extend_from_slice(&args);
+        let frame = run(&machine);
+        assert_eq!(frame.status, refused.status, "{}", frame.stdout);
+        let frame: serde_json::Value =
+            serde_json::from_str(frame.stdout.trim()).expect("one frame");
+        assert_eq!(frame["outcome"].as_str(), Some("unavailable"), "{frame}");
+        assert_eq!(
+            frame["details"]["agreed"],
+            serde_json::json!(false),
+            "{frame}"
+        );
+        assert_eq!(
+            frame["details"]["update"].as_str(),
+            Some(moves),
+            "the frame does not say which side has to move: {frame}"
+        );
+        assert_eq!(
+            frame["details"]["caller_speaks"].as_u64(),
+            Some(u64::from(other))
+        );
+        assert_eq!(
+            frame["details"]["sure_speaks"].as_u64(),
+            Some(u64::from(speaks))
+        );
+    }
+}
+
+#[test]
 fn a_refusal_reads_on_the_terminal_and_leaves_standard_output_empty() {
     // `sure check > report.txt` has to put a report in the file and leave the
     // complaint where the person can see it. For a command that produced
@@ -354,6 +442,12 @@ fn an_unknown_command_or_flag_is_a_wrong_command_line() {
         &["check", "--deep"][..],
         &["--format"][..],
         &[][..],
+        // A version is a number. An adapter that passed a word — a tag, a
+        // branch, `latest` — must be told it typed the command line wrong,
+        // rather than be answered "SURE cannot talk to that", which reads as a
+        // version that exists and is refused.
+        &["protocol", "--speaks", "latest"][..],
+        &["protocol", "--speaks"][..],
     ] {
         let run = run(args);
         assert_eq!(

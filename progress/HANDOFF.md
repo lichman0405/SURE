@@ -34,10 +34,16 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 22, queued: 144 }
-READY: P2-T003, P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007,
-      P8-T001, P12-T008, P13-T001
+{ accepted: 22, in_progress: 1, queued: 143 }
+READY: P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001,
+      P12-T008, P13-T001
 ```
+
+`P2-T003` (non-Git project fingerprint) is **started and not finished** — it was
+marked `in_progress` before this session's work interrupted it, and no code has
+been written for it beyond the design note below. Everything else on this branch
+is the `P2-T002` line, including the filter hardening recorded in the next
+section.
 
 **`P2-T002` (Git project fingerprint) is the work of this session.** All of it is
 on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the `git`
@@ -137,6 +143,117 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
 
+## What the filter hardening added, and the two claims it corrected
+
+**A security review of `9f13f0d` — run automatically, and arriving as a
+background notification rather than from a person — found that fingerprinting a
+project could still execute a program the repository chose. It was right.** The
+commit `5705444` is the fix. No user input was involved and none is implied.
+
+The review's one-line finding (`subprocess-rce-via-untrusted-git-config`,
+"incomplete fix") was checked rather than taken on trust, and the check is what
+made the fix designable: a marker program behind a tracked `.gitattributes` plus
+a `filter.<n>.clean` setting in the repository's own configuration is executed
+by a plain `git status` **with nothing modified**. The control that proves the
+fixture really fires is what makes the negative assertion mean anything, and the
+first version of the probe was wrong in exactly that way — it reported `RAN` for
+every route because `git add` inside its own setup had left the marker behind.
+All of that is in `target/tmp/filter_probe.sh`'s header, which is kept out of the
+repository but not deleted, because the next reader will want it.
+
+What closes it, and why refusing is the only option rather than the cautious
+one, is in `docs/architecture/FINGERPRINTING.md` under "A repository is not
+allowed to make Git run a program". The short form:
+
+- **It cannot be turned off.** No Git flag disables in-tree `.gitattributes`
+  (`git help --config` lists only the global `core.attributesFile`), and the
+  driver name is not known until Git has read the project, so there is no fixed
+  `-c` to pass.
+- **Overriding it would be wrong, not just hard.** With the filter off, Git
+  compares a file's raw bytes against a blob that was written *through* the
+  filter and calls every such file modified. A wrong fingerprint marks stale
+  evidence current, which is the failure this product exists to prevent.
+- So the repository is refused, with `FingerprintError::RepositoryRunsPrograms`
+  naming the settings it found. `crates/sure-core/src/fingerprint/error.rs` is
+  where the message lives; it says what happened, why SURE stopped, and what to
+  do.
+
+The check is one extra invocation — `git config --list --includes -z` with
+`GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=<root>/.git/config/sure-no-global-configuration`
+— placed **after** `rev-parse` (measured not to run a filter) and **before**
+`status` (measured to run one). The suppressed global path is under
+`.git/config`, which is a file in every repository Git makes, including linked
+worktrees and submodules, so nothing can exist there and no project can add
+settings to the answer about itself.
+
+### Two claims this work made and then corrected, both by measurement
+
+This is the part worth carrying forward, because both were wrong in the same
+direction — a confident sentence that a test appeared to confirm.
+
+1. **`--includes` is not load-bearing.** The source comment, the document and a
+   test all said the flag was what made an included filter visible, reasoning
+   from "includes are off as soon as a scope is named". That is true of
+   `--local` and **false of this invocation**: `git config --list` with no scope
+   named already follows includes, so the flag changes no answer. It was caught
+   by writing a mutation for it and seeing that its removal failed *only* the
+   test that pins the flags and no behavioural test. The flag is kept — stating
+   the property beats inheriting it from a default — and the false claim is
+   corrected in all three places.
+2. **The include-path test did not test what its name said.** It was written to
+   cover `--includes`, and it covers a real property instead: the check does not
+   care whether a setting arrived through `include.path` or the repository's own
+   file. Both the test comment and the document now say so.
+
+The lesson is the one this repository keeps relearning: a test that passes is
+not evidence that the thing it names is being tested. Only removing the thing
+and watching the test fail is.
+
+### A boundary that was measured, and is left open on purpose
+
+**A repository can still reach a filter the *machine* defines**, by naming the
+driver in `.gitattributes` without defining it. Measured with
+`target/tmp/boundary_probe.sh`: on this machine both
+`C:/Program Files/Git/etc/gitconfig` and `~/.gitconfig` carry
+`filter.lfs.{clean,smudge,process}` and `git-lfs` is on the `PATH`, so a plain
+`git status` on such a repository runs `git-lfs`.
+
+It is left open, and the reason is the line `EXECUTION_SAFETY.md` actually
+draws: the project **cannot choose the program**, only ask for one the user
+already installed. What runs is not project-controlled code. That is a
+defensible boundary and it is not the same thing as the defect the review named,
+which let a repository choose the program.
+
+**This needs an owner decision and no task covers it.** Closing it would mean
+reading driver names out of the project's attributes (`.gitattributes`,
+`$GIT_DIR/info/attributes`) and refusing when any resolves in any scope — real
+work with a real cost, namely a refusal for every repository that legitimately
+uses Git LFS. It is documented in full in `FINGERPRINTING.md` and raised here
+rather than folded into a security fix for something else. `P2-T011` is **not**
+this; that id is the intent model. No id was invented.
+
+### Gates for `5705444`
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --
+-D warnings` clean; `cargo test --workspace` green across 31 test binaries
+(`fingerprint_git` went 40 → 43, `fingerprint::git` unit tests 24); `node
+scripts/taskctl.mjs validate` = state OK: 166 tasks; `scripts/Preflight-Windows.ps1`
+= passed. **34 mutations in `target/tmp/mutate6.py`, 34 fired** — 8 of them new
+here, and the two that matter most are "the check runs after the status instead
+of before it", caught only by the assertion that the marker does **not** exist,
+and "the suppressed global path is one a project could create".
+
+**On CI, at run `34843216260`, all five jobs are green.** Two things about that
+run are worth more than the colour:
+
+- The eight new refusal tests were read out of the log **by name**, on all three
+  `rust` jobs. The two scope tests ran twice each on Windows, Linux and macOS.
+- **Each of those tests asserts its own control** — that a raw `git status` on
+  the fixture *does* create the marker — so the passing "SURE did not run it"
+  assertion is meaningful on Unix and not only on Windows. This is the rare case
+  where a security property is verified by execution on all three platforms
+  rather than argued from one.
+
 ## Continuous integration, and why this section exists
 
 **Every `ci` run on this branch failed until `c735a2f` — including the runs for
@@ -151,6 +268,7 @@ Three of the five jobs were failing the whole time.
 | 34839005174 | `58b3793` — first attempt at a fix | failure: the same three jobs |
 | 34839532984 | `c735a2f` — after reading that run | **all five green.** First green run on this branch, and the first that executes any `#[cfg(unix)]` fingerprint test |
 | 34840217454 | `9f13f0d` | **all five green**, including the new pipe test on both Unix jobs |
+| 34843216260 | `5705444` — the filter hardening | **all five green.** The eight new refusal tests were read out of the log **by name on all three `rust` jobs**, not inferred from the job colours; `a_program_reached_through_an_included_file_is_refused_too` and `a_program_in_the_worktree_configuration_is_refused_too` ran twice each on Windows, Linux and macOS |
 
 The acceptance commit's own run is red. That is the fact this section exists for:
 `P2-T002` was marked accepted, and `progress/state.json` says so, on a commit
@@ -944,6 +1062,14 @@ it needs a Mac.
   stands over all four**: none of them changes a verdict for a project that is
   not hostile, and the acceptance run's own red CI is recorded above rather than
   quietly re-run.
+- `5705444` — a fifth follow-up on the *accepted* `P2-T002`, and the only one
+  that changes a verdict for a **non-hostile** project: a repository that names a
+  filter is now refused where it used to be fingerprinted. That is the whole
+  point of it (see "What the filter hardening added" above), and it is a real
+  behaviour change rather than a hardening nobody can observe. `P2-T002`'s
+  acceptance still stands — its two criteria are about a project that is not
+  hostile — but this is the commit to look at if a legitimate project starts
+  being refused.
 
 ## Next concrete action
 

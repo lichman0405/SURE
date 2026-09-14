@@ -192,8 +192,10 @@ because its job is done but not deleted because the next reader will want it.
 | **`filter.<n>.clean\|smudge\|process`, defined by the repository** | **the repository is refused** | **the control fires it during a plain `git status` with nothing modified** |
 | `filter.<n>.*` defined by the *machine*, named by a `.gitattributes` the repository carries | nothing — left open on purpose | `filter_probe.sh`, then `boundary_probe.sh` when the first version of this document implied it was closed; see "What is deliberately not covered" |
 
-The last row is the one the earlier version missed, and it is the one that
-cannot be closed from the command line.
+The second-to-last row is the one the earlier version missed, and it is the one
+that cannot be closed from the command line. The last row is a second boundary
+found while checking the fix, and it is a different thing: the project can reach
+a program there, but cannot *choose* it.
 
 #### Why a content filter cannot be overridden, only refused
 

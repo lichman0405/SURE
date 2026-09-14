@@ -640,6 +640,7 @@ Three of the five jobs were failing the whole time.
 | 34850549120 | `0a577ca` + `68e51d8` + `1ec5bee` — **the `P2-T004` acceptance** | **failure: `rust (ubuntu-latest)` and `rust (macos-latest)`.** One test, `discover::read::tests::a_path_a_manifest_named_cannot_leave_the_project`. Detail below |
 | 34851008124 | `650852e` — the fix for that | **all five green**, and the test that failed was read out of all three `rust` logs **by name** |
 | 34854388756 | `e10f620` — **the `P2-T005` implementation** | **all five green.** Windows **786** / macOS **788** / Ubuntu **789** passed, 0 failed, each over 34 result lines. Detail below, because **Windows agreeing with the local run exactly is the fact worth having** |
+| 34855496424 | `37a848a` — **the `P2-T005` acceptance** | **all five green, and the counts are the implementation's to the test**: Windows **786** / macOS **788** / Ubuntu **789**, 0 failed, 34 result lines = 24 parents + 10 children on each. A documentation-only commit changing no number is the useful reading — it says the record was added without touching what it records |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
@@ -673,6 +674,14 @@ number from two independent executions on the same platform, one of them the one
 that will judge every future push. The `+2` macOS and `+3` Ubuntu deltas are the
 `#[cfg(unix)]` tests `P2-T002` recorded, unchanged, and 786 + 2 and 786 + 3 are
 the two totals to the test.
+
+**The acceptance commit's own run was read too — `34855496424`, on `37a848a`,
+all five jobs green.** `progress/state.json` and this file are the only things it
+touches, and the count came back **786 / 788 / 789 with 0 failed over 34 result
+lines on every platform**, which is the implementation's figures to the test.
+That is what a documentation-only commit's run is for: it says the record was
+added **without changing what it records**, and it is the cheapest place to
+notice that a "docs only" change was not one.
 
 **A method lesson, learned here by getting it wrong twice.** Attributing a
 `test result:` line to a target **by proximity in a CI log is invalid**. Cargo

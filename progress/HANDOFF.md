@@ -915,12 +915,56 @@ Three of the five jobs were failing the whole time.
 | 34865169857 | `435181f` — the `P2-T007` run record | **all five green**, and **871 / 873 / 874 with 0 failed, 1 ignored, 26 parents** — the implementation's figures to the test, unchanged. A commit that adds only prose to this file changing no count is the reading a record commit is for |
 | 34865317166 | `0907acf` — **the `P2-T007` acceptance** | **all five green**, and **871 / 873 / 874 again**, unchanged, `26` parents each. The acceptance touches only `progress/state.json` and this file, so the implementation's evidence survived its own recording. **This run is the end of the `P2-T007` chain and is reported in the session rather than committed** — see the rule stated at the top of this file |
 | 34865716315 | `906bfb0` — **the `P2-T007` record commit, which edits only this file** | **failure: `rust (ubuntu-latest)`.** The other four jobs green, including `rust (macos-latest)` and `rust (windows-latest)` on **the same commit**. Two tests failed in `sure-core --test store_concurrency`. Detail below — this is the first red run since `c735a2f` and the first ever seen on a documentation-only commit |
+| 34866795192 | `0f7c854` — **the fix for that run** | **all five green, including `rust (ubuntu-latest)`, the job that failed.** Windows **877** / macOS **879** / Ubuntu **880** passed, 0 failed, 1 ignored, each over **36** result lines = **26** parents + 10 children. **Windows equals the local Windows run exactly**, and the multiset comparison moved **one position on each of the three platforms** — the lib target, `401→407` on Windows and `398→404` on both Unix jobs. Detail below |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34866795192`, the fix's — and a multiset comparison on all three platforms
+
+**All five jobs green**, including `rust (ubuntu-latest)`, the one that failed.
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 36 | 26 | 10 | **877** | 0 | 1 |
+| `rust (macos-latest)` | 36 | 26 | 10 | **879** | 0 | 1 |
+| `rust (ubuntu-latest)` | 36 | 26 | 10 | **880** | 0 | 1 |
+
+**877 is the local Windows figure exactly**, measured before the push and not
+predicted from it. The raw sum over all 36 lines is 887 / 889 / 890, which
+over-counts by exactly 10 for the reason recorded above.
+
+The six new test names were read out of **all three** `rust` logs **by name** —
+each present exactly once on each platform, `0 FAILED` lines in each log:
+`a_file_another_connection_migrated_before_the_check_is_not_reported_as_foreign`,
+`a_file_that_moved_to_a_newer_schema_before_the_check_is_reported_as_newer`,
+`a_file_with_somebody_elses_table_is_still_refused`,
+`the_check_reads_the_file_in_one_transaction`,
+`a_statement_sure_ran_to_look_reports_contention_as_contention`,
+`a_file_that_reported_a_version_is_not_looked_at_again`.
+
+#### The multiset, against the run before it, on every platform
+
+The previous run's logs were fetched rather than remembered, so the comparison is
+over all three platforms and not only the one this file had recorded:
+
+| platform | before | after | positions that moved |
+|---|---|---|---|
+| `rust (windows-latest)` | 871 | **877** | **1** — the lib, `401 → 407` |
+| `rust (macos-latest)` | 873 | **879** | **1** — the lib, `398 → 404` |
+| `rust (ubuntu-latest)` | 874 | **880** | **1** — the lib, `398 → 404` |
+
+**Exactly one position moved on each platform, and it moved by exactly 6.** Every
+other position in the 36-value multiset is identical, on all three. That is the
+whole attribution: the six tests this commit adds are in the lib target and
+nowhere else, and nothing else in the suite changed size.
+
+The platform spread is likewise unchanged: macOS and Ubuntu carry 3 more lib
+tests than Windows (the `#[cfg(unix)]` ones), giving +2 and +3 on the totals, and
+those offsets were +2 and +3 before this commit as well.
 
 ### Reading run `34865716315` — red, on a commit that changed only this file
 

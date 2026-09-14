@@ -18,6 +18,16 @@ repository = "https://github.com/lichman0405/SURE"
 [workspace.dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+# The command line grammar. `docs/architecture/RUST_DESIGN.md` names clap for
+# this, and it earns its place on a surface this user-visible: usage errors,
+# `--help` that cannot drift from the accepted grammar, and the `--` handling
+# that decides whether a path beginning with a dash is a flag. Hand-rolling that
+# is where "an unknown flag was accepted and ignored" comes from, which is the
+# CLI's version of a false green.
+#
+# `docs/architecture/CLI.md` records what the flag decides and what it does not:
+# clap parses the command line, and every decision about *output* is SURE's.
+clap = { version = "4.6.6", features = ["derive"] }
 # Test-support only. Manifest parsing for the crate-boundary policy test must use
 # a real TOML parser: a hand-rolled one could silently mis-parse and report "no
 # violations", which is a false green in the check that exists to prevent them.

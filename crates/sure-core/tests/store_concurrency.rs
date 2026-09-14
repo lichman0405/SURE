@@ -139,9 +139,17 @@ fn spawn_child(database: &Path, writes: usize, starts_at_ms: u128) -> std::proce
     Command::new(exe)
         // `--exact`, so the filter cannot match another test whose name starts
         // the same way and have the child run the parent's tests. `--ignored`,
-        // because the child's half is not a test on its own. `--quiet`, because
-        // twenty children otherwise print twenty result lines into the parent's
-        // output; a child that fails still prints its panic.
+        // because the child's half is not a test on its own.
+        //
+        // `--quiet` does **not** keep the parent's output clean, which is worth
+        // knowing before anyone counts tests from it: libtest's `--quiet` drops
+        // the `running N tests` line and the per-test lines, and still prints
+        // its own `test result: ok. 1 passed; … 6 filtered out` summary. The ten
+        // children this file spawns therefore add ten `test result:` lines to
+        // whatever contains the parent, and summing those lines over a workspace
+        // run overstates the suite by ten. Count the parent lines, or read the
+        // per-binary figures, and see `progress/HANDOFF.md`. A child that fails
+        // still prints its panic.
         .args(["--exact", "child_writer", "--ignored", "--quiet"])
         .env(
             CHILD_ENV,

@@ -1,10 +1,21 @@
 # The wire protocol
 
-Everything SURE writes down — to local storage, to a machine-readable output
-stream, or to a coding harness — is one of seven documents, and each has a JSON
-Schema in `schemas/`. This document is the authority for how those two halves
-relate. The prose form of one of them, the harness event, is
-`docs/architecture/EVENT_PROTOCOL.md`.
+Everything SURE writes down about a project or an event — to local storage, to a
+machine-readable output stream, or to a coding harness — is one of seven
+documents, and each has a JSON Schema in `schemas/`. This document is the
+authority for how those two halves relate. The prose form of one of them, the
+harness event, is `docs/architecture/EVENT_PROTOCOL.md`.
+
+Two things SURE writes are deliberately not in that set, and the qualifier above
+is why the sentence is worth reading carefully. The first is the stored record,
+which wraps a document with the version, the project and the time
+(`docs/architecture/STORAGE_AND_DATA_PATHS.md` §The store); the second is the
+response frame a CLI command answers in
+(`docs/architecture/CLI.md` §The frame). A document is a *statement about a
+project*, and those two are the containers one travels in. They carry
+`protocol_version` rather than a schema of their own for the same reason: a
+reader has to be able to tell which build wrote the thing holding the document
+before it can decide whether it can read the document.
 
 ## The documents
 
@@ -167,6 +178,8 @@ resolved: the schema now defines `capability_tier` and `project_root`.
 2. **The handshake is not wired up yet.** `EventEnvelope::from_json` refuses a
    version it does not know, and nothing calls it. P1-T010 connects the CLI, the
    hook and the MCP adapter to it.
-3. **`sure protocol` does not exist.** There is no command that prints
-   `PROTOCOL_VERSION` for an adapter to read. P1-T008 adds the command, P1-T010
-   decides what it prints.
+3. **`sure protocol` prints the version and nothing negotiates with it.**
+   P1-T008 added the command: it prints `PROTOCOL_VERSION`, and
+   `--format json` carries it in the response frame as `protocol_version`. What
+   an adapter *does* with the answer — the handshake — is P1-T010's, and
+   `docs/architecture/CLI.md` records that this build stops short of it.

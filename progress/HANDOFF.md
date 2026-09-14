@@ -2,8 +2,9 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 16 / 166 tasks accepted. Phase P0 complete (9/9). Phase P1 in progress
-(7/13). `P1-T005` is accepted with the commit that carries this file.
+Progress: 17 / 166 tasks accepted. Phase P0 complete (9/9). Phase P1 in progress
+(8/11). `P1-T008` is accepted, and `progress/state.json` records it in the commit
+immediately after the one carrying this file.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -16,31 +17,91 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P1
-{ accepted: 16, queued: 150, ready: 10 }
-READY: P1-T008, P1-T010, P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 17, queued: 149, ready: 9 }
+READY: P1-T009, P1-T010, P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-The next one this session takes is **`P1-T008`** (CLI command framework), because
-`P1-T009` (`sure doctor`) and `P1-T010` (protocol version handshake) both need a
-command to hang off, and `P1-T005` has just given `sure doctor` something to
-report: the journal mode, the schema version and the integrity check are all
-public on `Store` already and have no command that reaches them.
+The next task is **`P1-T009`** (`sure doctor`), which `P1-T008` unblocked and
+which now has somewhere to put its answer: the command exists and refuses
+cleanly, `Command::report` has an arm waiting for it, and `Store` already
+exposes `journal_mode`, `schema_version` and `integrity_check` with nothing
+reaching them.
 
 `P1-T011` (configuration authority layers) is the alternative and is
-independent.
+independent; `P1-T010` (protocol handshake) is unblocked and smaller.
 
-## Gate set, as run at `P1-T005`
+**Correction to an earlier revision of this file:** it said P1 in progress
+"(7/13)". P1 has **11** tasks, not 13 — `tasks/tasks.json` is the authority and
+`node scripts/taskctl.mjs status` counts from it.
+
+## Gate set, as run at `P1-T008`
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
-| `cargo test --workspace --all-features` | 21 `test result: ok` lines, 408 passed, 0 failed |
+| `cargo test --workspace --all-features --no-fail-fast` | 429 passed, 0 failed, 1 ignored, across 14 test binaries |
 | `node scripts/validate-bootstrap.mjs` | 17 phases, 166 tasks |
 
-`sure-core` alone is 179 lib tests + 9 config_loading + 6 store_concurrency + 4
-store_packaging. The concurrency file spawns real child processes, so it takes
-about a second and its children appear in the output as `child_writer`.
+Per binary: `sure-cli` 22 lib + 11 `cli_contract`; `sure-core` 179 lib + 9
+`config_loading` + 6 of 7 `store_concurrency` + 4 `store_packaging`;
+`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 40 lib + 12
+`conformance` + 15 `round_trip`; `sure-testkit` 7 `integration_thinness` + 8
+`repository_shape`. Four doc-test targets report 0.
+
+### Count the parent lines, not the `test result:` lines
+
+**The raw number of `test result: ok` lines overstates this suite.** A workspace
+run prints **28** of them for **429** tests, because `store_concurrency` spawns
+**ten** child processes (4 writers + 6 openers) and each child prints its own
+`test result: ok. 1 passed; … 6 filtered out` into the parent's stdout. `--quiet`
+does not suppress that summary line — libtest's `--quiet` drops the
+`running N tests` line and the per-test lines and still prints the summary. The
+comment in `spawn_child` said otherwise and has been corrected.
+
+This matters for the record, not just for tidiness: the figure written into
+`P1-T005`'s acceptance note (**408 passed**) was a raw sum of those lines and is
+therefore **inflated by the child lines**. The true parent-only figure at
+`P1-T005` was 396 passed / 1 ignored, i.e. 397 tests; `P1-T008` adds `sure-cli`'s
+33, which is the 429 above. Nothing regressed — the earlier number was counted
+wrong. If a later session wants one number for the whole suite, sum the `running
+N tests` lines of the parent binaries or read the per-binary figures here.
+
+`store_concurrency` takes about a second and its children show up in the output
+as lines of nine characters each. `tests/store_concurrency.rs` and
+`tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P1-T008` added
+
+`crates/sure-cli/` — the command surface, and the two ways a result reaches a
+person and a script:
+
+- `src/cli.rs` — the grammar as one `enum Command` plus `HistoryAction`,
+  `ConfigAction`, `HookAction`. `docs/architecture/CLI.md` lists the same ten
+  commands in the same order, and a test compares the doc against what this
+  build parses.
+- `src/report.rs` — `report::exit` (the whole status table, the only place a
+  status is chosen), `NotYet`, and `Report { Version, Protocol, Unavailable }`
+  with `human`, `machine` and `frame`.
+- `src/output.rs` — `Format` and the two output paths. **The only module in the
+  crate that names a process stream.**
+- `src/commands.rs` — `Command::report`, one exhaustive match with no `_` arm
+  and no `unreachable!()`. Adding a command to the grammar fails the build here
+  until somebody decides whether this build implements it.
+- `src/main.rs` — `try_parse` rather than `Parser::parse`, so clap's exit status
+  goes through `status_of` and the documented table stays SURE's. 22 unit tests.
+- `tests/cli_contract.rs` — 11 process-boundary tests over the built binary.
+- `docs/architecture/CLI.md`, and two amendments to `PROTOCOL.md`.
+
+`clap` 4.6.6 is `sure-cli`'s first dependency, named by `RUST_DESIGN.md`.
+
+**Two commands work: `version` and `protocol`.** Both answer questions about SURE
+rather than about a project, which is why they need no engine. Every other
+documented command parses its arguments, decides it cannot do the job, exits **3**
+and says so in one sentence. Nothing is half-done; nothing that did nothing exits
+0. `docs/architecture/CLI.md` §Exit statuses is the table, and it marks two
+statuses (1 and 4) as reserved before anything returns them so a script written
+against this release is not invalidated later.
 
 ## What `P1-T005` added
 
@@ -93,6 +154,35 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P1-T008`
+
+- **Making a refusal exit 0** fails `main::tests::a_bare_sure_is_not_a_success`
+  and `commands::tests::…` in the unit tests, and three in `cli_contract.rs`.
+  This is the false-green rule inside SURE's own front door.
+- **Flipping `Report::is_an_answer`** so a complaint went to stdout fails one
+  unit test and two integration tests. **Visible only under `--no-fail-fast`** —
+  without it `cargo test` stops at the first failing target and the integration
+  file never runs, which is why the gate command carries the flag.
+- **Adding a stray `println!` outside `output.rs`** fails four tests, including
+  `only_the_output_module_writes_to_a_stream`. Checked by mutation because a
+  source scan is the only thing that can catch an *absence*; no run of the binary
+  demonstrates that a line was never written.
+- **Reading standard input in `hook ingest`** fails
+  `hook_ingest_does_not_read_standard_input`, which writes a megabyte into the
+  pipe and requires a broken pipe. A command that drained the event and then
+  refused would have destroyed the evidence it was refusing to record.
+- **Adding a `Command` variant** produces `E0004` in two places (`Command::name`
+  and `Command::report`), so a new command cannot ship with no answer about
+  whether this build carries it out.
+- **Making `frame()` report the wrong command name** fails
+  `cli_contract.rs::the_machine_form_is_one_object_on_one_line_of_standard_output`
+  at line 213. Worth recording *which* test caught it: the unit test beside it
+  compares the frame against `report.command()`, so it stays green under this
+  mutation — it is self-consistent by construction. **The integration test is the
+  one that is load-bearing for the frame's content.**
+
+### `P1-T005` and earlier
+
 - Removing `features = ["bundled"]` from the workspace `rusqlite` entry fails
   `store_packaging::sqlite_is_compiled_into_sure…`. Worth knowing *why* the test
   exists rather than leaving it to the build: without `bundled`,
@@ -130,14 +220,21 @@ Each was reverted after confirming the check fires.
   `docs/architecture/PROTOCOL.md`.
 - `P1-T005` — `crates/sure-core/src/store/`, the concurrency and packaging tests,
   and §The store in `STORAGE_AND_DATA_PATHS.md`.
+- `P1-T008` — `crates/sure-cli/`, `docs/architecture/CLI.md`, and the `PROTOCOL.md`
+  amendment that keeps "everything SURE writes is one of seven documents"
+  literally true.
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P1-T008` (CLI command framework).
-2. Then `P1-T009` (`sure doctor`) and `P1-T010` (protocol version handshake),
-   which depend on it. `P1-T009` has three things ready to report and no command
-   to report them from: `Store::journal_mode`, `Store::schema_version` and
-   `Store::integrity_check`.
+1. `node scripts/taskctl.mjs start P1-T009` (`sure doctor`). Three things are
+   already there to report and nothing reaches them: `Store::journal_mode`,
+   `Store::schema_version` and `Store::integrity_check`. `Command::report`'s
+   `Self::Doctor` arm is where the answer goes, and `Report` will need its first
+   new variant — which means `outcome()` and `exit_code()` grow with it, and the
+   frame's documented `outcome` set grows from `{ok, unavailable}`.
+2. Then `P1-T010` (protocol version handshake), which is unblocked and smaller.
+   It owns what an adapter does with `sure protocol`'s answer; `PROTOCOL.md`
+   known gap 3 records that this build stops short of it.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -147,6 +244,29 @@ ignored, which is how the earliest tasks came to record an empty note.
 - **Run `cargo fmt --all` before the gate set, not after.** New files written by
   hand are not rustfmt-shaped (let-else bodies, long `assert!` messages) and
   `--check` fails on them. `P1-T007`'s commit was blocked once by this.
+- **Do not read or write repository sources with Python's default encoding.** It
+  is `gbk` on this machine, and a source file with a `—` in it fails with
+  `UnicodeDecodeError: 'gbk' codec can't decode byte 0x94`. Pass
+  `encoding='utf-8'` and `newline='\n'`.
+- **Parse the command line with `clap::Parser::try_parse`, never `parse`.**
+  `parse` calls `process::exit` itself, which would put one row of SURE's
+  documented status table in a library's hands. `status_of` maps clap's exit code
+  onto `report::exit`; `--help` and `--version` are clap's 0 and become SURE's 0.
+- **`arg_required_else_help = true` makes a bare `sure` exit 2, not 0.** That is
+  deliberate: it did nothing, so status 0 would let a script that invoked the
+  wrong thing read it as a clean run.
+- **`env!("CARGO_BIN_EXE_sure")` gives an integration test the built binary**,
+  and an integration test may use its package's `[dependencies]` — which is why
+  `tests/cli_contract.rs` can `serde_json::from_str` the frame without a
+  dev-dependency of its own.
+- Clippy's `unnecessary_map_on_constructor` is enforced by `-D warnings`:
+  `Some(x).map(Some)` is an error, `Some(Some(x))` is not.
+- **A mutation can leave the responsible test green because the test and the
+  code share a source of truth.** Changing what `Report::command()` returns does
+  not fail `report.rs`'s own frame test, which compares the frame against
+  `report.command()`; the integration test that reads a real process's stdout is
+  what catches it. When a test asserts `f(x) == g(x)` and both sides call the
+  same function, check which test is actually load-bearing before trusting it.
 - **Every integration test file needs
   `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` at the
   top.** The workspace lints are `warn` but the gate runs `-D warnings`, so a new

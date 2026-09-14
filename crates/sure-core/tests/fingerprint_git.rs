@@ -49,6 +49,22 @@
 //! deliberate; what is missing is a test pinning it as deliberate, and it is
 //! named here rather than left to look like coverage.
 //!
+//! **A pipe, a socket or a device at a tracked path.** Covered on Unix by
+//! `a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang`, which is
+//! the platform where it can hang: `File::open` on a FIFO with no writer blocks
+//! until one appears. It is *not* covered on Windows, and not for want of
+//! trying — a pipe is not a filesystem entry there, so Git cannot report one as
+//! a tracked path and the arm in `Reader::read` is unreachable. Two facts about
+//! Git were measured while writing the test rather than assumed, and both are
+//! easy to get backwards:
+//!
+//! - A tracked path whose working-tree entry is replaced by a pipe **is**
+//!   reported, as an ordinary modified file (`.M`). That is why the fixture
+//!   commits the file before replacing it.
+//! - An *untracked* pipe is **not** reported at all — it does not appear in
+//!   `git status --porcelain=v2 -uall` output. Nothing may be concluded from its
+//!   absence from a fingerprint, because it is absent from Git's answer first.
+//!
 //! **`core.symlinks=false`.** Described above and not exercised: the fixture
 //! sets the machine's own default rather than overriding it, so the branch where
 //! a link arrives as a file holding its target has no test on either platform.
@@ -938,6 +954,69 @@ fn a_link_is_recorded_by_its_target_and_not_by_what_it_points_at() {
 
 #[cfg(unix)]
 #[test]
+fn a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang() {
+    // **A repository must not be able to stop a check by existing.**
+    //
+    // `File::open` on a FIFO with no writer blocks until one appears, and the
+    // working tree is written by whoever SURE is checking. A project that
+    // commits a file and replaces it with a pipe would therefore hang a
+    // fingerprint with no output at all — and a check that never returns cannot
+    // be told apart from one that is still working, which is the failure this
+    // arm exists to prevent.
+    //
+    // The premise is Git's, and it was measured rather than assumed: for a
+    // tracked path whose working-tree entry is a pipe, `git status
+    // --porcelain=v2` reports an ordinary modified file (`.M`), so this path
+    // does reach `Reader::read`. An *untracked* pipe is not listed by Git at
+    // all, and that is why the fixture commits the file before replacing it.
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let repo = Repo::new("pipe");
+    repo.write("script.sh", "#!/bin/sh\n").commit("first");
+    let before = repo.fingerprint();
+
+    let named = repo.path().join("script.sh");
+    std::fs::remove_file(&named).unwrap();
+    let made = Command::new("mkfifo").arg(&named).status();
+    // A missing program is a failure and not a skip. Every platform this test
+    // is compiled for ships it; if one stops doing so, the premise of the test
+    // is gone rather than the behaviour, and a test that passes because its
+    // premise did not hold is worse than no test.
+    assert!(
+        made.as_ref().is_ok_and(std::process::ExitStatus::success),
+        "mkfifo is needed to put a pipe in the working tree: {made:?}"
+    );
+
+    // Run the fingerprint off this thread so that a blocked `open` arrives as a
+    // named failure rather than as a job that sits there until it is killed.
+    // The thread is abandoned if this fires, deliberately: it is blocked in a
+    // read that will not return, and the process is about to fail anyway.
+    let (sender, receiver) = mpsc::channel();
+    let root = repo.path().to_path_buf();
+    std::thread::spawn(move || {
+        let _ = sender.send(git_fingerprint(&root, &Repo::options()));
+    });
+
+    let after = match receiver.recv_timeout(Duration::from_secs(60)) {
+        Ok(result) => result.unwrap_or_else(|error| panic!("{error}")),
+        Err(_) => panic!(
+            "fingerprinting a project with a pipe in it did not finish in 60 seconds, \
+             so the pipe was opened rather than described"
+        ),
+    };
+
+    // What is at the path is a pipe, and what was there before was a file. Two
+    // states, so two fingerprints — the same decision `Contents::Gone` is on the
+    // other side of, where a deletion must not digest as an empty file.
+    assert!(
+        !same(&before, &after),
+        "replacing a tracked file with a pipe is a change to the project"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_change_behind_an_unchanged_link_is_not_a_change() {
     // The documented gap, asserted so that it is a decision with a test rather
     // than a thing to be discovered. Reading through the link would pull in a
@@ -1404,4 +1483,49 @@ fn the_status_arguments_are_the_ones_the_module_doc_explains() {
             .count(),
         1
     );
+}
+
+#[test]
+fn the_settings_that_stop_a_repository_running_a_program_are_still_passed() {
+    // A repository is untrusted input, and it carries configuration that Git
+    // reads and obeys. Two of those settings name a program — `core.fsmonitor`
+    // and `core.pager` — so without these arguments, describing a project is the
+    // same act as running whatever the project says to run.
+    //
+    // This is pinned rather than left to the code because its absence is
+    // invisible: on every repository that does not exploit it, removing these
+    // changes no output, fails no test, and produces exactly the same
+    // fingerprint. The only observable difference is on the repository that was
+    // written to exploit it — which is the one case where noticing is too late.
+    let arguments = Git::SAFETY_ARGUMENTS;
+    for required in ["-c", "core.fsmonitor=false", "--no-pager"] {
+        assert!(
+            arguments.contains(&required),
+            "SAFETY_ARGUMENTS is missing {required:?}: {arguments:?}"
+        );
+    }
+
+    // Set through `-c` for this invocation and not in the repository. A `-c`
+    // argument is read by the Git that is started; a setting written into the
+    // project would be a change to the project being checked.
+    assert_eq!(
+        arguments
+            .iter()
+            .filter(|argument| argument.starts_with("core."))
+            .count(),
+        1,
+        "a second core.* setting appeared, and the tests above do not describe \
+         it: {arguments:?}"
+    );
+
+    // Every one of them comes before the subcommand. Git reads `-c` and
+    // `--no-pager` as arguments to Git itself, so an `--no-pager` after
+    // `status` would be a pathspec naming a file that does not exist rather
+    // than a setting.
+    for (index, argument) in arguments.iter().enumerate() {
+        assert!(
+            !argument.starts_with("status"),
+            "SAFETY_ARGUMENTS contains a subcommand at {index}: {arguments:?}"
+        );
+    }
 }

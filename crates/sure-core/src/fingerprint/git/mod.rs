@@ -153,6 +153,39 @@ impl Git {
         ".",
     ];
 
+    /// What is put in front of *every* Git invocation, before the subcommand.
+    ///
+    /// These are not about the question being asked; they are about what a
+    /// repository is allowed to make Git do while answering it. **A project is
+    /// untrusted input by assumption** — it may have been written by a coding
+    /// agent, or cloned from anywhere — and a repository carries its own
+    /// configuration, which Git reads and obeys. Two of those settings name
+    /// programs:
+    ///
+    /// - `core.fsmonitor=false` — the setting names a hook Git runs to ask which
+    ///   paths changed. It is read from the repository being described, so a
+    ///   repository can name a program and have Git start it. Describing a
+    ///   project would then be the same act as running that project's code, and
+    ///   SURE's whole premise is that it inspects a project without executing
+    ///   it. Turning it off costs a slower `status` on repositories that use it,
+    ///   and buys the guarantee that fingerprinting a project cannot execute it.
+    /// - `--no-pager` — `core.pager` names a program too. Git does not page into
+    ///   a pipe, so this changes nothing today; it is here so that it cannot
+    ///   start to matter if this output ever stops being one.
+    ///
+    /// The same reasoning is why the process gets `GIT_TERMINAL_PROMPT=0` and a
+    /// null stdin further down: a Git that stops to ask a question is a check
+    /// that hangs with no output, and a check with no output is indistinguishable
+    /// from one that is still working.
+    ///
+    /// Kept as a named constant rather than written inline so that a test can
+    /// read it, the same way [`Self::STATUS_ARGUMENTS`] is read. A setting that
+    /// quietly stopped being passed is exactly the change no test would
+    /// otherwise notice, because its absence changes no output on any repository
+    /// that does not exploit it.
+    pub const SAFETY_ARGUMENTS: &'static [&'static str] =
+        &["-c", "core.fsmonitor=false", "--no-pager"];
+
     /// The Git the operating system will run when asked for `git`.
     #[must_use]
     pub fn system() -> Self {
@@ -348,8 +381,13 @@ impl Git {
             // Read-only, and it says so. Without this, `status` refreshes the
             // index — writing to the repository SURE was asked to look at, and
             // possibly failing on a read-only checkout or a locked index.
-            // Checking a project must not change it.
+            // Checking a project must not change it. It also removes the index
+            // refresh, and with it the `post-index-change` hook a repository
+            // could otherwise have Git run while SURE is describing it.
             .arg("--no-optional-locks")
+            // What a repository is not allowed to make Git do while answering,
+            // before the subcommand. See [`Self::SAFETY_ARGUMENTS`].
+            .args(Self::SAFETY_ARGUMENTS)
             // One argument per value, never a command line built as a string. A
             // path with a space or a quote in it is one path, and the way it
             // stops being one is by being pasted into something that gets split
@@ -454,6 +492,13 @@ enum Contents {
     /// is the thing every other part of SURE refuses to do, and a link that
     /// points somewhere else is a different link whatever is at the other end.
     Link(String),
+    /// Something that is neither a file nor a directory nor a link, named by its
+    /// kind: a pipe, a socket, a device.
+    ///
+    /// The kind is recorded rather than any contents, because there are none to
+    /// read and because opening it is what would not return. See the arm in
+    /// [`Reader::read`] that produces this.
+    Special(&'static str),
     /// Nothing. Git named a path that is not in the working tree — a deletion,
     /// or a staged change whose file has since gone.
     Gone,
@@ -472,11 +517,43 @@ impl Contents {
             Self::Link(target) => {
                 digest.field("link").field(target);
             }
+            Self::Special(kind) => {
+                digest.field("special").field(kind);
+            }
             Self::Gone => {
                 digest.field("gone");
             }
         }
     }
+}
+
+/// What kind of not-a-file something is, as a name that goes in a digest.
+///
+/// The names are this module's own and are never printed to anybody, so they are
+/// stable across platforms on purpose: `fifo` means the same state on Linux and
+/// on macOS, and a digest taken on one is the digest the other would take. On
+/// Windows a pipe is not a filesystem entry and Git cannot report one as a
+/// tracked path, so the fall-through is what Windows returns.
+fn file_kind(file_type: &fs::FileType) -> &'static str {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+        if file_type.is_fifo() {
+            return "fifo";
+        }
+        if file_type.is_socket() {
+            return "socket";
+        }
+        if file_type.is_char_device() {
+            return "char-device";
+        }
+        if file_type.is_block_device() {
+            return "block-device";
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = file_type;
+    "other"
 }
 
 /// One path Git named, together with what was found at it.
@@ -548,6 +625,27 @@ impl<'a> Reader<'a> {
         }
         if metadata.is_dir() {
             return self.tree(relative, entry);
+        }
+        if !metadata.is_file() {
+            // Neither a file, nor a directory, nor a link: a pipe, a socket, a
+            // device. **This is answered without opening it, because opening it
+            // is the thing that does not return.** `File::open` on a FIFO with
+            // no writer blocks until one appears, and SURE reading a project
+            // must not be stoppable by the project: a repository that tracks
+            // `f` and whose working tree has a FIFO at `f` would otherwise hang
+            // a check with no output and no way to tell it from a slow one.
+            //
+            // What is recorded is the kind, and not "no contents". A file
+            // replaced by a pipe is a change, and a pipe replaced by a socket is
+            // a change; recording both as `Gone` would make them one state. This
+            // is the same decision as [`Contents::Link`] — describe what is
+            // there, do not read through it — and it is why a special file named
+            // by Git is *covered* while one met inside a walked directory is a
+            // loss the walk refuses on. The walk cannot tell what else a
+            // directory it could not fully read contains; Git has named exactly
+            // one path, and its kind is knowable without opening it.
+            self.take_file(relative)?;
+            return Ok(Contents::Special(file_kind(&metadata.file_type())));
         }
         self.read_bytes(relative, entry)
     }

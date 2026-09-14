@@ -120,16 +120,18 @@ is fresh on every computation so that two results can be told apart by value; th
 
 ### What Git is asked
 
-One invocation, through one abstraction (`Git`, and `Git::STATUS_ARGUMENTS` is
-read by a test that fails if a second place starts Git):
+One invocation, through one abstraction (`Git`, and `Git::STATUS_ARGUMENTS` and
+`Git::SAFETY_ARGUMENTS` are read by tests, one of which fails if a second place
+starts Git):
 
 ```
-git --no-optional-locks -C <root> status --porcelain=v2 -z --branch \
-    --untracked-files=all --no-renames -- .
+git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> status \
+    --porcelain=v2 -z --branch --untracked-files=all --no-renames -- .
 ```
 
-plus `git --no-optional-locks -C <root> rev-parse --show-prefix`, which is also
-how "there is no repository here" is detected.
+plus `git --no-optional-locks -c core.fsmonitor=false --no-pager -C <root> \
+rev-parse --show-prefix`, which is also how "there is no repository here" is
+detected.
 
 | Flag | Why it is there |
 | --- | --- |
@@ -140,6 +142,33 @@ how "there is no repository here" is detected.
 | `--no-renames` | a similarity heuristic whose threshold is configuration and whose behaviour has changed between Git versions cannot be allowed to decide a digest |
 | `-- .` | only this project, in a repository that may hold several |
 | `--no-optional-locks` | `status` must not refresh the index: checking a project must not change it |
+| `-c core.fsmonitor=false` | a repository's own configuration names a hook; see below |
+| `--no-pager` | and names a pager, which is the same hazard one step removed |
+
+### A repository is not allowed to make Git run a program
+
+`core.fsmonitor` names a hook that Git runs to ask which paths changed. It is
+read **from the repository being described**, and a project is untrusted input
+by assumption here — it may have been written by a coding agent, or cloned from
+anywhere. Without the override, fingerprinting a project would be the same act
+as running whatever that project says to run, which is the opposite of what SURE
+promises: it inspects a project without executing it.
+
+`core.pager` names a program too. Git does not page into a pipe, so `--no-pager`
+changes nothing today; it is passed so that it cannot start to matter if this
+output ever stops being one. `--no-optional-locks` already closes the third
+route of the same kind, the `post-index-change` hook, by removing the index
+refresh that would fire it.
+
+Three further settings are made for the same reason — that a check must not be
+stoppable by the thing it checks. `GIT_TERMINAL_PROMPT=0` and a null stdin mean
+a Git that wants to ask a question fails rather than waiting for an answer
+nobody will give, and the settings are on `SAFETY_ARGUMENTS` rather than written
+into the command so that a test can read them. **That test is the only thing
+that would notice their removal**: on every repository that does not exploit
+them, dropping them changes no output, fails nothing, and produces exactly the
+same fingerprint. The one case where it matters is the one case where noticing
+afterwards is too late.
 
 ### `--relative` is not used, and must not be
 
@@ -289,7 +318,23 @@ Each is recorded so it is not forgotten, with the reason it is not closed.
    whole project, which costs more than it is worth for a window of
    milliseconds.
 
-Gaps 1, 3 and 4 are stated in the module comment of
+6. **A pipe, a socket or a device at a tracked path, on Windows.** A path that
+   is none of a file, a directory or a link is described by its kind and never
+   opened, because `File::open` on a FIFO with no writer **blocks until a writer
+   appears** — and the working tree is written by whoever SURE is checking. A
+   project could otherwise hang a check with no output, and a check that never
+   returns cannot be told apart from one that is still working. The Unix test is
+   the one that matters, since Unix is where the hang is possible; on Windows a
+   pipe is not a filesystem entry, so Git cannot name one as a tracked path and
+   the arm is unreachable there. Two facts about Git were measured while writing
+   that test rather than assumed, and both are easy to get backwards: a tracked
+   path whose working-tree entry is replaced by a pipe **is** reported, as an
+   ordinary modified file, which is why the fixture commits before replacing it;
+   and an *untracked* pipe is **not** reported at all, so nothing may be
+   concluded from its absence from a fingerprint — it is absent from Git's
+   answer first.
+
+Gaps 1, 3, 4 and 6 are stated in the module comment of
 `crates/sure-core/tests/fingerprint_git.rs`, which is where a reader looks for
 what a test file does *not* cover; that comment also names a fourth untested
 case, `core.symlinks=false`, which is a branch of gap 1 rather than a separate
@@ -298,10 +343,14 @@ Windows is the thing gap 1 says this machine cannot do — so on Windows the who
 of the link behaviour, wider and blind alike, is asserted by no test at all, and
 this document is the only place it is written down. Gap 5 is a property of any
 design that reads files after asking Git about them, and no test can pin it.
+Gap 6's Unix test is the one that can hang, so it runs on a worker thread and
+fails by name after a timeout rather than sitting there — a hang is a failure
+that reports nothing, and the point of the test is that a project must not be
+able to cause one.
 
-The same asymmetry runs through the "Enforced by" table below: the two rows
-marked (Unix) are the ones with no Windows test, and they are the two rows about
-links.
+The same asymmetry runs through the "Enforced by" table below: the rows marked
+(Unix) are the ones with no Windows test, and they are the rows about links,
+about a file that cannot be read, and about pipes.
 
 ## Enforced by
 
@@ -333,6 +382,8 @@ links.
 | A refusal is never an empty fingerprint | this document | `a_directory_that_is_not_in_a_repository_has_no_fingerprint`, `git_that_will_not_start_is_a_refusal_and_not_an_empty_fingerprint`, `a_relative_root_is_refused_rather_than_resolved_against_the_current_directory`, `a_change_to_a_file_sure_cannot_read_has_no_fingerprint` (Unix) |
 | Git is started in exactly one place | `RUST_DESIGN.md` §Git | `git_is_started_in_exactly_one_place` |
 | `--relative` is never used | this document | `the_status_arguments_are_the_ones_the_module_doc_explains` |
+| A repository cannot make Git run a program | this document | `the_settings_that_stop_a_repository_running_a_program_are_still_passed` |
+| A pipe is described and not opened | this document | `a_tracked_path_replaced_by_a_pipe_is_a_change_and_not_a_hang` (Unix) |
 | The digest is a correct SHA-256 | this document | `the_published_sha256_vectors_come_out_right` |
 | Fields cannot be re-split across a boundary | this document | `the_framing_separates_a_split_in_a_different_place` |
 | A Git digest is never a content digest | this document | `a_digest_of_one_kind_is_never_a_digest_of_another` |

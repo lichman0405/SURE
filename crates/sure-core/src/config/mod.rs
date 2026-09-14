@@ -1384,9 +1384,21 @@ report:
                 error.kind()
             );
         }
-        // A Windows drive-qualified path is refused on the same grounds.
-        let error = error_from("project_intent:\n  spec_path: \"C:/secrets/spec.md\"\n");
-        assert!(matches!(error.kind(), ErrorKind::OutsideProject { .. }));
+        // A Windows drive-qualified path is refused on the same grounds — and
+        // this assertion is Windows-only, because its *premise* is. On Unix
+        // there are no drive prefixes at all: `C:/secrets/spec.md` parses as the
+        // relative path `C:/secrets/spec.md` and stays inside the project, so
+        // the correct answer there is the one the last line of this test gives
+        // for `docs/spec.md`. Asserting the Windows answer on Unix is asserting
+        // one platform's syntax onto another, and it was failing in CI.
+        //
+        // The Unix absolute-path case is already covered above by `/etc/spec.md`
+        // and the parent-directory escape by `../elsewhere/spec.md`.
+        #[cfg(windows)]
+        {
+            let error = error_from("project_intent:\n  spec_path: \"C:/secrets/spec.md\"\n");
+            assert!(matches!(error.kind(), ErrorKind::OutsideProject { .. }));
+        }
 
         // A path inside the project is fine.
         Config::from_yaml("project_intent:\n  spec_path: docs/spec.md\n").expect("an inside path");

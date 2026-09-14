@@ -29,6 +29,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// Gated to exactly the platforms whose test uses it. The only caller is
+// [`a_name_that_is_not_valid_unicode_is_ordered_by_the_name_and_not_by_its_text`],
+// which excludes macOS; a bare `use` here is dead code on macOS and
+// `cargo clippy --all-targets -D warnings` in CI says so.
+#[cfg(not(target_os = "macos"))]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -277,7 +282,14 @@ fn name_that_is_not_valid_unicode() -> std::ffi::OsString {
 }
 
 /// A file name the platform will accept and that is not valid Unicode.
-#[cfg(unix)]
+///
+/// `all(unix, not(target_os = "macos"))` and not a bare `unix`, because the
+/// caller excludes macOS (APFS validates a name as UTF-8, so the fixture may not
+/// be constructible there) while `unix` includes it. A helper gated *more
+/// widely* than its only caller is dead code on the platforms in the gap, and
+/// the Windows job cannot see it: the gap is macOS, and that is one of the two
+/// jobs that were red.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn name_that_is_not_valid_unicode() -> std::ffi::OsString {
     // The UTF-8 encoding of the same unpaired surrogate. A Unix file name is a
     // byte string, so this is a name the filesystem takes and UTF-8 rejects.

@@ -333,6 +333,28 @@ impl<'a> Tree<'a> {
     pub(super) fn is_directory(&self, relative: &Path) -> bool {
         self.directories.contains(&self.key(relative))
     }
+
+    /// The files directly inside `relative`, in a fixed order.
+    ///
+    /// For the one question discovery cannot ask by name: *which requirements
+    /// files does this project have?* Their names are chosen by the project —
+    /// `requirements.txt`, `requirements-dev.txt`, `requirements-prod.txt` —
+    /// so there is no fixed list to probe, and an arbitrary list of guesses
+    /// would silently miss the one a project actually has.
+    ///
+    /// Only files: a *directory* named `requirements.txt` is not a requirements
+    /// file, and naming it as one would be a claim the walk does not support.
+    /// Empty for a path the walk did not list, which is indistinguishable from a
+    /// directory with no files in it and deliberately so — see
+    /// [`Self::child_directories`] for the same rule.
+    pub(super) fn child_files(&self, relative: &Path) -> Vec<&'a Path> {
+        let parent = self.key(relative);
+        self.files
+            .iter()
+            .filter(|(_, path)| self.key(path.parent().unwrap_or(Path::new(""))) == parent)
+            .map(|(_, path)| *path)
+            .collect()
+    }
 }
 
 /// What is at a name, before reading it.
@@ -392,6 +414,127 @@ pub(super) fn read_yaml(
         Err(error) => ReadFile::Unread(UnreadReason::NotParsed {
             detail: error.to_string(),
         }),
+    }
+}
+
+/// Read one file as TOML, within the limits.
+///
+/// Parsed into the same [`serde_json::Value`] a JSON or YAML manifest is, so all
+/// three kinds of manifest are interpreted by one set of accessors rather than
+/// by three that agree today.
+///
+/// # Why this does not deserialize straight into `serde_json::Value`
+///
+/// `toml::from_str::<serde_json::Value>` compiles, runs, and **changes values
+/// the project declared**, in two ways that were measured rather than assumed
+/// before this function was written:
+///
+/// ```text
+/// when = 2024-01-01        -> {"when":{"$__toml_private_datetime":"2024-01-01"}}
+/// a = inf                  -> {"a":null}
+/// b = nan                  -> {"b":null}
+/// ```
+///
+/// The first invents a table the project did not write, under a key that looks
+/// exactly like project data — a manifest with a date in it would be described
+/// as declaring that table, and a project that genuinely declared a key of that
+/// name would be indistinguishable from one that declared a date. The second
+/// turns a value that was there into a value that is not. Both are the failure
+/// `CLAUDE.md` ranks above a visible error: not a parse that failed, but a
+/// document described as saying something it does not say.
+///
+/// So the conversion is written out here, and it holds to one rule: **a value
+/// that JSON cannot represent is carried as the text TOML wrote it with.** A
+/// datetime becomes its own TOML spelling as a string; a non-finite float
+/// becomes `inf`, `-inf` or `nan`, which is what the project wrote. Nothing is
+/// dropped and nothing is invented. Nothing in a `pyproject.toml` is
+/// *interpreted* from it — a version pin whose spelling is a date is still
+/// carried verbatim and never resolved.
+pub(super) fn read_toml(
+    root: &Path,
+    probe: Probe<'_>,
+    options: &DiscoverOptions,
+    budget: &mut Budget,
+) -> ReadFile {
+    let text = match read_text(root, probe, options, budget) {
+        Ok(text) => text,
+        Err(read) => return read,
+    };
+    match toml::from_str::<toml::Value>(&text) {
+        Ok(value) => ReadFile::Parsed(to_json(&value)),
+        Err(error) => ReadFile::Unread(UnreadReason::NotParsed {
+            detail: error.to_string(),
+        }),
+    }
+}
+
+/// Read one file as text, within the limits.
+///
+/// The value is a JSON string holding the file's whole text, so that a file
+/// whose entire content *is* the claim — `.python-version`, a
+/// `requirements.txt` — is read by the same code, within the same limits, and
+/// reported by the same [`ReadFile`] arms as every structured manifest. A
+/// separate reader for "the file is just text" would be a second place for
+/// *absent* and *unreadable* to be confused, which is the whole reason this
+/// module exists.
+///
+/// The text is **not trimmed, split or normalised** here. A caller that wants
+/// lines splits them itself, because what a newline means depends on the format
+/// it is reading and this function does not know it.
+pub(super) fn read_text_file(
+    root: &Path,
+    probe: Probe<'_>,
+    options: &DiscoverOptions,
+    budget: &mut Budget,
+) -> ReadFile {
+    match read_text(root, probe, options, budget) {
+        Ok(text) => ReadFile::Parsed(serde_json::Value::String(text)),
+        Err(read) => read,
+    }
+}
+
+/// A TOML value as the JSON-shaped value everything else here reads.
+///
+/// Total by construction: every `toml::Value` has an answer, and the arms that
+/// have to change the kind of a value say so. See [`read_toml`].
+///
+/// `pub(super)` rather than private because [`super::python`]'s tests build
+/// their fixtures by parsing a TOML string, and going through *this* function
+/// means those tests exercise the same conversion the reader uses. A private
+/// copy beside them would test a conversion nothing runs.
+pub(super) fn to_json(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(text) => serde_json::Value::String(text.clone()),
+        toml::Value::Integer(number) => serde_json::Value::Number((*number).into()),
+        toml::Value::Float(number) => match serde_json::Number::from_f64(*number) {
+            Some(number) => serde_json::Value::Number(number),
+            // JSON has no way to write a non-finite number. The string is
+            // TOML's own spelling of the same value, so this is the one
+            // conversion that loses nothing and invents nothing: `inf` is what
+            // the project wrote.
+            None => serde_json::Value::String(
+                if number.is_nan() {
+                    "nan"
+                } else if number.is_sign_negative() {
+                    "-inf"
+                } else {
+                    "inf"
+                }
+                .to_owned(),
+            ),
+        },
+        toml::Value::Boolean(flag) => serde_json::Value::Bool(*flag),
+        // A TOML datetime is not a string in TOML and would have to be one in
+        // JSON either way. `Display` renders the document's own text rather
+        // than a re-formatted instant, so `2024-01-01` stays `2024-01-01`.
+        toml::Value::Datetime(when) => serde_json::Value::String(when.to_string()),
+        toml::Value::Array(items) => serde_json::Value::Array(items.iter().map(to_json).collect()),
+        toml::Value::Table(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.clone(), to_json(value)))
+                .collect(),
+        ),
     }
 }
 
@@ -544,6 +687,114 @@ pub(super) fn contained_relative(text: &str) -> Option<PathBuf> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// Parse a TOML document the way [`read_toml`] does, without a file.
+    fn toml_value(text: &str) -> serde_json::Value {
+        to_json(&toml::from_str::<toml::Value>(text).expect("the test document must parse"))
+    }
+
+    #[test]
+    fn a_toml_datetime_is_carried_as_the_text_that_was_written() {
+        // The claim this holds, and the reason `read_toml` does not deserialize
+        // straight into `serde_json::Value`: that path turns every date into
+        // `{"$__toml_private_datetime": "..."}`, a table the project did not
+        // write. A manifest with a release date in it would be described as
+        // declaring a table, and a project that genuinely declared a key of
+        // that name would read identically to one that declared a date.
+        for (written, text) in [
+            ("2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z"),
+            ("2024-01-01", "2024-01-01"),
+            ("07:32:00", "07:32:00"),
+            (
+                "1979-05-27T07:32:00.999999-07:00",
+                "1979-05-27T07:32:00.999999-07:00",
+            ),
+        ] {
+            let document = format!("when = {written}\n");
+            assert_eq!(
+                toml_value(&document),
+                serde_json::json!({ "when": text }),
+                "{written} did not survive the read as text"
+            );
+        }
+        // The premise, asserted rather than described: the direct conversion
+        // really does invent that table. If a future `toml` changes this, the
+        // comment above is what has to be rewritten, not the behaviour.
+        let invented = toml::from_str::<serde_json::Value>("when = 2024-01-01\n")
+            .expect("the document parses");
+        assert_eq!(
+            invented,
+            serde_json::json!({ "when": { "$__toml_private_datetime": "2024-01-01" } }),
+            "the reason this function exists no longer holds; re-measure before \
+             simplifying it away"
+        );
+    }
+
+    #[test]
+    fn a_toml_number_json_cannot_write_is_carried_as_the_text_that_was_written() {
+        // `inf` and `nan` become `null` under the direct conversion, which is a
+        // value that was declared becoming a value that was not.
+        assert_eq!(
+            toml_value("a = inf\nb = -inf\nc = nan\n"),
+            serde_json::json!({ "a": "inf", "b": "-inf", "c": "nan" })
+        );
+        // And the ordinary numbers are still numbers, so the rule above is not
+        // costing every float its type.
+        assert_eq!(
+            toml_value("a = 1.5\nb = 3\nc = -0.25\nd = 1e10\n"),
+            serde_json::json!({ "a": 1.5, "b": 3, "c": -0.25, "d": 1e10_f64 })
+        );
+        assert_eq!(
+            toml::from_str::<serde_json::Value>("a = inf\n").expect("the document parses"),
+            serde_json::json!({ "a": null }),
+            "the reason this function exists no longer holds; re-measure before \
+             simplifying it away"
+        );
+    }
+
+    #[test]
+    fn a_toml_document_keeps_its_shape_its_order_and_its_types() {
+        // The rest of the conversion is meant to be unremarkable, which is why
+        // it is asserted: a conversion that quietly flattened a nested table
+        // would be found by this and not by the two tests above.
+        let value = toml_value(
+            "[project]\n\
+             name = \"x\"\n\
+             dependencies = [\"a>=1\", \"b\"]\n\
+             \n\
+             [project.optional-dependencies]\n\
+             dev = [\"pytest\"]\n\
+             \n\
+             [tool.poetry]\n\
+             name = \"x\"\n\
+             \n\
+             [[tool.uv.workspace.members]]\n",
+        );
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "project": {
+                    "name": "x",
+                    "dependencies": ["a>=1", "b"],
+                    "optional-dependencies": { "dev": ["pytest"] }
+                },
+                "tool": { "poetry": { "name": "x" }, "uv": { "workspace": { "members": [{}] } } }
+            })
+        );
+        assert_eq!(
+            value.pointer("/project/dependencies/0"),
+            Some(&serde_json::json!("a>=1")),
+            "a version requirement is carried verbatim, never resolved"
+        );
+    }
+
+    #[test]
+    fn a_toml_document_that_is_not_valid_toml_is_unread_and_never_absent() {
+        // The same rule the JSON and YAML readers hold to. A `pyproject.toml`
+        // with a syntax error in it is a file that is there and was not read.
+        let broken = toml::from_str::<toml::Value>("[project\nname = \"x\"\n");
+        assert!(broken.is_err(), "the fixture must not parse");
+    }
 
     #[test]
     fn a_path_a_manifest_named_cannot_leave_the_project() {

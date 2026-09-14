@@ -28,9 +28,20 @@ serde_json = "1.0.140"
 # `docs/architecture/CLI.md` records what the flag decides and what it does not:
 # clap parses the command line, and every decision about *output* is SURE's.
 clap = { version = "4.6.6", features = ["derive"] }
-# Test-support only. Manifest parsing for the crate-boundary policy test must use
-# a real TOML parser: a hand-rolled one could silently mis-parse and report "no
-# violations", which is a false green in the check that exists to prevent them.
+# Two readers, one parser. The crate-boundary policy test must use a real TOML
+# parser — a hand-rolled one could silently mis-parse and report "no violations",
+# which is a false green in the check that exists to prevent them — and
+# `sure-core` reads `pyproject.toml` with it for the same reason. It was
+# test-support-only until `P2-T005`; `Cargo.toml` is `P2-T006`'s reader and not
+# implemented yet.
+#
+# **Not deserialized straight into `serde_json::Value`.** `toml` represents a
+# TOML datetime in JSON as `{"$__toml_private_datetime": "2024-01-01"}` — a
+# table that the project did not write, under a key that looks like project
+# data — and it represents `inf` and `nan` as `null`. Both are a declared value
+# silently becoming a different value, so `discover::read::read_toml` converts
+# `toml::Value` explicitly and carries anything JSON cannot represent as the
+# text TOML wrote it with.
 toml = "1.1.6"
 # `sure.yaml` is a documented product surface (`PROJECT_NAME.md`,
 # `docs/architecture/ARCHITECTURE.md`), so it is parsed with a real YAML parser

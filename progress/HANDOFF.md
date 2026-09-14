@@ -1707,9 +1707,18 @@ it needs a Mac.
    explicit goal/spec, which `Config` already carries a slot for.
    `P2-T005` has one known prerequisite that `P2-T004` did not: it needs a TOML
    reader, and `toml` is currently a **test-support** dependency of `sure-core`
-   rather than a real one. Promoting it is part of the task, and
+   rather than a real one. Promoting it is part of the task.
+   **Correction, 2026-09-14, while doing it:** the sentence that stood here said
    `crates/sure-testkit/tests/repository_shape.rs` is where a dependency's
-   category is pinned, so that test is the one that will say whether it was done.
+   category is pinned and that it "is the one that will say whether it was done".
+   That is false. `repository_shape.rs` asserts `member_names()` and
+   `normal_edges()`, both workspace-internal, and its `TestOnlyInProduction`
+   violation fires only for an edge *to* `sure-testkit`; a third-party dependency
+   moving from `[dev-dependencies]` to `[dependencies]` is invisible to it. What
+   actually said whether it was done was `cargo check`, which failed until the
+   move was made. Nothing acted on the false claim, so it is corrected here
+   rather than buried: the pattern to watch for is a handoff sentence that names
+   a test as the authority for a property without the test having been read.
    **Keep the ordering discipline**: push each task's commits, read that run, and
    only then start the next acceptance. The cost of not doing it is already
    written down twice in this file.

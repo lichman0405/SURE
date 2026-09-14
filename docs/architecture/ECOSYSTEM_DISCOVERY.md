@@ -7,6 +7,13 @@ is implemented by `sure_core::scan`. This half is **reading a few named files an
 saying what they claim the project is**; it is implemented by
 `sure_core::discover` (`crates/sure-core/src/discover/`).
 
+Two ecosystems are implemented, each as a module with one entry point:
+**Node** (`node.rs`, from `package.json` and the lockfiles beside it) and
+**Python** (`python.rs`, from `pyproject.toml`, `Pipfile`, `requirements*.txt`
+and the lockfiles beside them). The rule, the four answers, the bounds and the
+gaps below are the same for both; `Ecosystem::ALL` is the list of what a build
+looks for, and `discover()` calls each module in that order.
+
 The whole of this document is one requirement:
 
 > **A manifest states a request, not a fact.**
@@ -44,6 +51,13 @@ So no type in `discover` answers that question with an `Option`:
 - `node::ManifestState` — `Read(Box<Package>)`, `Absent`, `Unread(UnreadReason)`.
 - `node::MemberManifest` — `Present`, `Absent`, `NotReadable(kind)` for a
   workspace member, answered without reading it.
+- `node::MemberManifest` — `Present`, `Absent`, `NotReadable(kind)` for a
+  workspace member, answered without reading it.
+- `python::ManifestState` — the same three answers, holding a `PyProject`.
+  `project()` answers yes/no by returning the manifest `Option`ally, and
+  `is_absent()` is `true` only for the `Absent` arm — so the one question a
+  caller may collapse is the one that collapses to `false` for a file that is
+  there but unread, which is the safe direction.
 
 `UnreadReason` carries the seven ways a file that is there can fail to become a
 value: `OutOfBudget`, `TooLarge`, `Unreadable`, `NotText`, `NotParsed`,
@@ -204,10 +218,137 @@ source files. Counted files are evidence, and `source_files` is a count rather
 than a list — a project with three thousand `.ts` files does not need three
 thousand paths in a discovery result.
 
+## Python
+
+### What SURE looks at, and what counts as a project
+
+| File | What it answers |
+| --- | --- |
+| `pyproject.toml` | dependencies, optional-dependency groups, entry points, the interpreter, the build backend, and any tool table |
+| `Pipfile` | dependencies and dev-dependencies, for pipenv |
+| `requirements*.txt` | dependencies, when a project declares them in a flat file |
+| `uv.lock`, `poetry.lock`, `Pipfile.lock`, `pdm.lock` | which installer the project used |
+| `.python-version` | the interpreter, as the file's own text, trimmed of surrounding whitespace |
+| `setup.py`, `setup.cfg` | that the project declares itself in a way SURE will not read |
+
+**Seven things make this a Python project**, and every one is a project-level
+file: a `pyproject.toml`, a `Pipfile`, a `.python-version`, a `setup.py`, a
+`setup.cfg`, a lockfile, a `requirements*.txt`. As with Node, **source files are
+not on the list** — a directory containing a `.py` file is a directory containing
+a `.py` file. `looks_like_one` is a disjunction over presence probes taken
+*before* any read or any budget spend, so "is this a Python project?" costs
+nothing and a directory that fails it is never opened.
+
+### `setup.py` is a program, so it is never read
+
+This is the ecosystem where "read the manifest" could most easily become "run the
+project". `setup.py` declares its dependencies by *executing Python*, and the
+obvious next step — import it, or shell out to `python setup.py --name` — is the
+step this product does not take at any stage of step 1.
+
+So a `setup.py` is evidence that a project exists and is reported as
+`unread_legacy`, a list of names carried through to the result. **A project whose
+only manifest is a `setup.py` gets `InspectOnly`**: SURE knows it is a Python
+project and knows nothing about what it declares, and says exactly that. A test
+writes a `setup.py` that would leave a file behind if anything executed or
+imported it, runs discovery, and requires that no such file exists.
+
+### The installer, and why a requirements file is the weakest evidence
+
+Three kinds of evidence, kept apart, strongest first:
+
+| Evidence | Where it comes from | What it means |
+| --- | --- | --- |
+| `Declared` | a `[tool.<installer>]` table, or a build backend naming one | the project's own statement about itself |
+| `Lockfile` | a lockfile exists for that installer | that installer has run here |
+| `RequirementsFile` | a `requirements*.txt` exists | somebody installs with `pip`-style flags — and nothing more |
+
+`Installer::from_build_backend` maps only the backends that *are* an installer's
+— `poetry.core.masonry.api` is poetry, `pdm.backend` is pdm. `hatchling.build`,
+`setuptools.build_meta` and `flit_core.buildapi` answer `None`, because hatch,
+setuptools and flit build distributions and do not install; they appear in
+`TOOLS` under `ToolRole::BuildBackend`, where a build backend belongs.
+
+**A requirements file is never evidence of disagreement.** pip, uv, poetry and
+pdm all read `requirements.txt`; a `uv.lock` beside one is the ordinary shape of
+a project that moved to uv, not a contradiction. Reporting it as one would be a
+false alarm, and a false alarm next to a real one is how a reader learns to
+ignore both. The evidence is still collected and still reported — as the third
+tier, where it decides only when nothing stronger is present.
+
+`Disagreement` is the same enum idea as Node's, with Python's three cases: two
+installers declared by two tool tables, two lockfiles, or a declaration and a
+lockfile naming different installers. The third is the one that needs saying out
+loud, because a project configured for poetry with a `uv.lock` beside it is a
+project mid-migration, and `agreed()` answers `None` rather than picking a
+winner. `two_tool_tables_naming_two_installers_are_a_disagreement` records a
+correction: the first version of this code reported two *declarations* as
+`TwoLockfiles`, and the test that came first was asserting the bug.
+
+### Requirements files, line by line
+
+The names after `requirements` are the project's to choose, so the rule is a
+prefix and a suffix (`requirements*.txt`) rather than a list, and the count is
+bounded by `MAX_REQUIREMENTS_FILES` because an unbounded count is work a project
+does not get to ask for. The files read are the first N in sorted order, so which
+ones are left out is a function of the project rather than of the walk.
+
+Every line of a file is accounted for in exactly one of three places —
+`requirements`, `directives`, or a `comments` count — and a test asserts that the
+three add up to the file's line count, so a line cannot be silently dropped.
+
+**A URL is not a distribution name.** `https://example.invalid/pkg-1.0.whl`
+begins with a run of perfectly good name characters, so a naive reader reports
+the project as depending on a package called `https` — an invented fact about the
+project, in the one place the product promises not to invent any. Two rules
+reject it, and both are about what may *follow* a name:
+
+- a name immediately followed by `:` or `/` is not a name, because a URL scheme
+  or a path separator cannot come after one — this is what stops `https://…`;
+- a run that ends in a non-alphanumeric is not a name, because `foo-` and `foo.`
+  are prefixes rather than distributions.
+
+`foo @ https://example.invalid/foo.tar.gz` is still read as `foo`, because that
+is what the line declares. `path.whl` on its own is read as a name called
+`path.whl`, which is correct: nothing follows it, so it is not a URL.
+
+### Tooling, and commands that are only planned where a tool was declared
+
+`TOOLS` is a fixed table of roughly a hundred package names mapped to SURE's own
+`ToolRole` names, matched under pypa name normalisation (case-insensitive; runs
+of `-`, `_` and `.` are equivalent). A project's spelling never reaches a
+finding: `Scikit_Learn` is reported as `scikit-learn`, because the string in a
+finding is SURE's and only a *name recorded as data* may come from the project.
+
+`conventional_commands` returns a row for every `CommandRole` whether or not
+there is a command, for the same reason Node's `conventional_scripts` does: "there
+is no way to check this project's types" is a finding, and a missing line is not.
+**A command is planned only where the tool it would run was declared**, and a row
+with no command carries no `because` — naming the tools a plan rests on when there
+is no plan would be a reader's evidence for a command that does not exist.
+
+The build row names a *frontend* and never a backend library: `setuptools` is
+what a frontend calls, so the plan is `python -m build` with `setuptools` in its
+`because`. Naming `setuptools` as the command would be a plan that does not run,
+and it is the obvious wrong answer here.
+
+### The interpreter is carried verbatim, from every place that states it
+
+`requires-python`, Poetry's `python`, `.python-version` and the
+`Programming Language :: Python :: …` classifiers are four independent claims,
+each with its own `Source`, and `PythonVersion::claims()` yields them separately.
+**SURE does not merge them into one answer.** `>=3.9,<4` is carried as that string
+and not interpreted, because interpreting it means being a version resolver and
+SURE has not run one. That the four can disagree is the project's business, and
+merging them would destroy the disagreement before anyone could see it.
+
 ## Support levels
 
 `grade` returns the level and the sentence together, as constants, so a level and
-its reason cannot be assigned in two places and disagree.
+its reason cannot be assigned in two places and disagree. Each ecosystem module
+has its own, because what counts as "the manifest" differs.
+
+**Node:**
 
 | What was found | Level | Why |
 | --- | --- | --- |
@@ -215,6 +356,16 @@ its reason cannot be assigned in two places and disagree.
 | a `package.json` it could not read | `InspectOnly` | it can only look at the project's files |
 | no manifest, but a lockfile | `InspectOnly` | it is plainly a Node project and nothing is declared |
 | no manifest and no lockfile | `InspectOnly` | only `tsconfig.json`/`pnpm-workspace.yaml` said so |
+
+**Python:**
+
+| What was found | Level | Why |
+| --- | --- | --- |
+| a readable `pyproject.toml` or `Pipfile` | `Generic` | SURE can find how the project is built and run |
+| a manifest it could not read | `InspectOnly` | it can only look at the project's files |
+| no readable manifest, but a lockfile | `InspectOnly` | it is plainly a Python project and nothing is declared |
+| only a `requirements*.txt` | `InspectOnly` | a requirements file says what to install and not how the project is built |
+| only `setup.py`, `setup.cfg` or `.python-version` | `InspectOnly` | nothing SURE will read declares anything |
 
 ## What is bounded, and how
 
@@ -226,7 +377,18 @@ and every one that is reached is reported rather than applied quietly.
 | `max_manifest_bytes` | 8 MiB | `TooLarge` — a refusal, **not** a parse of the first however-many bytes |
 | `max_manifests` | 512 | `OutOfBudget` for the manifests after it |
 | `max_workspace_members` | 512 | `Workspaces::truncated` |
+| `MAX_REQUIREMENTS_FILES` | 32 | the files after it are not read; the first 32 in sorted order are |
+| `MAX_REQUIREMENTS_LINES` | 4096 | `RequirementsFile::truncated` |
 | `scan.max_depth`, `scan.max_entries` | see `PROJECT_DISCOVERY.md` | as that document says |
+
+**One budget serves both ecosystems.** `discover()` builds a single `Budget` and
+hands the same one to `node::look` and then to `python::look`, in
+`Ecosystem::ALL` order. A project with five hundred Node manifests therefore
+leaves nothing for Python, and its Python manifest is `OutOfBudget` rather than
+read. That is the intended reading of "how many manifests SURE will read in one
+discovery" — the limit is on the run and not on the ecosystem — but it is a
+consequence of the call order rather than of anything Python's module does, so it
+is recorded here rather than left to be discovered.
 
 Two rules are taken from the rest of SURE rather than decided here. **A link is
 never read through**: `crate::scan` does not follow one and `crate::fingerprint`
@@ -244,16 +406,18 @@ with no `pnpm-workspace.yaml` does not pay for looking.
 
 ## What discovery does not do
 
-**It runs nothing.** No `npm`, no `node`, no resolver, no network. Reading a
-manifest is not executing a project, and the whole of step 1 is on the
-inspect-only side of `docs/architecture/EXECUTION_SAFETY.md`. A test writes a
-`build` script whose command would leave a file behind and requires that the file
-does not exist afterwards.
+**It runs nothing.** No `npm`, no `node`, no `python`, no `uv`, no resolver, no
+network. Reading a manifest is not executing a project, and the whole of step 1
+is on the inspect-only side of `docs/architecture/EXECUTION_SAFETY.md`. Two tests
+hold this line, one per ecosystem: the Node one writes a `build` script whose
+command would leave a file behind, the Python one writes a `setup.py` and a
+`conftest.py` that would each leave one behind if executed *or imported*, and
+both require the file to be absent afterwards.
 
-**It does not look at `node_modules`**, and not only because the scan leaves it
-out. What is installed is `node_modules`'s answer, and a directory that is
-usually absent, usually stale and never committed is not a fact about the project
-a person can act on.
+**It does not look at `node_modules`, `.venv`, or what is installed anywhere
+else**, and not only because the scan leaves those out. What is installed is the
+package manager's answer, and a directory that is usually absent, usually stale
+and never committed is not a fact about the project a person can act on.
 
 **It does not decide whether the project is good.** It says what the project
 declares and at what support level; whether the declaration is honest is what the
@@ -331,23 +495,70 @@ Recorded so they are not forgotten. None is resolved by a task yet.
    `progress/HANDOFF.md`, which also records that the notification carried no
    finding text and that this gap is what an inspection of the file found.
 
+7. **`*.egg-info` is not skipped, and cannot be with the table as it is.**
+   `scan/ignore.rs` matches **exact names only**, deliberately — there is no glob
+   language in it — and `foo.egg-info` is `foo`'s name with a suffix. `.tox`,
+   `.nox` and `.eggs` were added to `IGNORED_DIRECTORIES` as `Vendored` by
+   P2-T005; `*.egg-info` is recorded here as the entry that belongs beside them
+   and cannot be expressed. Adding a suffix rule to the table would change what
+   the whole ignore list means for every entry in it.
+
+8. **Python workspace members are not resolved.** uv
+   (`[tool.uv.workspace] members`) and PDM (`[tool.pdm.workspace]`) both have a
+   first-class member list, and neither is followed. The table's *presence* is
+   read, and correctly: it is evidence that the installer is configured. Its
+   contents are not, so a Python monorepo reports as one project with one
+   manifest read, and `max_workspace_members` — a Node-era limit — does not apply
+   to Python at all.
+
+9. **A project that declares its tooling outside the manifest reports none.**
+   `noxfile.py`, `tox.ini` and `.pre-commit-config.yaml` are three real ways to
+   declare a test runner or a linter, and none is on the list of files SURE looks
+   at — so a project that names `ruff` only in `.pre-commit-config.yaml` is
+   reported as having no linter, which is a negative finding about tooling the
+   project does have. This bears directly on P2-T005's "declared test and lint
+   tooling": SURE detects the tooling declared *in the files it reads*, and
+   `.pre-commit-config.yaml` is not one of them. `noxfile.py` is the same shape as
+   `setup.py` — a program — so reading it would need its own decision rather than
+   an entry in a table.
+
+10. **`Installer::Pip` is inferred, never declared.** There is no `[tool.pip]`
+    table in any real project, so pip reaches a finding only through a
+    `requirements*.txt` — the third evidence tier. A project that installs with
+    plain `pip` and no requirements file is reported with no installer at all,
+    which is the honest answer and not a satisfying one.
+
 ## Enforced by
+
+Node tests are in `crates/sure-core/tests/discover_node.rs`; Python tests are in
+`crates/sure-core/tests/discover_python.rs`; unit-test names without a file are in
+`src/discover/python.rs`.
 
 | Statement | Where the meaning lives | Enforced by |
 | --- | --- | --- |
-| A finding always names the file it came from | this document | every `Source` field; `the_conclusion_names_the_files_it_rests_on` |
-| "Not there" is never "there and unreadable" | this document, `discover/read.rs` | `a_manifest_that_is_valid_json_and_not_a_manifest_is_unread_too`, `a_manifest_that_is_not_json_is_unread_and_never_absent`, `every_reason_says_which_of_the_four_answers_it_is` |
-| An unread file is recorded in the result, not only in the state | this document, `discover/node.rs` `read_manifest` | the same two tests' assertions on `Discovery::unread` |
+| A finding always names the file it came from | this document | every `Source` field; `the_conclusion_names_the_files_it_rests_on`, `a_pyproject_toml_project_is_found_and_read` |
+| "Not there" is never "there and unreadable" | this document, `discover/read.rs` | `a_manifest_that_is_valid_json_and_not_a_manifest_is_unread_too`, `a_manifest_that_is_not_json_is_unread_and_never_absent`, `every_reason_says_which_of_the_four_answers_it_is`; for Python `a_manifest_that_is_not_toml_is_unread_and_never_absent`, `a_manifest_too_large_to_read_is_unread_rather_than_half_read`, `a_manifest_sure_ran_out_of_budget_for_is_unread_and_never_absent` |
+| An unread file is recorded in the result, not only in the state | this document, `read_manifest` in `node.rs` and `python.rs` | the same tests' assertions on `Discovery::unread` |
 | A link is never read through | this document, `PROJECT_DISCOVERY.md` | `a_link_named_package_json_is_not_read_through` (a real link out of the project, and a real manifest at the far end) |
-| A byte limit is a refusal, not a partial read | this document | `a_file_too_large_to_read_is_unread_rather_than_half_read` |
+| A byte limit is a refusal, not a partial read | this document | `a_file_too_large_to_read_is_unread_rather_than_half_read`; `a_requirements_file_that_could_not_be_read_is_named_and_not_dropped` |
 | The manifest budget is finite and reported when spent | this document | `a_manifest_sure_ran_out_of_budget_for_is_unread_and_never_absent`, `a_budget_of_zero_reads_nothing_and_says_so_rather_than_reading_anything` |
 | A pattern cannot leave the project | this document | `a_workspace_pattern_cannot_reach_outside_the_project` |
 | The root is never its own member | this document | `the_root_is_never_a_member_of_its_own_workspace` |
 | Two pieces of manager evidence pointing apart is reported | this document | `a_project_that_names_one_manager_and_locks_another_is_reported_not_resolved`, `two_lockfiles_for_two_managers_are_a_disagreement`, `two_lockfiles_for_two_managers_are_a_disagreement_and_two_for_one_are_not` |
-| No project string reaches a sentence | this document | the fixed `TOOLS` table; `Source::says` is `&'static str`; `a_tool_is_named_from_the_table_and_never_from_the_manifest` |
-| Discovery runs no program | this document, `EXECUTION_SAFETY.md` | `discovery_runs_none_of_the_scripts_it_reads` (writes a marker, requires it absent) |
-| A conventional role with no script is still a row | this document | `every_conventional_role_has_a_row_whether_or_not_it_is_declared` |
-| Order is fixed and independent of the filesystem | `PROJECT_DISCOVERY.md` | `discovery_is_a_function_of_the_project_and_not_of_the_run` |
+| The same, for installers | this document, `python.rs` | `two_tool_tables_naming_two_installers_are_a_disagreement`, `a_configured_installer_and_a_lockfile_for_another_are_a_disagreement`, `two_lockfiles_are_reported_as_a_disagreement_rather_than_resolved`, `a_configured_installer_and_another_lockfile_are_a_disagreement` |
+| A requirements file is evidence and never a disagreement | this document | `a_requirements_file_is_the_weakest_evidence_and_never_a_disagreement` |
+| No project string reaches a sentence | this document | the fixed `TOOLS` table; `Source::says` is `&'static str`; `a_tool_is_named_from_the_table_and_never_from_the_manifest`, `a_project_declares_its_test_and_lint_tooling_and_sure_names_it` |
+| Discovery runs no program | this document, `EXECUTION_SAFETY.md` | `discovery_runs_none_of_the_scripts_it_reads` (Node) and `discovery_runs_nothing` (Python, where a `setup.py` and a `conftest.py` would each leave a file behind) |
+| A conventional role with no script is still a row | this document | `every_conventional_role_has_a_row_whether_or_not_it_is_declared`; `a_command_is_planned_only_for_a_tool_the_project_declared` |
+| A planned command names a frontend and not a backend library | this document | `a_build_plan_names_a_frontend_and_never_the_backend_library` |
+| `setup.py` is reported and not read | this document | `a_setup_py_is_reported_rather_than_read` |
+| The interpreter is carried verbatim from every source | this document | `the_interpreter_the_project_asks_for_is_carried_verbatim_from_every_place`, `a_python_version_file_is_read_as_its_whole_text` |
+| Every line of a requirements file is accounted for | this document | `a_requirements_file_keeps_every_line_in_exactly_one_place` |
+| A URL line is not a dependency | this document | `a_url_line_in_a_requirements_file_is_not_a_dependency_named_https` |
+| Only a project-level file makes a project | this document | `a_directory_of_python_files_with_no_manifest_is_not_a_python_project`, `every_file_that_marks_a_python_project_is_enough_on_its_own` |
+| A directory that is not a project is not reported as one | this document | the two tests above; `a_directory_with_no_node_files_in_it_is_not_a_node_project` |
+| Order is fixed and independent of the filesystem | `PROJECT_DISCOVERY.md` | `discovery_is_a_function_of_the_project_and_not_of_the_run`, `thicker_requirements_files_are_all_read_and_in_a_fixed_order`, `a_project_that_is_both_node_and_python_reports_both_in_a_fixed_order` |
+| A project SURE could not read is not reported as completely understood | `PROJECT_DISCOVERY.md` | `a_scan_that_looked_at_everything_says_so_and_one_that_did_not_says_what_it_missed` |
 
 The "runs nothing" test is worth a note: no run of the code demonstrates that a
 program was never executed, so the test also greps `discover/{mod,node,read}.rs`

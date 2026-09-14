@@ -502,6 +502,7 @@ dependencies = [
  "sure-domain",
  "sure-protocol",
  "sure-testkit",
+ "toml",
 ]
 
 [[package]]

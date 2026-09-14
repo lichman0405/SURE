@@ -127,6 +127,10 @@ impl Fixture {
         });
         match &report.findings {
             Findings::Node(node) => (**node).clone(),
+            // The enum makes this arm mandatory rather than optional, which is
+            // the reason it is an enum: a report for one ecosystem cannot be
+            // handed to a test that asked for another without saying so.
+            other => panic!("the Node report carried {other:?}"),
         }
     }
 
@@ -222,10 +226,20 @@ fn a_directory_with_no_node_files_in_it_is_not_a_node_project() {
     // The part that matters: `ecosystems` being empty means *none of these were
     // found*, and the list of what was looked for is what makes that a
     // statement instead of a shrug.
+    //
+    // Asserted as the whole list this build looks for rather than as a list
+    // written out here. It was written out here, and adding Python to the build
+    // broke it — the test claimed to be about empty results and was really also
+    // asserting a fact about which ecosystems exist, which is a fact it has no
+    // business pinning.
     assert_eq!(
         found.looked_for(),
-        &[Ecosystem::Node],
-        "an empty result must still say what was looked for"
+        Ecosystem::ALL,
+        "an empty result must say everything this build looked for"
+    );
+    assert!(
+        found.looked_for().contains(&Ecosystem::Node),
+        "and Node is one of the things it looked for"
     );
     assert!(found.is_complete());
 }
@@ -1173,6 +1187,7 @@ fn a_manifest_sure_ran_out_of_budget_for_is_unread_and_never_absent() {
         .findings
     {
         Findings::Node(node) => (**node).clone(),
+        other => panic!("the Node report carried {other:?}"),
     };
     match &node.manifest {
         ManifestState::Unread(UnreadReason::OutOfBudget { limit }) => assert_eq!(*limit, 0),
@@ -1212,6 +1227,7 @@ fn a_file_too_large_to_read_is_unread_rather_than_half_read() {
         .findings
     {
         Findings::Node(node) => (**node).clone(),
+        other => panic!("the Node report carried {other:?}"),
     };
     match &node.manifest {
         ManifestState::Unread(UnreadReason::TooLarge { limit }) => assert_eq!(*limit, 1_000),
@@ -1232,6 +1248,7 @@ fn a_file_too_large_to_read_is_unread_rather_than_half_read() {
         .findings
     {
         Findings::Node(node) => (**node).clone(),
+        other => panic!("the Node report carried {other:?}"),
     };
     assert_eq!(
         node.manifest

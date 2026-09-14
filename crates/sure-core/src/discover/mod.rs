@@ -54,6 +54,7 @@
 //! for the same reason [`crate::diagnostics`] gives.
 
 pub mod node;
+pub mod python;
 mod read;
 
 use std::path::{Path, PathBuf};
@@ -63,6 +64,7 @@ use sure_domain::vocabulary::{StackClassification, SupportLevel};
 use crate::scan::{Scan, ScanError, ScanOptions, Skipped};
 
 pub use node::NodeProject;
+pub use python::PythonProject;
 pub use read::UnreadReason;
 
 /// One ecosystem this build knows how to look for.
@@ -75,17 +77,21 @@ pub use read::UnreadReason;
 pub enum Ecosystem {
     /// JavaScript and TypeScript: `package.json` and the lockfiles beside it.
     Node,
+    /// Python: `pyproject.toml`, `Pipfile`, `requirements*.txt`, and the
+    /// lockfiles beside them.
+    Python,
 }
 
 impl Ecosystem {
     /// Every ecosystem this build looks for, in a fixed order.
-    pub const ALL: &'static [Self] = &[Self::Node];
+    pub const ALL: &'static [Self] = &[Self::Node, Self::Python];
 
     /// The stable name, used in output and in the reason a level was assigned.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Node => "node",
+            Self::Python => "python",
         }
     }
 
@@ -94,6 +100,7 @@ impl Ecosystem {
     pub const fn plain_name(self) -> &'static str {
         match self {
             Self::Node => "JavaScript or TypeScript",
+            Self::Python => "Python",
         }
     }
 }
@@ -108,6 +115,8 @@ impl Ecosystem {
 pub enum Findings {
     /// What a Node project declares.
     Node(Box<NodeProject>),
+    /// What a Python project declares.
+    Python(Box<PythonProject>),
 }
 
 /// What SURE concluded about one ecosystem, and why.
@@ -187,6 +196,10 @@ pub struct Discovery {
     /// The walk, so that "could SURE see everything?" stays answerable.
     pub scan: Scan,
     /// One report per ecosystem that was found, in [`Ecosystem::ALL`] order.
+    ///
+    /// [`discover`] pushes them in that order, so a project that is both a Node
+    /// and a Python project reports Node first. The order is a property of the
+    /// product rather than of the walk, and the walk's order is not visible here.
     pub ecosystems: Vec<EcosystemReport>,
     /// Files that were there and could not be read.
     pub unread: Vec<Unread>,
@@ -354,6 +367,9 @@ pub fn discover(root: &Path, options: &DiscoverOptions) -> Result<Discovery, Sca
     if let Some(report) = node::look(root, &scan, options, &mut budget, &mut unread) {
         ecosystems.push(report);
     }
+    if let Some(report) = python::look(root, &scan, options, &mut budget, &mut unread) {
+        ecosystems.push(report);
+    }
 
     Ok(Discovery {
         root: root.to_path_buf(),
@@ -376,8 +392,14 @@ mod tests {
         }
         // The list is the answer to "did SURE look?", so a list that omitted
         // one would make an untouched ecosystem look like an absent one.
-        assert_eq!(Ecosystem::ALL.len(), 1);
+        assert_eq!(Ecosystem::ALL.len(), 2);
         assert!(Ecosystem::ALL.contains(&Ecosystem::Node));
+        assert!(Ecosystem::ALL.contains(&Ecosystem::Python));
+        // Distinct, so that `report(ecosystem)` can find at most one and two
+        // ecosystems cannot answer to one name.
+        let names: std::collections::BTreeSet<&str> =
+            Ecosystem::ALL.iter().map(|found| found.as_str()).collect();
+        assert_eq!(names.len(), Ecosystem::ALL.len());
     }
 
     #[test]

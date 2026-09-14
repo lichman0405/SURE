@@ -121,6 +121,30 @@ pub const IGNORED_DIRECTORIES: &[IgnoreRule] = &[
         name: "virtualenv",
         reason: SkipReason::Vendored,
     },
+    // `.tox`, `.nox` and `.eggs` are the same claim as `venv`: a tool made the
+    // directory, it holds installed distributions rather than a person's work,
+    // and it is rebuilt by running the tool again. `.tox` and `.nox` are what
+    // `tox` and `nox` build their per-environment virtualenvs in, and `.eggs` is
+    // `setuptools`' own installation directory.
+    //
+    // `*.egg-info` is the name that belongs here and cannot be: it is a *suffix*
+    // — `foo.egg-info` is one distribution's metadata — and this table matches
+    // exact names only, deliberately (see the module comment). Adding a pattern
+    // language to catch it would make every rule in both tables harder to be
+    // sure about, so it is recorded as a gap in
+    // `docs/architecture/ECOSYSTEM_DISCOVERY.md` instead.
+    IgnoreRule {
+        name: ".tox",
+        reason: SkipReason::Vendored,
+    },
+    IgnoreRule {
+        name: ".nox",
+        reason: SkipReason::Vendored,
+    },
+    IgnoreRule {
+        name: ".eggs",
+        reason: SkipReason::Vendored,
+    },
     IgnoreRule {
         name: ".bundle",
         reason: SkipReason::Vendored,
@@ -409,6 +433,17 @@ mod tests {
             ("node_modules", SkipReason::Vendored),
             ("target", SkipReason::BuildOutput),
             ("__pycache__", SkipReason::Cache),
+            // The Python environments and caches, which are the names a Python
+            // project is most likely to have a directory of. Asserted by name
+            // rather than left to the table's own iteration, because a rule that
+            // was removed from the table would otherwise remove its own test.
+            (".venv", SkipReason::Vendored),
+            ("venv", SkipReason::Vendored),
+            (".tox", SkipReason::Vendored),
+            (".nox", SkipReason::Vendored),
+            (".eggs", SkipReason::Vendored),
+            (".pytest_cache", SkipReason::Cache),
+            (".mypy_cache", SkipReason::Cache),
         ];
         for (name, reason) in cases {
             assert_eq!(

@@ -300,6 +300,37 @@ Recorded so they are not forgotten. None is resolved by a task yet.
    would show is a link whose target is a *file*. The macOS and Linux CI jobs are
    where it could run.
 
+6. **A file can be *replaced by a link* between the walk and the read.** The walk
+   records what is at a name; `read_text` then calls `File::open` on the path the
+   walk recorded, and an open follows whatever is at that path *now*. A project
+   that swaps `package.json` for a link pointing outside the project, in the
+   window between the two, is read through.
+
+   **What bounds it.** Everywhere else, containment is by construction rather
+   than by a check that could be wrong: a path a manifest names is resolved
+   through the walk's own records (`Tree::is_directory`, `child_directories`)
+   and never by joining onto the filesystem, and `read_json` takes the `Probe`
+   the walk produced rather than a path, so that what is read and what was found
+   cannot come from two different walks. This gap is the one place where the
+   filesystem is consulted a second time.
+
+   **What it is not.** It is an **integrity** problem, not a disclosure: the
+   content lands in SURE's own report, which is read by the person who could
+   already open the file the link points at. It also needs an adversary running
+   code on the machine during the same milliseconds as SURE, and it changes
+   nothing that is executed.
+
+   **Why it is not closed.** Closing it needs an open that does not follow a
+   link — `O_NOFOLLOW` on Unix, `FILE_FLAG_OPEN_REPARSE_POINT` on Windows — and
+   the Windows flag is not reachable from `std` without `unsafe`, which this
+   workspace forbids. `FINGERPRINTING.md` gap 5 records the same window for the
+   fingerprint's reader, where the consequence is a stale digest rather than a
+   foreign reading; the two are the same shape and neither is closed. Recorded
+   here rather than left implicit because a **push security review flagged this
+   file for "path traversal / symlink TOCTOU"** on 2026-09-14 — see
+   `progress/HANDOFF.md`, which also records that the notification carried no
+   finding text and that this gap is what an inspection of the file found.
+
 ## Enforced by
 
 | Statement | Where the meaning lives | Enforced by |

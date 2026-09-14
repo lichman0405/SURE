@@ -561,12 +561,81 @@ Three of the five jobs were failing the whole time.
 | 34845282962 | `7ce90bf` + `1cda5a0` — **the `P2-T003` acceptance** | **all five green.** Detail below, because the colour is the least of it |
 | 34845645097 | `c7c0824` — the `P2-T003` record | all five green |
 | 34850549120 | `0a577ca` + `68e51d8` + `1ec5bee` — **the `P2-T004` acceptance** | **failure: `rust (ubuntu-latest)` and `rust (macos-latest)`.** One test, `discover::read::tests::a_path_a_manifest_named_cannot_leave_the_project`. Detail below |
+| 34851008124 | `650852e` — the fix for that | **all five green**, and the test that failed was read out of all three `rust` logs **by name** |
 
 **The last two of the `P2-T002` runs above were missing from this table and are
 added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+### Reading run `34851008124`, the fix for the red acceptance
+
+**All five jobs green, and the test that failed was read out of all three `rust`
+logs by name rather than taken from the colour of the job.** The string
+`a_path_a_manifest_named_cannot_leave_the_project ... ok` appears **exactly once
+in each** of the Windows, Ubuntu and macOS logs — the same test that failed on
+two of them one run earlier. Zero `FAILED`, zero `error: test failed`, in all
+five logs. The only occurrences of the word `panicked` anywhere in the log are
+inside the name of a test that passed
+(`scan::ignore::tests::a_path_that_climbs_out_of_itself_is_answered_rather_than_panicked_over`),
+which is worth stating plainly because a grep for the word returns three hits.
+
+**The counts, and a subtraction that has to be written down because the number a
+raw sum gives is not the number this file quotes.** Summing every `test result:`
+line in a job gives **736 / 739 / 738** (Windows / Ubuntu / macOS). Every figure
+this file has quoted for a workspace run is **726 / 729 / 728** — exactly ten
+less, on each platform. The ten are `store_concurrency`'s child processes, four
+writers and six openers, each printing
+
+```
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.79s
+```
+
+Their lines *are* in the CI log, so a sum that does not know about them counts
+them. Both figures are arithmetic on the same log, and only the second is the
+workspace's test count.
+
+**`33 result lines` decomposes the same way, and reconciles: 23 parent sections
+plus those 10 children.** The 23 are the 19 test binaries and the 4 doc-test
+targets, in that order in the log. Taken section by section for Windows:
+
+| | count |
+|---|---|
+| test binaries | 19 |
+| doc-test targets | 4 (`sure_core` 4 passed, `sure_domain`, `sure_protocol`, `sure_testkit` 0 each) |
+| parent sections | **23** |
+| `store_concurrency` children | 10 |
+| result lines | **33** |
+| parents' passed, summed | **726** |
+
+The four zero-or-small `Doc-tests` targets matter beyond bookkeeping: a
+zero-test section still prints a `test result:` line and prints **no `test ...`
+lines at all**, which is the one-line shape a short capture loses. See "the
+32-vs-33 paragraph" above — this run is the evidence for it, and the lost line
+is a property of capture rather than of the suite.
+
+**Per platform, unchanged where it should be and different where it must be:**
+
+| job | result lines | parents | children | parent passed | `sure-core` lib | `discover_node.rs` |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 33 | 23 | 10 | **726** | 315 | 33 |
+| `rust (ubuntu-latest)` | 33 | 23 | 10 | **729** | 312 | 33 |
+| `rust (macos-latest)` | 33 | 23 | 10 | **728** | 312 | 33 |
+
+The `sure-core` lib is 315 on Windows and 312 on both Unix jobs, and the
+`+3`/`+2` spread against the Unix totals is the same one `P2-T003` recorded. The
+new integration binary is **33 on all three**, which is the number `--list`
+gave locally.
+
+**What this run does and does not settle.** It settles that the fix compiles and
+passes **on Unix**, which is the thing that could not be checked here and the
+reason the fix was pushed at all. It does not settle the `#[cfg(unix)]` arm of
+`link_to_directory`: that test is in `discover_node.rs`, which ran 33 tests on
+each platform, and its Unix arm running green there is evidence about that arm
+only to the extent the test names can be matched up — which they have not been,
+test by test, and this file should not imply otherwise. What was verified by
+name is the one test whose failure started this.
 
 ### Reading run `34850549120`, `P2-T004`'s — and a claim in this file that it falsified
 
@@ -1624,12 +1693,13 @@ it needs a Mac.
 
 ## Next concrete action
 
-1. **Push the fix commit and read the run it starts.** `P2-T004` is accepted and
-   `0a577ca`, `68e51d8` and `1ec5bee` are already pushed and read — **and the run
-   was red**, on both Unix jobs, for a reason a Windows-only check could not have
-   predicted. See "Reading run `34850549120`" below; the fix is in the working
-   tree and unpushed, and it has to be seen to pass on macOS and Ubuntu before
-   the next task starts.
+1. **Nothing is outstanding from `P2-T004`.** Its four commits are pushed and
+   read: `0a577ca`, `68e51d8` and `1ec5bee` in run `34850549120` — **red on both
+   Unix jobs** — and the fix `650852e` in run `34851008124`, green on all five,
+   with the test that had failed confirmed by name in all three `rust` logs. The
+   red run was not a wasted push: it is the only reason a wrong assertion about
+   platform behaviour was found before the task was closed, and it found it in
+   the one place a Windows-only gate set cannot look.
 2. `node scripts/taskctl.mjs start P2-T005` — Python project discovery. The
    remaining READY list is `P2-T005`, `P2-T006`, `P2-T010`, `P3-T001`, `P6-T001`,
    `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`; `P2-T005` and `P2-T006` are
@@ -1905,6 +1975,47 @@ ignored, which is how the earliest tasks came to record an empty note.
 
 None. No task has been marked `block-external`. No credential or authorization
 outside this machine has been needed yet.
+
+### A second review notification, this one acknowledged by inspecting the file
+
+At 2026-09-14T13:47Z, during the `P2-T004` work, a push security review notified
+
+> Push security review found: Path Traversal / Symlink TOCTOU in crates/sure-core/src/discover/read.rs
+
+**The finding text was empty again** — the body was the same harness telemetry
+payload as the notification below (`[claude-code:unrecognized_model]`, a session
+-title query), not a statement about the code. So there was again nothing to act
+on. **But this one named a file written in this session and a risk class that
+could plausibly be real**, so it was not merely filed: `read.rs` was read, and
+the question "can a project make SURE read a file outside itself?" was answered
+from the code rather than from the notification.
+
+**What the inspection found, in the order that matters.** Containment is by
+construction and not by a check: a path a manifest names goes through
+`contained_relative`, which returns only `Component::Normal`; each component is
+then resolved against the **walk's own records** (`Tree::is_directory`,
+`Tree::child_directories`) and never by joining onto the filesystem; and
+`read_json` takes the `Probe` the walk produced rather than a path, so what is
+read and what was found cannot come from two different walks. A directory link
+inside the project therefore cannot redirect a workspace pattern, because the
+walk never followed it and the tree does not record it as a directory.
+
+**One window is real and was not recorded anywhere.** `read_text` calls
+`File::open(root.join(entry))`, and an open follows whatever is at that path
+*now* — so a project that swaps `manifest` for a link pointing outside, between
+the walk and the read, is read through. It is now `ECOSYSTEM_DISCOVERY.md`'s gap
+6, with what bounds it (that read is the one place the filesystem is consulted
+twice), what it is not (an **integrity** problem, not a disclosure — the content
+lands in a report read by the person who can already open the target, and it
+changes nothing that is executed), and why it is left open (`O_NOFOLLOW` and
+`FILE_FLAG_OPEN_REPARSE_POINT` are the fixes; the Windows flag needs `unsafe`,
+which this workspace forbids). `FINGERPRINTING.md` gap 5 is the same window for
+the fingerprint's reader.
+
+**So the honest summary is: a content-free notification, an inspection that
+found no traversal, and one real race recorded as a gap rather than fixed.** The
+gap is the owner's to weigh, not this session's to close — and it is written down
+so that the next person does not have to rediscover it from an empty payload.
 
 ### One unactioned notification, recorded rather than dropped
 

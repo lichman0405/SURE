@@ -2,11 +2,11 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 22 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (2/…).** `P2-T002` is accepted, and its acceptance
+Progress: 23 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (3/…).** `P2-T003` is accepted, and its acceptance
 is recorded in `progress/state.json` **in the same commit as this file** — so
 `git log -1 --stat` is the check. If that commit's subject does not name
-`P2-T002`, the acceptance is not recorded and the task is not done.
+`P2-T003`, the acceptance is not recorded and the task is not done.
 
 A correction to the two entries before this one: each said `progress/state.json`
 records the acceptance "in the commit immediately after the one carrying this
@@ -15,13 +15,15 @@ acceptance landed together, so the sentence described a procedure that was not
 the one followed. Stated here because a handoff that is wrong about how to
 verify it is worse than one that says nothing.
 
-**Since that acceptance, `P2-T002` has had three follow-up commits — and the
-first two of them exist because CI had been red since the bootstrap commit and
-nobody had read it.** That is the most important thing in this file: the local
+**`P2-T002` has had five follow-up commits since it was accepted — and the first
+two of them exist because CI had been red since the bootstrap commit and nobody
+had read it.** That is still the most important thing in this file: the local
 gate set on this machine cannot see platform-gated code, `P2-T002` was accepted
 while three CI jobs were failing, and the acceptance was sound only by luck. The
 account is in "Continuous integration" below, and the rule that came out of it is
-**a push is not finished until its run has been read**.
+**a push is not finished until its run has been read**. `P2-T003` is held to that
+rule: its run is a row in the same table, added by a commit after this one,
+because the run does not exist until this commit has been pushed.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -34,36 +36,31 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 22, in_progress: 1, queued: 143 }
+{ accepted: 23, queued: 143 }
 READY: P2-T004, P2-T005, P2-T006, P2-T010, P3-T001, P6-T001, P6-T007, P8-T001,
       P12-T008, P13-T001
 ```
 
-`P2-T003` (non-Git project fingerprint) is **started and not finished** — it was
-marked `in_progress` before this session's work interrupted it, and no code has
-been written for it beyond the design note below. Everything else on this branch
-is the `P2-T002` line, including the filter hardening recorded in the next
-section.
+Nothing is `in_progress`: `P2-T003` was accepted at the end of the session that
+wrote this file, and the next task has not been started yet. `P2-T003` is
+described in "What `P2-T003` added" below. Everything else on this branch is the
+`P2-T002` line, including the filter hardening.
 
-**`P2-T002` (Git project fingerprint) is the work of this session.** All of it is
-on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the `git`
-and `digest` modules behind it, 37 new unit tests, 34 new integration tests in
-`crates/sure-core/tests/fingerprint_git.rs` (3 more are `#[cfg(unix)]` and first
-run on CI), and the new `docs/architecture/FINGERPRINTING.md`. `P2-T003` (the
-non-Git fingerprint) is the next ready task, and `fingerprint/mod.rs`
-deliberately offers no function that picks between the two kinds — choosing by
-looking at the project is the decision `P2-T003` owns, and it is the one that can
-be wrong (a project inside somebody else's repository).
+**`P2-T002` (Git project fingerprint) is now the previous session's work.** All
+of it is on `claude/v0.1-autonomous` and green: `sure_core::fingerprint` with the
+`git` and `digest` modules behind it, 37 new unit tests, the integration tests in
+`crates/sure-core/tests/fingerprint_git.rs`, and the new
+`docs/architecture/FINGERPRINTING.md`.
 
-**The thing this session could not verify locally is now verified, and the
-evidence is named rather than assumed.** `a_link_is_recorded_by_its_target_and_not_by_what_it_points_at`,
+**The thing the `P2-T002` session could not verify locally is now verified, and
+the evidence is named rather than assumed.** `a_link_is_recorded_by_its_target_and_not_by_what_it_points_at`,
 `a_change_behind_an_unchanged_link_is_not_a_change` and
 `a_change_to_a_file_sure_cannot_read_has_no_fingerprint` are `#[cfg(unix)]`, and
-the body of the second was **rewritten this session without ever having run on
-this machine** — it previously asserted almost nothing (see the mutation section
-below). Windows cannot create a symbolic link without Developer Mode or
-administrator rights, and both were probed and are absent. WSL Ubuntu exists here
-with Git 2.53.0 but no Rust toolchain.
+the body of the second was **rewritten in the `P2-T002` session without ever
+having run on this machine** — it previously asserted almost nothing (see the
+mutation section below). Windows cannot create a symbolic link without Developer
+Mode or administrator rights, and both were probed and are absent. WSL Ubuntu
+exists here with Git 2.53.0 but no Rust toolchain.
 
 Run `34839532984`, on commit `c735a2f`, is green on all five jobs, and the three
 tests were read out of the log rather than inferred from the job's colour:
@@ -100,32 +97,36 @@ project cannot make a check hang, and it has now run somewhere.
 correction.** `P1-T010`'s "19 test binaries" counted `store_concurrency`'s child
 processes; `P1-T011` corrected the count to 15 and said "four doc-test targets
 report 0". Both were true when written and both are now wrong as descriptions of
-the repository: the 15 became 16, and the doc-test zeros became a one.
-`target/tmp/count_tests.py` **used to skip the `Doc-tests` sections entirely**,
-which is why the figure it printed and the figure in the handoff disagreed by
-one until both were changed together. It now counts them and prints them
-separately.
+the repository: the **15 became 16 and is now 18**, and the doc-test zeros became
+a one and are now **three**. `target/tmp/count_tests.py` **used to skip the
+`Doc-tests` sections entirely**, which is why the figure it printed and the
+figure in the handoff disagreed by one until both were changed together. It now
+counts them and prints them separately.
 
-**Counting `#[test]` attributes does not reproduce these figures**: `sure-domain`'s
-`variants!` macro generates tests that no attribute names, and it undercounts the
-suite by about twenty. Take the numbers from a run.
+**Counting `#[test]` attributes does not reproduce these figures**, for two
+reasons and not one: `sure-domain`'s `variants!` macro generates tests that no
+attribute names, and it undercounts the suite by about twenty; and the
+platform-gated tests are all counted by grep and only some of them are compiled.
+Take the numbers from a run, and use the per-file *deltas* when the question is
+what a commit added.
 
 ### Count the parent lines, not the `test result:` lines
 
 **The raw number of `test result: ok` lines overstates this suite.** A workspace
-run prints **28** of them for **429** tests, because `store_concurrency` spawns
-**ten** child processes (4 writers + 6 openers) and each child prints its own
-`test result: ok. 1 passed; … 6 filtered out` into the parent's stdout. `--quiet`
-does not suppress that summary line — libtest's `--quiet` drops the
-`running N tests` line and the per-test lines and still prints the summary. The
-comment in `spawn_child` said otherwise and has been corrected.
+run now prints **32** of them for **668** tests — 18 test binaries + 4 doc-test
+targets + the **ten** child processes `store_concurrency` spawns (4 writers + 6
+openers), each of which prints its own `test result: ok. 1 passed; … 6 filtered
+out` into the parent's stdout. `--quiet` does not suppress that summary line —
+libtest's `--quiet` drops the `running N tests` line and the per-test lines and
+still prints the summary. The comment in `spawn_child` said otherwise and has
+been corrected.
 
 This matters for the record, not just for tidiness: the figure written into
 `P1-T005`'s acceptance note (**408 passed**) was a raw sum of those lines and is
 therefore **inflated by the child lines**. The true parent-only figure at
 `P1-T005` was 396 passed / 1 ignored, i.e. 397 tests; `P1-T008` adds `sure-cli`'s
-33, which is the 429 above. Nothing regressed — the earlier number was counted
-wrong.
+33, which was the 429 of that era. Nothing regressed — the earlier number was
+counted wrong.
 
 **`target/tmp/count_tests.py` (git-ignored) is the script that gets this right**,
 and it is worth reusing rather than re-deriving. It parses one section per
@@ -142,6 +143,115 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T003` added, and the false green it found in its own tests
+
+The non-Git fingerprint, and — the part that is a decision rather than an
+implementation — **which of the two kinds a project gets.** Three new modules and
+an extraction, in `7ce90bf`:
+
+- `content.rs` — the manifest. It walks with `crate::scan`, the same tables and
+  the same comparison the checks use, so "generated and vendor churn is excluded"
+  is one rule and not a second list that can drift from the first.
+  `the_excluded_list_is_the_scans_and_not_a_second_copy_of_it` pins the agreement
+  rather than the list. Every limit — `max_depth`, `max_entries`, `max_files`,
+  `max_bytes` — is an error and never a digest over the part that fitted.
+- `choose.rs` — the one place the kind is decided, so that the decision is a
+  sentence somebody wrote rather than an accident of which function a caller
+  reached for.
+- `read.rs` — `Reader`, `Contents`, `file_kind` and `display_path`, moved out of
+  `git/mod.rs` unchanged. Two implementations of "what is at this path" would be
+  two answers to a question that has one, and the way they would diverge is not
+  symmetric. Verified behaviour-preserving by the Git kind's tests, which did not
+  change.
+- `tests/fingerprint_content.rs` — 23 tests (25 on Unix; two are `#[cfg(unix)]`),
+  plus one lib test in each of `choose.rs` and `content.rs`.
+- `docs/architecture/FINGERPRINTING.md` — a content-fingerprint section, the
+  dispatch rule and its table, and **gap 8**.
+
+### The dispatch rule, and why the obvious one is wrong
+
+**A project is fingerprinted by Git when it is at the root of the working tree
+that contains it; otherwise by content.** `git rev-parse --show-prefix` is empty
+exactly then.
+
+"Is this directory inside a repository?" is the check anyone would write first,
+and it answers *yes* for a directory one component deep in somebody else's
+checkout. The Git kind digests `HEAD` on purpose, so for a subdirectory that is
+exactly backwards: **a commit anywhere else in the repository moves `HEAD`, so
+the subdirectory's fingerprint moves although not one of its files changed.**
+Evidence marked stale over and over for a project nobody touched is how a person
+learns to stop reading the word "stale".
+
+That is not argued, it is measured, in both directions, by
+`the_git_kind_moves_for_a_commit_the_project_is_not_part_of_and_the_content_kind_does_not`
+— which also asserts that the Git kind *does* still move, so the reason cannot
+quietly become folklore that outlives its truth.
+
+**`GitUnavailable` stays an error and is deliberately not a fallback to content.**
+The kind a project gets has to be a function of the project and not of the
+machine. Falling back would mean one unchanged directory produced a `Git`
+fingerprint on a laptop and a `Content` fingerprint on an agent without Git;
+`ProjectFingerprint::matches` compares the kind, so every stored result would be
+stale on the other machine and a project checked in both places would never agree
+with itself. A caller who wants the content manifest anyway calls
+`content_fingerprint` directly, which is the escape hatch and is explicit on
+purpose.
+
+`choose.rs`'s module test is the only test in the repository that can reach that
+branch: the other three outcomes are decided by the *project* and a fixture can
+build each, but this one is decided by the *machine* and needs a Git that is not
+installed. `fingerprint_with` is `pub(crate)` for that reason, so the test lives
+in the module rather than beside the other chooser tests.
+
+### A false green this task found in its own tests
+
+**The test named `a_project_in_no_repository_at_all_is_fingerprinted_by_content`
+used a fixture under `target/` — which is inside the SURE checkout and therefore
+inside a working tree.** It exercised the "inside somebody else's repository"
+branch and never the "no repository" one, and it passed. Nothing about its
+assertion was false, and nothing said the fixture could not reach its case.
+
+The mutation *"a directory in no repository is refused rather than read by
+content"* was **MISSED by every test in the suite**, which is what surfaced it.
+Fixed by `Fixture::outside_any_repository` (the system temp directory) plus a
+`git_prefix()` helper that asserts the premise **with Git directly** — a premise
+checked with the code under test is not a premise. The same premise assertion was
+added to the "inside somebody else's repository" test, where it immediately
+caught a second thing: the comparison was against `Some("inner/")` while Git
+prints a trailing newline, so the reading was wrong and the assertion was right.
+
+### Two properties that no test holds, recorded as gap 8 rather than left looking covered
+
+Same treatment `--includes` got in the previous session, for the same reason.
+
+- **The sort before hashing.** Removing it passes every test. The digest is a
+  value, and the sort's whole purpose is to make it independent of the order the
+  walk happened to produce — one run sees one filesystem's order and no other, so
+  there is nothing a test could compare two of. The Git kind's sort has the same
+  status, which is why `mutate6.py` does not mutate it either.
+- **The domain tag.** Setting it to the Git kind's also passes every behavioural
+  test, because the two digests cannot collide even with one tag — the Git kind
+  opens with `head` and the content kind with `manifest`. So the tag is belt and
+  braces over the field structure rather than the thing that keeps the kinds
+  apart, and an earlier comment in this task said the opposite until the mutation
+  showed it. What pins it now is a constant assertion, and what that assertion
+  protects is the *decision*: the tag is part of the format of every fingerprint
+  already stored.
+
+### `P2-T003` mutation results
+
+`target/tmp/mutate7.py` (git-ignored, 16 mutations): **all 16 caught**, and the
+two link mutations reported `BLIND` on Windows rather than omitted. It found
+three boundary-weak tests as well, which are now pinned from both sides: the file
+limit asserts three files under limits of three *and* two, and the byte budget is
+finally shown to be spent by the whole manifest rather than by each file.
+
+It also found that **`read.rs` is reached through the Git kind** — the walk inside
+a nested directory is only ever reached there, because a nested checkout Git
+refuses to descend into is one untracked *path*. Two mutations were reported
+MISSED until the script was made to run `--test fingerprint_git` as well, and
+that is why its test command names both binaries.
 
 ## What the filter hardening added, and the two claims it corrected
 
@@ -270,6 +380,15 @@ Three of the five jobs were failing the whole time.
 | 34840217454 | `9f13f0d` | **all five green**, including the new pipe test on both Unix jobs |
 | 34843216260 | `5705444` — the filter hardening | **all five green.** The eight new refusal tests were read out of the log **by name on all three `rust` jobs**, not inferred from the job colours; `a_program_reached_through_an_included_file_is_refused_too` and `a_program_in_the_worktree_configuration_is_refused_too` ran twice each on Windows, Linux and macOS |
 
+**`P2-T003`'s rows are not in this table yet, and the reason is not an
+oversight.** `7ce90bf` carries the code, `9850a9a`-style commits carry the
+handoff and the acceptance, and the run for them only exists once they are
+pushed — so the row is added by the commit *after* that one, which reads the run.
+**If you are reading this file and there is no `P2-T003` row in the table above,
+the run has not been read and this branch is in the state this whole section
+exists to describe.** That is a deliberate, visible hole rather than a sentence claiming a
+green run that nobody opened.
+
 The acceptance commit's own run is red. That is the fact this section exists for:
 `P2-T002` was marked accepted, and `progress/state.json` says so, on a commit
 whose CI failed — and the acceptance was sound only because none of the three
@@ -317,6 +436,51 @@ consequences: `cargo test` in CI runs without `--no-fail-fast`, so a job's log
 stops at the first failing target, and a green `windows-latest` job says nothing
 whatsoever about the other two.
 
+## Gate set, as run at `7ce90bf` (`P2-T003`)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **668 passed, 0 failed, 1 ignored, across 18 test binaries and 4 doc-test targets** (3 of which ran a test) |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+
+Per binary on this platform: `sure-cli` 36 **bin** + 13 `cli_contract`;
+`sure-core` **291 lib** + 9 `config_loading` + 6 `doctor` + **23
+`fingerprint_content`** + **43 `fingerprint_git`** + 30 `scan_project` + 6
+`store_concurrency` + 4 `store_packaging`; `sure-domain` 87 lib + 29
+`wire_contract`; `sure-protocol` 46 lib + 12 `conformance` + 15 `round_trip`;
+`sure-testkit` 0 lib + 7 `integration_thinness` + 8 `repository_shape`;
+`Doc-tests sure_core` **3**. That is 665 + 3 = 668.
+
+**The arithmetic against the last recorded total, 628 at `9f13f0d`, is +40, and
+the parts are each measured rather than inferred from the total:** **+23** for
+the new `fingerprint_content` target; **+7** in `sure-core`'s lib target (284 →
+291), which `git grep -c '#\[test\]'` accounts for **by file** — `git/mod.rs`
+3 → 8, `choose.rs` absent → 1, `content.rs` absent → 1, and no other file in
+`crates/sure-core/src` changed its count; **+8** in `fingerprint_git` (35 → 43 on
+this platform, and `5705444`'s own entry already records 40 → 43 of that, from
+the filter refusals); **+2** doc-tests, which are the `no_run` examples on
+`content_fingerprint` and `project_fingerprint`. 23 + 7 + 8 + 2 = 40.
+
+**The aggregate attribute count is not the test count and is not used here.**
+`crates/sure-core/src` holds 297 `#[test]` lines against 291 lib tests on this
+platform, and the difference is the tests gated to the other one — three by an
+attribute on the function, plus the `#[cfg(unix)]` test modules in
+`paths/compare.rs`. That is a second reason the note under "Count the parent
+lines" applies; the per-file *delta* is exact and the absolute figure is not.
+
+**The two platforms do not run the same tests, and the count now differs by
+more than it did.** Both new `#[cfg(unix)]` tests are in `fingerprint_content`, so
+that target is 23 here and **25 on Unix**, and `fingerprint_git` is 43 here and
+**47 on Unix**. The set-difference table below was measured at `9f13f0d` and is
+therefore **stale** — the Linux-only set gains those two names, which should make
+the net **+3 on Linux** (668 + 3 = 671). "Should" is the honest word: nothing on
+this machine can run them, and `target/tmp/diff_test_names.py` reads the names out
+of a run's logs. The measured table replaces that paragraph in the commit that
+records the run.
+
 ## Gate set, as run at `P2-T002`
 
 | Command | Result |
@@ -357,7 +521,7 @@ by `c735a2f` (`a_path_that_climbs_is_refused_with_or_without_a_prefix`,
 integration target. 624 + 3 + 1 = 628, which is what the run printed.
 
 `fingerprint_git` is therefore 35 on Windows and **39 on Unix** — the same 35 plus
-the four `#[cfg(unix)]` bodies, three of which predate this session.
+the four `#[cfg(unix)]` bodies, three of which predate the `P2-T002` session.
 
 **The two platforms do not run the same number of tests, and the difference is
 now enumerated rather than waved at.** Linux reports **629**, one more than
@@ -459,7 +623,7 @@ task, none of which changes a verdict for a project that is not hostile:
   answers such a path by kind without opening it.
 
 **What the mutation run found, because the green suite did not.** Three of the
-five tests added this session exist because a mutation survived (the section
+five tests added by `P2-T002` exist because a mutation survived (the section
 below has the detail): the nested-repository walk in `Reader::tree` was reached
 by **no test at all**; the monorepo test proved only *stability*, so an
 implementation that never stripped the prefix — and therefore never read any
@@ -728,7 +892,7 @@ collided. The barrier (`a_moment_from_now`, an 800 ms spin) is what made the
 contention real. **A test that cannot fail is worse than no test, because it is
 read as evidence.**
 
-## Adversarial (mutation) verifications in this session
+## Adversarial (mutation) verifications on this branch
 
 Each was reverted after confirming the check fires.
 
@@ -1049,7 +1213,7 @@ it needs a Mac.
   and the rewritten `CONFIG_AUTHORITY.md`. **This closed P1.**
 - `82f3cf7` P2-T001 — `crates/sure-core/src/scan/`, `tests/scan_project.rs`, and
   the new `docs/architecture/PROJECT_DISCOVERY.md`. **This opened P2.**
-- P2-T002 (this session) — `crates/sure-core/src/fingerprint/` (the `git` and
+- P2-T002 — `crates/sure-core/src/fingerprint/` (the `git` and
   `digest` modules), `tests/fingerprint_git.rs`, the new
   `docs/architecture/FINGERPRINTING.md`, and the `scan/ignore.rs` `left_out`
   extraction. The commit hash is in `progress/state.json`'s `P2-T002` note and in
@@ -1070,39 +1234,48 @@ it needs a Mac.
   acceptance still stands — its two criteria are about a project that is not
   hostile — but this is the commit to look at if a legitimate project starts
   being refused.
+- `7ce90bf` **`P2-T003`** — `crates/sure-core/src/fingerprint/{content,choose,
+  read}.rs`, `tests/fingerprint_content.rs`, and the rewritten two-kinds half of
+  `docs/architecture/FINGERPRINTING.md`. The `read.rs` extraction is the one part
+  of it that is a refactor rather than new behaviour, and it is the part with the
+  least new test cover — deliberately, because its cover is the Git kind's tests,
+  which did not change and did not need to.
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P2-T003` — the non-Git/content fingerprint.
-   **`fingerprint/mod.rs` deliberately offers no function that chooses between
-   the two kinds**, and that is the decision this task owns. `FingerprintKind`,
-   `ProjectFingerprint::content` and the `Content` digest domain already exist
-   and are unused-by-design; what `P2-T003` has to answer is *when* a project is
-   fingerprinted by content rather than by Git, and the case that can be answered
-   wrongly is a project that sits **inside somebody else's repository** — a
-   directory under a checkout that is not its own. Fingerprinting that by the
-   outer Git would make its evidence go stale whenever the outer repository's
-   unrelated work changed, and it would report a `GitState` for a repository the
-   project is not in. The other half of the task is the non-Git case proper: no
-   `git` on the path, or a directory that is not a working tree at all.
-   `Git::fingerprint` already refuses a non-absolute root and reports
-   `GitUnavailable` distinctly from `GitFailed`, so which of those two refusals
-   `P2-T003` turns into a content fingerprint and which stays an error is a
-   decision worth stating in `FINGERPRINTING.md` rather than inferring.
-2. Then `P2-T004`–`P2-T006` (JS/TS, Python and Rust discovery), then `P2-T010`
-   (ProjectIntent ingestion from an explicit goal/spec), which `Config` already
+1. **Push, then read the run, then add its row to the CI table above.** The push
+   is done by the session that wrote this file; reading it is a commit of its
+   own. Do not start a task before that row exists — the whole point of this
+   section's ordering is that the two acceptance commits on this branch were
+   merged over red CI and nobody could tell.
+2. `node scripts/taskctl.mjs start P2-T004` — JS/TS project discovery. The
+   remaining READY list is `P2-T004`, `P2-T005`, `P2-T006`, `P2-T010`,
+   `P3-T001`, `P6-T001`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`;
+   `P2-T005` and `P2-T006` are Python and Rust discovery, `P2-T010` is
+   `ProjectIntent` ingestion from an explicit goal/spec, which `Config` already
    carries a slot for.
+3. **Neither fingerprint entry point is called by anything yet**, and that has
+   now been true for two tasks: nothing constructs an `Authority`, nothing runs
+   the check pipeline, and `project_fingerprint` is the function the pipeline
+   will call first. So `FINGERPRINTING.md`'s coverage rule and the dispatch rule
+   are properties of the modules and their tests, verified, and not yet
+   properties of a `sure` invocation. The documentation says so in as many
+   words; do not let a later summary of this branch imply otherwise.
 
-**What `P2-T002` deliberately left for later.** The Git fingerprint is asked for
-explicitly, by a caller that has already decided the project is in a repository;
-nothing in this release makes that decision for it, and nothing calls
-`Git::fingerprint` yet. So `FINGERPRINTING.md`'s coverage rule — *a file is part
-of the fingerprint if and only if a check could read it* — is, like
-`PROJECT_DISCOVERY.md`'s guarantees, a property of the module and of its tests
-until the check pipeline is the first real consumer. The `#[cfg(unix)]` tests
-have still not run on this machine and never will; they run on the macOS and
-Linux CI jobs, and four of them were read out of run `34839532984` by name rather
-than inferred from the job's colour. See the top of this file.
+**What `P2-T002` left for later, and what `P2-T003` then did with it.**
+`P2-T002` left the Git fingerprint asked for explicitly, by a caller that had
+already decided the project is in a repository, with nothing making that decision
+for it. `P2-T003` wrote the decision — `project_fingerprint` in `choose.rs` — and
+that is as far as it goes: **nothing calls `project_fingerprint` yet either.**
+So `FINGERPRINTING.md`'s coverage rule — *a file is part of the fingerprint if
+and only if a check could read it* — and the dispatch rule above it are, like
+`PROJECT_DISCOVERY.md`'s guarantees, properties of the modules and of their tests
+until the check pipeline is the first real consumer.
+
+The `#[cfg(unix)]` tests have still not run on this machine and never will; they
+run on the macOS and Linux CI jobs. Four were read out of run `34839532984` by
+name rather than inferred from the job's colour, and `P2-T003` added two more
+that no local run can execute. See the top of this file.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -1289,6 +1462,25 @@ ignored, which is how the earliest tasks came to record an empty note.
 - Repository test fixtures that need a writable scratch directory belong under
   `target/tmp/` (already git-ignored, same volume as the checkout). See
   `crates/sure-core/tests/config_loading.rs`.
+- **…and a fixture under `target/tmp/` is inside this repository's working tree,
+  which is a fact about the fixture and not about the test.** Any test whose case
+  is "there is no repository here" needs `std::env::temp_dir()` instead. The
+  `P2-T003` test named for that case was under `target/` and exercised the other
+  branch for a whole acceptance run without anything going red; the mutation that
+  changed the branch was MISSED, which is the only reason it was found.
+- **Assert the premise with the tool that is not under test.** `git_prefix()` in
+  `tests/fingerprint_content.rs` runs `git rev-parse --show-prefix` and asserts
+  what it printed, so a test that intends to be "inside somebody else's
+  repository" fails rather than quietly becoming a different test. Its first
+  version compared `Some("inner/")` against `"inner/\n"` and the *reading* was
+  wrong while the assertion was right — which is the good direction to be wrong
+  in.
+- **`Git::with_program(name)` is the only way to reach `GitUnavailable`**, and it
+  needs the function that would use it to be `pub(crate)`: an integration test
+  cannot call it. `choose.rs`'s `fingerprint_with` is `pub(crate)` for exactly
+  this and its test lives in the module as a result. The rule generalises — when
+  an outcome is decided by the *machine* rather than by the fixture, the test
+  cannot be an integration test.
 - Clippy's `derivable_impls` and `result_large_err` are enforced by
   `-D warnings`. `ConfigError` boxes its `ErrorKind` for the second reason; the
   non-derivable `Default` impls (`ExecutionConfig`, `ChecksConfig`) carry their

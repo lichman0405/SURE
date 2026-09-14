@@ -17,7 +17,7 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P1
-{ accepted: 17, queued: 149, ready: 9 }
+{ accepted: 17, queued: 149 }
 READY: P1-T009, P1-T010, P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 

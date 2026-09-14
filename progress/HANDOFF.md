@@ -2,9 +2,9 @@
 
 Last updated: 2026-09-14
 Branch: `claude/v0.1-autonomous`
-Progress: 19 / 166 tasks accepted. Phase P0 complete (9/9). Phase P1 in progress
-(10/11). `P1-T010` is accepted, and `progress/state.json` records it in the
-commit immediately after the one carrying this file.
+Progress: 20 / 166 tasks accepted. **Phase P0 complete (9/9) and phase P1
+complete (11/11).** `P1-T011` is accepted, and `progress/state.json` records it
+in the commit immediately after the one carrying this file.
 
 Primary development host: Windows 11 x64 / native MSVC.
 
@@ -17,47 +17,47 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P1
-{ accepted: 19, queued: 147 }
-READY: P1-T011, P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 20, queued: 146 }
+READY: P2-T001, P2-T010, P3-T001, P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-**`P1-T011` is the last task in P1**: configuration authority layers — a project
-config must not be able to silently grant host execution, network, install or
-full recording, or to weaken user protection. Its two acceptance criteria are a
-property (with a unit test per layer) and an absence (a project layer that
-cannot escalate), and `crates/sure-core/src/config/` already has the loading
-order P1-T003 built, so this is where the authority question gets answered.
-`docs/adr/0011-project-configuration-is-a-request.md` is the decision it has to
-implement.
+**All 11 tasks of P1 are done and P2 is next.** `P2-T001` (bounded
+filesystem/project-root scanner) is the first of the seven ready tasks, the
+largest of them, and everything in P3 to P6 reads its output; `P1-T004`'s `Paths`
+already carries the project/outside-project rule it has to respect. Behind it:
+`P2-T010` (ProjectIntent ingestion), then `P3-T001`, `P6-T007`, `P8-T001`,
+`P12-T008`, `P13-T001` — the first task of each later phase.
 
-The other ready tasks are the first of their phases: `P2-T001` (bounded
-filesystem/project-root scanner — the first thing `sure check` needs and the
-broadest of them), `P2-T010` (ProjectIntent ingestion), `P3-T001`, `P6-T007`,
-`P8-T001`, `P12-T008`, `P13-T001`. `P2-T001` is the natural next one after P1
-closes: it is the largest, everything in P3 to P6 reads its output, and
-`P1-T004`'s `Paths` already gives it the project/outside-project rule.
-
-## Gate set, as run at `P1-T010`
+## Gate set, as run at `P1-T011`
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
-| `cargo test --workspace --all-features --no-fail-fast` | 473 passed, 0 failed, 1 ignored, across 19 test binaries (15 with tests) |
-| `node scripts/validate-bootstrap.mjs` | 17 phases, 166 tasks |
+| `cargo test --workspace --all-features --no-fail-fast` | **492 passed, 0 failed, 1 ignored, across 15 test binaries** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
 
-Per binary: `sure-cli` 36 lib + 13 `cli_contract`; `sure-core` 195 lib + 9
-`config_loading` + 6 `doctor` + 6 of 7 `store_concurrency` + 4 `store_packaging`;
-`sure-domain` 87 lib + 29 `wire_contract`; `sure-protocol` 46 lib + 12
-`conformance` + 15 `round_trip`; `sure-testkit` 0 lib + 7 `integration_thinness`
-+ 8 `repository_shape`. Four doc-test targets report 0.
+Per binary, re-run and reconciled with `target/tmp/count_tests.py`: `sure-cli`
+36 lib + 13 `cli_contract`; `sure-core` 214 lib + 9 `config_loading` + 6 `doctor`
++ 6 `store_concurrency` + 4 `store_packaging`; `sure-domain` 87 lib + 29
+`wire_contract`; `sure-protocol` 46 lib + 12 `conformance` + 15 `round_trip`;
+`sure-testkit` 0 lib + 7 `integration_thinness` + 8 `repository_shape`. Four
+doc-test targets report 0.
 
-The arithmetic, so a later session can check it: 429 at `P1-T008`, 462 at
-`P1-T009` (+33), 473 here (+11 — 6 in `sure-protocol`, 4 in `sure-cli`'s unit
-tests, 1 in `cli_contract`). **Counting `#[test]` attributes does not reproduce
-these figures**: `sure-domain`'s `variants!` macro generates tests that no
-attribute names, and it undercounts the suite by about twenty. Take the numbers
-from a run.
+The arithmetic: 473 at `P1-T010`, **492 here (+19, all in `sure-core`'s lib
+target: 195 → 214)**, which is the 18 tests of `authority.rs` plus 1 for the
+near-miss name check in `mod.rs`.
+
+**Correction to the previous entry.** This file said `P1-T010` ran "across 19
+test binaries (15 with tests)". That is wrong, and the acceptance note for
+`P1-T010` carries the same wrong figure: it counted the output of
+`store_concurrency`'s child processes as extra binaries. The **473** test count
+was right; the binary count was not. The true figure then and now is **15 test
+binaries**, per the per-binary list above.
+
+**Counting `#[test]` attributes does not reproduce these figures**: `sure-domain`'s
+`variants!` macro generates tests that no attribute names, and it undercounts the
+suite by about twenty. Take the numbers from a run.
 
 ### Count the parent lines, not the `test result:` lines
 
@@ -74,12 +74,72 @@ This matters for the record, not just for tidiness: the figure written into
 therefore **inflated by the child lines**. The true parent-only figure at
 `P1-T005` was 396 passed / 1 ignored, i.e. 397 tests; `P1-T008` adds `sure-cli`'s
 33, which is the 429 above. Nothing regressed — the earlier number was counted
-wrong. If a later session wants one number for the whole suite, sum the `running
-N tests` lines of the parent binaries or read the per-binary figures here.
+wrong.
+
+**`target/tmp/count_tests.py` (git-ignored) is the script that gets this right**,
+and it is worth reusing rather than re-deriving. It parses one section per
+`Running … (path)` or `Doc-tests …` header and takes the **last** `test result:`
+inside each. Three things it had to get right, each of which produced a wrong
+total first: cargo writes the `Running` markers to **stderr** and the binaries to
+**stdout**, so the two streams must share one pipe with ordering preserved
+(`stderr=subprocess.STDOUT` — `capture_output=True` cannot be combined with it);
+`store_concurrency`'s children print `test result:` lines of their own; and
+doc-tests print `test result:` with no `Running` marker, so "last line wins"
+alone lets them overwrite the section before them. Five different wrong totals
+came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P1-T011` added
+
+`crates/sure-core/src/config/authority.rs` (new, 18 tests) — **the answer to
+"the project's file asked for host execution; is that a yes?"**, which is a
+question about two files rather than about one.
+
+- `Layer { User, Project }` with `can_grant()`. Ranks 2 and 4 of
+  `CONFIG_AUTHORITY.md` exist; **rank 3 (organization policy) deliberately does
+  not**, and neither `Layer` nor `ConsentGrantor` offers a way to name it — a
+  source a caller can name but never obtain is how a documented feature becomes
+  a believed one. Rank 1 is a decision rather than a file and lives in
+  `ConsentGrantor::InteractiveUser`.
+- `Privilege { request, asked_by, granted_by }`. The refusal is a **value**, not
+  an omission: a file that asked for network access and did not get it leaves a
+  `Privilege` behind, so a report can say what was asked for. Dropping it would
+  make "the project asked and was refused" and "the project asked for nothing"
+  the same list.
+- `Resolved<T> { value, by: Option<Layer> }`. `by: None` means "nothing beyond
+  the default", not "SURE did not work it out". Protection and privacy resolve
+  to the **stricter** value either layer set, and `by` names the most trusted
+  layer that asked for it.
+- `Authority::load` / `new` / `privileges` / `privilege` / `permissions` /
+  `protection` / `privacy_mode`.
+
+**There is no merged `Config` and no `Authority::effective()`** — a merge was
+rejected by ADR 0011 because it cannot be reported back in terms of the files the
+user wrote. `Authority::permissions()` answers "which permissions a *file* was
+allowed to hand over", which is a different question from
+`sure_domain::execution::decide`'s "may this action run"; the execution **mode
+is not a permission**, so a project asking for `host_confirmed` gets nothing in
+the permission set.
+
+`docs/architecture/CONFIG_AUTHORITY.md` was rewritten around what exists: the
+order and the may/may-not lists are kept, and **"Nothing routes through it yet"**
+is stated plainly — no command builds an `Authority` today, and wiring it in
+front of the check pipeline is **P13-T009**. Until then a report that claimed a
+project's request was refused would be describing behaviour that has not run.
+
+Two smaller changes: `Config::load_file(path)` splits from `Config::load(root)`
+so the user's own file is read by the same reader (the near-miss `sure.yml` check
+now follows the requested *file name*, not its directory), and
+`neither_routes_through_the_authority_yet`-style honesty in the docs.
+
+**The one test that could not be written any other way** is
+`both_files_are_read_from_where_they_were_asked_for`, which goes through
+`Authority::load` with two real files. An `Authority` that found the user's file
+and silently discarded it passes every test that builds one directly — proved by
+mutation before the test was written.
 
 ## What `P1-T010` added
 
@@ -222,6 +282,40 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P1-T011`
+
+Fourteen mutations, fourteen fired. The script is `target/tmp/mutate4.py`
+(git-ignored) and it prints `SKIP` loudly when an anchor does not match — see the
+`P1-T009` note below for why that matters more than the pass count.
+
+Three are the false-green shapes this task exists to prevent, and they are the
+ones worth keeping:
+
+- **A project layer granting itself execution authority** — `Layer::can_grant`
+  answering `true` for `Project` — fails
+  `a_project_file_cannot_grant_itself_anything`,
+  `only_the_user_layer_can_grant`, and the refusal-count assertions. This is the
+  whole acceptance criterion in one line.
+- **A refusal dropped instead of reported** — filtering refused privileges out of
+  `privileges()` — fails
+  `a_refusal_keeps_the_request_that_was_refused`. The distinction between "asked
+  and refused" and "never asked" is the reason `Privilege` is a struct and not a
+  `Vec<ProjectRequest>`.
+- **The permission set starting with the network already allowed** fails the
+  test that builds the set from `inspect_only()` and the test that requires an
+  ungranted request to change nothing.
+
+Two more are worth recording because they were **holes the mutations found
+rather than confirmed**:
+
+- **`resolve` keeping the *last* stricter value on a tie instead of the first**
+  was green until `when_both_layers_ask_for_the_same_thing_the_user_is_named`
+  was added. A tie silently named the *project* as the reason a restriction
+  exists, which is exactly backwards.
+- **`near_miss_beside` keying off the directory rather than the file name** was
+  green until `the_near_miss_check_follows_the_file_name_not_the_directory` was
+  added — the same class of bug, and the reason that test exists at all.
+
 ### `P1-T010`
 
 Six mutations, six fired. The script is `target/tmp/mutate3.py` (git-ignored).
@@ -340,25 +434,25 @@ for this reason.
   `crates/sure-cli/src/doctor.rs`.
 - `8892e48` P1-T010 — `crates/sure-protocol/src/handshake.rs`, `sure protocol
   --speaks`, and §The handshake in `PROTOCOL.md`.
+- `b6ca862` P1-T011 — `crates/sure-core/src/config/authority.rs`, `load_file`,
+  and the rewritten `CONFIG_AUTHORITY.md`. **This closed P1.**
 
 ## Next concrete action
 
-1. `node scripts/taskctl.mjs start P1-T011` — configuration authority layers,
-   the last task in P1. Its acceptance is a property and an absence: a project
-   config cannot silently grant host execution, network, install or full
-   recording, or weaken user protection, and authority resolution has unit
-   tests. `crates/sure-core/src/config/` already has the loading order from
-   P1-T003, and `docs/adr/0011-project-configuration-is-a-request.md` is the
-   decision to implement. The shape that suggests itself is that each setting
-   carries which layer it came from and which layers are allowed to set it, so
-   that "the project asked for this" is a value the report can print rather than
-   a check somewhere in the middle of loading — but that is a decision to make
-   against the existing code, not to assume here.
-2. Then the first task of P2, `P2-T001` (bounded filesystem/project-root
-   scanner). It is the largest ready task and everything in P3 to P6 reads its
-   output; `P1-T004`'s `Paths` already carries the project/outside-project rule
-   it has to respect. Windows specifics from `CLAUDE.md` apply directly: spaces,
-   Unicode, case-insensitive comparison and long-path pressure.
+1. `node scripts/taskctl.mjs start P2-T001` — the bounded filesystem/project-root
+   scanner. It is the largest ready task, it is the first thing `sure check`
+   needs, and everything in P3 to P6 reads its output. `P1-T004`'s `Paths`
+   already carries the project/outside-project rule it has to respect, and
+   `P1-T011`'s `Authority` is what will later decide what the scan is allowed to
+   open. The bounded part is the acceptance criterion, not an optimisation: a
+   scanner that follows a symlink out of the project, or that reads a directory
+   because it was named rather than because a rule allowed it, is a scope leak
+   that no later check can detect. Windows specifics from `CLAUDE.md` apply
+   directly — spaces, Unicode, case-insensitive comparison, long-path pressure,
+   and junction/reparse points rather than only POSIX symlinks.
+2. Then `P2-T010` (ProjectIntent ingestion from an explicit goal/spec), which
+   reads `Config::requested_privileges`' neighbour `project_intent` and is the
+   other half of what makes a report able to say what the user asked for.
 
 `taskctl accept` takes `--note`, not `--evidence`; `--evidence` is silently
 ignored, which is how the earliest tasks came to record an empty note.
@@ -413,6 +507,20 @@ ignored, which is how the earliest tasks came to record an empty note.
   top.** The workspace lints are `warn` but the gate runs `-D warnings`, so a new
   test file fails clippy until it carries the opt-out. `cargo fmt --all` will
   place it correctly if the file starts with it.
+- **Rank a closed enum with a full `match` returning a number, not with a
+  `bool` predicate.** `P1-T011`'s first `resolve` took
+  `stronger: impl Fn(T) -> bool` (e.g. `|mode| mode == Standard`), which silently
+  ranks every variant the predicate does not name as *weaker* — including
+  `ProtectionMode::Custom`, a variant this release cannot produce but which
+  exists in the enum. A `match` forces the question to be answered when a variant
+  is added, and lets the unreachable ones be ranked in the safe direction with a
+  comment saying so. **A predicate that answers `false` for an unhandled case is
+  a default, and defaults are where false greens live.**
+- **`execution.allow_network: true` and `allow_dependency_install: true` are
+  `Contradiction`s unless `execution.mode` is non-`inspect_only`.** Any test
+  fixture that sets either boolean must also set `mode: host_confirmed`, or it
+  fails at parse time with a message about a setting that "could never take
+  effect".
 - Write repository files with LF endings. `core.autocrlf=true` plus
   `.gitattributes` (`* text=auto eol=lf`) means a Python `write_text` on Windows
   leaves CRLF in the working tree that shows as a phantom ` M` until

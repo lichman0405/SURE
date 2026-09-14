@@ -1,0 +1,854 @@
+//! Which layer of configuration a setting came from, and what a lower layer is
+//! allowed to do with it.
+//!
+//! # The order, and the one rule
+//!
+//! `docs/architecture/CONFIG_AUTHORITY.md` puts the user above the project,
+//! because the project being checked may be controlled by the same AI whose work
+//! SURE is evaluating. This module is that order, and the rule that follows from
+//! it:
+//!
+//! > A layer cannot widen what a layer above it allows, and cannot weaken a
+//! > restriction a layer above it imposed.
+//!
+//! # Why this is not a merge
+//!
+//! The obvious shape — fold the project's settings into the user's, field by
+//! field, keeping whichever is safer — was rejected in ADR 0011, and it is worth
+//! restating here because it is the thing a reader expects to find. A merge
+//! reinterprets intent: a user who did not mention a setting has not expressed a
+//! preference to be maximised, and the merged result cannot be reported back to
+//! them in terms of the files they wrote. So there is no `Authority::effective()
+//! -> Config`.
+//!
+//! What there is instead is two answers that *are* well defined:
+//!
+//! 1. [`Authority::privileges`] — every behaviour any layer asked for, and who,
+//!    if anyone, was able to grant it. A project file that asks for network
+//!    access produces a recorded refusal, not a granted permission and not
+//!    silence.
+//! 2. [`Authority::protection`] and [`Authority::privacy_mode`] — restrictions,
+//!    where the answer is the stricter of the two layers, because taking the
+//!    stricter restriction never turns a statement into a permission.
+//!
+//! Everything else in a project file is read from the project's own settings:
+//! the project is the authority on which of its own checks apply, what its own
+//! goal is, and how its own components fit together. `Config::scope_reductions`
+//! is read that way, and it is *reported* rather than overridden — a project
+//! turning a check off cannot be told apart from one that never mentioned it when
+//! the value it names is the default, so a claim that the user's file overrode
+//! it would be a claim SURE cannot support.
+//!
+//! # The highest authority is not a file
+//!
+//! Rank 1 in `CONFIG_AUTHORITY.md` is the person at the keyboard approving the
+//! current action. That is not configuration and does not live here:
+//! `ConsentGrantor::InteractiveUser` is where it is recorded, and
+//! `docs/architecture/CLI.md` reserves status 4 for a decision that comes out of
+//! it. When that exists it is applied *on top of* this, which is why
+//! [`Authority::permissions`] says what the configuration grants rather than what
+//! may happen.
+
+use std::path::Path;
+
+use sure_domain::execution::{ConsentGrantor, ExecutionPermissions};
+use sure_domain::variants::variants;
+
+use super::values::{PrivacyMode, ProjectRequest, ProtectionMode};
+use super::{Config, ConfigError, LoadedConfig};
+
+/// One layer of configuration.
+///
+/// Ordered by authority, most trusted first. There is no `Default` or `Policy`
+/// variant: a default is not a file that asked for something, and organization
+/// policy does not exist in this release — adding either as a variant would give
+/// callers a source they could name but never obtain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Layer {
+    /// The user's own settings, outside the project.
+    User,
+    /// `sure.yaml` at the root of the project being checked.
+    Project,
+}
+
+variants!(
+    /// Every layer, most trusted first.
+    Layer { User, Project }
+);
+
+impl Layer {
+    /// The stable name, for a report or a frame.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Project => "project",
+        }
+    }
+
+    /// Where this layer's settings are read from, in the user's words.
+    #[must_use]
+    pub const fn plain_description(self) -> &'static str {
+        match self {
+            Self::User => "your own SURE settings, outside this project",
+            Self::Project => "this project's own sure.yaml",
+        }
+    }
+
+    /// Whether this layer is allowed to grant a privileged behaviour.
+    ///
+    /// The whole of `CONFIG_AUTHORITY.md` in one predicate. It is written as a
+    /// match rather than as `self == Self::User` so that adding a layer forces
+    /// the question to be answered instead of defaulting to "no".
+    #[must_use]
+    pub const fn can_grant(self) -> bool {
+        match self {
+            Self::User => true,
+            Self::Project => false,
+        }
+    }
+}
+
+/// A setting two layers could each have set, and what decided it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resolved<T> {
+    /// The value in effect.
+    pub value: T,
+    /// The most trusted layer that asked for something stricter than the
+    /// default, or `None` when no layer did.
+    ///
+    /// `None` is not "unknown": the settings this is used for are the *strict*
+    /// ones, so a layer that did not choose one chose what SURE does anyway.
+    pub by: Option<Layer>,
+}
+
+impl<T> Resolved<T> {
+    /// Whether the value in effect is the one SURE would have used unasked.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        self.by.is_none()
+    }
+}
+
+/// One behaviour a configuration file asked for, and what came of it.
+///
+/// A refusal is a value, not a missing entry. A file that asked for network
+/// access and did not get it leaves this behind, so a report can say what was
+/// asked for; dropping it would make "the project asked and was refused" and
+/// "the project asked for nothing" the same list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Privilege {
+    /// What was asked for.
+    pub request: ProjectRequest,
+    /// Every layer whose file asks for it, most trusted first.
+    pub asked_by: Vec<Layer>,
+    /// Who was able to grant it, or `None` when nobody was.
+    pub granted_by: Option<ConsentGrantor>,
+}
+
+impl Privilege {
+    /// Whether the request was granted.
+    #[must_use]
+    pub const fn is_granted(&self) -> bool {
+        self.granted_by.is_some()
+    }
+
+    /// Whether this is a project's request that no higher layer agreed to.
+    ///
+    /// The escalation `docs/architecture/CONFIG_AUTHORITY.md` exists to prevent,
+    /// named so that a caller reporting it does not have to reassemble the
+    /// condition and get it subtly wrong.
+    #[must_use]
+    pub fn is_refused_escalation(&self) -> bool {
+        !self.is_granted() && self.asked_by.contains(&Layer::Project)
+    }
+}
+
+/// The configuration files in force, and what they are allowed to decide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Authority {
+    user: Option<LoadedConfig>,
+    project: LoadedConfig,
+}
+
+impl Authority {
+    /// Read the user's configuration and the project's.
+    ///
+    /// `user_config` is a path rather than a [`crate::paths::Paths`] so that this
+    /// module stays about authority and not about where files live; a caller gets
+    /// the path from `Paths::user_config_file`. A file that is not there is not
+    /// an error — it means the user has declared nothing, which is the ordinary
+    /// case — and the result says which of the two happened.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConfigError`] for either file, naming the file. One bad file
+    /// stops the read: running with defaults while the user believes their
+    /// settings are in force is the failure both readers exist to prevent.
+    pub fn load(project_root: &Path, user_config: &Path) -> Result<Self, ConfigError> {
+        let user = Config::load_file(user_config)?;
+        let project = Config::load(project_root)?;
+        Ok(Self {
+            user: user.source.is_file().then_some(user),
+            project,
+        })
+    }
+
+    /// Build from settings already read.
+    ///
+    /// For a caller that has them — a test, or a command reporting on the files
+    /// it read — and for [`Authority::load`] itself.
+    #[must_use]
+    pub const fn new(user: Option<LoadedConfig>, project: LoadedConfig) -> Self {
+        Self { user, project }
+    }
+
+    /// The project's settings.
+    ///
+    /// Every privileged setting in them is inert; see [`Authority::privileges`]
+    /// for what any of them amount to.
+    #[must_use]
+    pub const fn project(&self) -> &Config {
+        &self.project.config
+    }
+
+    /// The project's settings and where they came from.
+    #[must_use]
+    pub const fn project_file(&self) -> &LoadedConfig {
+        &self.project
+    }
+
+    /// The user's settings, or `None` when the user has no configuration file.
+    ///
+    /// `None` and "a file that declares nothing" are different answers, and this
+    /// is what keeps them apart: the first means SURE found no file, the second
+    /// means it read one and it was empty.
+    #[must_use]
+    pub const fn user(&self) -> Option<&Config> {
+        match &self.user {
+            Some(loaded) => Some(&loaded.config),
+            None => None,
+        }
+    }
+
+    /// The user's settings and where they came from, if any.
+    #[must_use]
+    pub const fn user_file(&self) -> Option<&LoadedConfig> {
+        self.user.as_ref()
+    }
+
+    /// Every privileged behaviour either layer asked for, and what came of it.
+    ///
+    /// In [`ProjectRequest::ALL`] order, so two runs over the same two files
+    /// produce the same list and a report reads the same way twice.
+    #[must_use]
+    pub fn privileges(&self) -> Vec<Privilege> {
+        let user = match &self.user {
+            Some(loaded) => loaded.config.requested_privileges(),
+            None => Vec::new(),
+        };
+        let project = self.project.config.requested_privileges();
+
+        ProjectRequest::ALL
+            .iter()
+            .copied()
+            .filter_map(|request| {
+                let mut asked_by = Vec::new();
+                if user.contains(&request) {
+                    asked_by.push(Layer::User);
+                }
+                if project.contains(&request) {
+                    asked_by.push(Layer::Project);
+                }
+                // A request appears here only if somebody asked, and the list is
+                // built most trusted first, so the first entry is the strongest
+                // layer that asked.
+                let granted_by = asked_by
+                    .first()
+                    .filter(|layer| layer.can_grant())
+                    .map(|_| ConsentGrantor::UserConfiguration);
+                (!asked_by.is_empty()).then_some(Privilege {
+                    request,
+                    asked_by,
+                    granted_by,
+                })
+            })
+            .collect()
+    }
+
+    /// The request with this name, as it was resolved.
+    ///
+    /// `None` when no layer asked for it.
+    #[must_use]
+    pub fn privilege(&self, request: ProjectRequest) -> Option<Privilege> {
+        self.privileges()
+            .into_iter()
+            .find(|privilege| privilege.request == request)
+    }
+
+    /// The permissions the configuration grants.
+    ///
+    /// Not the answer to whether an action may run: that is
+    /// `sure_domain::execution::decide`, which also needs a mode and treats an
+    /// unclassifiable command as needing its own consent in every mode. What this
+    /// answers is the narrower question the authority layer owns — which
+    /// permissions a *file* was allowed to hand over.
+    ///
+    /// The mode itself is not a permission. A project asking for
+    /// `host_confirmed` gets no entry here, because the mode is the project's
+    /// preference about what SURE would do with permissions it does not have.
+    #[must_use]
+    pub fn permissions(&self) -> ExecutionPermissions {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        for privilege in self.privileges() {
+            if !privilege.is_granted() {
+                continue;
+            }
+            if let Some(permission) = privilege.request.permission() {
+                permissions.set(permission, true);
+            }
+        }
+        permissions
+    }
+
+    /// The protection in effect: the firmer of the two layers.
+    ///
+    /// A project may ask for *more* protection than the user configured, and the
+    /// layer that asked is reported so a user can see where it came from. It may
+    /// not ask for less: `standard` in a project file cannot lower a `strict`
+    /// the user set, and the value here is `strict`.
+    #[must_use]
+    pub fn protection(&self) -> Resolved<ProtectionMode> {
+        resolve(
+            [
+                (
+                    Layer::User,
+                    self.user
+                        .as_ref()
+                        .map(|loaded| loaded.config.protection.mode),
+                ),
+                (Layer::Project, Some(self.project.config.protection.mode)),
+            ],
+            ProtectionMode::default(),
+            protection_rank,
+        )
+    }
+
+    /// The privacy mode in effect: the stricter of the two layers.
+    ///
+    /// `fully_local` wins over `local_first` whichever layer wrote it, because
+    /// sending less out is never the escalation. ADR 0002 puts authority for
+    /// privacy outside the project and lets a project ask for a behaviour; this
+    /// is the same rule seen from the other side, where the behaviour a project
+    /// may add on its own is the one that gives something up.
+    #[must_use]
+    pub fn privacy_mode(&self) -> Resolved<PrivacyMode> {
+        resolve(
+            [
+                (
+                    Layer::User,
+                    self.user.as_ref().map(|loaded| loaded.config.privacy.mode),
+                ),
+                (Layer::Project, Some(self.project.config.privacy.mode)),
+            ],
+            PrivacyMode::default(),
+            privacy_rank,
+        )
+    }
+}
+
+/// How firmly a protection mode intervenes, for comparing two of them.
+///
+/// A match rather than a derived `Ord`: the declaration order in `values.rs` is
+/// the order a user reads the values in, which happens to agree today and has no
+/// reason to keep agreeing.
+///
+/// `Custom` is not accepted in a file in this release
+/// (`ProtectionMode::is_available`). It ranks highest anyway: a value SURE does
+/// not implement is not a reason to relax anything, and the safe direction for an
+/// unreachable input is the firmer answer.
+const fn protection_rank(mode: ProtectionMode) -> u8 {
+    match mode {
+        ProtectionMode::Standard => 0,
+        ProtectionMode::Strict => 1,
+        ProtectionMode::Custom => 2,
+    }
+}
+
+/// How much of a project's activity SURE may keep, for comparing two privacy
+/// modes. Higher keeps more here.
+///
+/// `CloudEnhanced` sends more out than either available mode and is refused in a
+/// file (`PrivacyMode::is_available`); it ranks lowest so that an unreachable
+/// input can never be the reason a stricter setting is dropped.
+const fn privacy_rank(mode: PrivacyMode) -> u8 {
+    match mode {
+        PrivacyMode::CloudEnhanced => 0,
+        PrivacyMode::LocalFirst => 1,
+        PrivacyMode::FullyLocal => 2,
+    }
+}
+
+/// Take the strictest value any layer set, and remember which layer set it.
+///
+/// `by` is `Some` exactly when the value in effect is firmer than the default,
+/// and names the most trusted layer that asked for it. A layer absent from
+/// `layers` — because there is no user file — cannot win.
+fn resolve<T: Copy>(
+    layers: [(Layer, Option<T>); 2],
+    default: T,
+    rank: impl Fn(T) -> u8,
+) -> Resolved<T> {
+    let mut strictest: Option<(Layer, T)> = None;
+    for (layer, value) in layers {
+        let Some(value) = value else { continue };
+        // Strictly greater, so a tie keeps the more trusted layer already held.
+        if strictest.is_none_or(|(_, current)| rank(value) > rank(current)) {
+            strictest = Some((layer, value));
+        }
+    }
+    match strictest {
+        Some((layer, value)) if rank(value) > rank(default) => Resolved {
+            value,
+            by: Some(layer),
+        },
+        _ => Resolved {
+            value: default,
+            by: None,
+        },
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::config::ConfigSource;
+    use std::path::PathBuf;
+    use sure_domain::execution::Permission;
+
+    /// A layer that was read from a file, as both layers are in practice.
+    fn loaded(text: &str, from: &str) -> LoadedConfig {
+        LoadedConfig {
+            config: Config::from_yaml(text)
+                .unwrap_or_else(|error| panic!("this fixture should parse:\n{error}")),
+            source: ConfigSource::File(PathBuf::from(from)),
+            searched: PathBuf::from(from),
+        }
+    }
+
+    /// Both layers, the user's file present.
+    fn both(user: &str, project: &str) -> Authority {
+        Authority::new(
+            Some(loaded(user, "user/sure.yaml")),
+            loaded(project, "project/sure.yaml"),
+        )
+    }
+
+    /// The project alone: an ordinary user has no SURE configuration file.
+    fn project_only(project: &str) -> Authority {
+        Authority::new(None, loaded(project, "project/sure.yaml"))
+    }
+
+    /// Everything a project file can ask for, asked for at once.
+    const ASKS_FOR_EVERYTHING: &str = "\
+execution:
+  mode: host_confirmed
+  allow_dependency_install: true
+  allow_network: true
+privacy:
+  full_recording: true
+  telemetry: true
+analysis:
+  provider: claude_cli
+";
+
+    #[test]
+    fn a_project_file_cannot_grant_itself_anything() {
+        // The criterion this module exists for. Every request a project can
+        // make, made at once, granted by nobody.
+        let authority = project_only(ASKS_FOR_EVERYTHING);
+        let privileges = authority.privileges();
+
+        assert_eq!(
+            privileges.len(),
+            ProjectRequest::ALL.len(),
+            "a file asking for everything must leave every request on the record, \
+             got {privileges:?}"
+        );
+        assert!(
+            privileges.iter().all(Privilege::is_refused_escalation),
+            "a project granted itself something: {privileges:?}"
+        );
+        assert_eq!(
+            authority.permissions(),
+            ExecutionPermissions::inspect_only(),
+            "a project file widened what SURE may do"
+        );
+    }
+
+    #[test]
+    fn a_user_file_grants_only_what_it_asks_for() {
+        // The other direction, so that the test above is not satisfied by a
+        // module that refuses everything.
+        let authority = both(
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+            "execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n",
+        );
+
+        assert_eq!(
+            authority.privilege(ProjectRequest::Network),
+            Some(Privilege {
+                request: ProjectRequest::Network,
+                asked_by: vec![Layer::User],
+                granted_by: Some(ConsentGrantor::UserConfiguration),
+            })
+        );
+
+        let install = authority
+            .privilege(ProjectRequest::InstallDependencies)
+            .expect("the project asked for an install and left no record");
+        assert!(!install.is_granted());
+        assert!(install.is_refused_escalation());
+
+        let permissions = authority.permissions();
+        assert!(
+            permissions.allows(Permission::Network),
+            "the user's own file asked for the network and did not get it"
+        );
+        assert!(
+            !permissions.allows(Permission::InstallDependencies),
+            "the project asked for an install and was given it"
+        );
+    }
+
+    #[test]
+    fn asking_for_what_the_user_also_asked_for_is_not_an_escalation() {
+        // A project and its user agreeing is the ordinary case, and it must not
+        // be reported as an attempt. Both askers are kept, so a report can say
+        // who agreed rather than only that it was allowed.
+        let authority = both(
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        );
+        let network = authority
+            .privilege(ProjectRequest::Network)
+            .expect("both layers asked");
+
+        assert_eq!(network.asked_by, vec![Layer::User, Layer::Project]);
+        assert!(network.is_granted());
+        assert!(!network.is_refused_escalation());
+    }
+
+    #[test]
+    fn a_higher_layer_request_is_not_downgraded_by_a_silent_project() {
+        // The user granted the network and the project said nothing about it. The
+        // permission stands: a project that does not mention a setting has not
+        // expressed an opinion about it.
+        let authority = both(
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+            "",
+        );
+        let network = authority
+            .privilege(ProjectRequest::Network)
+            .expect("the user asked");
+        assert_eq!(network.asked_by, vec![Layer::User]);
+        assert!(network.is_granted());
+        assert!(authority.permissions().allows(Permission::Network));
+    }
+
+    #[test]
+    fn when_both_layers_ask_for_the_same_thing_the_user_is_named() {
+        // A report that attributed a strict setting to the project when the
+        // user's own file asked for it too would send the user to read a file
+        // they had already agreed with, looking for a decision that was theirs.
+        let authority = both(
+            "protection:\n  mode: strict\n",
+            "protection:\n  mode: strict\n",
+        );
+        assert_eq!(authority.protection().value, ProtectionMode::Strict);
+        assert_eq!(authority.protection().by, Some(Layer::User));
+    }
+
+    #[test]
+    fn a_project_cannot_lower_the_protection_the_user_set() {
+        // "Project config may not weaken user protection", and the value that
+        // proves it is the effective one rather than the reported one.
+        let authority = both(
+            "protection:\n  mode: strict\n",
+            "protection:\n  mode: standard\n",
+        );
+        let protection = authority.protection();
+
+        assert_eq!(protection.value, ProtectionMode::Strict);
+        assert_eq!(protection.by, Some(Layer::User));
+        assert!(!protection.is_default());
+    }
+
+    #[test]
+    fn a_project_may_strengthen_protection_and_is_named_as_the_reason() {
+        // The asymmetric half. Asking for *more* protection is not escalation,
+        // and a report that could not say which layer imposed it would leave the
+        // user wondering why a run became slower and more interruptive.
+        let authority = both("", "protection:\n  mode: strict\n");
+        assert_eq!(authority.protection().value, ProtectionMode::Strict);
+        assert_eq!(authority.protection().by, Some(Layer::Project));
+    }
+
+    #[test]
+    fn the_stricter_privacy_mode_wins_and_the_layer_that_set_it_is_named() {
+        // Privacy resolves the way protection does, and the direction that
+        // matters is the opposite one: here the stricter value is the one that
+        // discloses less, so nothing below the user moves the resolved mode
+        // toward the network.
+        //
+        // Note what the first row does *not* claim. `local_first` is the default
+        // and it does allow external analysis where one is configured; it is the
+        // stricter of the two available modes only relative to nothing being
+        // said at all. Saying "no content leaves" is `fully_local`, and that is a
+        // setting rather than an assumption.
+        let cases: &[(&str, &str, PrivacyMode, Option<Layer>)] = &[
+            ("", "", PrivacyMode::LocalFirst, None),
+            (
+                "",
+                "privacy:\n  mode: fully_local\n",
+                PrivacyMode::FullyLocal,
+                Some(Layer::Project),
+            ),
+            (
+                "privacy:\n  mode: fully_local\n",
+                "privacy:\n  mode: local_first\n",
+                PrivacyMode::FullyLocal,
+                Some(Layer::User),
+            ),
+            (
+                "privacy:\n  mode: fully_local\n",
+                "",
+                PrivacyMode::FullyLocal,
+                Some(Layer::User),
+            ),
+        ];
+        for (user, project, value, by) in cases {
+            let resolved = both(user, project).privacy_mode();
+            assert_eq!(
+                (resolved.value, resolved.by),
+                (*value, *by),
+                "user {user:?} with project {project:?} resolved to {resolved:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_asked_for_means_the_default_and_says_so() {
+        // `by: None` has to mean "nothing beyond the default", not "SURE did not
+        // work it out". A report that could not tell those apart would be unable
+        // to say whether it had looked.
+        for authority in [project_only(""), both("", "")] {
+            assert_eq!(authority.protection().value, ProtectionMode::Standard);
+            assert!(authority.protection().is_default());
+            assert_eq!(authority.privacy_mode().value, PrivacyMode::LocalFirst);
+            assert!(authority.privacy_mode().is_default());
+            assert!(authority.privileges().is_empty());
+            assert_eq!(
+                authority.permissions(),
+                ExecutionPermissions::inspect_only()
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_user_layer_can_grant() {
+        // Written against `Layer::ALL` so that a third layer added later has to
+        // answer this question rather than inheriting an assumption.
+        assert_eq!(Layer::ALL.len(), 2);
+        for layer in Layer::ALL {
+            assert_eq!(
+                layer.can_grant(),
+                *layer == Layer::User,
+                "{layer:?} answered the question differently from the documented order"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_nobody_made_is_not_in_the_list() {
+        // The list is what was asked for, not a menu of what could have been. A
+        // report that printed all six every time would bury the one that
+        // mattered.
+        let authority = project_only("execution:\n  mode: host_confirmed\n");
+        assert_eq!(authority.privileges().len(), 1);
+        assert!(authority.privilege(ProjectRequest::Telemetry).is_none());
+        assert!(authority.privilege(ProjectRequest::Network).is_none());
+    }
+
+    #[test]
+    fn the_privileges_are_in_a_fixed_order() {
+        // Two runs over the same files must read the same way, and a report is
+        // read by people and compared by machines.
+        let authority = both(
+            "execution:\n  mode: host_confirmed\n  allow_network: true\nprivacy:\n  telemetry: true\n",
+            "execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n",
+        );
+        let order: Vec<ProjectRequest> = authority
+            .privileges()
+            .into_iter()
+            .map(|privilege| privilege.request)
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ProjectRequest::RunProjectCode,
+                ProjectRequest::InstallDependencies,
+                ProjectRequest::Network,
+                ProjectRequest::Telemetry,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_user_file_that_is_not_there_is_not_a_file_that_declared_nothing() {
+        // "You have no settings" and "your settings are empty" are different
+        // sentences, and a report has to be able to say which one is true.
+        let none = project_only("");
+        assert!(none.user().is_none());
+        assert!(none.user_file().is_none());
+
+        let empty = both("", "");
+        assert!(empty.user().is_some());
+        assert!(empty.user_file().is_some());
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_request_that_was_refused() {
+        // Dropping refused requests would make "asked and refused" and "never
+        // asked" the same list, which is the shape of report this product exists
+        // to replace.
+        let authority = project_only("privacy:\n  full_recording: true\n");
+        let recording = authority
+            .privilege(ProjectRequest::FullRecording)
+            .expect("full_recording was asked for and left no record");
+        assert_eq!(recording.asked_by, vec![Layer::Project]);
+        assert_eq!(recording.granted_by, None);
+        assert!(recording.is_refused_escalation());
+        assert!(
+            authority.privilege(ProjectRequest::Telemetry).is_none(),
+            "nothing asked for telemetry"
+        );
+    }
+
+    #[test]
+    fn asking_for_something_that_is_not_a_permission_grants_no_permission() {
+        // Recording more is not running more. A granted `full_recording` or
+        // `telemetry` must not appear in the permission set as though it were
+        // execution authority.
+        let authority = both(
+            "privacy:\n  mode: fully_local\n  full_recording: true\n",
+            "",
+        );
+        assert!(authority.privilege(ProjectRequest::FullRecording).is_some());
+        assert_eq!(
+            authority.permissions(),
+            ExecutionPermissions::inspect_only()
+        );
+    }
+
+    /// A directory under the workspace's git-ignored `target/tmp`, unique to this
+    /// test binary, for the tests that need files on disk.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("config authority")
+            .join(format!("{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the scratch directory");
+        dir
+    }
+
+    #[test]
+    fn both_files_are_read_from_where_they_were_asked_for() {
+        // The one test that goes through `Authority::load`, because the wiring it
+        // holds is invisible to every test that builds an `Authority` directly:
+        // an `Authority` that found the user's file and then discarded it would
+        // pass all of them and silently ignore the user's own settings.
+        let dir = scratch_dir("load");
+        let project_root = dir.join("project");
+        std::fs::create_dir_all(&project_root).expect("create the project directory");
+        let user_config = dir.join("sure.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("write the user's file");
+        std::fs::write(
+            project_root.join(Config::FILE_NAME),
+            "execution:\n  mode: host_confirmed\n",
+        )
+        .expect("write the project's file");
+
+        let authority = Authority::load(&project_root, &user_config)
+            .expect("both files are there and both are valid");
+
+        assert!(
+            authority.user().is_some(),
+            "the user's own file was found and then not used"
+        );
+        assert!(
+            authority.permissions().allows(Permission::Network),
+            "the user's file granted the network and the grant did not arrive"
+        );
+        assert_eq!(
+            authority
+                .privilege(ProjectRequest::Network)
+                .expect("the user asked for the network")
+                .asked_by,
+            vec![Layer::User],
+            "the project never asked, so only the user is on the record"
+        );
+        assert!(
+            authority
+                .privilege(ProjectRequest::RunProjectCode)
+                .is_some_and(|privilege| privilege.is_granted()),
+            "the mode the user's own file set did not count as a grant"
+        );
+
+        // Failing to clean up must not turn a passing test into a failing one;
+        // Windows keeps directory handles open longer than Unix does.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_with_no_configuration_files_at_all_declares_nothing() {
+        // Absence is not failure. A user who has configured nothing must get
+        // defaults rather than an error, and the answer must say so.
+        let dir = scratch_dir("absent");
+        let root = dir.join("empty-project");
+        let authority = Authority::load(&root, &dir.join(Config::FILE_NAME))
+            .expect("nothing to read is not a failure");
+
+        assert!(authority.user().is_none());
+        assert!(authority.project().requested_privileges().is_empty());
+        assert!(authority.privileges().is_empty());
+        assert_eq!(
+            authority.permissions(),
+            ExecutionPermissions::inspect_only()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_file_cannot_weaken_a_user_restriction_in_either_direction() {
+        // Both restrictions at once, weakened from below, resolved to what the
+        // user set. This is the sentence in `CONFIG_AUTHORITY.md` — "a
+        // lower-authority source cannot weaken a higher-authority safety/privacy
+        // restriction" — rather than either half of it.
+        let authority = both(
+            "protection:\n  mode: strict\nprivacy:\n  mode: fully_local\n",
+            "protection:\n  mode: standard\nprivacy:\n  mode: local_first\n",
+        );
+        assert_eq!(authority.protection().value, ProtectionMode::Strict);
+        assert_eq!(authority.protection().by, Some(Layer::User));
+        assert_eq!(authority.privacy_mode().value, PrivacyMode::FullyLocal);
+        assert_eq!(authority.privacy_mode().by, Some(Layer::User));
+    }
+}

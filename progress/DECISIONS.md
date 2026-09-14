@@ -144,3 +144,77 @@ For architectural decisions with lasting impact, also add an ADR under `docs/adr
 - **A word where a version belongs is a wrong command line (2),** not a refusal
   (3). `--speaks latest` reads as a version that exists and is refused; that is
   the wrong thing to tell an adapter.
+
+## P1-T011 — configuration authority
+
+Task: `Implement configuration authority layers`. Acceptance: "Project config
+cannot silently grant host execution/network/install/full-recording or weaken
+user protection. Authority resolution has unit tests."
+
+The rule is one sentence in `docs/architecture/CONFIG_AUTHORITY.md`, and
+`crates/sure-core/src/config/authority.rs` is that sentence as code:
+
+> A layer cannot widen what a layer above it allows, and cannot weaken a
+> restriction a layer above it imposed.
+
+- **`Layer` is `User` and `Project`, and nothing else.** Rank 3 in the authority
+  order is organization policy, which does not exist in this release. It is not a
+  variant, so no caller can name a source it can never obtain. Rank 1 — the
+  person at the keyboard — is not configuration at all and stays where it already
+  was, in `ConsentGrantor::InteractiveUser`.
+- **`Layer::can_grant()` is a match, not `self == Self::User`.** Written as a
+  match so that adding a third layer forces the question to be answered instead
+  of silently inheriting "no". It is the whole document in one predicate.
+- **`Authority::privileges()` records every ask, including the refused ones.** A
+  `Privilege` carries the request, every layer that asked (most trusted first),
+  and the grantor or `None`. A project file that asks for the network produces a
+  recorded refusal — not a granted permission, and not silence. Dropping refusals
+  would make "asked and refused" and "never asked" the same list, which is the
+  shape of report this product exists to replace.
+- **A grant comes only from the topmost layer that asked, and only if that layer
+  may grant.** A request appears in `asked_by` together with every layer above it
+  that also asked, so the first entry is the strongest. A project and its user
+  both asking is the ordinary case and is *not* reported as an escalation.
+- **`permissions()` is not `decide()`.** It says which permissions a *file* was
+  allowed to hand over. Whether an action may run is
+  `sure_domain::execution::decide`, which needs a mode and treats an
+  unclassifiable command as needing its own consent in every mode. Two different
+  questions; conflating them is how a blanket configuration grant becomes a
+  blanket execution grant.
+- **The execution mode is not a permission.** A project asking for
+  `host_confirmed` gets no entry in the permission set. The mode is the project's
+  preference about what SURE would do with permissions it does not have.
+- **Restrictions resolve to the stricter value, and `Resolved::by` names the
+  most trusted layer that asked for it.** A project may ask for *more*
+  protection and is named as the reason; it may not ask for less. `fully_local`
+  beats `local_first` whichever layer wrote it, because sending less out is never
+  the escalation.
+- **The ranks are two hand-written `match`es, not a derived `Ord`.** The
+  declaration order in `values.rs` is the order a user reads the values in, which
+  happens to agree today and has no reason to keep agreeing. The two unavailable
+  variants are ranked in the safe direction — `Custom` protection highest,
+  `cloud_enhanced` privacy lowest — so an input SURE cannot reach can never be
+  the reason a stricter setting is dropped.
+- **`by: None` means "nothing beyond the default", not "SURE did not work it
+  out".** A report that could not tell those apart would be unable to say whether
+  it had looked.
+- **No merged `Config`, as ADR 0011 requires.** There is no `effective()`. Scope
+  reductions are read from the project and *reported* rather than overridden: a
+  project that sets a check to the default is indistinguishable from one that
+  never mentioned it, so "your file overrode the project" would be a claim SURE
+  cannot support.
+- **`Config::load` split into `load` and `load_file`.** The user's configuration
+  is the same format at a different path, so it is read by the same reader rather
+  than by a second one that would drift. The near-miss `sure.yml` check follows
+  the *file name*, not the directory: `sure.yml` is only a mistake as a spelling
+  of `sure.yaml`, and a caller that asked for `config.yaml` has not misspelled
+  anything. That is now a contract of a public function, so it has its own test.
+- **`Layer::User` names `ConsentGrantor::UserConfiguration`, not
+  `InteractiveUser`.** A configuration file grants a class of actions; the person
+  at the keyboard approves one action and names the exact argument vector. The
+  two are different objects and are not folded into one flag.
+
+Not in this task, and said plainly in the architecture document: **nothing routes
+through the authority layer yet.** No command builds an `Authority`; wiring it in
+front of the check pipeline is P13-T009, which depends on this. Until then the
+resolution is built and tested on its own.

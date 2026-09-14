@@ -20,6 +20,13 @@ nothing, and every setting below takes its default. The loader records which of
 the two happened, so a report can say whether a setting was chosen by the user
 or by the project.
 
+The same file format is read at one other path: the user's own configuration,
+outside any project, at `Paths::user_config_file()`. It is the same reader
+rather than a second one, so a near-miss `sure.yml` beside it is the same
+mistake. `Config::load_file` reads a file at exactly the path it is given;
+`Config::load` reads `sure.yaml` from a project root. Which layer a setting came
+from is `docs/architecture/CONFIG_AUTHORITY.md`.
+
 ## Rules that apply to every setting
 
 1. **An unknown setting stops the run.** SURE does not warn and continue. A
@@ -152,7 +159,10 @@ sets the authority order, and this file can only ever sit below the user's own
 configuration.
 
 **Requests** — parsed, reported by `Config::requested_privileges`, and inert
-until a higher authority agrees:
+until a higher authority agrees. The user's own configuration at
+`Paths::user_config_file()` is that higher authority; a request only this file
+makes is refused and recorded as a refusal, not granted and not dropped. What
+each request becomes is in `docs/architecture/CONFIG_AUTHORITY.md`:
 
 | Setting | Request |
 | --- | --- |
@@ -196,9 +206,10 @@ Nothing here restates them; this file can only narrow them or ask for them.
 
 | File | Holds |
 | --- | --- |
-| `mod.rs` | the model, `from_yaml`, `load`, validation, the request and reduction lists |
+| `mod.rs` | the model, `from_yaml`, `load`, `load_file`, validation, the request and reduction lists |
 | `values.rs` | the seven enums, their wire names and what each one means |
 | `error.rs` | every message a bad file can produce |
+| `authority.rs` | which layer a setting came from, and what a lower layer may do with it |
 
 `crates/sure-core/src/redact.rs` is the second line of defence against a secret
 reaching a message. It lives at the crate root rather than here because

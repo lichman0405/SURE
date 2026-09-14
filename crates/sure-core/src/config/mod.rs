@@ -22,8 +22,10 @@
 
 mod values;
 
+pub mod authority;
 pub mod error;
 
+pub use authority::{Authority, Layer, Privilege, Resolved};
 pub use error::{ConfigError, ErrorKind, Location};
 pub use values::{
     AnalysisProvider, CheckPreference, PrivacyMode, ProjectRequest, ProtectionMode, ReportFormat,
@@ -282,36 +284,52 @@ impl Config {
     /// error — it means the project has declared nothing, and the defaults are
     /// reported as [`ConfigSource::NoFile`] so a report can say so.
     pub fn load(project_root: &Path) -> Result<LoadedConfig, ConfigError> {
-        let path = project_root.join(Self::FILE_NAME);
+        Self::load_file(&project_root.join(Self::FILE_NAME))
+    }
+
+    /// Read a `sure.yaml` at exactly this path.
+    ///
+    /// The same file, read from somewhere other than a project root — the
+    /// user's own configuration lives in the platform's config directory and is
+    /// the same format, so it is read by the same code rather than by a second
+    /// reader that would drift from this one.
+    ///
+    /// The near-miss check follows the *file name*, not the directory: a
+    /// `sure.yml` beside the path SURE was told to read is the same mistake
+    /// wherever that path is.
+    ///
+    /// # Errors
+    ///
+    /// As [`Config::load`].
+    pub fn load_file(path: &Path) -> Result<LoadedConfig, ConfigError> {
         // The read decides, rather than a separate `is_file` probe. A probe asks
         // a different question from the one that matters, and the two can
         // disagree: a directory, a locked file or a denied path all exist but
         // cannot be read, and treating those as "no configuration file" would
         // run with defaults while the user believes their settings are in force.
-        let Some(text) = read_if_present(&path)? else {
-            let near_miss = project_root.join(Self::NEAR_MISS_FILE_NAME);
-            if near_miss.is_file() {
+        let Some(text) = read_if_present(path)? else {
+            if let Some(near_miss) = near_miss_beside(path) {
                 // Silently ignoring this file is the worst option available:
                 // the user believes their settings are in force and SURE is
                 // running with defaults.
                 return Err(ConfigError::new(ErrorKind::WrongFileName {
                     found: near_miss.clone(),
-                    expected: path,
+                    expected: path.to_path_buf(),
                 })
                 .at_file(&near_miss));
             }
             return Ok(LoadedConfig {
                 config: Self::default(),
                 source: ConfigSource::NoFile,
-                searched: path,
+                searched: path.to_path_buf(),
             });
         };
 
-        let config = Self::from_yaml(&text).map_err(|error| error.at_file(&path))?;
+        let config = Self::from_yaml(&text).map_err(|error| error.at_file(path))?;
         Ok(LoadedConfig {
             config,
-            source: ConfigSource::File(path.clone()),
-            searched: path,
+            source: ConfigSource::File(path.to_path_buf()),
+            searched: path.to_path_buf(),
         })
     }
 
@@ -519,6 +537,19 @@ const fn shape_of(value: &Value) -> &'static str {
         Value::Mapping(_) => "a set of settings",
         Value::Tagged(_) => "a tagged value",
     }
+}
+
+/// The `sure.yml` beside `path`, when that file exists and `path` does not.
+///
+/// A path with no file name, or a file name that is not the one SURE reads, has
+/// no near-miss: `sure.yml` is only a mistake as a *spelling* of `sure.yaml`.
+fn near_miss_beside(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?;
+    if name != Config::FILE_NAME {
+        return None;
+    }
+    let near_miss = path.with_file_name(Config::NEAR_MISS_FILE_NAME);
+    near_miss.is_file().then_some(near_miss)
 }
 
 /// Read a configuration file, or report that it is not there.
@@ -1465,6 +1496,59 @@ analysis:
             Config::default(),
             "the example must be the defaults"
         );
+    }
+
+    // --- reading a named file that is not a project root ------------------
+
+    /// A directory under the workspace's git-ignored `target/tmp`, unique to this
+    /// test binary.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("config file name")
+            .join(format!("{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the scratch directory");
+        dir
+    }
+
+    #[test]
+    fn the_near_miss_check_follows_the_file_name_not_the_directory() {
+        // `sure.yml` is only a mistake as a *spelling* of `sure.yaml`. A caller
+        // that asked SURE to read some other file has not misspelled anything,
+        // and reporting the `sure.yml` beside it would be an error about a file
+        // nobody asked for. That makes this a contract of the public
+        // `Config::load_file` rather than a detail of reading a project root.
+        let dir = scratch_dir("near-miss");
+        let near_miss = dir.join(Config::NEAR_MISS_FILE_NAME);
+        std::fs::write(&near_miss, "report:\n  format: json\n").expect("write the near miss");
+
+        let error = Config::load_file(&dir.join(Config::FILE_NAME))
+            .expect_err("the file the user meant to write must be named, not passed over");
+        match error.kind() {
+            ErrorKind::WrongFileName { found, expected } => {
+                assert_eq!(found, &near_miss);
+                assert_eq!(expected.file_name(), Some(Config::FILE_NAME.as_ref()));
+            }
+            other => panic!("expected a wrong file name, got {other:?}"),
+        }
+
+        // A different name is not a misspelling of `sure.yaml`, and the file
+        // beside it is none of this read's business.
+        for name in ["config.yaml", "settings.yaml", "sure.toml"] {
+            let loaded = Config::load_file(&dir.join(name))
+                .unwrap_or_else(|error| panic!("{name} is not a spelling mistake:\n{error}"));
+            assert_eq!(loaded.source, ConfigSource::NoFile, "{name}");
+            assert_eq!(loaded.config, Config::default(), "{name}");
+            assert_eq!(loaded.searched, dir.join(name));
+        }
+
+        // A caller that asks for `sure.yml` by name means `sure.yml`.
+        let loaded = Config::load_file(&near_miss).expect("this file is one SURE accepts");
+        assert_eq!(loaded.source, ConfigSource::File(near_miss.clone()));
+        assert_eq!(loaded.config.report.format, ReportFormat::Json);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // --- helpers ----------------------------------------------------------

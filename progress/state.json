@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P1",
-  "last_updated": "2026-09-14T10:33:09.951Z",
+  "last_updated": "2026-09-14T10:34:04.125Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -180,8 +180,8 @@
       "notes": "The version rule lives in exactly one place: sure_protocol::handshake::negotiate returns Agreed / CallerIsOlder / CallerIsNewer, and EventEnvelope::from_json calls it rather than comparing numbers itself. Exact equality, no compatibility table -- a version changes exactly when an older reader would get the format wrong, so a mismatch is a document that would be misread, and a misread event becomes wrong evidence. The CLI end is 'sure protocol --speaks VERSION': agreed exits 0 with the sentence on stdout, a mismatch exits 3 with the sentence on stderr and the numbers under details (sure_speaks, caller_speaks, agreed, update). 3 and not 4 because 4 is reserved for a refusal grounded in the user's configuration and no setting makes this build speak a protocol it was not compiled with. The refusal names which side has to move, because the two directions are not the same answer. Re-exported through sure-core rather than reached directly: sure-cli has one edge into the engine (ADR 0001). New: crates/sure-protocol/src/handshake.rs (5 unit tests), 1 new test in event.rs binding the reader and the handshake over 0..=PROTOCOL_VERSION + 3, 2 new tests in sure-cli/src/commands.rs, 2 in report.rs, 1 in cli_contract.rs -- 11 new tests. The CLI contract test reads the version out of the frame instead of carrying its own copy, so it cannot keep passing after what SURE announces and what it accepts have drifted. Six mutations, six fired: negotiate agreeing with newer callers (5 tests, in handshake.rs, event.rs and cli_contract.rs), the two directions swapped, a refused handshake exiting 0 (false green -- 3 unit + 1 integration), the CLI answering every caller with its own version, is_an_answer true for a refused handshake (complaint to stdout), and the reader comparing versions itself, which only 'the_reader_and_the_handshake_refuse_the_same_versions' catches. Gate set: fmt --check clean; clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace --all-features --no-fail-fast 473 passed / 0 failed / 1 ignored across 19 test binaries (15 with tests); validate-bootstrap 17 phases / 166 tasks. Commit 8892e48."
     },
     "P1-T011": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-14T10:34:04.124Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

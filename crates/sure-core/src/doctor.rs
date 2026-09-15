@@ -443,11 +443,14 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 /// # What "found" means, exactly
 ///
 /// The search is for what **SURE would execute**, not what a shell would. On
-/// Windows that is `name.exe`: `Command::new("git")` reaches `CreateProcess`,
-/// which appends `.exe` and nothing else, so a `.cmd` or `.bat` shim is not
-/// something SURE can run — it would need a shell, and `RUST_DESIGN.md` forbids
-/// building shell command lines from project-controlled text. On other
-/// platforms it is `name`, carrying an execute bit.
+/// Windows a name with no extension is completed with `.exe` and **nothing
+/// else**, which is `CreateProcess`'s rule and the one this function copies: a
+/// machine whose Git is a `git.cmd` shim has no `git.exe`, and SURE finds
+/// nothing. Say that precisely, because the loose version — "a `.cmd` is not
+/// something SURE can run" — is false and would be the wrong reason for a right
+/// answer: a batch file named *with* its extension does run, by way of an
+/// interpreter Windows starts for it, which is exactly what a search for `git`
+/// is not doing. On other platforms it is `name`, carrying an execute bit.
 ///
 /// An empty entry is skipped rather than read as the current directory. On Unix
 /// it *is* the current directory, which would make the answer depend on where
@@ -464,8 +467,11 @@ fn find_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
 
 /// The name a program is stored under, given what to suffix it with.
 ///
-/// On Windows, `Command::new("git")` appends `.exe`. Nothing else is tried:
-/// `.cmd` and `.bat` need a shell, and `.com` is a legacy format. A name that
+/// On Windows, a name with no extension gets `.exe` and nothing else — the rule
+/// `Command::new("git")` inherits from `CreateProcess`. `.cmd` and `.bat` are
+/// not tried because the operating system would not try them here either: a
+/// batch file is started when it is named *with* its extension, and that is not
+/// what a search for `git` is doing. `.com` is a legacy format. A name that
 /// already carries an extension is used as given.
 #[cfg(windows)]
 const EXECUTABLE_SUFFIXES: &[&str] = &[".exe"];

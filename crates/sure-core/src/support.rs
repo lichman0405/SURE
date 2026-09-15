@@ -30,12 +30,17 @@
 //!
 //! Both level A and level B include *running* something — "meaningful
 //! deterministic checks", "approved generic checks" — and **this build runs no
-//! project code.** That is not an impression, it is checkable: the only child
-//! process any product code path spawns is `git`, read-only, for the content
-//! fingerprint ([`crate::fingerprint`]'s one `Command::new`, in
-//! `fingerprint/git/mod.rs`), and [`crate::doctor`] searches for and probes
-//! toolchains, which is SURE talking about its own prerequisites. `sure check`
-//! records a goal and says that nothing was checked.
+//! project code.** That is not an impression, it is checkable, and it is a claim
+//! about which programs are reached rather than about how many places *could*
+//! reach one: `sure-core` now holds three `Command::new` sites, and exactly one
+//! of them is on a product path — [`crate::fingerprint`]'s, in
+//! `fingerprint/git/mod.rs`, which runs `git`, read-only, for the content
+//! fingerprint. The other two are [`crate::process`]'s runner and its
+//! `taskkill`, and **nothing in the product calls the runner yet**; the day
+//! something does, this ceiling moves and so does that call site.
+//! [`crate::doctor`] searches for and probes toolchains, which is SURE talking
+//! about its own prerequisites. `sure check` records a goal and says that
+//! nothing was checked.
 //!
 //! So the honest answer for every project in this build is level C, and
 //! [`CEILING`] is what says so in one place. It is a constant rather than a

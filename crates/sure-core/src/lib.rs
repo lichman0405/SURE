@@ -15,6 +15,7 @@ pub mod documents;
 pub mod fingerprint;
 pub mod intent_model;
 pub mod paths;
+pub mod process;
 pub mod project_intent;
 pub mod redact;
 pub mod references;

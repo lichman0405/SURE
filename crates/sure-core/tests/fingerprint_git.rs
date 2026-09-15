@@ -1410,6 +1410,26 @@ fn git_is_started_in_exactly_one_place() {
     // test fixture *must* start Git — that is what every test in this file does,
     // and what makes them tests of the real thing rather than of a recording.
     const THE_ONE_PLACE: &str = "sure-core/src/fingerprint/git/mod.rs";
+
+    // A `Command` built from a stored program is what a second Git entry point
+    // would look like: the field exists in `fingerprint/git` so that a test can
+    // point it at a stand-in for Git, and a copy of that idea in another file
+    // would be the same door under a different name. Named here rather than
+    // inlined so that the two files allowed to spell it can be described.
+    const FROM_A_STORED_PROGRAM: &str = "Command::new(&self.program)";
+
+    // One shipped file other than `fingerprint/git` is allowed that spelling,
+    // and it is exempt by name rather than because the rule above was
+    // loosened. `P3-T001` added the general process runner, this test failed on
+    // it, and that is the check working: it found a second stored-program
+    // `Command` in shipped code and made somebody decide whether it was a
+    // second way to start Git. It is not — the runner holds any program a
+    // caller names, has no mention of Git in it, and is what `P1-T006`'s
+    // single-entry-point rule has been waiting for since a runner was the thing
+    // that did not exist. The `Command::new("git")` rule below still applies to
+    // this file, so a Git invocation could not hide in it.
+    const THE_ONE_GENERAL_RUNNER: &str = "sure-core/src/process/request.rs";
+
     let shipped: Vec<_> = rust_sources()
         .into_iter()
         .filter(|(path, _)| path.contains("/src/"))
@@ -1425,17 +1445,24 @@ fn git_is_started_in_exactly_one_place() {
         if path == THE_ONE_PLACE {
             continue;
         }
+        let general_runner = path == THE_ONE_GENERAL_RUNNER;
         for (number, line) in text.lines().enumerate() {
             if line.trim_start().starts_with("//") {
                 continue;
             }
-            for forbidden in ["Command::new(\"git\")", "Command::new(&self.program)"] {
+            if !general_runner {
                 assert!(
-                    !line.contains(forbidden),
-                    "{path}:{} starts Git outside {THE_ONE_PLACE}: {line}",
+                    !line.contains(FROM_A_STORED_PROGRAM),
+                    "{path}:{} builds a command from a stored program outside \
+                     {THE_ONE_PLACE}: {line}",
                     number + 1
                 );
             }
+            assert!(
+                !line.contains("Command::new(\"git\")"),
+                "{path}:{} starts Git outside {THE_ONE_PLACE}: {line}",
+                number + 1
+            );
         }
     }
 }

@@ -38,11 +38,14 @@
 //! holds one `String` — the line, as the document wrote it — and has no
 //! `program`, no `args`, and no `Vec<String>` of anything. Handing a command to
 //! the operating system means splitting shell text into a program and its
-//! arguments, and nothing in this crate does that: the only `Command::new` in
-//! `sure-core`'s shipped code is `fingerprint/git`'s, which runs a named program
-//! with a fixed argument vector. `npm install && npm test` is recorded as one
-//! string, because splitting it is where a shell would have to be involved and
-//! SURE does not have one.
+//! arguments, and nothing in this crate does that. `sure-core`'s shipped code
+//! has three `Command::new` sites and not one of them takes a string to be
+//! split: `fingerprint/git`'s runs a named program with a fixed argument
+//! vector, and [`crate::process`]'s two take a program and a vector of
+//! arguments, one element per argument, with no way to hand either of them a
+//! command line. `npm install && npm test` is recorded as one string, because
+//! splitting it is where a shell would have to be involved and SURE does not
+//! have one.
 //!
 //! **The provenance travels inside the value, and is derived rather than
 //! restated.** [`DocumentedCommand::source`] answers

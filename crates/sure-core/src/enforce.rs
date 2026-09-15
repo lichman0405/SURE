@@ -664,6 +664,45 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_file_is_never_admitted_in_any_mode_under_any_permission_set() {
+        // The one command shape no grant reaches, and the reason is a property of
+        // the classification rather than of the mode. `safety::classify` refuses to
+        // read a `.cmd` or `.bat` name at all, and the answer it gives instead is
+        // `anything()` — every category but `Static`, **`Destructive` included**.
+        // `Destructive` has no permission, so the domain's rule 2 answers for every
+        // batch file before the grants are consulted: `Denied` in a mode that runs
+        // nothing, `NeedsConsent` in a mode that does. Both arrive here as a stop,
+        // because this module has no prompt.
+        //
+        // **The owner's open question — whether a caller may ever name one — is
+        // unchanged by this**, and it is not this module's to settle; `P3-T004`,
+        // `P3-T005`, `P3-T006` and now `P3-T007` have each run into it, and none of
+        // them has answered it. What is settled is what an enforcement does with
+        // one in the meantime, and it is the answer that cannot become a false
+        // green: not admitted, and a `Skipped` result with a reason in its place.
+        for mode in ExecutionMode::ALL {
+            for (name, permissions) in permission_sets() {
+                let (stopped, _) = enforcement_of(*mode, permissions, &[("npm.cmd", &["test"])]);
+                assert_eq!(
+                    stopped.admitted().count(),
+                    0,
+                    "{} / {name}: a batch file was admitted",
+                    mode.as_str()
+                );
+                assert_eq!(stopped.stopped().len(), 1, "{} / {name}", mode.as_str());
+                assert!(!stopped.runs_project_code(), "{} / {name}", mode.as_str());
+            }
+            let (granted, _) = enforcement_of(*mode, everything(), &[("npm.cmd", &["test"])]);
+            assert_eq!(
+                granted.check_plan().excluded,
+                vec![NotCheckedReason::ExecutionNotAuthorized],
+                "{}: every permission granted, and the category that has none still answers first",
+                mode.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn the_stopped_results_and_the_excluded_reasons_are_in_step() {
         // `CheckPlan::excluded` is a list of reasons with no ids, so the only
         // thing tying a reason to a check is that the two lists were built in the

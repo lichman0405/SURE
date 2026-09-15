@@ -2280,3 +2280,110 @@ is isolated from core verdict semantics."*
   `P3-T011`'s acceptance rather than to `P3-T011`**, which is where the interest
   lies: the work was correct, and the ledger about the work was wrong twice, in two
   different fields, and neither was wrong in a way the code could have caught.
+
+## P4-T001 — the schedule that is not the plan, a sentence a user would have read, and the mutation that survived because a predicate had no test of its own
+
+Acceptance: *"Ordered plan includes reason, evidence class and execution
+requirements per check."*
+
+- **The acceptance names something the frozen `CheckPlan` cannot hold, and that is
+  the first decision in the task.** `CheckPlan` is `id`, `fingerprint`, `mode`, a
+  list of static check ids, a list of dynamic check ids and the exclusions —
+  **identifiers and nothing else**, because adding a field to it is an ADR-level
+  decision. It therefore cannot carry a reason or an evidence class. The thing
+  this task builds is a **schedule**: SURE's own account of what a run intends to
+  check, with the reason, the evidence class and the execution requirements on
+  each entry. [`CheckSchedule::planned_checks`] is the **one** bridge from the
+  schedule to `Enforcement::of`, so the order a report shows is decided in one
+  place rather than re-derived by each caller. **The two words are kept apart
+  because they answer different questions**: a schedule is what a run *intends*,
+  a plan is what a mode *allowed*, and the frozen record is downstream.
+
+- **"Ordered" means a function of the checks, and it is held over all 120
+  permutations of a five-check set.** Three rules, applied in order, the last of
+  which makes the order total: checks that run nothing come first; then by
+  severity, worst first; then by identifier, smallest first. The sweep **collects
+  the orders it visited rather than counting them**, because a permutation sweep
+  is exactly the kind of loop whose failure is a smaller, plausible answer — 24
+  iterations that produced one permutation 24 times would pass a count. Rule 3 is
+  inside the comparison rather than a second pass, so the identifier is the *last*
+  word: a `sort_by_key` on the first two rules would leave equal checks in
+  submission order, which is the order the module promises not to depend on.
+
+- **The mode is deliberately not an ordering rule, and there is a test whose only
+  job is that.** `ExecutionDecision` is not a property of a check; it is the
+  answer to a question asked *about* one under a particular mode and permission
+  set. Folding it into the ordering would mean the same checks came back in two
+  different orders depending on how they were about to be run, so a caller
+  comparing an inspect-only plan with a host-confirmed one could no longer tell
+  **a changed decision from a reshuffled plan**. The decisions are on the entries
+  and `the_order_does_not_move_when_the_mode_does_but_the_decisions_do` keeps them
+  there. **That test also corrected the module's own prose**: the first draft of
+  rule 2 said `Severity`'s variant order was the *inverse* of `rank`, and
+  `Severity`'s `Ord` is written by hand and already agrees with it — so the two
+  are now **asserted** to agree (`Severity::ALL.windows(2)`) rather than assumed
+  to, which is `P3-T008`'s repair applied one field over.
+
+- **A check that cannot run is still in the plan, and the only status this module
+  can produce is a `Skipped` one.** Dropping a blocked entry would produce a plan
+  that reads as complete while something in it never happened, which is the one
+  outcome this repository exists to avoid. A blocked entry keeps its decision and
+  the permission that stopped it, `CheckSchedule::blocked` is the complement of
+  `may_run`, and `ScheduledCheck::not_run` returns `None` for a check that would
+  run — so a caller cannot get a *pass* out of a schedule entry. It sets
+  `EvidenceClass::Unknown` because the domain's `CheckResult::not_run` does and
+  documents why: a check that did not run established nothing, and offering a
+  choice would only offer a way to write that down wrongly.
+
+- **A false sentence was on course to be shown to a user, and the test that found
+  it was written for a different reason.** `permissions_missing` filtered on
+  `!decide(..).is_allowed()` — the *decision* — so it listed permissions that were
+  **granted** but blocked by the mode, and `plain_description` then told the user
+  *"will not run: run_project_code"* about a permission **they had already
+  given**. `blocked_by` and `permissions_missing` now filter on the permission set
+  and take **no mode at all**: it is a fact about the permission set and the same
+  list under every one, and that is the whole of what "denied" means in `decide`.
+  `plain_description` has **three** outcomes rather than two, so a mode-blocked
+  check says *"will run only if you agree"* and never names a granted permission.
+  **The sentence a user reads before deciding is the one place this repository can
+  least afford a plausible-looking wrong answer**, and this one was one predicate
+  away from shipping.
+
+- **One mutation survived the first run of the set, and the test that kills it
+  exists only because of that.** Answering `may_run` from `blocked_by.is_none()`
+  instead of from the decision **passed all 630 tests**, because the two agree
+  whenever a check is denied a permission — which is every case the existing tests
+  reached — and come apart **exactly** where every permission is granted and the
+  mode still refuses to run project code. A caller asking `blocked_by` would be
+  told the check runs and would produce **no result for it at all**, so the check
+  would *vanish from the report* rather than appear as one that did not happen.
+  `a_check_the_mode_stops_still_gets_a_result_saying_it_did_not_run` was written
+  to hold it and the set was re-run in full against the changed file, so the log
+  is one vintage. **The lesson is `P3-T008`'s one field over**: the mutation did
+  not find a bug in the code, it found that **a derived predicate had no test of
+  its own** three lines below the predicate it derives from. **Nineteen mutations,
+  nineteen caught, twelve by exactly one test.**
+
+- **`m2`'s first draft did not compile, and the harness is right to refuse to call
+  that a survivor.** Moving `Reverse(severity.rank())` to `severity.rank()`
+  without the signature makes the key a `(bool, u8)` where the function promises a
+  `Reverse<u8>`, so `cargo` fails before any test runs and `mutate3.py` prints
+  **INCONCLUSIVE** — *the suite did not run, so this says nothing either way* —
+  which is the line `P3-T011` added for exactly this and which fired here for the
+  first time since. **A mutation that does not compile is not a mutation that was
+  caught.** The driver also died on its own console output, on the GBK codec, one
+  level above the trap `mutate3.py` documents; the console copy is ASCII-escaped
+  now and the log keeps the raw text.
+
+- **What this does not do, stated where the code states it.** It does not decide
+  which checks exist: there is no catalogue and no rule that derives a check from
+  a project, **no shipped code proposes one yet**, and
+  `tests/check_schedule.rs` names the files that may construct a `CheckProposal`
+  and says it is written to fail on the day `P4-T002`, `P4-T003` or `P4-T004`
+  lands the first proposer. It does not run anything — the one mention of
+  `std::process::Command` in the module is a doc link, so `tests/spawn_sites.rs`'
+  census is unchanged. It does not ask the user anything: `NeedsConsent` is
+  reported as `NeedsConsent`, and turning that into a prompt is `crate::consent`'s
+  job. And **it says nothing about whether a check is any good** — a caller that
+  labels a guess `ObservedFact` has lied in a way this module cannot detect, which
+  is the limit `crate::browser` states about its drivers one module over.

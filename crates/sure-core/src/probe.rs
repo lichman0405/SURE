@@ -331,6 +331,26 @@ impl Probe {
     /// budget — a probe's own failure, which is
     /// [`CheckStatus::Error`](crate::status::CheckStatus::Error) and never
     /// aggregates to green. Nothing is connected and nothing is read.
+    ///
+    /// # A budget shorter than the refusal can also land on `Unreachable`
+    ///
+    /// The budget covers the connect as well as the read, and the connect is not
+    /// instantaneous even when it is going to be refused: a refusal arrives after
+    /// the operating system has given up on the handshake, which on a loopback
+    /// port with nothing behind it is measurably slower than a successful
+    /// connect. **A budget below that latency turns *nothing is listening* — an
+    /// observation about the project, and a `fail` — into
+    /// [`ProbeOutcome::Unreachable`], which is a failure of the probe and an
+    /// `error`.** Both are non-green, so nothing here can manufacture the false
+    /// green this module is built against; what changes is which of the two
+    /// sentences a report prints, and only the longer budget can print the one
+    /// about the project. The refusal latency is a property of the platform, so
+    /// it is not named here as a number.
+    ///
+    /// # A port with nothing behind it can connect to itself
+    ///
+    /// See [`is_a_self_connect`]. The connect *succeeds*, nothing is listening,
+    /// and the honest record is the one for a port with nothing behind it.
     pub fn get(&self, endpoint: &Endpoint) -> ProbeOutcome {
         let budget = self.limits.timeout();
         if budget.is_zero() {
@@ -344,6 +364,17 @@ impl Probe {
             Ok(stream) => stream,
             Err(error) => return connection_failed(&error),
         };
+
+        if let Ok(local) = stream.local_addr()
+            && is_a_self_connect(local, endpoint.address())
+        {
+            return ProbeOutcome::Refused {
+                detail: "the connection was made to itself, which is what a free port does \
+                         when the operating system hands out the port being dialled — nothing \
+                         was listening"
+                    .to_owned(),
+            };
+        }
 
         if let Err(error) = write_request(&mut stream, endpoint) {
             return connection_failed(&error);
@@ -597,6 +628,33 @@ fn is_a_timeout(error: &std::io::Error) -> bool {
 }
 
 /// The variant for anything the operating system refused to do.
+/// Whether a connection that *succeeded* was made to itself.
+///
+/// A port with nothing behind it can still accept a connection. If the operating
+/// system picks the port being dialled as the **source** port of the connection,
+/// the connection is looped back on itself and every byte written arrives back
+/// in its own receive queue. This is documented TCP behaviour rather than a
+/// Windows quirk, and it is what makes a free port occasionally look like a
+/// service that answers with something that is not HTTP: the probe writes
+/// `GET / HTTP/1.1`, reads those same bytes, and reports the caller's own request
+/// line as the peer's reply.
+///
+/// The giveaway is exact, and it is why this is decided here rather than by
+/// retrying. **On loopback, the local port of a real connection can never equal
+/// the port it dialled**, because that port is held by whichever socket is
+/// listening — the operating system cannot also hand it out as an ephemeral
+/// source port. So a connection whose local address *is* the address it was
+/// dialled to reached no service, and the honest record is the one for a port
+/// with nothing behind it.
+///
+/// It is a free function over two addresses rather than an inspection of a live
+/// socket, because the condition it names cannot be produced on demand: a test
+/// that wanted a real self-connect would have to wait for the operating system to
+/// choose a particular port, so the predicate is what is tested.
+fn is_a_self_connect(local: SocketAddr, dialled: SocketAddr) -> bool {
+    local.port() == dialled.port() && local.ip() == dialled.ip()
+}
+
 fn connection_failed(error: &std::io::Error) -> ProbeOutcome {
     match error.kind() {
         ErrorKind::ConnectionRefused => ProbeOutcome::Refused {
@@ -615,8 +673,14 @@ fn connection_failed(error: &std::io::Error) -> ProbeOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProbeOutcome {
     /// Nothing on that port accepted the connection.
+    ///
+    /// Two ways to arrive here, and they are the same fact about the project:
+    /// the operating system refused the connection, or the connection was made
+    /// to itself — see [`is_a_self_connect`], which is what a free port does
+    /// when the port being dialled is handed out as the source port.
     Refused {
-        /// What the operating system said.
+        /// What the operating system said, or, for a self-connect, what
+        /// happened in place of it.
         detail: String,
     },
     /// The connection could not be made, or ended, for a reason that is neither
@@ -870,5 +934,26 @@ mod tests {
         assert!(!could_still_be_a_status_line(&[0x15, 0x03, 0x03]));
         assert!(!could_still_be_a_status_line(b"HTTP/1.1 2000"));
         assert!(!could_still_be_a_status_line(b"HTTP/1.1 20x"));
+    }
+
+    #[test]
+    fn a_connection_whose_local_address_is_the_one_it_dialled_did_not_reach_a_service() {
+        // The third test in this module rather than in `tests/`, for the same
+        // reason and a sharper one: the condition cannot be *produced* on
+        // demand. A self-connect needs the operating system to choose the
+        // dialled port as the source port, which is why the integration test for
+        // a port with nothing behind it was the one that found this — in CI, on
+        // a commit that changed a doc comment and nothing else, where the probe
+        // reported its own request line back as the peer's reply.
+        let at = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
+
+        assert!(is_a_self_connect(at(5000), at(5000)));
+
+        // The two ways it is not a self-connect, and the first is the one every
+        // real connection is: on loopback the local port can never equal the
+        // port that was dialled, because that port is held by whatever is
+        // listening.
+        assert!(!is_a_self_connect(at(5001), at(5000)));
+        assert!(!is_a_self_connect(at(5000), at(5001)));
     }
 }

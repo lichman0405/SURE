@@ -678,3 +678,133 @@ shape can be checked.
   them as its own work. What is genuinely left for it is a spaces-and-Unicode
   matrix across every entry point rather than the working directory alone, and
   lifecycle coverage that is about the platform rather than about the contract.
+
+## P3-T002 — native Windows lifecycle tests, and the assertion that proved nothing
+
+- **The acceptance has three sentences and only one of them was a gap.**
+  "Start/timeout/cancel/output capture pass on native Windows" is provenance —
+  `P3-T001`'s tests hold those claims and this machine and the Windows CI job
+  are where they run. "Process-tree cleanup is tested without relying on Unix
+  signals" was already held by `a_stopped_run_reaches_what_the_run_started_or_says_that_it_did_not`,
+  and that test turned out to have a hole (below). "Paths with spaces/Unicode
+  are covered" was covered **in one position out of five**: the working
+  directory. What this task adds is the other four positions and the fix to the
+  tree test.
+
+- **A path is five different things in a request, and only one of them was
+  awkward.** The working directory is handed to the operating system as its own
+  value; the program is a path that has to survive being turned into a command
+  line; an argument is a string that goes through a command line and must arrive
+  as one element; a variable's *value* is a path that goes through the
+  environment block instead, a second encoding surface with its own conversion;
+  and the output is the one place the direction is reversed — bytes coming back
+  rather than going out. Four tests now hold the four that were missing:
+  `a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs`,
+  `an_argument_that_is_not_ascii_arrives_as_one_argument_unchanged`,
+  `a_report_path_with_a_space_and_unicode_is_the_path_the_child_writes_to`, and
+  `what_a_program_writes_outside_ascii_comes_back_as_the_bytes_it_wrote`. One
+  `const AWKWARD` and one `const NOT_ASCII` spell the awkward input once, so
+  "a path with a space and a character outside ASCII" means the same thing in
+  every test that uses it.
+
+- **`NOT_ASCII` carries three problems because they fail differently.**
+  `é`/`ö` are Latin-1: a byte-oriented path passes them through unchanged and a
+  code-page conversion does not. `中文` is outside Latin-1, so nothing but a
+  real encoding survives it. And `🎉` is **outside the Basic Multilingual
+  Plane** — on Windows it is two UTF-16 code units and a surrogate pair, which
+  is the case a conversion that stops at the first unit truncates and a length
+  computed in code units gets wrong. A test that used one accented letter would
+  pass against all three failure modes.
+
+- **The four new tests are characterisation tests, and calling them anything
+  else would be a false claim.** Nothing in the runner as it stands can be
+  mutated into failing them: `OsString` round-trips on Windows, and a
+  `to_string_lossy` step applied to valid Unicode is the identity, so every
+  mutation that would break them is a mutation that first has to introduce a
+  conversion the code has never had. What they are for is the rewrite that
+  reaches for one — a raw command line, a job object, a hand-built environment
+  block — and they are the four places that would notice. They are recorded as
+  characterisation rather than dressed up as mutation-covered, and the one
+  mutation added to the harness this time is about the position that *can* be
+  got wrong in the code as written (the quotes below).
+
+- **The tree test's central assertion proved nothing on Windows, and that was
+  measured rather than argued.** The claim is "a stop reaches the whole tree",
+  and its evidence was that the grandchild's report file never appeared. **A
+  file that is absent is what a stopped grandchild leaves behind and also what a
+  grandchild that never ran leaves behind**, so the assertion was satisfied by
+  both. It is not academic: a grandchild whose name does not match the filter it
+  is started with runs zero tests, exits cleanly and writes nothing. Measured
+  twice, on Windows: with the grandchild's mode string changed to a name that is
+  not a test, and the new marker assertion in place, the test **fails** with
+  "the grandchild never started"; with that assertion removed — the old reading
+  — the same run **passes**, in 3.26s, reporting `WholeTree` about a tree that
+  never existed. On Unix the same change fails loudly instead, because that
+  branch asserts the opposite outcome, so the hole was Windows-only: the branch
+  that skipped a measurement was the branch that read an absence.
+
+- **The fix is a positive control, and the instrument that makes it possible is
+  a file the grandchild writes before it waits.** `child_waits_to_be_released`
+  writes `<report>.started` the moment it is running and then waits for
+  `<report>.release` to appear; the parent asserts the marker **before** it
+  reads the absence, so "the stop reached it" and "it never existed" can no
+  longer be confused. The release file answers the second question — is it still
+  alive — by the only means available on both platforms: a process that is
+  running writes within a poll and a process that was stopped cannot write at
+  all. Waiting on a file rather than sleeping also takes the clock out of the
+  test: the old grandchild slept 1.5s, which has to be long enough not to finish
+  before the stop and short enough to be worth waiting out, and on a fast
+  machine the first of those is what breaks. The given number is now a poll
+  interval, and `ABANDONED` bounds what a grandchild waits when the test that
+  started it has already failed — a failing test does not get to leave a process
+  behind.
+
+- **The stop is now held for both triggers, in two tests rather than one with
+  two branches.** `a_cancelled_run_reaches_what_it_started_too` is the caller's
+  decision where the test above is the runner's clock, and they are separate
+  promises: P3-T001 already has separate contract-level tests for the two, and
+  the platform-level pair is the same shape. The cancellation is asked for
+  **after the grandchild's marker exists**, by a thread that waits for it, so
+  the test cannot race two process starts and report a tree that was never there.
+  Both tests share `a_grandchild_after_the_stop` and
+  `assert_what_the_platform_could_reach`, which is where the platform's answer
+  is stated once: `WholeTree` on Windows and `ProcessOnly` elsewhere, each
+  asserted rather than skipped, so the day a Unix build can reach a tree the
+  test fails and the report has to change on purpose.
+
+- **One mutation was added to the harness, for the regression the program test
+  exists to catch**: *"the program path is quoted, in case it has a space in
+  it"* — the plausible mistake, since a path with a space is the reason to quote
+  and a program path the process API was going to quote itself must not be
+  quoted twice. It is caught by many tests, and **the new one is among them,
+  measured rather than assumed**: with the mutation applied,
+  `a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs` fails
+  alone in 0.01s with `os error 123`, `ERROR_INVALID_NAME`, before any process is
+  started. The harness's own log cannot show that — it prints the first three
+  catchers and this test is not among them — so the claim rests on the direct
+  measurement and not on the table. What the new test adds over the others is
+  the position: every other test runs a program whose path contains no space, so
+  quoting it happens to work there, and it is a path that actually contains the
+  space where quoting looks harmless and is not.
+
+- **Cost, measured**: the two tree tests together take 3.3s wall-clock (they run
+  concurrently; the deadline test's 2s is most of it), against 2.75s for the one
+  test they replace. The file's 36 tests take about 3.3s in total.
+
+- **One artefact from the mutation run is worth recording, because it is the
+  same mutation leaving physical evidence.** With *"the program runs wherever
+  SURE happens to be rather than where it was told"* applied, the batch-file
+  test's own `echo it ran > ran.txt` — a redirect inside a `.cmd` the test
+  writes — landed in `crates/sure-core/` rather than in the test's scratch
+  directory, and `crates/sure-core/ran.txt` was sitting in the tree holding
+  `it ran` when the harness finished. It was deleted. It is the module's own
+  claim demonstrated by accident: a process runs in the directory it was given,
+  and the difference is visible on disk.
+
+- **What is not established.** The four matrix tests characterise today's
+  behaviour and would not fail against any mutation of the runner as it stands,
+  which is stated in the commit and here rather than left for a reader to
+  discover. Nothing is claimed about paths that are not valid Unicode on either
+  platform — `AWKWARD` and `NOT_ASCII` are both well-formed text, and a path
+  that is not valid UTF-8 is a question `P3-T003`'s comparison is the right
+  place to meet, not this one.

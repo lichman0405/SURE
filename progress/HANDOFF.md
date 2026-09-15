@@ -2,13 +2,58 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 33 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 open (1/11).** `P3-T001`'s
-implementation is committed and pushed as `819d499`, its run `34924525793` is read
+Progress: 34 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 open (2/11).** `P3-T002`'s
+implementation is committed and pushed as `fd878e6`, its run `34927065374` is read
 in full below, and **the commit carrying this file is its acceptance**. What the
-task added is described under "What `P3-T001` added".
+task added is described under "What `P3-T002` added".
 
-**The one thing about `P3-T001` a reader should know before the detail: SURE can
+**The one thing about `P3-T002` a reader should know before the detail: the
+acceptance was already satisfied on paper, and reading it again against the file
+found one sentence covered in one position out of five and one test whose central
+assertion was empty on the platform this task is named for.** "Paths with
+spaces/Unicode are covered" named the working directory, and a path in a process
+request is five different things: the directory, the **program** (a path that has
+to survive being turned into a command line by somebody), an **argument**, a value
+in the **environment block**, and, in reverse, the **bytes coming back out**. Four
+tests now hold the four that were missing, over one `const AWKWARD` and one
+`const NOT_ASCII` so that "a path with a space and a character outside ASCII"
+means one thing everywhere it is used. **This task added no behaviour:**
+`crates/sure-core/src/` is untouched, and the commit carries exactly two files —
+`crates/sure-core/tests/process_runner.rs`, 29 tests to 36, and
+`progress/state.json`.
+
+**The second thing, and the reason this was not a test-writing exercise: the
+existing tree test proved nothing on Windows, and that was measured twice rather
+than argued.** Its claim is "a stop reaches the whole tree" and its evidence was
+that the grandchild's report never appeared — but **a file that is absent is what
+a stopped grandchild leaves behind and also what a grandchild that never ran
+leaves behind**. With the grandchild's mode string changed to a name that is not a
+test, the new marker assertion fails saying the grandchild never started; with the
+same assertion removed, the old reading passes, in 3.26s, reporting `WholeTree`
+about a tree that never existed. The fix is a positive control: the grandchild
+writes `<report>.started` the moment it is running and waits for
+`<report>.release`, the parent asserts the marker **before** it reads the absence,
+and afterwards it drops the release so that "still running" and "was stopped" are
+told apart by a write rather than by a sleep. On Unix the same mutation fails
+loudly, because that branch asserts the opposite outcome — **the hole was in the
+branch that skipped a measurement.**
+
+**The third thing, recorded as a limit rather than as coverage: the four new
+matrix tests are characterisation tests, and no mutation of the runner as it
+stands can make them fail.** `OsString` round-trips on Windows and a
+`to_string_lossy` step applied to valid Unicode is the identity, so every way of
+breaking them first has to introduce a conversion the code has never had. What
+they are for is the rewrite that reaches for one — a raw command line, a job
+object, a hand-built environment block — and they are named as characterisation
+rather than dressed up as mutation-covered. The one mutation this task added is
+about the position that *can* be got wrong in the code as written, *"the program
+path is quoted, in case it has a space in it"*, and the new test catches it:
+applied, it fails alone in 0.01s with `os error 123`, `ERROR_INVALID_NAME`, before
+any process starts.
+
+**The one thing about `P3-T001` a reader should know, kept because it is still
+the shape of the product: SURE can
 now start a program, and nothing asks it to.** `sure_core::process` is a complete
 bounded runner — one request carrying program, arguments, working directory,
 environment, deadline, cancellation and output bounds, and one `Outcome` saying
@@ -42,10 +87,20 @@ it. Matching on the five counts alone gives the same 43 lines / 33 parents /
 10 children / 1082 on both runs. See the gate-set section below.
 
 **This was the acceptance that opened a phase rather than closing one.** Phase
-`P2` closed at `P2-T011`; `P3` is now 1 of 11 with the other ten `queued`. The
-`phase:` line in `taskctl status` reads `P3` because `start` wrote it, which is
-what that field records — what is being worked on rather than a summary of the
-task list.
+`P2` closed at `P2-T011`; `P3` was **1 of 11** with the other ten `queued` when
+this paragraph was written, and reads **2 of 11** after `P3-T002`. The `phase:`
+line in `taskctl status` reads `P3` because `start` wrote it, which is what that
+field records — what is being worked on rather than a summary of the task list.
+
+**`P3-T002`'s acceptance moved the READY list down, and that is a fourth
+outcome rather than a repeat.** The list went **12 → 11**: `P3-T002` left by
+being accepted and **nothing entered**, because no task in `tasks/tasks.json`
+names it in a `depends_on`. The three precedents are one-for-one (a task leaving
+as a dependent entered), two dependents entering, and a member lost with none
+gained — and this one is a member lost with none gained *because nothing depends
+on it*, which is a different reason with the same number. Which is the same
+argument the paragraph below makes in the other direction: the count is quoted
+from the command and the **reason** is read out of `tasks/tasks.json`.
 
 **The one thing about `P2-T011` a reader should know before the detail: the label
 belongs to the door, and no door takes one.** Every channel that can produce a
@@ -204,24 +259,34 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P3
-{ accepted: 33, queued: 133 }
-READY: P3-T002, P3-T003, P3-T004, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
-       P6-T007, P8-T001, P12-T008, P13-T001
+{ accepted: 34, queued: 132 }
+READY: P3-T003, P3-T004, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
+       P8-T001, P12-T008, P13-T001
 ```
 
-**`P3-T001` is `accepted`**, on run `34924525793`, and **`in_progress` is 0**, so
-nothing is half-finished and the next session may start any READY task without
-adopting an orphan. **Phase `P3` is 1 of 11 and open**: the other ten `P3` tasks
-are `queued`. `33 + 133 = 166`, which is every task in `tasks/tasks.json`.
+**`P3-T001` and `P3-T002` are `accepted`**, on runs `34924525793` and
+`34927065374`, and **`in_progress` is 0**, so nothing is half-finished and the
+next session may start any READY task without adopting an orphan. **Phase `P3` is
+2 of 11 and open**: the other nine `P3` tasks are `queued`. `34 + 132 = 166`,
+which is every task in `tasks/tasks.json`.
 
-**The READY list went 10 → 12, and it is the first time an acceptance has made the
-list longer.** `P3-T001` left by being accepted and **three** dependents entered —
-`P3-T002`, `P3-T003` and `P3-T004` — because all three name it in their
-`depends_on` and nothing else. The two acceptances before this one each recorded
-the same shape, a task leaving and a dependent entering in the same step so the
-count stood still; the one before that lost a member and gained none. **Three
-outcomes, three different numbers, which is the argument for quoting the command
-rather than reasoning about which way the count should have moved.**
+**The READY list went 12 → 11, and nothing entered it.** `P3-T002` left by being
+accepted, exactly as `P3-T001` did, and unlike `P3-T001` it has **no dependents**:
+`[x for x in tasks if 'P3-T002' in x.depends_on]` is empty. So the count fell this
+time, and it fell for a reason a reader cannot get from the number — which is why
+the list is quoted rather than summarised.
+
+**The READY list went 10 → 12 one acceptance earlier, and that was the first time
+an acceptance had made it longer.** `P3-T001` left by being accepted and **three**
+dependents entered — `P3-T002`, `P3-T003` and `P3-T004` — because all three name
+it in their `depends_on` and nothing else. The two acceptances before that one
+each recorded the same shape, a task leaving and a dependent entering in the same
+step so the count stood still; the one before that lost a member and gained none.
+**Four outcomes and four different numbers, which is the argument for quoting the
+command rather than reasoning about which way the count should have moved.** The
+fourth is the one that would have been predicted wrong: `P3-T002` had three
+siblings waiting on `P3-T001` and nothing waiting on itself, so the same operation
+that lengthened the list last time shortened it this time.
 
 **The phase arithmetic in this file was wrong until `P2-T011`'s acceptance, and
 the correction is in the header rather than only here.** `P2` was described as 10
@@ -230,7 +295,8 @@ that finished it. The tally is read out of `tasks/tasks.json` joined with
 `progress/state.json` rather than counted forward from the previous session's
 sentence — and **the figures are a reading with a date on them**: *11 accepted and
 1 queued* when this paragraph was written, *12 and 0* at `P2-T011`'s acceptance,
-which is what closed the phase, and *1 and 10* at `P3-T001`'s. **The method is the
+which is what closed the phase, *1 and 10* at `P3-T001`'s, and *2 and 9* at
+`P3-T002`'s. **The method is the
 durable part and the numbers are not**, which is why the sentence gives the
 successive readings rather than replacing the old ones: a reader who compares this
 paragraph against the header should find them agreeing, and a reader who compares
@@ -247,15 +313,15 @@ than being a thing this file asks to be believed.
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
 and `evidence` is `[]`; `taskctl accept` sets `status`, `finished_at` and `notes`
-and nothing else. **That is true of the SHAs for all 33 accepted tasks — 0 carry
+and nothing else. **That is true of the SHAs for all 34 accepted tasks — 0 carry
 a `base_sha` or a `head_sha` — but it is NOT true of `evidence` or `notes`,
 and a blanket claim would have been wrong in two directions:** `P2-T003` is the
-one accepted task of the 33 with a non-empty `evidence` array (three strings,
+one accepted task of the 34 with a non-empty `evidence` array (three strings,
 added when that acceptance was recorded), and `P0-T009`, `P1-T001` and `P1-T002`
-carry no notes at all where the other 30 do. So the commits and the run for
+carry no notes at all where the other 31 do. So the commits and the run for
 `P2-T010` are recorded **here**, and the fields in `progress/state.json` are not
 a substitute for this file — they are not even uniform across tasks. **This
-paragraph has now been re-read at 28 and at 33 accepted tasks and every count in
+paragraph has now been re-read at 28, 33 and 34 accepted tasks and every count in
 it held except the totals**: the three always-empty-notes tasks are still the
 same three, `P2-T003` is still the only one with evidence, and no task has ever
 gained a SHA. That is a fact about the tool rather than about the tasks, so it
@@ -400,6 +466,124 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P3-T002` added
+
+**One file, tests only, no shipped behaviour.** `crates/sure-core/tests/process_runner.rs`
+goes from 29 tests (23 parents + 6 ignored children) to **36 (28 parents + 8
+children)**: five new tests, two new ignored children, no test removed, no
+assertion weakened, and `crates/sure-core/src/` untouched. The acceptance is three
+sentences: *"Start/timeout/cancel/output capture pass on native Windows"*,
+*"Process-tree cleanup is tested without relying on Unix signals"*, and *"Paths
+with spaces/Unicode are covered."*
+
+**The third sentence was covered in one position out of five.** The working
+directory was already tested, in the one position the operating system takes as a
+value of its own. A path in a process request is also the **program** — which has
+to survive being turned into a command line by somebody — an **argument**, a value
+in the **environment block**, a second encoding surface with its own conversion,
+and, in reverse, the **bytes coming back out** of a program. Four tests now hold
+the four that were missing:
+
+| position | test |
+| --- | --- |
+| the program | `a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs` |
+| an argument | `an_argument_that_is_not_ascii_arrives_as_one_argument_unchanged` |
+| the report path | `a_report_path_with_a_space_and_unicode_is_the_path_the_child_writes_to` |
+| the bytes out | `what_a_program_writes_outside_ascii_comes_back_as_the_bytes_it_wrote` |
+
+They share one `const AWKWARD` (`a directory with a space and é中文`) and one
+`const NOT_ASCII` (`héllo wörld 中文 🎉`) so that "a path with a space and a
+character outside ASCII" means one thing everywhere in the file. `NOT_ASCII`
+carries three different problems rather than one, because the three fail
+differently: `é` is what a byte-oriented path passes through and a code-page
+conversion does not, `中文` is what only a real encoding survives, and `🎉` is
+outside the Basic Multilingual Plane — two UTF-16 code units, one surrogate pair
+— which is the case a conversion that stops at the first unit truncates. The first
+of the four tests copies `current_exe()` to
+`<scratch>/a directory with a space and é中文/a program with a space and é中文.exe`
+and runs the copy, so the assertion is about a real executable at an awkward path
+rather than about a request that echoes back what it was given.
+
+### The tree test's central assertion proved nothing on Windows, and that was measured rather than argued
+
+`a_stopped_run_reaches_what_the_run_started_or_says_that_it_did_not` claims "a
+stop reaches the whole tree", and its evidence was that the grandchild's report
+never appeared. **A file that is absent is what a stopped grandchild leaves behind
+and also what a grandchild that never ran leaves behind.** Measured twice on this
+machine:
+
+- With the grandchild's mode string changed to a name that is not a test, and the
+  new marker assertion in place, the test **fails**, saying the grandchild never
+  started.
+- With that assertion removed — the old reading — the same run **passes**, in
+  3.26s, reporting `WholeTree` about a tree that never existed.
+
+On Unix the same change fails loudly, because that branch asserts the opposite
+outcome. **The hole was in the branch that skipped a measurement**, which is the
+same sentence this file keeps having to write.
+
+The fix is a positive control rather than a longer sleep.
+`child_waits_to_be_released` writes `<report>.started` the moment it is running,
+then polls for `<report>.release`; the parent asserts the marker **before** it
+reads the absence, so "the stop reached it" and "it never existed" cannot be
+confused, and afterwards it drops the release to ask the second question by the
+only means both platforms have — a process that is running writes within a poll
+and a process that was stopped cannot write at all. The waiting also takes the
+clock out of the test: the old grandchild slept 1.5s, which must be long enough
+not to finish before the stop and short enough to be worth waiting out, and on a
+fast machine the first of those is what breaks. `ABANDONED` (30s) bounds a child
+whose release never comes;
+`a_cancelled_run_reaches_what_it_started_too` holds the same claim for the
+caller's decision rather than the runner's clock, cancelling only after the marker
+exists so it cannot race two process starts.
+
+### The four matrix tests are characterisation tests, and saying otherwise would be a false claim
+
+No mutation of the runner as it stands can make them fail: `OsString` round-trips
+on Windows, and a `to_string_lossy` step applied to valid Unicode is the identity,
+so every way of breaking them first has to introduce a conversion the code has
+never had. What they are for is the rewrite that reaches for one — a raw command
+line, a job object, a hand-built environment block. They are recorded as
+characterisation rather than dressed up as mutation-covered, and `DECISIONS.md`
+says the same thing.
+
+The one mutation this task added is about the position that *can* be got wrong in
+the code as written: *"the program path is quoted, in case it has a space in it"*,
+which is the plausible mistake, since a path with a space is the reason to quote
+and the process API quotes the program itself. It is caught, and measured
+directly rather than read off the harness's three-line display cap: with it
+applied, `a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs`
+fails alone in 0.01s with `os error 123`, `ERROR_INVALID_NAME`, before any process
+is started.
+
+### Four comments in this work overclaimed, and were corrected before the commit
+
+One said a permission bit "is checked rather than assumed" when nothing checked
+it; one described `std::process::Command` as using `lpApplicationName` against
+`lpCommandLine`; one said the outcome naming the program is how the test tells
+"the copy ran" from "another program ran" — when the outcome carries the
+**request's** program back, so it says what was asked for and the report is what
+says what ran; and one said every "was it stopped?" assertion in the file would
+have been satisfied by a grandchild that never ran, which is true of the Windows
+assertion and was narrowed to it after measurement.
+
+### The artefact the mutation run left on disk
+
+With *"the program runs wherever SURE happens to be rather than where it was
+told"* applied, the batch-file test's `echo it ran > ran.txt` landed in the crate
+root instead of its scratch directory, and `crates/sure-core/ran.txt` was there
+afterwards holding `it ran`. Inspected, deleted, and recorded because it is the
+same mutation leaving physical evidence rather than a log line.
+
+### What `P3-T002` does not establish
+
+**Nothing about a path that is not valid UTF-8.** On Windows a path that is not
+valid Unicode cannot be spelled at all, and the interesting cases — a Windows path
+that is not valid UTF-16, a Unix path that is not valid UTF-8 — are `P3-T003`'s
+question rather than this one's. The owner decision `P3-T001` left open (whether a
+caller may name a `.cmd`/`.bat`) is unchanged and is now **exercised by two more
+tests rather than settled by them**.
 
 ## What `P3-T001` added
 
@@ -1725,6 +1909,10 @@ Three of the five jobs were failing the whole time.
 | 34917710402 | `b644462` — **the `P2-T009` implementation** | **all five green.** Windows **1019** / macOS **1021** / Ubuntu **1022** passed, 0 failed, 1 ignored, each over **40** result lines = **30 parents + 10 children**. The parent count went 29 → 30 because `document_commands` is a new test binary. **Windows agrees with the local Windows run exactly**, and all 36 `documents::tests::*` names and all 20 `document_commands` names were read out of all three `rust` logs **by name**. Detail below |
 | 34918036410 | `cf7675d` — **the `P2-T009` acceptance** | **all five green**, and **1019 / 1021 / 1022** with 0 failed, 1 ignored, **40** result lines = **30 parents + 10 children** — unchanged from the row above |
 | 34919714838 | `73da9a6` — **the `P2-T011` implementation** | **all five green.** Windows **1040** / macOS **1042** / Ubuntu **1043** passed, 0 failed, 1 ignored, each over **41** result lines = **31 parents + 10 children**. The parent count went 30 → 31 because `intent_sources` is the new 27th named test binary. **Windows agrees with the local Windows run exactly**, the +21 is attributed **by binary name**, and all 14 `intent_model::tests::*` names and all 7 `intent_sources` names were read out of all three `rust` logs **by name**. Detail below |
+| 34921018452 | `408b821` — **the `P2-T011` acceptance** | **all five green**, and **1040 / 1042 / 1043** with 0 failed, 1 ignored, **41** result lines = **31 parents + 10 children** — the implementation's three figures to the test, unchanged. **This row was missing until `P3-T002`'s acceptance** and is added here after downloading the logs rather than copied from the row above |
+| 34924525793 | `819d499` — **the `P3-T001` implementation** | **all five green.** Windows **1072** / macOS **1071** / Ubuntu **1072** passed, 0 failed, **7 ignored**, each over **43** result lines = **33 parents + 10 children**. The parent count went 31 → 33 by exactly two, because `process_runner` and `spawn_sites` are two new test binaries. **Windows agrees with the local Windows run exactly**, and all 37 new test names were read out of all three `rust` logs **by name** — 37 of 37 on Windows, 34 of 37 on macOS and Ubuntu, the three absent ones being exactly the `#[cfg(windows)]` tests. Detail below |
+| 34925508727 | `8955a69` — **the `P3-T001` acceptance** | **all five green**, and **1072 / 1071 / 1072** with 0 failed, 7 ignored, **43** result lines = **33 parents + 10 children** — unchanged from the row above, which is what a documentation-only commit should read as. **This run was read in the session that took the acceptance and is reported here rather than committed at the time**, which is the chain rule stated at the top of this file. **This row was also missing until `P3-T002`'s acceptance** |
+| 34927065374 | `fd878e6` — **the `P3-T002` implementation** | **all five green.** Windows **1077** / macOS **1076** / Ubuntu **1077** passed, 0 failed, **9 ignored**, **33 parents + 10 children** — but Ubuntu reports them over **42 physical result lines**, because two child lines are spliced into one. Counted by occurrence rather than by line, Ubuntu is **identical to Windows**. The parent count moved +5 on every platform for the five new tests and no new binary; the ignored count moved +2 for the two new children, and Windows agrees with the local Windows run exactly. Detail below, because **the one apparent difference between the three jobs is a defect this branch has now recorded four times** |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and
@@ -1744,6 +1932,22 @@ added with `P2-T003`'s.** They were green and went unrecorded, which is the same
 shape of gap this section exists to name — a run nobody opened is a run nobody
 can describe, and "it was green" written from memory is exactly what the red
 acceptance commit was written from.
+
+**Three more rows were missing when `P3-T002` was accepted — `408b821`,
+`819d499` and `8955a69` — and the shape of the gap is now worth stating exactly,
+because it is not the same one.** The section above the table was written for
+`34924525793` and the acceptance entry below names both runs, so neither run was
+*unread*; both were read, described in prose, and never added to the index a
+reader scans. That is a **third** distinct way for this table to be wrong,
+alongside the two already recorded: a run read and committed as prose with no row
+(a reader of the table sees a table that ends early, which reads exactly like a
+table that is complete), and a run written into the table from memory without
+being opened. The check is the same one in all three cases —
+`gh run list --branch claude/v0.1-autonomous` set against the table — and it has
+now been run twice and found a gap twice. **All three rows were read out of the
+downloaded logs before being written**, with the occurrence method recorded below,
+and the two `P3-T001` rows are identical figure for figure, which is what a
+documentation-only commit should produce.
 
 ### Reading run `34869888350`, `P2-T010`'s — and a delta attributed by binary name
 
@@ -1820,6 +2024,104 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34927065374`, `P3-T002`'s — and the line count that was a splice rather than a missing test
+
+Run `34927065374`, commit `fd878e6`. All five jobs `success`:
+`bootstrap-validate-windows`, `rust (windows-latest)`, `rust (macos-latest)`,
+`rust (ubuntu-latest)`, `shellcheck-secondary`. The three rust jobs report
+**33 parents + 10 children, 0 failed, 9 ignored**, over **43 results** — but
+Ubuntu prints them on **42 lines**:
+
+| job | result lines | results | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 43 | 43 | 33 | 10 | 1087 | 0 | 9 |
+| `rust (macos-latest)` | 43 | 43 | 33 | 10 | 1086 | 0 | 9 |
+| `rust (ubuntu-latest)` | **42** | **43** | 33 | 10 | 1087 | 0 | 9 |
+
+**The 42 was read as a difference first, and it is not one.** Totalled by
+physical line the three jobs read 43 / 43 / **42**, with Ubuntu showing nine
+children where the other two show ten — the exact shape already recorded against
+the `Preflight-Windows.ps1` log and against an earlier run, so it was attributed
+before anything was written down. Ubuntu's missing line is **two child results
+spliced into one physical line**, by the children `store_concurrency` spawns
+sharing one inherited stdout handle. Verbatim, timestamp included:
+
+```
+2026-09-15T04:00:31.5038981Z test result: oktest result: ok. 1 passed; 0 failed;
+ 0 ignored; 0 measured; 6 filtered out. 1 passed; 0 failed; 0 ignored; 0
+ measured; 6 filtered out; finished in 0.81s; finished in 0.80s
+```
+
+Two complete count tuples, two different durations, and the first result's
+`test result: ok` clause written ahead of the second line with its own counts
+following behind it. Counted by **occurrence of `test result: ok`** rather than
+by line, Ubuntu is identical to Windows: 43 results, 1087 passed, 0 failed,
+9 ignored, 1077 parents, 10 children. The method is two lines of Python
+(`len(re.findall(...))` over the concatenated output rather than over the lines)
+and it is now the third distinct counting mistake this section has had to
+correct — the by-name counter that was 22 long, the matcher that matched nothing
+and printed a well-formed table of zeros, and this. **The cause of all three is
+the same: a parser whose failure mode is a plausible number rather than an
+error.**
+
+**Windows CI equals the local Windows run exactly, and that is checked on the
+parent multiset rather than on the total.** The 33 parent values are
+`[0, 0, 0, 0, 2, 4, 4, 5, 6, 6, 7, 7, 7, 8, 8, 9, 12, 14, 15, 18, 20, 23, 24,
+28, 30, 30, 31, 33, 43, 46, 48, 88, 501]` on both, summing to 1077 on both, with
+1087 passed and 9 ignored on both. **This reading was taken by re-running the
+suite on this machine after the push**, not carried forward from the
+implementation session, because the number in this file has to be a measurement.
+
+**The +5 is attributed by name to one binary, and the check is that no other
+binary moved.** Parsing each `Running` header against the result line beneath it
+on Windows, `819d499` and `fd878e6` differ in exactly one position:
+`tests\process_runner.rs` **23 → 28**. Every other binary is identical value for
+value, so the whole of `P3-T002` is in that one file — which is also why the
+parent *line* count stood still at 33 while five tests arrived, and why the ignored
+count is the other half of the reading (**7 → 9**, the two new children). On
+macOS and Ubuntu the same binary moved **20 → 25**, and the platform offset is
+still the same set of pre-existing gates.
+
+**The paragraph above was first written with a multiset I had predicted rather
+than computed, and it was wrong in three positions** — `20, 25, 25` where the log
+says `20, 23, 24`, and a `47` where it says `46`. It was caught by running the
+same extraction over the downloaded logs before the section was committed, and it
+is recorded because a predicted multiset is indistinguishable from a measured one
+once it is written down, which is the failure this whole section exists to catch.
+
+**macOS is 1076 against Ubuntu's 1077, and the difference is the same three names
+as on `819d499` — checked rather than assumed.** Reading the three logs as sets of
+names gives two names on Ubuntu and not macOS
+(`a_name_that_is_not_valid_unicode_is_ordered_by_the_name_and_not_by_its_text`,
+and
+`paths::compare::tests::unix::the_default_entry_point_folds_nothing_on_a_case_sensitive_platform`)
+and one on macOS and not Ubuntu
+(`...the_default_entry_point_folds_case_on_a_case_insensitive_platform`) — the
+identical three names the same comparison produced on `819d499`, so the gate is
+pre-existing and this commit did not move it. Windows carries **11** names the
+other two do not, again the identical 11 as on `819d499`: the three
+`#[cfg(windows)]` process_runner tests,
+`fingerprint::git::status::tests::a_path_that_is_not_valid_unicode_is_refused_on_windows`,
+and seven `paths::compare::tests::windows` tests. This is the check `P3-T001`'s
+reading did, repeated against the run before it rather than against a memory of
+it.
+
+**The five new tests were read out of all three logs by name, and so was the
+ignored set.** 5 of 5 on Windows, macOS and Ubuntu, every one of them in the
+`process_runner` binary; and the nine `#[ignore]`d children are identical **by
+name** on all three jobs, including the two this task added
+(`child_waits_to_be_released`, `child_says_something_not_ascii`). That second
+check is the one that matters for this task: the tree test's fix depends on the
+new child being spawned rather than merely existing, and a child that is compiled
+in but never named would leave the ignored count at 9 on all three platforms and
+the tree test asserting nothing.
+
+**What this run does not say.** It says nothing about whether the stop reached the
+grandchild on any job — that is the local measurement recorded under "What
+`P3-T002` added", and the CI logs do not carry it. The tree tests report `ok` on
+all three jobs, which is the same evidence that was true before this task when the
+Windows branch was proving nothing, which is the point of the section above.
 
 ### Reading run `34924525793`, `P3-T001`'s — and a headline convention that had to be found before two numbers could be compared
 
@@ -2718,6 +3020,53 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P3-T002`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | `FMT CLEAN` |
+| `cargo check --workspace --all-targets` | `CHECK CLEAN` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | `CLIPPY CLEAN` |
+| `node scripts/validate-bootstrap.mjs` | `SURE bootstrap validation OK: 17 phases, 166 tasks.` |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `cargo test --workspace --no-fail-fast` | **1087 passed, 0 failed, 9 ignored, across 43 result lines = 33 parent sections + 10 children** |
+| `pwsh -NoProfile -File scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+| `python target/tmp/mutate18.py` | **32 of 32 observable mutations caught, 2 declared unobservable and both missed as declared, 0 SKIP, 0 BUILD**, baseline green first |
+
+**The log again holds two full runs of the suite, and this time there is no
+scare.** `Preflight-Windows.ps1` runs `cargo test` itself, so
+`target/tmp/p3t002-preflight.log` contains both, and both report
+**1087 / 0 / 9** with **1077** passed in parents — identical to the standalone
+run and to CI Windows. The parent multiset is the same value for value:
+
+```
+0 0 0 0 2 4 4 5 6 6 7 7 7 8 8 9 12 14 15 18 20 23 24 28 30 30 31 33 43 46 48 88 501
+```
+
+**The mutation count went 33 → 34, and the one added mutation is the only one
+whose subject is this task's own subject.** It replaces `Command::new(&self.program)`
+with a `format!` that wraps the program in quotes, which is the plausible mistake
+— a path with a space is the reason to quote, and the process API quotes the
+program itself. The harness prints **at most three** caught names per mutation,
+and the three it printed are
+`a_batch_file_named_with_its_extension_runs_and_windows_brings_the_interpreter`,
+`a_cancelled_run_is_stopped_before_its_deadline` and
+`a_cancelled_run_reaches_what_it_started_too` — **the new test is not among
+them**. So the question "does the test this task added catch the mutation this
+task added" was answered by measurement rather than by reading the summary:
+applied by hand,
+`a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs` **fails
+alone in 0.01s with `os error 123`, `ERROR_INVALID_NAME`**, before any process is
+started, and the mutation was reverted and `git status` read clean afterwards.
+That is the third time this file has had to say the harness's output is a summary
+and not the record.
+
+**The two declared-unobservable mutations are unchanged and still declared:** no
+test holds a stream open past `DRAIN_GRACE`, and no test can make `taskkill` exist
+and fail. Neither is this task's, and neither was made observable by it — the
+tree tests reach further into the tree than `P3-T001`'s did, but they still cannot
+make a program exist and fail.
 
 ## Gate set, as run on `P3-T001`'s implementation commit
 
@@ -3652,6 +4001,45 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P3-T002`
+
+`target/tmp/mutate18.py` (git-ignored), **34** mutations — **one more than
+`P3-T001`'s run of the same file** — exit 0: *"all 32 observable mutations caught
+by a failing test, and 2 declared unobservable as expected"*, 0 `SKIP`, 0 `BUILD`,
+unmutated baseline green first. **No mutation was removed and no declaration was
+weakened**, so the arithmetic is `33 → 34` mutations and `31 → 32` observable, and
+the two declared unobservable are the same two.
+
+The one addition joins the **command** family, which is now 6 rather than 5:
+*"the program path is quoted, in case it has a space in it"*, replacing
+`Command::new(&self.program)` with a `format!` that wraps the program in quotes.
+It is the mutation this task's subject most obviously invites — a path with a
+space is the reason to quote, and the process API quotes the program itself — and
+it is a real hazard rather than a synthetic one, because `Command::new` is the
+line that exists to avoid exactly this.
+
+**The display cap bit again, and this time it was anticipated rather than
+discovered.** `main()` prints `fired[:3]`, and the three names it printed for this
+mutation are
+`a_batch_file_named_with_its_extension_runs_and_windows_brings_the_interpreter`,
+`a_cancelled_run_is_stopped_before_its_deadline` and
+`a_cancelled_run_reaches_what_it_started_too` — **none of them the test this task
+added.** So "does the new test catch the new mutation" could not be answered from
+the harness output at all, and was answered by applying the mutation by hand and
+running that one test: `a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs`
+fails alone in **0.01s** with `os error 123`, `ERROR_INVALID_NAME`, before any
+process is started. Reverted, and `git status` read clean afterwards. The rule
+this file drew from the last time — *a display cap is a display cap; the count
+that matters is the one in the sentence the harness prints when it is done* — was
+followed, and it was followed by not trusting the display either way.
+
+**The two declared unobservable are unchanged, and this task did not make them
+observable.** No test holds a stream open past `DRAIN_GRACE`, and no test can make
+`taskkill` exist and fail. The tree tests now reach further into a tree than
+`P3-T001`'s did, and a reader might expect that to change the second declaration;
+it does not, because the limitation is the ability to make a program exist **and**
+fail, not the depth of the tree.
+
 ### `P3-T001`
 
 `target/tmp/mutate18.py` (git-ignored), 33 mutations over the four mutated files
@@ -4568,6 +4956,22 @@ it needs a Mac.
   step further in — its executable-suffix list was right and the reason stated
   for it was wrong, so only the comment changed and no behaviour did.
   **This opened phase `P3`.**
+- `fd878e6` **`P3-T002`** — `crates/sure-core/tests/process_runner.rs` and nothing
+  else: **29 tests → 36** (23 parents + 6 children → 28 parents + 8 children), the
+  file going from **1233 to 1729 lines** (`+558 −62` in `git show --stat`). **The one task on this branch whose delivery
+  is entirely tests, and the one whose acceptance was already satisfied on
+  paper**: `P3-T001` had recorded a test per sentence, and re-reading the
+  sentences against the file found "Paths with spaces/Unicode are covered" holding
+  in one position out of five and one test asserting an absence that a thing which
+  never existed also satisfies. Four new tests cover the program path, an
+  argument, the report path and the bytes coming back out, over one
+  `const AWKWARD` and one `const NOT_ASCII`; the tree test gained a positive
+  control (`<report>.started`) and a release probe (`<report>.release`) and lost a
+  1.5-second sleep. **No shipped file changed, so no behaviour changed** — which
+  is why the four matrix tests are recorded as **characterisation tests** rather
+  than as mutation-covered, and why the one mutation this task added is about the
+  position that can be got wrong in the code as written. **Not established:**
+  anything about a path that is not valid UTF-8, which is `P3-T003`'s question.
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -4593,20 +4997,31 @@ pass, and it is recorded there rather than only here.
 
 ## Next concrete action
 
-1. **`P3-T001` is implemented, pushed, read, and accepted by the commit carrying
-   this file, and it opened phase `P3`.** `819d499` is the implementation, run
-   `34924525793`, all five jobs green, **Windows 1082 / macOS 1081 / Ubuntu 1082**
-   with 0 failed and 7 ignored over **43** result lines = **33 parents + 10
-   children** — read and attributed, with the Windows log matching this machine's
-   own run value for value, in "Reading run `34924525793`". All 37 new test names
-   were checked by name on each job: **37 of 37 on Windows, 34 of 37 on macOS and
-   Ubuntu**, the three absent ones being exactly the `#[cfg(windows)]` tests.
-   **Its run is read in the session that took it rather than committed** — the
-   stopping rule at the top of this file, so the `P3-T001` chain ends at the
-   acceptance. **The runner runs nothing yet**: no product path calls it, and
-   `tests/spawn_sites.rs` fails the day one does without being added to it.
-   The next task that would use it is `P3-T002`, which is `queued` on it.
-2. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+1. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it changed no shipped code.** `fd878e6` is the implementation,
+   run `34927065374`, all five jobs green, **Windows 1077 / macOS 1076 / Ubuntu
+   1077** with 0 failed and 9 ignored over 43 results = **33 parents + 10
+   children** — read and attributed in "Reading run `34927065374`", where the one
+   apparent difference between the three jobs (Ubuntu printing **42** result
+   lines) turned out to be two child results spliced into one line by the
+   concurrent children `store_concurrency` spawns, not a missing test. Windows CI
+   matches this machine's own re-run on the parent multiset, value for value. All
+   five new test names were read by name on each job, and the nine ignored
+   children are identical **by name** on all three. **Its run is read in the
+   session that took it rather than committed** — the stopping rule at the top of
+   this file, so the `P3-T002` chain ends at the acceptance.
+2. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
+   `P3`.** `819d499` is the implementation, run `34924525793`, all five jobs
+   green, **Windows 1082 / macOS 1081 / Ubuntu 1082** with 0 failed and 7 ignored
+   over **43** result lines = **33 parents + 10 children** — read and attributed,
+   with the Windows log matching this machine's own run value for value, in
+   "Reading run `34924525793`". All 37 new test names were checked by name on each
+   job: **37 of 37 on Windows, 34 of 37 on macOS and Ubuntu**, the three absent
+   ones being exactly the `#[cfg(windows)]` tests. **The runner runs nothing
+   yet**: no product path calls it, and `tests/spawn_sites.rs` fails the day one
+   does without being added to it. `P3-T002` has now used it — in tests only — and
+   the first task that would run anything in the product is `P3-T004`.
+3. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -4618,12 +5033,12 @@ pass, and it is recorded there rather than only here.
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-3. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+4. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-4. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+5. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -4631,19 +5046,22 @@ pass, and it is recorded there rather than only here.
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-5. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+6. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-6. **The next task is a real choice, and the list is 12 long.**
-   `P3-T002`, `P3-T003`, `P3-T004`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`,
+7. **The next task is a real choice, and the list is 11 long.**
+   `P3-T003`, `P3-T004`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`,
    `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. **`P3` is open and
-   `P3-T001` is accepted, which is new since this item was last written** — the
-   list gained `P3-T002`, `P3-T003` and `P3-T004` in the same step it lost
-   `P3-T001`, so the phase's own tasks are now choosable and three of them at
-   once. `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
+   `P3-T001` and `P3-T002` are accepted** — this item lists **two fewer** members
+   than when it was last written, and for two different reasons, which is why the
+   membership is written out rather than the number: `P3-T002` left by being
+   accepted and **nothing entered**, because no task names it in a `depends_on`;
+   and `P3-T001`'s acceptance had put `P3-T002`, `P3-T003` and `P3-T004` on the
+   list, so the phase's own tasks have been choosable for one acceptance now.
+   `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
    and `P8-T001` have been on the list since before this file was written.
    **Read the task entry before choosing**; do not choose from this paragraph.
    **`P8-T005` is the task that would consume what `P2-T011` left**, and it is
@@ -4651,7 +5069,7 @@ pass, and it is recorded there rather than only here.
    accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
    has its rule and its door and still no capture, and the task that supplies one
    is waiting on a task nobody has read.
-7. **`P2-T012` left an owner decision open, and it is the first one a reader
+8. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -4666,19 +5084,19 @@ pass, and it is recorded there rather than only here.
    ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-8. **`P2-T012` also left the classification with no consumer.** `classify` is
+9. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
-   shape as `ComponentGraph` in item 9, and it is recorded rather than implied —
+   shape as `ComponentGraph` in item 10, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-9. **`P2-T007` is accepted, its two commits are pushed and read.**
+10. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-10. **The store now holds six rows that no user wrote, and that is the first item
+11. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -4712,7 +5130,7 @@ pass, and it is recorded there rather than only here.
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-11. **`project_fingerprint` now has one caller, and it is not a check.**
+12. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -4722,7 +5140,7 @@ pass, and it is recorded there rather than only here.
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
-12. **`P3-T001` left a second owner decision open, and it is the one the next
+13. **`P3-T001` left a second owner decision open, and it is the one the next
    three `P3` tasks will each run into: may a caller name a batch file?** The
    facts, all measured and held as tests rather than asserted: a name with no
    extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,
@@ -4750,7 +5168,9 @@ number**: item 7 still read *"the same shape as `ComponentGraph` in item 3"*,
 which was written when item 3 was `P2-T007` and which by this acceptance pointed
 at `P2-T008` — a reader following it would have been sent to the wrong task, and
 the sentence would have read as though it had been checked against the list it
-sits in. It now says item 8, which is `P2-T007`. This is the third instance of one
+sits in. It was changed to item 8, which was `P2-T007` then and has moved since —
+it reads item 10 now, and that is still `P2-T007`; the paragraph below records the
+move. This is the third instance of one
 shape found in this single pass: a list that is wrong in a way that reads as
 complete — the missing task entries above, the stale commit ordering in the
 header, and now the numbering. All three were found by checking the file against
@@ -4773,6 +5193,32 @@ and check it still points where it did**, and the check that found this one was
 `grep -n "item [0-9]"`, not a reading. A script that verifies its own output can
 still leave the file inconsistent, because the thing it verified was not the
 thing that was broken.
+
+**`P3-T002`'s acceptance followed both steps, and the second one is what caught
+its own mistake.** `target/tmp/renumber2.py` prepended the new item, renumbered
+the rest to 1..13, re-read and rewrote the one `item N` reference
+(`ComponentGraph` now reads **item 10**, which is still `P2-T007`), and verified
+1..n with no gap before writing — **and the first run still produced a list with
+two `P3-T001` items in it.** The script inserts a new item; it does not replace,
+so the item it was written to rewrite stayed where it was and the list read
+`1. P3-T002 / 2. P3-T001 / 3. P3-T001 / 4. P2-T011`. The numbering check passed on
+that file, because `1..13` is exactly what a list with a duplicate *content* and
+correct numbers looks like; what found it was `grep -n "^[0-9]\+\. \*\*"` over
+the section, which prints the items themselves rather than their numbers. The
+duplicate was deleted and the tail renumbered again, and the check was run a
+second time. **So the rule gained a third step, and it is the one that would have
+caught all three of this file's numbering failures: after renumbering, print the
+items and read them.** A sequence of numbers is not a sequence of items, which is
+the same sentence as "a multiset is consistent with the attribution and cannot
+establish it", arriving in a list.
+
+The third step is also where the write itself was fixed: `renumber2.py` passes
+`newline=""`, because `Path.write_text` on Windows translates every `\n` to
+`\r\n` silently and the earlier script did not — which would have turned every
+line of this file into CRLF in the working tree while `git diff` stayed quiet
+under `.gitattributes`' `eol=lf`. The check is one command
+(`python -c "print(open('progress/HANDOFF.md','rb').read().count(b'\r\n'))"`) and
+it now prints 0.
 
 **What `P2-T002` left for later, and what `P2-T003` then did with it.**
 `P2-T002` left the Git fingerprint asked for explicitly, by a caller that had

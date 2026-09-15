@@ -19,9 +19,10 @@
 //!
 //! **Nothing about process trees on a platform that cannot reach them.**
 //! [`Stop`] says which of the two stops happened, and the test asserts what the
-//! platform can actually do rather than what would be nicest. The Windows/Linux
-//! comparison is the table below, which every one of these tests is a row of;
-//! what is here is the runner's own contract, and the platform's answer to it.
+//! platform can actually do rather than what would be nicest. The comparison
+//! across the three platforms is the table below, which every one of these tests
+//! is a row of; what is here is the runner's own contract, and the platform's
+//! answer to it.
 //!
 //! # The platform matrix
 //!
@@ -33,18 +34,27 @@
 //! **Read a run by test name, never by total** — a green job says nothing about
 //! the other two, and the three run different sets.
 //!
-//! | What differs | Windows | Linux and macOS |
-//! | --- | --- | --- |
-//! | what a stop reaches | the whole tree, through `taskkill /T /F` | the process itself; nothing below it |
-//! | what a name may be | no extension is completed with `.exe` and nothing else | the name is the path, and the executable bit decides |
-//! | a file that is not an image | `.cmd` and `.bat` start, with an interpreter Windows supplies; `.ps1` does not start at all | a file whose first line names an interpreter starts; without the executable bit nothing starts |
-//! | a path that is not text | cannot be spelled at all — an unpaired surrogate is not a path | bytes are bytes: the name, the working directory and every argument arrive unchanged |
+//! | What differs | Windows | Linux | macOS |
+//! | --- | --- | --- | --- |
+//! | what a stop reaches | the whole tree, through `taskkill /T /F` | the process itself; nothing below it | the same as Linux |
+//! | what a name may be | no extension is completed with `.exe` and nothing else | the name is the path, and the executable bit decides | the same as Linux |
+//! | a file that is not an image | `.cmd` and `.bat` start, with an interpreter Windows supplies; `.ps1` does not start at all | a file whose first line names an interpreter starts; without the executable bit nothing starts | the same as Linux |
+//! | a path that is not text | cannot be spelled at all — an unpaired surrogate is not a path | bytes are bytes: the name, the working directory and every argument arrive unchanged | **cannot be spelled at all either** — the filesystem refuses the name with `EILSEQ`, so the question cannot be asked here |
+//!
+//! The last column is not decoration. **`#[cfg(unix)]` spans Linux and macOS,
+//! and this table is where they stop agreeing**: the row it breaks is the last
+//! one, and the first version of this work had it as a single "Linux and macOS"
+//! cell that was true of exactly one of them. CI said so — run `34929385200`,
+//! `rust (macos-latest)`, `Os { code: 92, message: "Illegal byte sequence" }`
+//! from the `fs::write` that creates the program — which is why the three
+//! columns are written out and why the answer for each is held by a test rather
+//! than by this paragraph.
 //!
 //! The first row is `P3-T002`'s; the other three are the ones `P3-T002` said
-//! nothing about and `P3-T003` added. Each is a pair — a positive and a
-//! negative where the negative is the interesting half — because "it did not
-//! run" and "it was not asked to run" are different facts and only the second
-//! is a contract.
+//! nothing about and `P3-T003` added. Where a row has two halves they are a pair
+//! — a positive and a negative where the negative is the interesting half —
+//! because "it did not run" and "it was not asked to run" are different facts
+//! and only the second is a contract.
 //!
 //! **The lifecycle claims are about a process, not about a report.** A stop is
 //! asked to prove itself against a grandchild that is given a way to say
@@ -1752,7 +1762,7 @@ fn a_power_shell_script_cannot_be_started_as_a_program() {
 }
 
 // ---------------------------------------------------------------------------
-// The same request, on the two families. `P3-T003`.
+// The same request, on the three platforms. `P3-T003`.
 //
 // The claim these hold is one sentence: SURE hands the operating system a name
 // and a vector of bytes, the platform decides what a name may be and how a file
@@ -1763,6 +1773,12 @@ fn a_power_shell_script_cannot_be_started_as_a_program() {
 // Each test runs on the platform it is about, which is what makes the coverage
 // a fact about a CI run rather than a sentence in a document. The table in the
 // module documentation is the index; read a run against it by test name.
+//
+// **The three are not two families plus a rounding error.** The first version of
+// this section treated Linux and macOS as one thing and was wrong about the last
+// row — macOS refuses a file name that is not valid UTF-8 before SURE is asked
+// anything — and CI said so on the first run. Where the columns agree they agree
+// because a test on each says so, not because `unix` was taken to mean it.
 // ---------------------------------------------------------------------------
 
 /// The smallest program a Unix test can put in front of the runner.
@@ -1903,16 +1919,26 @@ fn the_same_script_without_the_executable_bit_is_not_a_program() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs() {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
-    // The sharpest difference between the two families, and the question
-    // `P3-T002` left open. A Windows path is UTF-16, so a name that is not
-    // valid Unicode cannot exist on that side at all and the test below pins
-    // the refusal. A Unix path is bytes, and the bytes are the name: the file
-    // is created with a name that is not valid UTF-8, named to the runner, and
-    // run.
+    // The sharpest difference between the families, and the question `P3-T002`
+    // left open. A Windows path is UTF-16, so a name that is not valid Unicode
+    // cannot exist on that side at all and `a_program_name_that_is_not_a_windows_path_is_refused_rather_than_mangled`
+    // pins the refusal. A Unix path is bytes, and the bytes are the name: the
+    // file is created with a name that is not valid UTF-8, named to the runner,
+    // and run.
+    //
+    // **This is `target_os = "linux"` and not `unix`, and that was learned from
+    // CI rather than reasoned about.** macOS holds those bytes in an `OsStr` as
+    // happily as Linux does — the assertion style here works there — and its
+    // filesystem will not have a file by that name: `fs::write` answers
+    // `EILSEQ`, errno 92, "Illegal byte sequence". Run `34929385200` is where
+    // this test first ran on macOS and said exactly that, at the `write_a_script`
+    // call below. So the row has two answers on the Unix side and this is the
+    // Linux one; `a_program_whose_name_is_not_valid_utf8_cannot_be_created_on_macos`
+    // is the other.
     //
     // What is being checked is that nothing on the way turned any of it into
     // text. A `String` anywhere in the path — a `to_str`, a `to_string_lossy`,
@@ -1958,6 +1984,59 @@ fn a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs() {
         written,
         payload.as_bytes(),
         "the argument has to arrive as the bytes it is; anything else is a conversion"
+    );
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn a_program_whose_name_is_not_valid_utf8_cannot_be_created_on_macos() {
+    use std::os::unix::ffi::OsStringExt;
+
+    // The macOS answer to the row above, and **it is not an answer about the
+    // runner** — which is the whole reason it is a test rather than a note.
+    // macOS is `unix`, `OsString::from_vec` gives it the same bytes, and its
+    // filesystem will not hold a file whose name is not valid UTF-8: the create
+    // returns `EILSEQ`. There is no request to make, so the claim "SURE hands
+    // the bytes through" has no macOS half and the table above says so.
+    //
+    // **This test asserts a premise rather than a behaviour, and it is here so
+    // that the premise cannot rot quietly.** If a later macOS or a later
+    // filesystem accepts the name, this fails and the row has to be rewritten
+    // on purpose — the same reason `assert_what_the_platform_could_reach` states
+    // the platform's answer instead of skipping it. What it does *not* do is
+    // check anything SURE wrote: `fs::write` is the standard library's, and the
+    // only thing under test here is the operating system.
+    //
+    // The errno is asserted as a number and the sentence is not. `EILSEQ` is 92
+    // on Darwin and 84 on Linux, so the number is this platform's and not a
+    // portable constant — and unlike Windows' localized text it is not
+    // translated, which is what makes it the part worth pinning.
+    let directory = scratch("macos-not-text");
+    let bytes = OsString::from_vec(b"says-\xff\xfe-something".to_vec());
+
+    // The control comes **first**, and it is what makes the assertion about the
+    // name rather than about the directory. The same bytes of program, in the
+    // same directory, under a name the filesystem will take: without this, a
+    // scratch path that was never created or a permission problem would satisfy
+    // the assertion below just as well, and for the wrong reason.
+    fs::write(directory.join("an ordinary name"), A_SCRIPT)
+        .expect("the control: an ordinary name in the same directory is created");
+
+    let refused = fs::write(directory.join(&bytes), A_SCRIPT);
+    let errno = refused
+        .as_ref()
+        .err()
+        .and_then(std::io::Error::raw_os_error);
+
+    assert_eq!(
+        errno,
+        Some(92),
+        "macOS was expected to refuse a file name that is not valid UTF-8 with EILSEQ (92), and \
+         this is {refused:?}. If the name was accepted, the row above has a macOS half and this \
+         test has to be rewritten; if it was refused with a different error, this test's number \
+         is what is wrong."
     );
 
     let _ = fs::remove_dir_all(&directory);

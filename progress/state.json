@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P2",
-  "last_updated": "2026-09-15T01:36:37.012Z",
+  "last_updated": "2026-09-15T01:41:03.195Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -283,8 +283,8 @@
       "notes": "Accepted on run 34869888350 (4746c48), all five jobs green: Windows 907 / macOS 909 / Ubuntu 910 passed, 0 failed, 1 ignored, each over 37 result lines = 27 parents + 10 children. Windows equals the local Windows run exactly, 877 -> 907. The +30 is attributed by binary name rather than by total, read out of the logs: sure_core lib 407 -> 416 (+9), the sure bin 36 -> 48 (+12), cli_contract 13 -> 14 (+1), and the new project_intent_ingest binary (8); Doc-tests sure_core unchanged at 4, and every other position in the 27-value multiset identical on all three platforms. Implementation: sure_core::project_intent (explicit_goal, record, EXPLICIT_GOAL_ID) turns a command-line goal into one Requirement with source explicit_user_goal and raw_retained true, stored as one project-intent row; `sure check --goal` records it against a real project fingerprint and returns Report::GoalRecorded at status 3, or Report::Failed at status 5, with a bare `check` still answering status 3 unchanged. Gates: cargo fmt --all --check clean; clippy --workspace --all-targets -D warnings clean; cargo test --workspace green; taskctl validate OK; Preflight-Windows passed. Mutation run target/tmp/mutate12.py: 21 of 21 observable mutations caught by a failing test, 2 declared unobservable and missed as declared, 0 skipped, 0 build failures. Two mutations found real holes and the tests were written afterwards - the multi-sentence goal, and the store-ordering test that used a relative root Store::open refuses for a different reason than the fingerprinter does. Two claims stay untested and are recorded in progress/HANDOFF.md rather than papered over: the --goal happy path cannot be pointed at a store a test can observe, because dirs on Windows resolves through SHGetKnownFolderPath and ignores every environment variable; and a bare `sure check` that opened the store before deciding it had nothing to do is unobservable on a machine that already has a store. One side effect of the mutation run is recorded in HANDOFF: the whitespace mutation made the cli_contract process-level test store six empty-text goal rows in the developer's real store at %LOCALAPPDATA%\\SURE\\sure.db, because that test runs the real binary against the real locations and cannot be redirected. An unmutated suite run was measured to leave that store byte-identical, so the shipped tests do not pollute it; the six rows are the mutation harness's, they are listed in HANDOFF, and removing them is left to the owner because the store is the owner's history and has no backup."
     },
     "P2-T011": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-15T01:41:03.194Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

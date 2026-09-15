@@ -40,8 +40,24 @@ emphatically it is worded. `Config::goal_source` is a `const` returning exactly
 that, and it is the one place the decision is made for every caller
 (`docs/adr/0011-project-configuration-is-a-request.md`).
 
-The command line is the other channel, and it is the only one this build
-implements.
+The command line is the other channel, and until `P2-T011` it was the only one
+with a producer. It is still the only one a person reaches by typing: every
+channel now has a **door** in `crates/sure-core/src/intent_model.rs`, which is
+where a label is written, and a door is not a producer. The doors with nobody
+knocking are named in that module's comment rather than left to be inferred from
+the table there — a table of five labels reads as a pipeline whether or not one
+exists. Two have a producer today: the command line
+(`crate::project_intent::explicit_goal`) and a goal written into `sure.yaml`
+(`crate::intent_model::documented_goal`); a third arrives from a document's
+fenced commands, which `crate::documents` produces and nothing in `sure-cli`
+builds yet; `agent_claim` and `inferred` have none, and the reason is in that
+comment.
+
+**A door writes its own label, and no function in that module takes one as an
+argument.** A caller holding a command it read out of a README has nothing to
+ask for, because there is no parameter to ask with, so the mistake this section
+is about — a document's sentence arriving as something the user said — is
+prevented by a shape rather than by a rule the code follows.
 
 ## The explicit channel
 
@@ -143,8 +159,16 @@ Possible strategy:
 
 If goal extraction requires an external model, disclose that model use and respect fully-local mode.
 
-None of this is implemented: `observed_user_request` is the only source that
-requires full recording, and no harness integration writes one yet.
+**The permission is implemented and the capture is not.** No harness integration
+writes an observed request yet, so the strategy above describes a pipeline this
+build does not have. What `P2-T011` implements is the rule such an integration
+will have to satisfy: `IntentSource::requires_full_recording` is true of exactly
+one source, `observed_user_request`, and
+`crate::intent_model::observed_user_request` refuses to produce one unless
+`Authority` says the privilege was **granted**. It takes the authority rather
+than a `Config` for the reason the section above gives: `sure.yaml` is inside the
+project, so a project that sets `privacy.full_recording: true` has asked, and
+only the user's own settings outside the project can allow it.
 
 ## What this document does not cover
 

@@ -13,6 +13,7 @@ pub mod discover;
 pub mod doctor;
 pub mod documents;
 pub mod fingerprint;
+pub mod intent_model;
 pub mod paths;
 pub mod project_intent;
 pub mod redact;

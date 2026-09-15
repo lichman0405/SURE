@@ -1,0 +1,765 @@
+//! `P4-T001`'s acceptance, checked rather than asserted.
+//!
+//! The task's sentence is:
+//!
+//! > *Ordered plan includes reason, evidence class and execution requirements
+//! > per check.*
+//!
+//! Three claims in one sentence, and they are not the same kind of claim. That
+//! each entry *carries* a reason, an evidence class and its requirements is
+//! behavioural — it is checked here from outside the crate, which is also what
+//! proves the accessors are public and the seam is usable. That the plan is
+//! *ordered* is a property rather than a value, so it is checked against the
+//! rules the module states rather than against one expected list. And that the
+//! ordering does not depend on how the checks arrived cannot be demonstrated by
+//! running one case at all, so it is a sweep.
+//!
+//! # The five rules
+//!
+//! **One: the acceptance sentence, over a plan and not over one proposal.**
+//! Every entry, with the reason, the evidence class and the requirements read
+//! back through the public API.
+//!
+//! **Two: the order is the rules' order, whatever order the proposals arrived
+//! in.** Every permutation of a four-check set, built from outside the crate,
+//! lands on the same sequence — and that sequence is asserted to be the one the
+//! three rules describe, so a stably wrong plan fails too.
+//!
+//! **Three: nothing in the product proposes a check yet.** No shipped file
+//! outside `schedule.rs` names [`CheckProposal`], [`CheckReason`],
+//! [`ExecutionRequirements`] or [`PlanBuilder`]. **This rule is meant to fail** —
+//! `P4-T002`, `P4-T003` and `P4-T004` are the tasks that will write the first
+//! proposer, and the day one lands this test must fail and that commit edits the
+//! list below, which is the moment somebody reads this paragraph.
+//!
+//! **Four: the schedule cannot spell a verdict.** The shipped part of
+//! `schedule.rs` names `CheckStatus` zero times, and `CheckResult` four times in
+//! four roles — a doc sentence, an import, one signature and one call. The
+//! status a blocked check gets is the domain's `not_run` constructor's to choose,
+//! so there is no place here where a schedule entry could be turned into a pass.
+//!
+//! **Five: the frozen plan does not grow a reason.** `CheckPlan` in
+//! `sure-domain/src/vocabulary.rs` holds identifiers and nothing else, and the
+//! reason and the evidence class this task adds live in `sure-core`. That
+//! boundary is the reason `Enforcement` did not have to change for this task, and
+//! a field appearing in the domain record is an ADR-level decision rather than a
+//! refactor.
+//!
+//! # What is not claimed here
+//!
+//! **None of this says a check is a good one.** The schedule will faithfully
+//! order and carry a check that is worthless, or one whose evidence class is a
+//! lie, and rules one to five are silent about it — the same limit `browser.rs`
+//! states about its drivers. What they hold is that the plan a report is built
+//! from cannot be quietly incomplete in the two ways that matter: a check dropped
+//! for being unrunnable, and an order that depends on somebody's loop.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use sure_core::consent::PermissionPlan;
+use sure_core::enforce::Enforcement;
+use sure_core::scan::{ScanOptions, scan};
+use sure_core::schedule::{
+    CheckProposal, CheckReason, CheckSchedule, ExecutionRequirements, PlanBuilder, ScheduledCheck,
+};
+use sure_domain::evidence::EvidenceClass;
+use sure_domain::execution::{
+    ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions, Permission,
+};
+use sure_domain::ids::{CheckId, FingerprintId};
+use sure_domain::severity::Severity;
+use sure_domain::status::{CheckStatus, NotCheckedReason};
+
+/// The one file allowed to build a check, as a path from the repository root.
+const THE_BUILDER: &str = "crates/sure-core/src/schedule.rs";
+
+/// The same file as the `crates/` walk reports it, relative to that root.
+///
+/// Two spellings of one path, because the two checks that name this file reach it
+/// by different routes, and `the_two_spellings_of_the_builders_path_agree` is what
+/// stops them drifting into two files — the mistake `browser_probe.rs` records
+/// making once.
+const THE_BUILDER_IN_THE_WALK: &str = "src/schedule.rs";
+
+/// The file that owns the frozen plan record.
+const THE_FROZEN_PLAN: &str = "crates/sure-domain/src/vocabulary.rs";
+
+/// Words that mean something in the product has begun proposing checks.
+///
+/// Four type names rather than one, because a proposer can be written from any
+/// end: a function that returns a `CheckProposal`, one that names a `CheckReason`,
+/// one that hands `ExecutionRequirements` to something else, or one that reaches
+/// for `PlanBuilder`. Naming any of them outside the builder is the thing rule
+/// three is about, and a rule that waited for the whole set to appear would not
+/// fire until the feature was finished.
+const PROPOSER_WORDS: &[&str] = &[
+    "CheckProposal",
+    "CheckReason",
+    "ExecutionRequirements",
+    "PlanBuilder",
+];
+
+/// Read a file the rules are stated against, refusing to check a file that could
+/// not be read.
+///
+/// A rule that passes because its subject was not found is the false green this
+/// repository is built against, so a missing file is a failure and not a skip.
+fn read(relative: &str) -> String {
+    let path = sure_testkit::repository_root().join(relative);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
+}
+
+/// Whether a line is prose rather than code.
+///
+/// The paragraphs that *explain* a rule have to be able to name the thing the
+/// rule is about, which is why rule three skips them.
+fn is_prose(line: &str) -> bool {
+    line.trim_start().starts_with("//")
+}
+
+/// Every **shipped** `.rs` file under `crates/`, with its text.
+///
+/// Narrowed to `src/`, because the rule is about code that ships: a test file is
+/// *supposed* to name these types — this one does — and a rule that counted them
+/// would be a rule nobody could satisfy. The walk is the product's own scanner so
+/// that "a file in this crate" means here what it means everywhere else, and it is
+/// asserted complete, because a source rule over an unknown subset of the sources
+/// is the false green this test exists to prevent.
+fn shipped_sources() -> Vec<(String, String)> {
+    let crates = sure_testkit::repository_root().join("crates");
+    let walked = scan(&crates, ScanOptions::default()).expect("crates/ is a directory");
+    assert!(
+        walked.is_complete(),
+        "the source tree could not be read completely, so these rules would be \
+         checking an unknown subset of it"
+    );
+
+    let shipped: Vec<(String, String)> = walked
+        .files()
+        .filter(|entry| {
+            entry
+                .path
+                .extension()
+                .is_some_and(|extension| extension == "rs")
+        })
+        .map(|entry| {
+            let path = crates.join(&entry.path);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+            (entry.display_path(), text)
+        })
+        .filter(|(path, _)| path.contains("src"))
+        .collect();
+
+    assert!(
+        shipped.len() > 10,
+        "the source walk found {} shipped files, which is not this workspace — the \
+         filter is matching the wrong thing",
+        shipped.len()
+    );
+    shipped
+}
+
+/// The part of a file above its `#[cfg(test)]` module.
+///
+/// Rule four is about code that ships, and `schedule.rs`'s own tests build results
+/// and name statuses because that is what testing a mapping looks like. Counting
+/// them would make the rule unsatisfiable, and the rule that *is* satisfiable —
+/// "no test may check a status" — is false and should be.
+///
+/// `None` when there is no test module, which the caller refuses rather than
+/// treating as "the whole file ships": with no test module the counts would
+/// silently include whatever the file grew later.
+fn shipped_part(text: &str) -> Option<&str> {
+    text.split_once("\n#[cfg(test)]")
+        .map(|(shipped, _)| shipped)
+}
+
+/// The body of `pub struct CheckPlan { ... }`, to its closing brace.
+///
+/// Returns `None` rather than an empty string when the struct is not found. **An
+/// empty body would satisfy every rule stated against it**, and a parse that fails
+/// into a smaller, plausible answer is the defect this repository has hit more
+/// than once; the test below refuses the `None` instead of treating it as a struct
+/// with no fields.
+fn check_plan_body(text: &str) -> Option<&str> {
+    const OPENS: &str = "pub struct CheckPlan {";
+    let start = text.find(OPENS)?;
+    let body = &text[start + OPENS.len()..];
+    let end = body.find("\n}")?;
+    Some(&body[..end])
+}
+
+/// A proposal with everything a proposal needs and nothing that distinguishes it,
+/// so a test that wants to vary one thing varies exactly that.
+fn proposal(
+    id: CheckId,
+    title: &str,
+    severity: Severity,
+    evidence_class: EvidenceClass,
+    actions: &[ActionKind],
+) -> CheckProposal {
+    CheckProposal::new(
+        id,
+        title,
+        severity,
+        false,
+        evidence_class,
+        CheckReason::ProjectWide,
+        actions,
+    )
+}
+
+fn titles(schedule: &CheckSchedule) -> Vec<&str> {
+    schedule
+        .checks()
+        .iter()
+        .map(|scheduled| scheduled.proposal().title())
+        .collect()
+}
+
+/// A builder for a run that may execute the project's code.
+fn an_executing_builder() -> PlanBuilder {
+    PlanBuilder::new(
+        ExecutionMode::HostConfirmed,
+        ExecutionPermissions {
+            run_project_code: true,
+            ..ExecutionPermissions::inspect_only()
+        },
+    )
+}
+
+#[test]
+fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requirements() {
+    // The acceptance sentence. Read from an integration test rather than from the
+    // module's own tests, which is what makes it a claim about the public seam
+    // rather than about code that can reach private fields.
+    let mut builder = an_executing_builder();
+    builder
+        .propose(CheckProposal::new(
+            CheckId::generate(),
+            "the lockfile matches the manifest",
+            Severity::MustFix,
+            true,
+            EvidenceClass::ObservedFact,
+            CheckReason::FilePresent {
+                path: "package-lock.json".to_owned(),
+            },
+            &[ActionKind::ReadFile, ActionKind::ReadMetadata],
+        ))
+        .unwrap();
+    builder
+        .propose(CheckProposal::new(
+            CheckId::generate(),
+            "the declared tests pass",
+            Severity::MustFix,
+            true,
+            EvidenceClass::DeterministicCheck,
+            CheckReason::DeclaredCommand {
+                declared_in: "package.json".to_owned(),
+                command: "npm test".to_owned(),
+            },
+            &[ActionKind::RunTests],
+        ))
+        .unwrap();
+    builder
+        .propose(CheckProposal::new(
+            CheckId::generate(),
+            "nothing surprising in the layout",
+            Severity::CanFixLater,
+            false,
+            EvidenceClass::ModelAssessment,
+            CheckReason::StackPresent {
+                component: "web".to_owned(),
+                stack: "node".to_owned(),
+            },
+            &[ActionKind::ListDirectory],
+        ))
+        .unwrap();
+
+    let schedule = builder.build();
+    assert_eq!(schedule.len(), 3, "a proposal was lost building the plan");
+
+    let mut classes = Vec::new();
+    for (index, scheduled) in schedule.checks().iter().enumerate() {
+        let entry = scheduled.proposal();
+        // The three named in the acceptance, each read through its accessor.
+        let reason = entry.reason();
+        assert!(reason.names_something(), "{reason:?} names nothing");
+        assert!(!reason.plain_description().trim().is_empty());
+
+        let class = entry.evidence_class();
+        assert!(!class.as_str().trim().is_empty());
+        classes.push(class.as_str());
+
+        let requirements = entry.requirements();
+        assert!(!requirements.is_empty(), "the check would do nothing");
+        assert!(!requirements.actions().is_empty());
+        assert!(
+            !requirements.permissions_needed().is_empty(),
+            "a check that needs no permission is one nothing would be asked about"
+        );
+
+        // And the entry renders, which is what a report does with it.
+        assert!(!scheduled.plain_description().trim().is_empty());
+        assert_eq!(
+            scheduled.position(),
+            index,
+            "an entry's position is not where the plan put it"
+        );
+    }
+
+    // The evidence classes are not all one value, which is what makes carrying the
+    // field worth anything: a plan that could only ever say `unknown` would satisfy
+    // every assertion above while distinguishing nothing.
+    classes.sort_unstable();
+    classes.dedup();
+    assert!(
+        classes.len() >= 3,
+        "three proposals with three evidence classes produced {classes:?}, so the \
+         field is not travelling from the proposal to the plan"
+    );
+
+    // The requirements are computed from the actions and not copied from the
+    // caller, which is the half of "execution requirements" that could be faked.
+    let requirements_of = |title: &str| {
+        schedule
+            .checks()
+            .iter()
+            .find(|scheduled| scheduled.proposal().title() == title)
+            .expect("the check is in the plan")
+            .proposal()
+            .requirements()
+            .clone()
+    };
+
+    // Running the tests is one action and it needs one permission. `Inspect` is
+    // *not* added on top: `ActionKind::required_permission` is a total mapping
+    // from an action to what that action costs, and a check that also has to read
+    // something says so by listing the read among its actions -- which is the
+    // proposer's job and not something this module may infer.
+    let tests = requirements_of("the declared tests pass");
+    assert!(tests.runs_project_code());
+    assert!(!tests.runs_nothing());
+    assert_eq!(tests.permissions_needed(), [Permission::RunProjectCode]);
+
+    // And the other direction, from a check that only reads: two actions, one
+    // permission, deduplicated.
+    let lockfile = requirements_of("the lockfile matches the manifest");
+    assert!(!lockfile.runs_project_code());
+    assert!(lockfile.runs_nothing());
+    assert!(lockfile.is_inspection_only());
+    assert_eq!(lockfile.actions().len(), 2);
+    assert_eq!(lockfile.permissions_needed(), [Permission::Inspect]);
+}
+
+#[test]
+fn the_order_is_the_one_the_rules_describe_whatever_order_the_checks_arrived_in() {
+    // The module's own test sweeps all 120 permutations of five checks. This one
+    // sweeps 24 of four and exists for a different reason: it builds the plan
+    // through the public API only, so it holds the promise for a caller rather
+    // than for the module's own tests.
+    let kinds = [
+        ("reads", Severity::Note, ActionKind::ReadFile),
+        ("tests", Severity::MustFix, ActionKind::RunTests),
+        ("lists", Severity::CanFixLater, ActionKind::ListDirectory),
+        ("builds", Severity::ShouldFixFirst, ActionKind::Build),
+    ];
+    let proposals: Vec<CheckProposal> = kinds
+        .iter()
+        .map(|(title, severity, action)| {
+            proposal(
+                CheckId::generate(),
+                title,
+                *severity,
+                EvidenceClass::DeterministicCheck,
+                &[*action],
+            )
+        })
+        .collect();
+
+    // Rule one puts the checks that run nothing first -- reads, lists -- and rule
+    // two puts the worse first inside each half. So: no-code half is lists
+    // (CanFixLater) then reads (Note), and the code half is tests (MustFix) then
+    // builds (ShouldFixFirst).
+    let expected = ["lists", "reads", "tests", "builds"];
+
+    // The arrival orders are collected rather than counted, so a generator that
+    // visited the same permutation 24 times fails instead of passing: a sweep is
+    // exactly the kind of loop whose failure is a smaller, plausible answer, and a
+    // count cannot tell 24 permutations from one permutation 24 times.
+    let mut visited: Vec<Vec<usize>> = Vec::new();
+    for order in permutations(4) {
+        let mut builder = an_executing_builder();
+        for index in &order {
+            builder.propose(proposals[*index].clone()).unwrap();
+        }
+        let built_schedule = builder.build();
+        assert_eq!(
+            titles(&built_schedule),
+            expected,
+            "the plan built from arrival order {order:?} is not the order the rules \
+             describe, so either the order depends on how the checks arrived or the \
+             rules are not the ones implemented"
+        );
+        assert!(
+            !visited.contains(&order),
+            "the sweep visited {order:?} twice, so it is not a sweep"
+        );
+        visited.push(order);
+    }
+    assert_eq!(visited.len(), 24, "4! permutations were not all visited");
+    assert!(
+        visited.iter().all(|order| order.len() == 4),
+        "the permutation generator produced a shorter sequence than it was asked for"
+    );
+}
+
+/// Every permutation of `0..n`.
+fn permutations(n: usize) -> Vec<Vec<usize>> {
+    fn walk(n: usize, current: &mut Vec<usize>, used: &mut Vec<bool>, out: &mut Vec<Vec<usize>>) {
+        if current.len() == n {
+            out.push(current.clone());
+            return;
+        }
+        for candidate in 0..n {
+            if used[candidate] {
+                continue;
+            }
+            used[candidate] = true;
+            current.push(candidate);
+            walk(n, current, used, out);
+            current.pop();
+            used[candidate] = false;
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(n, &mut Vec::new(), &mut vec![false; n], &mut out);
+    out
+}
+
+#[test]
+fn a_check_that_cannot_run_stays_in_the_plan_and_can_only_be_skipped() {
+    // The failure this guards against is a plan that reads as complete: a check
+    // dropped for being unrunnable leaves a report with nothing missing from it,
+    // which is the shape of every false green this repository has recorded.
+    let mut builder = PlanBuilder::new(
+        ExecutionMode::InspectOnly,
+        ExecutionPermissions::inspect_only(),
+    );
+    builder
+        .propose(CheckProposal::new(
+            CheckId::generate(),
+            "the declared tests pass",
+            Severity::MustFix,
+            true,
+            EvidenceClass::DeterministicCheck,
+            CheckReason::DeclaredCommand {
+                declared_in: "package.json".to_owned(),
+                command: "npm test".to_owned(),
+            },
+            &[ActionKind::RunTests],
+        ))
+        .unwrap();
+    builder
+        .propose(proposal(
+            CheckId::generate(),
+            "the manifest is readable",
+            Severity::CanFixLater,
+            EvidenceClass::ObservedFact,
+            &[ActionKind::ReadMetadata],
+        ))
+        .unwrap();
+
+    let schedule = builder.build();
+    assert_eq!(
+        schedule.len(),
+        2,
+        "a check that cannot run was dropped from the plan"
+    );
+    assert_eq!(schedule.may_run().count(), 1);
+    assert_eq!(schedule.blocked().count(), 1);
+    assert_eq!(
+        schedule.may_run().count() + schedule.blocked().count(),
+        schedule.len(),
+        "the two halves are not complements, so a caller counting one of them \
+         would be counting a plan that is either short or long"
+    );
+
+    let blocked: &ScheduledCheck = schedule.blocked().next().expect("one blocked check");
+    assert_eq!(blocked.decision(), ExecutionDecision::Denied);
+    assert_eq!(
+        blocked.blocked_by(),
+        Some(Permission::RunProjectCode),
+        "the entry names the one permission that would change the answer"
+    );
+    // It still carries the acceptance's three things, which is the point of
+    // keeping it: a blocked check is not an entry with less in it.
+    assert_eq!(blocked.proposal().title(), "the declared tests pass");
+    assert!(blocked.proposal().reason().names_something());
+    assert_eq!(
+        blocked.proposal().evidence_class(),
+        EvidenceClass::DeterministicCheck
+    );
+    assert!(blocked.proposal().requirements().runs_project_code());
+
+    // The only status reachable from a schedule entry is `skipped`, and the
+    // evidence class collapses to `unknown` on the way -- a check that did not run
+    // established nothing, whatever its result would have been worth.
+    let result = blocked
+        .not_run(&FingerprintId::generate())
+        .expect("a blocked check has a result saying it did not run");
+    assert_eq!(result.status, CheckStatus::Skipped);
+    assert!(!result.status.is_green());
+    assert!(!result.status.produced_a_result());
+    assert_eq!(result.evidence_class, EvidenceClass::Unknown);
+    assert_eq!(
+        result.not_checked_reason,
+        Some(NotCheckedReason::ExecutionNotAuthorized)
+    );
+    assert!(
+        result.blocks_green(),
+        "a critical check that never ran must forbid a green verdict"
+    );
+
+    // And a check that would run has no such result at all, so a caller cannot
+    // reach a skipped row for something that happened.
+    assert!(
+        schedule
+            .may_run()
+            .next()
+            .expect("one runnable")
+            .not_run(&FingerprintId::generate())
+            .is_none()
+    );
+}
+
+#[test]
+fn the_schedule_hands_enforcement_its_checks_in_the_same_order() {
+    // The bridge. `planned_checks` is what a caller hands to `Enforcement`, and if
+    // it were built by a second pass over a differently sorted list the plan a
+    // report shows and the plan that was executed could disagree.
+    let mut builder = an_executing_builder();
+    for (title, severity, action) in [
+        ("runs", Severity::Note, ActionKind::RunTests),
+        ("reads", Severity::MustFix, ActionKind::ReadFile),
+        ("lists", Severity::MustFix, ActionKind::ListDirectory),
+    ] {
+        builder
+            .propose(proposal(
+                CheckId::generate(),
+                title,
+                severity,
+                EvidenceClass::DeterministicCheck,
+                &[action],
+            ))
+            .unwrap();
+    }
+
+    let schedule = builder.build();
+    let planned = schedule.planned_checks();
+    assert_eq!(planned.len(), schedule.len());
+    for (index, (scheduled, planned)) in schedule.checks().iter().zip(&planned).enumerate() {
+        assert_eq!(
+            scheduled.position(),
+            index,
+            "positions are not the plan's own"
+        );
+        assert_eq!(scheduled.proposal().id(), planned.id());
+        assert_eq!(scheduled.proposal().title(), planned.title());
+        assert_eq!(scheduled.proposal().severity(), planned.severity());
+        assert_eq!(scheduled.proposal().critical(), planned.critical());
+    }
+
+    // And the frozen record accepts them, which is the two types meeting.
+    let permissions = PermissionPlan::new(
+        ExecutionMode::HostConfirmed,
+        FingerprintId::generate(),
+        ExecutionPermissions {
+            run_project_code: true,
+            ..ExecutionPermissions::inspect_only()
+        },
+    );
+    let enforcement = Enforcement::of("plan-1", permissions, &planned);
+    assert_eq!(
+        enforcement.check_plan().all_checks().len(),
+        schedule.may_run().count(),
+        "the frozen plan holds a different number of checks from the schedule's \
+         runnable half"
+    );
+    assert!(
+        enforcement.unscheduled().is_empty(),
+        "a scheduled check was not in the frozen plan: {:?}",
+        enforcement.unscheduled()
+    );
+}
+
+#[test]
+fn nothing_in_the_product_proposes_a_check_yet() {
+    // Rule three, and it is an absence, so it is the source text that is checked.
+    let mut found = Vec::new();
+    for (path, text) in shipped_sources() {
+        if path.ends_with(THE_BUILDER_IN_THE_WALK) {
+            continue;
+        }
+        for (number, line) in text.lines().enumerate() {
+            if is_prose(line) {
+                continue;
+            }
+            if PROPOSER_WORDS.iter().any(|word| line.contains(word)) {
+                found.push(format!("{path}:{}: {}", number + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a shipped file has begun proposing checks. That is a real change and not a \
+         test to update: it means something in the product decides which checks \
+         exist, which is `P4-T002`/`P4-T003`/`P4-T004`'s work and not this task's. \
+         Add the file to this rule's exemption and say why, in the same commit. \
+         Found:\n  {}",
+        found.join("\n  ")
+    );
+
+    // The other half, and it is behavioural rather than textual: the builder itself
+    // can be handed nothing and returns a plan with nothing in it, so there is no
+    // path from "no proposer" to "a plan that looks checked".
+    let empty = PlanBuilder::new(
+        ExecutionMode::InspectOnly,
+        ExecutionPermissions::inspect_only(),
+    )
+    .build();
+    assert!(empty.is_empty());
+    assert!(empty.planned_checks().is_empty());
+    assert_eq!(empty.mode(), ExecutionMode::InspectOnly);
+}
+
+#[test]
+fn the_schedule_cannot_spell_a_verdict() {
+    let text = read(THE_BUILDER);
+
+    // The vacuity guard, before the counts: a file that could not be found or is
+    // not the schedule module would give zero of both and pass.
+    assert!(
+        text.contains("pub struct CheckSchedule") && text.contains("pub struct CheckProposal"),
+        "the file at {THE_BUILDER} is not the schedule module, so the counts below \
+         would be counting nothing"
+    );
+
+    let shipped = shipped_part(&text).unwrap_or_else(|| {
+        panic!(
+            "{THE_BUILDER} has no `#[cfg(test)]` module, so this rule cannot tell \
+             shipped code from test code and the counts below would include whatever \
+             the file grows later"
+        )
+    });
+    assert!(
+        shipped.contains("pub struct CheckSchedule"),
+        "the text above the test module is not the shipped module — the split found \
+         the wrong boundary"
+    );
+
+    for (needle, expected, why) in [
+        (
+            "CheckStatus",
+            0,
+            "the status a blocked check gets is `CheckResult::not_run`'s to choose. \
+             A status named here is a second place a verdict is spelled, and a \
+             schedule entry that could be turned into a pass is the false green this \
+             module is written against",
+        ),
+        (
+            "CheckResult",
+            4,
+            "a doc sentence, an import, one signature and one call. A fifth is a \
+             second way out of a schedule and into a result",
+        ),
+        (
+            "CheckId::generate",
+            0,
+            "identity is the caller's, because a check SURE minted an id for could \
+             not be joined back to the plan that proposed it across a re-check",
+        ),
+    ] {
+        let found = shipped.matches(needle).count();
+        assert_eq!(
+            found, expected,
+            "the shipped part of {THE_BUILDER} contains {found} of `{needle}` and \
+             should contain {expected}: {why}"
+        );
+    }
+
+    // And the one call out is the one that produces a skipped result, so the
+    // counts above are about the function they claim to be about.
+    assert_eq!(shipped.matches("pub fn not_run").count(), 1);
+}
+
+#[test]
+fn the_frozen_plan_does_not_grow_a_reason() {
+    // Rule five. The three things this task adds are the schedule's, and the
+    // domain's record holds identifiers: `Enforcement::of` did not have to change
+    // for `P4-T001`, and adding a field to `CheckPlan` is an ADR-level decision
+    // rather than a convenience.
+    let text = read(THE_FROZEN_PLAN);
+    let body = check_plan_body(&text).expect(
+        "`pub struct CheckPlan {` was not found in the vocabulary, so this rule \
+         checked nothing",
+    );
+
+    // The vacuity guard: a body found but empty would pass a "names none of these"
+    // rule while saying nothing.
+    assert!(
+        body.contains("pub mode: ExecutionMode"),
+        "the struct body does not contain the field it is known by, so the parse \
+         found the wrong region: {body:?}"
+    );
+
+    for forbidden in ["CheckReason", "EvidenceClass", "ExecutionRequirements"] {
+        assert!(
+            !body.contains(forbidden),
+            "the frozen plan has grown a `{forbidden}`. That is the boundary this \
+             task kept: a schedule entry may carry a reason and an evidence class, \
+             and the record that says what execution allowed holds identifiers. \
+             Moving it into the domain is an ADR, not a refactor. Body:\n{body}"
+        );
+    }
+}
+
+#[test]
+fn the_two_spellings_of_the_builders_path_agree() {
+    // Written because they disagreed once, in `browser_probe.rs`: `src/schedule.rs`
+    // used as a path from the repository root reads nothing, and the rule built on
+    // it would have checked an empty file rather than failing.
+    assert!(
+        THE_BUILDER.ends_with(THE_BUILDER_IN_THE_WALK),
+        "{THE_BUILDER} does not end with {THE_BUILDER_IN_THE_WALK}, so the walk's \
+         spelling of the schedule module names a different file — or none"
+    );
+    assert!(THE_BUILDER_IN_THE_WALK.starts_with("src/"));
+}
+
+#[test]
+fn the_plan_is_usable_from_outside_the_crate() {
+    // A last, cheap rule with a specific job: every type the acceptance names has
+    // to be nameable and constructible by a caller in another crate, because the
+    // proposer `P4-T002` writes will be. This test compiles only if that holds.
+    let requirements = ExecutionRequirements::of(&[ActionKind::ReadFile]);
+    assert_eq!(requirements.permissions_needed(), [Permission::Inspect]);
+    assert!(requirements.is_inspection_only());
+    assert!(requirements.runs_nothing());
+    assert!(!requirements.can_touch_network());
+    assert!(!requirements.can_modify_disk());
+    assert_eq!(requirements.actions(), [ActionKind::ReadFile]);
+
+    let reason = CheckReason::StackPresent {
+        component: "web".to_owned(),
+        stack: "node".to_owned(),
+    };
+    assert!(reason.plain_description().contains("web"));
+    assert!(reason.names_something());
+
+    let built: CheckSchedule = an_executing_builder().build();
+    assert!(built.is_empty());
+}

@@ -546,6 +546,30 @@ impl CommandClass {
         }
     }
 
+    /// What a command of this category does, in plain language.
+    ///
+    /// Written to complete the sentence **"because the command ___"**, which is
+    /// how [`Permission::consent_prompt`] is explained to a user: the prompt is
+    /// the permission being asked for and this is the reason it is being asked
+    /// for. It is a clause rather than a sentence for that reason, and it is
+    /// here rather than in the prompt-building code because a category's plain
+    /// description is a fact about the category, in the same way
+    /// [`ExecutionMode::plain_description`] is a fact about the mode.
+    ///
+    /// It describes the *command*, never the code the command runs — SURE has
+    /// not read that, and a sentence that implied otherwise would be the one
+    /// thing this vocabulary exists to avoid.
+    #[must_use]
+    pub const fn plain_description(self) -> &'static str {
+        match self {
+            Self::Static => "only reads things",
+            Self::DynamicHost => "runs the project's own code",
+            Self::Install => "installs or updates packages",
+            Self::Network => "reaches the network",
+            Self::Destructive => "can destroy data",
+        }
+    }
+
     /// The permission that covers a command of this category, when one does.
     ///
     /// **`Destructive` answers `None`, and that is a finding rather than a gap
@@ -897,6 +921,36 @@ mod tests {
         assert_eq!(CommandClass::Install.as_str(), "install");
         assert_eq!(CommandClass::Network.as_str(), "network");
         assert_eq!(CommandClass::Destructive.as_str(), "destructive");
+    }
+
+    #[test]
+    fn every_command_class_explains_itself_as_the_reason_a_permission_is_asked_for() {
+        // Each description completes "because the command ___", which is the
+        // sentence a consent prompt is built from — so each is a clause written
+        // mid-sentence, and two categories that explained themselves the same
+        // way would make a prompt unable to say which one it was asking about.
+        let mut seen: Vec<&str> = Vec::new();
+        for &class in CommandClass::ALL {
+            let text = class.plain_description();
+            assert!(!text.is_empty(), "{class:?} has no description");
+            assert!(
+                !text.ends_with('.'),
+                "{class:?} is a clause, not a sentence"
+            );
+            assert!(
+                !text.chars().next().is_some_and(char::is_uppercase),
+                "{class:?} is written to follow the words before it"
+            );
+            for banned in ["execute", "sandbox", "spawn", "process", "invoke"] {
+                assert!(!text.contains(banned), "{class:?} uses jargon '{banned}'");
+            }
+            assert!(
+                !seen.contains(&text),
+                "{class:?} explains itself as {text:?}, which another category already said"
+            );
+            seen.push(text);
+        }
+        assert_eq!(seen.len(), CommandClass::ALL.len());
     }
 
     #[test]

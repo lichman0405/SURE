@@ -143,18 +143,82 @@ fn is_prose(line: &str) -> bool {
     line.trim_start().starts_with("//")
 }
 
+/// Whether a line of **code** builds a [`std::process::Command`].
+///
+/// The token boundary is the whole of the rule, and it is here because
+/// `consent.rs`'s `PlannedCommand::new` is not a way to run anything while
+/// `request.rs`'s `Command::new` is — and a substring search cannot tell them
+/// apart, because the first contains the second. The character before `Command`
+/// therefore has to be one that cannot be part of an identifier, which is true
+/// of every spelling that really builds one (`Command::new(` after a `use`,
+/// `std::process::Command::new(`, `process::Command::new(`) and false of every
+/// type whose *name* merely ends in `Command`.
+///
+/// This was found by the check itself: `P3-T005` added a type called
+/// `PlannedCommand` and this test failed on a file that cannot start a process
+/// — it imports nothing from `std::process`, and
+/// `nothing_outside_the_runner_names_a_process_request` passes on it. So the
+/// census was matching a name rather than a spawn, and the honest fix is to
+/// make the matcher mean what the rule says. The rule is unchanged and neither
+/// of the two holes a tripwire like this can have — a bare alias such as
+/// `use std::process::Command as C;` — is widened by it, because the old
+/// substring search missed that spelling too.
+fn builds_a_command(line: &str) -> bool {
+    const PATTERN: &str = "Command::new(";
+    let mut rest = line;
+    while let Some(index) = rest.find(PATTERN) {
+        let before = rest[..index].chars().next_back();
+        if before.is_none_or(|character| !(character.is_alphanumeric() || character == '_')) {
+            return true;
+        }
+        rest = &rest[index + PATTERN.len()..];
+    }
+    false
+}
+
 /// The files whose **code** builds a command, in scan order.
 fn command_builders() -> Vec<String> {
     let mut found: Vec<String> = shipped_sources()
         .into_iter()
         .filter(|(_, text)| {
             text.lines()
-                .any(|line| !is_prose(line) && line.contains("Command::new("))
+                .any(|line| !is_prose(line) && builds_a_command(line))
         })
         .map(|(path, _)| path)
         .collect();
     found.sort();
     found
+}
+
+#[test]
+fn the_matcher_tells_a_command_apart_from_a_type_whose_name_ends_in_command() {
+    for line in [
+        "let output = Command::new(&self.program)",
+        "        let mut command = Command::new(\"taskkill\");",
+        "std::process::Command::new(program)",
+        "process::Command::new(program)",
+        "\tCommand::new(\"git\")",
+    ] {
+        assert!(builds_a_command(line), "{line:?} builds a command");
+    }
+    for line in [
+        "PlannedCommand::new(check, program, arguments, mode, permissions)",
+        "let planned = PlannedCommand::new(",
+        "my_Command::new(x)",
+        "someCommand::new(x)",
+    ] {
+        assert!(
+            !builds_a_command(line),
+            "{line:?} does not build a std::process::Command"
+        );
+    }
+
+    // A comment saying `Command::new` is not a spawn either, and this function
+    // cannot tell — which is why the caller asks [`is_prose`] first. Stated as
+    // the pair, so that a reader changing one of them sees the other.
+    let commented = "// Command::new(\"git\") in a comment, not in code";
+    assert!(builds_a_command(commented));
+    assert!(is_prose(commented));
 }
 
 #[test]

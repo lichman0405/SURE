@@ -8,6 +8,7 @@
 
 pub mod components;
 pub mod config;
+pub mod consent;
 pub mod diagnostics;
 pub mod discover;
 pub mod doctor;

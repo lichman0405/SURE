@@ -369,6 +369,33 @@ impl CheckPlan {
         }
     }
 
+    /// Take a check out of the plan and record why it will not run.
+    ///
+    /// **Removing the id as well as recording the reason is the whole point.**
+    /// A plan that held a check in `dynamic_checks` *and* in `excluded` would
+    /// read as "this will run" to a caller iterating one field and as "this will
+    /// not run" to a reader looking at the other, and which of the two a report
+    /// showed would depend on which field it read. The three lists are disjoint
+    /// here by construction rather than by a rule every caller has to remember.
+    ///
+    /// Returns whether the check was in the plan, and **a check that was not is
+    /// not recorded at all**: `excluded` means exactly "checks this plan
+    /// contained and then took out", and a reason appended for a check the plan
+    /// never held would be a line in the report that names no check. A caller
+    /// excluding something it never planned has a bug, and the `false` is where
+    /// that shows — the caller's to report, which is what `sure_core`'s
+    /// `PermissionPlan::exclude_refused_from` does with it.
+    pub fn exclude(&mut self, check: &CheckId, reason: NotCheckedReason) -> bool {
+        let before = self.static_checks.len() + self.dynamic_checks.len();
+        self.static_checks.retain(|id| id != check);
+        self.dynamic_checks.retain(|id| id != check);
+        let was_planned = self.static_checks.len() + self.dynamic_checks.len() != before;
+        if was_planned {
+            self.excluded.push(reason);
+        }
+        was_planned
+    }
+
     /// Every check in the plan.
     #[must_use]
     pub fn all_checks(&self) -> Vec<&CheckId> {
@@ -768,6 +795,46 @@ mod tests {
         let plan = CheckPlan::new("plan-1", fingerprint(), ExecutionMode::InspectOnly);
         assert!(plan.all_checks().is_empty());
         assert!(plan.excluded.is_empty());
+    }
+
+    #[test]
+    fn excluding_a_check_takes_it_out_and_says_why() {
+        // The three lists are disjoint by construction, which is the property a
+        // report depends on: a check that is in `dynamic_checks` *and* in
+        // `excluded` would read as "will run" to one reader and "will not" to
+        // another, and which one a report showed would depend on which field it
+        // read.
+        let mut plan = CheckPlan::new("plan-1", fingerprint(), ExecutionMode::InspectOnly);
+        let stays = CheckId::generate();
+        let goes = CheckId::generate();
+        plan.static_checks.push(stays.clone());
+        plan.dynamic_checks.push(goes.clone());
+
+        assert!(
+            plan.exclude(&goes, NotCheckedReason::ExecutionNotAuthorized),
+            "the check was in the plan, so this removed it"
+        );
+        assert!(plan.dynamic_checks.is_empty());
+        assert_eq!(plan.static_checks, vec![stays.clone()]);
+        assert_eq!(
+            plan.excluded,
+            vec![NotCheckedReason::ExecutionNotAuthorized]
+        );
+        assert_eq!(plan.all_checks(), vec![&stays]);
+    }
+
+    #[test]
+    fn a_check_the_plan_never_held_is_left_out_of_the_reasons_too() {
+        // `excluded` means exactly "checks this plan contained and then took
+        // out". A reason appended for a check that was never in the plan would
+        // be a line in the report naming no check, and the caller that excluded
+        // it has a bug of its own to report — the `false` is the whole of what
+        // this method can say about one.
+        let mut plan = CheckPlan::new("plan-1", fingerprint(), ExecutionMode::InspectOnly);
+        let never_planned = CheckId::generate();
+        assert!(!plan.exclude(&never_planned, NotCheckedReason::UserDeclined));
+        assert!(plan.excluded.is_empty(), "{:?}", plan.excluded);
+        assert!(plan.all_checks().is_empty());
     }
 
     #[test]

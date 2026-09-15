@@ -1325,3 +1325,168 @@ shape can be checked.
   anything. `spawn_sites.rs`'s own module doc says it is meant to fail the day
   `P3-T005` wires the runner up; that it did not is a fact the check established
   rather than a claim this note makes.
+
+## P3-T006 — the gate that decides which commands may run, and the record that outlives the process that made it
+
+- **The approval record had to gain a field, and without it the acceptance
+  sentence is vacuous.** `ApprovedCommand` carried `program`, `args`,
+  `working_directory` and `check` — four ways of saying *what would run* — and
+  nothing about *what SURE told the user it was*. "Only approved command categories
+  execute" cannot be checked against a record that does not say which categories
+  were approved, so `effects: CommandEffects` is new. The reason it is not
+  ceremony: `safety::classify` is deterministic on `(program, arguments)`, so
+  within one build the recorded reading and the live one always agree, and a check
+  comparing them compares a value with itself. What makes it a check is that **an
+  approval outlives the build that wrote it** — it is written to disk, it is read
+  back by a later SURE, and *may this run* is then put to a classifier that may
+  since have learned something. `git clean` approved as destruction and later read
+  as destruction is the same answer; the same command line approved as *static* and
+  now read as destruction is not, and a record without categories sails past it.
+  `Refusal::CategoryNotApproved` is that case, and it is where the first acceptance
+  sentence is enforced rather than asserted.
+
+- **`CommandEffects` gained a `Deserialize`, and it is deliberately *not*
+  `of`.** The two doors point their cautious direction oppositely.
+  `of(&[])` answers `anything()`, because a rule that named no category has said
+  nothing about a command and for a *classification* silence must land on the
+  dangerous side. A value arriving over a wire is not a classification — it is a
+  claim about something that already happened — and for the set of categories a
+  user approved, the cautious direction is the other one: reading an empty list as
+  `anything` would turn *this approval covers nothing* into *this approval covers
+  everything*, which is the worst possible reading of the exact field the gate
+  depends on. So the impl refuses an empty list outright, and everything else
+  routes through `canonical` so no non-canonical value can be read back. This is
+  the one place in the workspace where `Deserialize` is hand-written, and it is the
+  reason the record can be trusted without re-validating it at every use.
+
+- **`covers` is a subset test, and one direction of it is a boundary rather than a
+  bug.** A command that still falls inside what was approved is covered; one that
+  has gained a category nobody agreed to is not. `Static` is **not** a subset of
+  `Install, Network` — it is a different reading — so `covers` answers `false` for
+  that pair, and `execution.rs`'s test says so rather than the opposite. **My first
+  version of that test asserted the opposite and the suite caught it**: it claimed a
+  command that narrowed to `static_only` was still covered, which is not what
+  subset means. The case cannot reach the gate either way — a static-only command
+  is permitted by `Permission::Inspect` in `standing_for`'s first branch, before
+  any consent is consulted — so the question `covers` answers is only ever asked
+  about a command that needs consent. No special case was added for `Static`: a
+  rule with no producer of the case it handles would be vocabulary rather than
+  behaviour.
+
+- **The record is a `RecordKind`, not an eighth `DocumentKind`, and it is the
+  third schema-less kind.** A `DocumentKind` would put SURE's own audit trail into
+  the integration protocol, which is a contract with harnesses rather than a
+  place for this; `docs/architecture/STORAGE_AND_DATA_PATHS.md` already decided
+  the store is where records about a project state live, and
+  `docs/architecture/PROTOCOL.md`'s gap about document versions makes the protocol
+  registry the more expensive of the two rooms to add a bed to. So
+  `RecordKind::Approval` joins `Recording` as the second kind with no schema — and
+  takes the **opposite** history rule. `Recording` is excluded from
+  `HistoryFilter::default` because it is private captured material the user opted
+  into; an approval is a statement about what SURE was allowed to do, and a kind
+  the default filter excluded would make the audit trail invisible to the command a
+  user would look in. It is still deletable, because `docs/security/PRIVACY.md`
+  gives the user the whole local history and not a part of it. The drift guard that
+  said `is_recording()` is now `is_recording() || is_approval()` **and asserts the
+  count is exactly 2**, so a fourth schema-less kind cannot arrive quietly — which
+  is what it is for: it broke on this change and was rewritten having been read.
+
+- **No after-the-fact vocabulary was invented, and `ADR 0009`'s sentence is
+  satisfied by two timestamps instead.** The ADR says *"An approval made after the
+  fact is recorded as such rather than presented as pre-authorisation."* The
+  tempting move was an `ApprovalOrder` enum with a `PreAuthorised`/`AfterTheFact`
+  pair. It was not taken: `docs/architecture/FROZEN_SEMANTICS.md`'s rule is that a
+  variant the code cannot produce is not vocabulary but an invitation to produce it
+  wrongly, and nothing in this release can produce an after-the-fact approval —
+  there is no repair loop yet that would need one. What the record carries instead
+  is `granted_at`, supplied by the caller in the user's own terms, and
+  `RecordedApproval::written_at_ms`, which is the store's clock. They are kept
+  apart rather than reconciled, and `written_at_ms`'s doc says why: an audit that
+  found them disagreeing has found something worth looking at. When a task can
+  actually take an approval after the fact, that task adds the vocabulary and this
+  note is the reason it was not added early.
+
+- **`NotCheckedReason::UserDeclined` has its first producer, and only one of the
+  three ways to be refused is entitled to it.** `crate::consent` recorded why it
+  did not use the word — *"nothing has been declined, and a report that said so
+  would be inventing an event"* — and named this task as the prompt that can be
+  declined. The gate is that prompt: a command that was in the
+  `ConsentRequest` and is not in the `HostConsent` was shown and not approved, and
+  `Refusal::Declined` is what it becomes. The two neighbours are deliberately not
+  the same word. `Refusal::CannotBeShown` is a command that needed an answer and
+  could not be rendered at all, so nobody was asked; `Refusal::NotPermitted`
+  carries the plan's own reason, because a missing permission is not a question.
+  Both report `ExecutionNotAuthorized`, and a test asserts that a destructive
+  command under inspect-only is refused under the plan's reason rather than under
+  `UserDeclined` — **the user was never asked, so nothing was declined.**
+
+- **The gate keys on the plan index, not the check id, because one check can plan
+  two commands.** `npm ci` and then `npm test` are one check, and the second is not
+  approved by the first one's answer. So `RequestedCommand` stores its index into
+  `plan.commands()`, `standing_for` matches an `ApprovedCommand` on
+  `(program, args)` rather than taking the first approval under the check, and
+  `Refusal::NotTheApprovedCommand` is what a near-miss produces. Matching on the
+  check id alone would have been the classic false green: a `git clean -fdx`
+  approval admitting a `git clean -fd` plan because they share a check.
+
+- **Two structural findings about the prompt, both of which are facts about the
+  plan rather than rules of the new type.** First, **the two `WhyAsked` reasons
+  cannot co-occur in one request**: `consent::decide_for` asks about the
+  ungrantable category *before* the mode, so a destructive command under a mode
+  that runs nothing is `Denied` rather than `NeedsConsent` and never reaches a
+  prompt — a test pins that, and pins that its reason is not `UserDeclined`.
+  Second, **under host-confirmed with every permission granted, the prompt surface
+  is narrow**: `npm test` and `cargo add` are both *allowed* and are not questions
+  at all, so the only commands that reach a user are the destructive ones and the
+  ones SURE could not read. My first version of the category test used `cargo add`
+  and failed for exactly this reason — it is a finding about how little of a plan
+  a user is asked about, and it is recorded rather than quietly worked around by
+  changing the command.
+
+- **A command SURE cannot render is unaskable *and* unrecordable, so it is
+  structurally unapprovable — and it is reported rather than dropped.**
+  `ConsentRequest::of` puts such a command in `unrenderable` with its place in the
+  plan, `explain` prints that it could not be shown, and the gate refuses it with
+  `CannotBeShown`. A question that quietly lost a command would be a prompt the
+  user answered without being asked about all of it, which is the same defect as a
+  report that quietly loses a check. This is the second consequence of
+  `P3-T004`'s rule that nothing SURE could not read is ever allowed to run: it
+  cannot even be consented to, and that falls out of the types rather than being
+  enforced — `ApprovedCommand`'s fields are `String`, so a non-text command line
+  has nowhere to be recorded.
+
+- **No spawn site was added, and the support ceiling still holds.** This module
+  builds the gate and the record; it does not open the gate. There is still no
+  caller of `sure_core::process::run`, `THE_SPAWN_SITES` is still three entries,
+  and `nothing_outside_the_runner_names_a_process_request` passes. The module doc
+  says so, and says which two places change in the same commit the day something
+  runs: `spawn_sites.rs` and `sure_core::support`'s level-C ceiling, which is
+  justified by *no project code running*. Stating the pair here is the point —
+  they are the two files that would otherwise go on claiming nothing executes.
+
+- **What is not established.** **Nothing has been run**, and `Authorisation::admitted`
+  is not a claim that anything has; it is the only door to a command a caller could
+  start, and no caller exists. **Nothing about what an approved command will do** —
+  approving a command line is not approving the code behind it. **Nothing about
+  whether the user understood the question**; what is recorded is what was shown
+  and what was answered, and the two are the same value by construction. **Nothing
+  about a prompt having been displayed**: `ConsentRequest` is by definition what
+  SURE shows, and a caller that builds one and never displays it has a bug this
+  module cannot see — `Refusal::Declined` would then be reporting a decline that
+  never happened. **Not a check that a plan is complete**: the gate decides about
+  the commands a plan holds and says nothing about one that was never planned.
+
+- **`d58532a`'s own message says `approval.rs` is "1490 lines", and it is `1777`,
+  and that message cannot be rewritten.** The number was carried from a note taken
+  while the file was still growing and was never re-measured against the tree being
+  committed — which is the same failure as `c940300`'s method-size figures two
+  tasks ago, in the same place: **a size quoted from memory at the moment the
+  message is written, when the anchor is one command away.** The anchors are
+  `git show --numstat d58532a` (`1777 0`) and `wc -l` on the committed blob, and
+  the other counts in that message were re-measured against the committed tree
+  before the handoff section was written: `+30` in both directions, the six
+  per-file numbers, `0 failed` and `9 ignored` over 44 result lines. The correction
+  lives here and in the acceptance note. **The general form is worth stating once**:
+  a commit message is the one artefact in this repository that can never be fixed,
+  so every number in one should be pasted from a command rather than typed from
+  what the author believes the file's size to be.

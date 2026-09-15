@@ -19,14 +19,21 @@
 //! [`super::service::Supervisor::start`] returning `Ok` means a process exists.
 //! A caller that treats *the port is open* as *the feature works* has reported
 //! the false green this product is built against, and the way to make that
-//! impossible is not a warning in a doc comment — it is to have no value that
-//! means it. **There is no boolean here.** [`ProbeOutcome`] has five variants and
-//! exactly one of them is a response; [`ProbeOutcome::is_an_answer`] is true for
-//! that one and false for the other four, and the variant that means *something
-//! accepted the connection and said nothing* maps to
-//! [`CheckStatus::Unknown`](crate::status::CheckStatus::Unknown) — which
-//! [`aggregate`](crate::status::aggregate) treats as **not checked**, so a
-//! critical port-only probe cannot aggregate to green.
+//! impossible is not a warning in a doc comment — it is to keep *the port is
+//! open* off the path that produces a verdict.
+//!
+//! **The boolean exists, and naming it here is the point rather than an
+//! exception to it.** A caller asking *is the port open* finds
+//! [`ProbeOutcome::opened_a_connection`], which answers exactly that question and
+//! is true for `NoAnswer` — **and no verdict is built on it.**
+//! [`ProbeOutcome::status`] matches the variant and never calls it, so the
+//! variant that means *something accepted the connection and said nothing* maps
+//! to [`CheckStatus::Unknown`](crate::status::CheckStatus::Unknown) — which
+//! [`aggregate`](crate::status::aggregate) treats as **not checked** — and a
+//! critical port-only probe cannot aggregate to green however loudly the caller
+//! asks the port question. [`ProbeOutcome::is_an_answer`] is true for exactly
+//! one of the five variants, and that is the one a caller reaching for *did it
+//! work?* should find.
 //!
 //! That last sentence is the acceptance rather than a design preference:
 //! *"Open port alone is not feature completeness."* A check that has read a

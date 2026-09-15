@@ -19,6 +19,7 @@ pub mod enforce;
 pub mod fingerprint;
 pub mod intent_model;
 pub mod paths;
+pub mod probe;
 pub mod process;
 pub mod project_intent;
 pub mod redact;

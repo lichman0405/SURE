@@ -318,6 +318,32 @@ impl CheckResult {
         }
     }
 
+    /// A check that ran and established nothing either way.
+    ///
+    /// The evidence class **is** a parameter here, unlike [`CheckResult::not_run`]
+    /// and [`CheckResult::errored`], and the difference is the point: those two
+    /// mean SURE has no evidence, while this one means SURE has evidence that
+    /// supports no verdict. The first caller is a probe that found a port open
+    /// and nothing said — an observed fact, and not a basis for saying the
+    /// project is fine or that it is broken.
+    ///
+    /// `unknown` is not a soft failure and it is not a pass: for a critical
+    /// check, [`aggregate`] treats it as not checked (rule 1).
+    #[must_use]
+    pub fn unknown(
+        id: CheckId,
+        title: impl Into<String>,
+        severity: Severity,
+        critical: bool,
+        class: EvidenceClass,
+        fingerprint: FingerprintId,
+    ) -> Self {
+        Self {
+            status: CheckStatus::Unknown,
+            ..Self::pass(id, title, severity, critical, class, fingerprint)
+        }
+    }
+
     /// A check that could not be run, with the reason.
     ///
     /// The evidence class is [`EvidenceClass::Unknown`] and is not a parameter.
@@ -773,6 +799,47 @@ mod tests {
         let results = [check(CheckStatus::Unknown, true)];
         let summary = aggregate(&results);
         assert_eq!(summary.severity, AggregateSeverity::NotEnoughChecked);
+    }
+
+    #[test]
+    fn an_unknown_check_carries_the_evidence_it_was_given_and_no_skip_reason() {
+        // `unknown` is the only status whose evidence class is a parameter, and
+        // that is the whole of what distinguishes it from `not_run`: here SURE
+        // has evidence, and the evidence supports no verdict; there SURE has
+        // none. Two results that differ only in their `CheckStatus` would be a
+        // distinction a report could not explain.
+        let unknown = CheckResult::unknown(
+            CheckId::generate(),
+            "local probe: GET /health HTTP/1.1 answered",
+            Severity::MustFix,
+            true,
+            EvidenceClass::ObservedFact,
+            fingerprint(),
+        );
+        assert_eq!(unknown.status, CheckStatus::Unknown);
+        assert_eq!(unknown.evidence_class, EvidenceClass::ObservedFact);
+        assert!(
+            unknown.not_checked_reason.is_none(),
+            "unknown means the check ran and established nothing, not that it was skipped"
+        );
+
+        let skipped = CheckResult::not_run(
+            CheckId::generate(),
+            "local probe: GET /health HTTP/1.1 answered",
+            Severity::MustFix,
+            true,
+            NotCheckedReason::ToolUnavailable,
+            fingerprint(),
+        );
+        assert_eq!(skipped.status, CheckStatus::Skipped);
+        assert!(skipped.not_checked_reason.is_some());
+
+        // Both block green, and for different reasons — the distinction the
+        // report has to be able to make.
+        for result in [unknown, skipped] {
+            let summary = aggregate(&[result]);
+            assert_ne!(summary.severity, AggregateSeverity::Green);
+        }
     }
 
     #[test]

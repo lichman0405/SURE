@@ -2387,3 +2387,119 @@ requirements per check."*
   job. And **it says nothing about whether a check is any good** — a caller that
   labels a guess `ObservedFact` has lied in a way this module cannot detect, which
   is the limit `crate::browser` states about its drivers one module over.
+
+## P4-T002 — the frozen vocabulary has no word for "declared and unusable", and the mutation set that found four claims with prose and no test
+
+Acceptance: *"Declared build/lint/type/test checks run only under allowed
+execution mode. Missing commands are not passes."*
+
+- **The decision this task had to make and could not avoid: `NotCheckedReason` is
+  frozen, and none of its ten variants means what SURE needs to say.** The fact is
+  *the project declares this and what it declares is not something SURE can run* —
+  `"test": ["jest"]`, or a declared script with no lockfile to say what runs it.
+  Three candidates come close and each is false in a way that costs something.
+  [`NotApplicable`](NotCheckedReason::NotApplicable) — *"This check does not apply
+  to your project."* — is true for a project that declares no command for a role
+  and **a lie a person would act on** for one that wrote an unusable one: they
+  would not go and look at their manifest.
+  [`ToolUnavailable`](NotCheckedReason::ToolUnavailable) is a claim about **the
+  machine** and is false whenever `npm` is sitting right there.
+  [`UnsupportedStack`](NotCheckedReason::UnsupportedStack) says the project is not
+  on a stack SURE can check, which is false — **this is the stack it checks
+  best**. What is left is [`UnknownReason`](NotCheckedReason::UnknownReason),
+  which is false about **SURE's own state** rather than about the project or the
+  machine. **SURE knows exactly why neither ran, and the word a report groups by
+  is wrong; the word is still the best of four and that is recorded here rather
+  than left in a `match` arm.**
+
+- **The choice is not free, because `is_scope_limit` is load-bearing.** The
+  frozen enum's `is_scope_limit` is present or absent on each variant, and
+  [`CheckResult::blocks_green`] reads it to decide whether a **critical** check
+  that did not run holds the run out of green. `NotApplicable`,
+  `UnsupportedStack` and `DisabledByConfiguration` are scope limits; the other
+  seven are not. So mapping `NotACommand` and `NoRunner` onto `NotApplicable`
+  would not merely be a wrong word — it would **silently stop a broken manifest
+  from holding a run out of green**, which is the false green this product exists
+  to prevent. `UnknownReason` is the only candidate that does not class a defect
+  the user can fix as a scope limit, and `MissingKind::ALL`'s sweep asserts the
+  split as a value: `NotDeclared` is the **only** kind whose reason is a scope
+  limit. The two fixtures in `tests/node_checks.rs` that differ by exactly one
+  script name — `a_project_that_declares_nothing_is_not_a_project_that_fails` and
+  `every_role_the_acceptance_names_is_either_a_check_or_a_skipped_result` — are
+  what holds the two answers apart.
+
+- **The shape is `crate::browser::AbsenceReason`'s, deliberately: the frozen
+  reason is what a report groups by, and SURE's own sentence is what it prints.**
+  `MissingKind::plain_explanation` is true for all three kinds and
+  `MissingCommand::not_checked` **overwrites** the `reason` field that
+  `CheckResult::not_run` filled from the vocabulary — for two of the three kinds
+  the generic sentence is false. That assignment is the one line in the module
+  that looks like a wart, so
+  `the_sentence_a_person_reads_is_not_the_vocabularys_sentence_where_that_one_is_false`
+  exists to say what it is for, and the sweep asserts the three sentences are
+  three.
+
+- **A check's identifier is derived from the component and the role, and the tag
+  is not trusted.** `check_id` digests `(component, tag)` and the readable half is
+  the tag with everything outside `[a-z0-9]` dropped, **with the digest taken over
+  the raw text** — so `node-test` and `nodetest` read alike and are still two
+  checks. The component is in the digest as well as the tag, because the same role
+  in two workspace members is two checks; `CheckId::generate` is deliberately
+  absent, because a random identifier cannot join a stored result to a later plan
+  and that join is the repair contract in `docs/architecture/CHECK_PIPELINE.md`.
+  The `# Panics` section of `check_id` is the one place here written as though a
+  function cannot fail, and it is **held by a sweep** over components and tags
+  with spaces, punctuation, Unicode, path separators, the empty string and lengths
+  past the Windows path limit rather than asserted in a sentence.
+
+- **The four roles checked are the acceptance's four, and the four ignored are
+  ignored for what they do to a project rather than for how useful they are.**
+  `format` and `clean` **write**; `dev` and `start` **do not finish**. Neither is
+  a check — there is no question they answer — and `ActionKind` has no variant for
+  any of the four, which is the domain saying the same thing. The four weights on
+  the roles that remain (build and test `MustFix` and critical; lint
+  `CanFixLater`; type check `ShouldFixFirst`) are **a policy and not a
+  discovery**: nothing in a `package.json` says how much a lint failure matters.
+  That is exactly why the mutation set matters here — see the last item.
+
+- **The first run of the mutation set left four survivors and all four were one
+  finding: a claim with prose and no test.** Flipping the lint's weight, flipping
+  the type check's criticality, dropping the explanation from
+  `MissingCommand::plain_description`, and answering `is_empty` from `proposed`
+  alone each **passed the whole suite**, because the prose above the table was the
+  only thing that said why the table reads the way it does. The four are now held
+  by `the_table_carries_the_four_checks_and_the_weight_this_module_argues_for_each`
+  (which pins the whole table as a value), three added assertions in
+  `every_missing_command_is_skipped_and_none_of_them_is_a_pass`, and
+  `a_project_whose_only_findings_are_gaps_is_not_a_project_with_nothing_to_say`.
+  **A policy written only in a comment is a policy nothing enforces**, and the
+  type-check weight would have moved without a single test changing colour.
+
+- **The fifth survivor was the test that was written to kill the fourth, and that
+  is the more useful lesson.** `a_project_whose_only_findings_are_gaps_is_not_a_project_with_nothing_to_say`
+  first used a project with **one** script, so `proposed.is_empty()` was `false`
+  under the original and under the mutation alike, and the mutation **survived a
+  test written against it**. A test for a conjunction is worth exactly as much as
+  the case where the two conjuncts differ; the fixture is now a project that
+  declares nothing — no proposals, four gaps — which is the only shape where the
+  two readings come apart. The set was re-run in full after each change, so the
+  log is one vintage.
+
+- **`mutate3.py` gained `--no-fail-fast`, and the reason is a measurement rather
+  than a preference.** `cargo test` stops at the first failing target, so on the
+  first run every "caught by" list was a **floor** — whatever the library's own
+  binary happened to hold — and the survivors were the only rows that could be
+  trusted, because a survivor is the one answer fail-fast cannot fake: a run where
+  **every** target ran and passed. With the flag, all 37 targets run for every
+  mutation. The final tally is **twenty-three mutations, twenty-three caught,
+  eight by exactly one test.**
+
+- **The first proposer in the product is what closed a rule written two tasks
+  earlier to fail on this day.** `tests/check_schedule.rs` carried
+  `nothing_in_the_product_proposes_a_check_yet`, which walked the source tree and
+  asserted that no shipped file constructs a [`CheckProposal`]. It was written to
+  fail when `P4-T002`, `P4-T003` or `P4-T004` landed the first proposer, it did
+  fail on this task, and the rule is now a `MAY_PROPOSE` list with a second test
+  asserting that **every exemption is still a proposer** — so an entry cannot be
+  left behind by a file that stopped proposing, which is the way an exemption list
+  rots.

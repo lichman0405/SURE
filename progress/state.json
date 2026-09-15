@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P4",
-  "last_updated": "2026-09-15T11:30:07.677Z",
+  "last_updated": "2026-09-15T12:38:02.997Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -427,13 +427,22 @@
       "notes": "Implementation 97f0707 (an ordered plan, and the sentence a blocked check must not be told): crates/sure-core/src/schedule.rs new (2101 lines: 886 of module above its #[cfg(test)] and 1215 below it, 20 unit tests), crates/sure-core/tests/check_schedule.rs new (766 lines, 9 tests), crates/sure-core/src/lib.rs +1 line (pub mod schedule;). No file outside sure-core changes. Run 34963032089 carries 97f0707: all five jobs success (shellcheck-secondary, bootstrap-validate-windows, rust on ubuntu/macos/windows). Windows 1306 / macOS 1307 / Ubuntu 1308 passed, 0 failed, 11 ignored, 49 result lines = 39 parents + 10 children on each. Against 34959719084 (be02100): +29 on every platform, parent result lines 38 -> 39 for the new check_schedule binary, children 10 -> 10, ignored 11 -> 11. Name-delta is +29 -0 on all three platforms with the identical added set -- 20 schedule::tests::* and 9 integration tests -- so nothing was renamed and nothing was dropped. Nineteen mutations, nineteen caught, twelve by exactly one test; the first run of the set left one survivor (may_run answered from blocked_by rather than from the decision) and a_check_the_mode_stops_still_gets_a_result_saying_it_did_not_run exists only because of it. The acceptance sentence is 'Ordered plan includes reason, evidence class and execution requirements per check.' A schedule is not the frozen CheckPlan: the plan holds identifiers only, and CheckSchedule::planned_checks is the single bridge to Enforcement::of. The order is a function of the checks -- runs nothing first, then severity worst first, then identifier -- held over all 120 permutations of a five-check set, and the mode is deliberately not a rule, because a decision is not a property of a check. A blocked check stays in the plan; the only status the module can produce is a Skipped one. A false sentence shown to a user was found by a test written for another reason: blocked_by filtered on the decision, so it named permissions the user had already granted, and plain_description now has three outcomes so a mode-blocked check says 'will run only if you agree'. No shipped code proposes a check yet -- that is P4-T002, P4-T003 and P4-T004, and tests/check_schedule.rs names the files that may construct a CheckProposal and says it is written to fail on that day."
     },
     "P4-T002": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-15T12:29:16.000Z",
+      "finished_at": "2026-09-15T12:38:02.997Z",
       "base_sha": null,
       "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "evidence": [
+        {
+          "kind": "commit",
+          "ref": "0bf09c2"
+        },
+        {
+          "kind": "ci_run",
+          "ref": "34969139607"
+        }
+      ],
+      "notes": "Implementation 0bf09c2 (the four checks a Node project declares, and the gaps where it declares none): crates/sure-core/src/checks/mod.rs new (651 lines, 5 unit tests: check_id and its digest domain, MissingKind, MissingCommand), crates/sure-core/src/checks/node.rs new (1022 lines, the proposer: the role table over ScriptRole, Runner::of, NodeChecks::of/proposed/missing/is_empty/not_checked), crates/sure-core/tests/node_checks.rs new (731 lines, 9 integration tests), crates/sure-core/src/lib.rs +1 line (pub mod checks;), crates/sure-core/src/schedule.rs 3 edits (CheckReason::DeclaredCommand's variant doc, its plain_description, and the paragraph that said no shipped code proposes a check), crates/sure-core/src/discover/node.rs MANIFEST made pub, crates/sure-core/src/fingerprint/mod.rs mod digest made pub(crate), crates/sure-core/tests/check_schedule.rs the MAY_PROPOSE list and a test that every exemption is still a proposer. 8 files, +2556 -25. Run 34969139607 carries 0bf09c2: all five jobs success (bootstrap-validate-windows, rust on windows/macos/ubuntu, shellcheck-secondary). Windows 1334 / macOS 1335 / Ubuntu 1336 passed, 0 failed, 11 ignored, 50 result lines = 40 parents + 10 children; +28 on every platform against 34964462368 (the P4-T001 acceptance, 1306/1307/1308, 49 result lines), the extra result line being the new node_checks binary. The per-platform offsets (windows = ubuntu - 2, macOS = ubuntu - 1) are identical in both runs, so they predate this task; crates/sure-core/src/paths/compare.rs carries the same shape of platform-gated tests (#[cfg(windows)] / #[cfg(unix)] / #[cfg(target_os = \"macos\")]). The per-target pairing in the captured macOS job log is NOT trustworthy -- a result line carries its predecessor's target name -- so the per-platform totals are quoted from the result-line sum, which is label-independent and reproduces on all three platforms, and no per-test attribution is claimed. Gates on 0bf09c2: fmt clean, clippy clean, cargo test --workspace --no-fail-fast = 50 result lines / 1334 passed / 0 failed / 11 ignored locally, which is exactly the CI Windows figures; taskctl validate = state OK: 166 tasks; validate-bootstrap.mjs = SURE bootstrap validation OK: 17 phases, 166 tasks. Adversarial: 23 mutations, 23 caught, 8 by exactly one test, 0 survivors, 0 INCONCLUSIVE, 0 NOT RESTORED, 37 binaries run for every mutation (mutate3.py now passes --no-fail-fast, without which cargo test stops at the first failing target and every catch list is a floor). The first run of the set left 4 survivors, all of them the same finding -- a claim with prose and no test -- and the test written to kill the fourth survived its own mutation until its fixture was changed to a project that declares nothing. started_at is backfilled: `taskctl start` was not run before the implementation was committed, so the real start time was not recorded. It is set to 0bf09c2's author date (2026-09-15T20:29:16+08:00) rather than to the acceptance moment, which would assert the task started after it finished."
     },
     "P4-T003": {
       "status": "queued",

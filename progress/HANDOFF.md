@@ -2,14 +2,53 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 44 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 45 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 open
-(1/9).** `P4-T001` is implemented and pushed as one commit, `97f0707`, its run
-`34963032089` is read in full below, and **the commit carrying this file is its
-acceptance**. What the task added is described under "What `P4-T001` added".
-**Accepting it unblocked three tasks in its own phase and one in the next** —
-`P4-T002`, `P4-T003`, `P4-T004` and `P5-T001` — so the READY list grew `12 → 15`
-and the next concrete action is the lowest-numbered of the four.
+(2/9).** `P4-T002` is implemented and pushed as one commit, `0bf09c2`, its run is
+read in full below, and **the commit carrying this file is its acceptance**. What
+the task added is described under "What `P4-T002` added", which is this section;
+`P4-T001`'s is the next one down. **Accepting `P4-T001` unblocked three tasks in
+its own phase and one in the next** — `P4-T002`, `P4-T003`, `P4-T004` and
+`P5-T001` — so the READY list grew `12 → 15`; **accepting `P4-T002` unblocked
+nothing, because its only dependent is `P4-T009` and two of `P4-T009`'s four
+requirements are still `queued`**, so the READY list is 14 long and the next
+concrete action is the lowest-numbered of the remaining fourteen, which is
+`P4-T003`.
+
+## What `P4-T002` added
+
+**The one thing about `P4-T002` a reader should know before the detail: the
+frozen `NotCheckedReason` has no word for *"the project declares this and what it
+declares is not something SURE can run"*, so SURE says the true sentence and
+groups by the nearest wrong word, and that choice decides whether a broken
+manifest holds a run out of green.** The acceptance is two sentences —
+*"Declared build/lint/type/test checks run only under allowed execution mode.
+Missing commands are not passes."* — and the second is the one with no plan entry
+to hide in. `checks::node` proposes Build, Test, Lint and TypeCheck for every
+readable manifest, and where a project gives SURE no command for one of them it
+records a `MissingCommand` rather than saying nothing. `NotApplicable` would be
+the natural word for the first of the three ways that happens and is **false** for
+the other two — a `"test": ["jest"]` or a declared script with no lockfile is a
+defect in the project, and `NotApplicable`'s `is_scope_limit()` is `true`, so
+mapping either onto it would put a broken manifest **outside** what can hold a run
+out of green. `UnknownReason` is what the two map onto, and the module says in
+its own documentation that the word is wrong and why it is still the best of the
+four available. `progress/DECISIONS.md` has the full argument.
+
+**The second thing a reader should know: the mutation set found five survivors,
+and four of them were the same finding — a claim with prose and no test.** Flipping
+the lint's severity from `CanFixLater` to `MustFix`, flipping the type check's
+`critical` from `false` to `true`, deleting the explanation from
+`MissingCommand::plain_description`, and answering `NodeChecks::is_empty` from
+`proposed` alone each **passed all 1045 tests**, because the paragraph above the
+table was the only place the policy existed. The fifth was worse and more useful:
+the test written to kill the fourth **survived its own mutation**, because its
+fixture used a project with one script and so `proposed.is_empty()` was `false`
+under both readings. A test for a conjunction is worth exactly as much as the case
+where the two conjuncts differ. All five are now held; the final tally is
+**twenty-three mutations, twenty-three caught, eight by exactly one test**.
+
+## What `P4-T001` added
 
 **The one thing about `P4-T001` a reader should know before the detail: the
 acceptance sentence names something the frozen `CheckPlan` cannot hold, so the
@@ -571,10 +610,48 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P4
-{ accepted: 44, queued: 122 }
-READY: P4-T002, P4-T003, P4-T004, P4-T005, P4-T006, P4-T007, P4-T008, P5-T001,
-       P6-T001, P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
+{ accepted: 45, queued: 121 }
+READY: P4-T003, P4-T004, P4-T005, P4-T006, P4-T007, P4-T008, P5-T001, P6-T001, P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
+
+**That block is the tool's output pasted whole, including the third line
+unwrapped**, and it was pasted **after** `P4-T002` was accepted rather than
+before. The version of this block that stood in the working tree while `P4-T002`
+was being implemented was a *prediction* — it named `{ accepted: 45, queued: 121 }`
+and the fourteen-task READY list above before `taskctl` had been run — and it
+happened to be right, which is exactly why it is worth saying that it was not
+evidence at the time. The run that makes it evidence is the one taken after
+`node scripts/taskctl.mjs accept P4-T002`, which is where the numbers in this
+block come from.
+
+**`P4-T002` is `accepted`** on **`34969139607`**, which carries **`0bf09c2`** and
+is read in full below. **`in_progress` is 0 again**, so nothing is half-finished
+and the next session may start any READY task without adopting an orphan. The
+READY list went `15 → 14`: **the READY list read 15 before `P4-T002` and reads 14
+after it, so accepting it unblocked nothing.** `P4-T002` has exactly **one**
+dependent — `P4-T009`, *"Implement repair and re-check loop"* — and `P4-T009` names
+**four** requirements, two of which are still `queued`:
+
+```
+P4-T009 depends_on: ["P0-T004","P4-T002","P4-T003","P4-T004"]  (tasks/tasks.json)
+P0-T004: accepted   P4-T002: accepted
+P4-T003: queued     P4-T004: queued                            (progress/state.json)
+15 - 1 + 0 = 14
+```
+
+**This paragraph is the second version of itself, and the first is worth
+recording because of how it failed.** The first draft named `P4-T005` as the
+dependent and `["P4-T001","P4-T002","P4-T004"]` as its requirements, which would
+have produced the *same* arithmetic — `15 - 1 + 0 = 14` — and read as a verified
+statement. `P4-T005` depends on `["P2-T009","P3-T004"]` and **does not name
+`P4-T002` at all**; `P4-T009` is the dependent. **A wrong dependency graph that
+happens to give the right number is exactly what the reading rule below is for**,
+and it was caught by printing the two files rather than by re-reading the
+sentence. The arithmetic is available from `tasks/tasks.json` and
+`progress/state.json` without leaving either file, which is the same instruction
+item 18 below gives (the snapshot item, which is where the READY-list reading rule
+lives).
+
 
 **`P3-T001` through `P3-T011` are `accepted`**, on runs `34924525793`,
 `34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270`,
@@ -652,7 +729,7 @@ P3-T011 depends_on: ["P3-T009"]                (tasks/tasks.json)
 
 **A reader who took the three earlier shrinks as a rule about this list would have
 predicted 13 again**, and the arithmetic that produces 14 is available from
-`tasks/tasks.json` without leaving the file — which is the same instruction item 17
+`tasks/tasks.json` without leaving the file — which is the same instruction item 18
 below gives (the snapshot item, which is where the READY-list reading rule lives),
 arriving from a case where the arithmetic and the reading agree. **The number in
 this sentence has been rewritten four times, and the third rewrite is why the
@@ -1837,7 +1914,7 @@ task's enforcement; this is the third of those to meet it and the third to leave
 it open — which is exactly what this file predicted would happen to whoever
 started `P3-T007`. The question is recorded in `crates/sure-core/src/process/mod.rs`
 (*"Whether a batch file may be named is not decided here"*) and in
-`process/error.rs`, and **the owner decision is still item 23 below**.
+`process/error.rs`, and **the owner decision is still item 24 below**.
 
 ### The four mutations, and the one that found the tests were the thin part
 
@@ -4084,6 +4161,94 @@ in the rows above are read out of the logs rather than copied from the prose
 sections that describe eighteen of these runs. The rows also carry what the
 sections never did: **the per-platform deltas**, which is how the two commits of
 `P3-T010` read as `+23 on every platform` and `+1 on every platform` respectively.
+
+### Reading run `34969139607`, `P4-T002`'s — and a name table that printed `+0` on every row because its pattern matched nothing
+
+**All five jobs green**: `bootstrap-validate-windows`, `rust (windows-latest)`,
+`rust (macos-latest)`, `rust (ubuntu-latest)`, `shellcheck-secondary`.
+
+| platform | result lines | passed | failed | ignored |
+| --- | --- | --- | --- | --- |
+| Windows | 50 | **1334** | 0 | 11 |
+| macOS | 50 | **1335** | 0 | 11 |
+| Ubuntu | 50 | **1336** | 0 | 11 |
+
+**The baseline is `34964462368`**, the `P4-T001` acceptance carrying `53599d2`,
+and the delta is **`+28` on every platform** — 1306 / 1307 / 1308 → 1334 / 1335 /
+1336 — with the result-line count going **49 → 50 on all three**, the extra line
+being the new `node_checks` binary. **The one- and two-test gaps between the
+platforms are the same gaps the previous run had**, so they are pre-existing
+rather than anything this task did, and `crates/sure-core/src/paths/compare.rs`
+carries the same shape of platform-gated tests (`#[cfg(windows)]`, `#[cfg(unix)]`,
+and a `#[cfg(target_os = "macos")]` pair that splits one Unix test into two). The
+per-platform figures are read from the sum over every `test result:` line, which
+is independent of which target a line belongs to and reproduces on all three
+platforms; **no per-test attribution is claimed for macOS or Ubuntu**, for the
+reason the method note below already records.
+
+**Local Windows agrees with CI Windows to the test.** The local
+`cargo test --workspace --no-fail-fast` on the same commit reports 50 result
+lines, **1334 passed, 0 failed, 11 ignored** — the same three numbers CI Windows
+reports, which is the check that makes the Windows column of the table above
+evidence rather than a log reading.
+
+**The Windows per-name table, against the same baseline:**
+
+| name | before | after | delta |
+| --- | --- | --- | --- |
+| `sure_core` (lib) | 636 | 654 | **+18** |
+| `node_checks` | 0 | 9 | **+9** |
+| `check_schedule` | 9 | 10 | **+1** |
+| the other 36 names | — | — | **+0** |
+| **TOTAL** | **1306** | **1334** | **+28** |
+
+**18 + 9 + 1 = 28, and the decomposition agrees with the local one arrived at from
+the other side.** Locally the same `+28` was read off the source as eighteen
+`checks::*` unit tests, nine `node_checks` integration tests and one new
+`check_schedule` test; the CI name table gets there by counting binaries. **Two
+derivations that do not share a step agree on all three parts**, which is what
+makes the `−0` on the other thirty-six names worth something: a rename or a
+deletion that kept the total would be invisible in `+28` and is visible here.
+
+**The first version of that table printed `+0` on every row and a `+0` total, and
+it was wrong.** It was written through a shell heredoc, the shell collapsed the
+`\\` in the character class `[\\/]` to a single `\`, and the resulting `[\/]` is a
+class containing only `/` — so no Windows target line ever matched, no name was
+ever set, and the script printed a well-formed table of zeros. That is the same
+defect this file already records twice, once as *"a pattern that matched nothing
+prints a well-formed table of zeros that reads exactly like 'no binary changed'"*,
+and it was caught only by printing the compiled pattern and looking at it. The
+replacement normalises the separator on the line before matching rather than
+embedding a backslash in a pattern, and **refuses to print a table at all while
+any target line is unmatched**, which is the check the first version lacked.
+
+**The macOS and Ubuntu logs are not paired by name, and this task re-derived that
+rule the hard way.** An attempt to build the same table on all three platforms
+produced `doctor = 30` on macOS where the other two said 6, `process_runner = 48`
+where they said 20 and 28, and `wire_contract = 106` where they said 31 — each of
+them the sum of a target and the one before it, because a result line carried its
+predecessor's name. **Those are the same class of artefact as the `sure_domain
++87` and `components_graph +22` recorded below**, they were wrong in the way that
+matters, and the rule that says so was already in this file — it is the note
+*"What is compared by name, what is compared by multiset, and what each can
+support"*, which sits inside the next reading down. The Windows-only table above
+is what that note sanctions; the macOS and Ubuntu numbers were discarded rather
+than published. **A wrong figure that was never written down is cheaper than a
+wrong figure with a caveat**, and the correction here is that the existing rule
+was not read before the work was done, not that the rule was wrong.
+
+**One figure moved because of that, and the way it moved is the point.** The
+broken pairing reported Windows `sure_core` as **649**; the corrected table says
+**654**. **The total was 1334 in both tables**, because mis-pairing permutes
+values rather than inventing them — so a check that reads only the total could
+not have caught it, and the first table's `+0`-on-every-row collapse happened to
+be consistent with its own totals for the same reason. What catches it is that
+the corrected table reports **zero unmatched target lines** and that its
+decomposition **`18 + 9 + 1`** is arrived at from two directions that share no
+step — binaries in the log, and `#[test]` functions in the source. **A name table
+that sums to the right number is not thereby right**; it is right when its rows
+are individually checkable and the pattern behind them is known to have matched,
+which is why the replacement refuses to print anything until it has counted them.
 
 ### Reading run `34869888350`, `P2-T010`'s — and a delta attributed by binary name
 
@@ -7048,6 +7213,81 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P4-T002`
+
+**Twenty-three mutations: twenty-three caught, eight of them by exactly one
+test.** The pairs are held in `target/tmp/p4t002-mutations.py` as a list of
+`(name, the claim it makes false, target, old text, new text)` and it drives
+`target/tmp/mutate3.py` once per mutation; the log is
+`target/tmp/p4t002-mutations.log`, and **every count in this section is read out
+of that log rather than out of the commit message.** Three files carry the
+claims: `crates/sure-core/src/checks/mod.rs`, `.../checks/node.rs` and
+`.../schedule.rs`. **The set was run three times and only the third log is the
+one these numbers come from**: the first run left four survivors, the second left
+one, and each time the set was re-run in full so the log is one vintage against
+the tree that was committed.
+
+| mutation | caught by |
+| --- | --- |
+| m1 the component is dropped from the identifier's digest | **three**, including `a_workspace_member_is_checked_under_its_own_identifier_and_its_own_title` |
+| m2 the tag is trusted, so punctuation reaches the identifier body | `an_identifier_is_well_formed_for_every_tag_and_component_this_can_be_given` and `an_identifier_is_the_same_every_time_and_different_for_every_check` |
+| m3 a declared-but-unusable script is called a scope limit | **four**, including `every_role_the_acceptance_names_is_either_a_check_or_a_skipped_result` |
+| m4 a project that cannot name a runner is called a scope limit | `every_missing_command_is_skipped_and_none_of_them_is_a_pass` and `the_sentence_a_person_reads_is_not_the_vocabularys_sentence_where_that_one_is_false` |
+| m5 the printed sentence is the vocabulary's, not SURE's | **two**, as m4's second |
+| m6 the third kind is dropped from `MissingKind::ALL` | `a_component_that_is_not_there_is_not_a_component_with_no_command` — **a rule over the whole set stops covering it** |
+| m7 a missing command's one-line description drops why it is missing | `every_missing_command_is_skipped_and_none_of_them_is_a_pass` — **a survivor on the first run** |
+| m8 a lint failure is made a reason not to hand the project over | `every_role_the_acceptance_names_is_either_a_check_or_a_skipped_result` and `the_table_carries_the_four_checks_and_the_weight_this_module_argues_for_each` |
+| m9 a failing test suite stops being a reason not to hand the project over | **three**, including the same two as m8 |
+| m10 a type check failure is made a reason not to hand the project over | `the_table_carries_the_four_checks_and_the_weight_this_module_argues_for_each` — **a survivor on the first run** |
+| m11 a lint failure is weighted as heavily as a failing build | the same test as m10 — **a survivor on the first run** |
+| m12 a workspace member's manifest is not a component | **three**, including `the_same_project_is_checked_under_the_same_identifiers_every_time` |
+| m13 a member's check is titled as though it were the root's | **two**, including `the_root_manifest_and_every_readable_member_is_its_own_component` |
+| m14 the runner is asked about before the script is | `the_two_ways_a_project_can_fail_to_name_a_runner_are_told_apart` |
+| m15 a script that is there and unusable is reported as a script that is not there | **three**, including `a_script_that_is_there_and_is_not_a_command_is_not_a_script_that_is_not_there` |
+| m16 a project that names no runner is run by npm anyway | `the_two_ways_a_project_can_fail_to_name_a_runner_are_told_apart` |
+| m17 the two ways a project fails to name a runner are rendered alike | the same test as m16 |
+| m18 the four roles of one manifest share one identifier | **five**, including `nothing_this_module_builds_is_refused_and_the_plan_holds_everything` |
+| m19 every proposal claims to be an observation rather than a deterministic check | `a_declared_script_becomes_a_check_running_the_command_sure_would_run` |
+| m20 `not_checked` produces no results at all | **three**, including `a_project_that_declares_nothing_is_not_a_project_that_fails` |
+| m21 a project with only gaps reports itself as having nothing to say | `a_project_whose_only_findings_are_gaps_is_not_a_project_with_nothing_to_say` — **a survivor on the first *and* second runs** |
+| m22 the sentence about a declared command stops naming the command | `the_reason_names_the_command_sure_would_run_and_not_the_script_text` and `every_reason_says_what_it_is_about_and_which_ones_name_nothing` |
+| m23 the sentence about a declared command stops naming the file | the same two as m22 |
+
+**The four survivors of the first run were one finding, and it is the finding this
+task is worth recording for: a claim with prose and no test.** m7, m10, m11 and
+m21 each passed **all 1045 tests** — every one of the 37 targets ran, which is
+what makes a survivor a finding rather than a gap in the harness. Flipping the
+lint's severity from `CanFixLater` to `MustFix`, flipping the type check's
+`critical` from `false` to `true`, deleting the explanation from
+`MissingCommand::plain_description`, and answering `NodeChecks::is_empty` from
+`proposed` alone: **the paragraph above the role table was the only thing in the
+repository that said why the table reads the way it does.** Four tests now hold
+them — `the_table_carries_the_four_checks_and_the_weight_this_module_argues_for_each`
+pins the whole table as a value, three assertions were added to
+`every_missing_command_is_skipped_and_none_of_them_is_a_pass`, and
+`a_project_whose_only_findings_are_gaps_is_not_a_project_with_nothing_to_say` is
+new.
+
+**`m21` then survived its own test, which is the more useful half.** The first
+version of that test used a project with **one** script, so `proposed.is_empty()`
+was `false` under the original and under the mutation alike, and it **passed with
+the mutation applied**. A test for a conjunction is worth exactly as much as the
+case where the two conjuncts differ; the fixture is now a project that declares
+nothing — no proposals, four gaps — which is the only shape where the two
+readings come apart. **This is `P4-T001`'s `m16` lesson one level further out**:
+there the mutation found that a derived predicate had no test of its own, and
+here it found that a test written against a mutation was vacuous.
+
+**`mutate3.py` gained `--no-fail-fast`, and the reason is a measurement rather
+than a preference.** `cargo test` stops at the first failing target, so on the
+first run every "caught by" list in the log was a **floor** — whatever the
+library's own binary happened to hold — and only the four survivors were rows
+that could be trusted, because a survivor is the one answer fail-fast cannot
+fake: a run where **every** target ran and passed. With the flag, all 37 targets
+run for every mutation and the counts above are counts. **The first log's
+"caught by three" and "caught by one" are therefore not comparable with these**,
+which is why the counts here are read from the third log and not the first.
+
 ### `P4-T001`
 
 **Nineteen mutations: nineteen caught, twelve of them by exactly one test.** The
@@ -8800,6 +9040,36 @@ it needs a Mac.
   1307 / 1308** passed, 0 failed, 11 ignored, **49** result lines = **39 parents +
   10 children**, namesets **`+29 −0`** against `34959719084` **on all three
   platforms**. Nineteen mutations, nineteen caught, twelve by exactly one test.
+- `0bf09c2` **`P4-T002`** — `crates/sure-core/src/checks/mod.rs` (+651, new:
+  `check_id` and its digest domain, `MissingKind`, `MissingCommand`, 5 unit
+  tests), `crates/sure-core/src/checks/node.rs` (+1022, new: the role table over
+  `ScriptRole`, `Runner::of`, and `NodeChecks` with its `proposed` and `missing`
+  halves), `crates/sure-core/tests/node_checks.rs` (+731, 9 integration tests),
+  `crates/sure-core/src/schedule.rs` (3 edits, +38 −25), `crates/sure-core/src/
+  discover/node.rs` (`MANIFEST` made `pub`), `crates/sure-core/src/fingerprint/
+  mod.rs` (`mod digest` made `pub(crate)`), `crates/sure-core/tests/
+  check_schedule.rs` (the `MAY_PROPOSE` list and a test that every exemption is
+  still a proposer) and one line of `lib.rs`. **The task is the first thing on
+  this branch that proposes a check, and the rule that nothing did was meant to
+  fail here** — `tests/check_schedule.rs` carried it from `P4-T001` and this is
+  the commit that amends it. **The vocabulary gap is the whole of the task**:
+  `NotCheckedReason` is frozen and has no word meaning *"the project declares this
+  and what it declares is not something SURE can run"*, and the three ways a role
+  ends up with no command need three different answers — `NotApplicable` is true
+  for a project that declares none and false for one that wrote `"test": ["jest"]`,
+  `ToolUnavailable` is a claim about the machine, `UnsupportedStack` is false here,
+  so two of the three map onto `UnknownReason`; the choice matters because
+  `blocks_green` reads `is_scope_limit`, and mapping a broken manifest onto
+  `NotApplicable` would put it **outside** what can hold a run out of green. **The
+  first mutation run left four survivors and all four were the same finding** — a
+  claim with prose and no test — and the test written to kill the fourth survived
+  its own mutation until its fixture was changed to a project that declares
+  nothing. Run `34969139607`, all five `success`, **1334 / 1335 / 1336** passed, 0
+  failed, 11 ignored, **50** result lines, **`+28` on every platform** against
+  `34964462368`, and the Windows name table decomposes that `+28` as `+18`
+  `sure_core`, `+9` new `node_checks`, `+1` `check_schedule`, **`+0` on the other
+  thirty-six names**. Twenty-three mutations, twenty-three caught, eight by
+  exactly one test.
   **Not established:** whether any check is any good. A caller that labels a guess
   `ObservedFact` has lied in a way this module cannot detect, and **nothing in the
   product proposes a check yet** — that is `P4-T002`, `P4-T003` and `P4-T004`, and
@@ -8884,8 +9154,85 @@ was run *after* the entry was added, which is the order the paragraph above
 insists on**, and the id it would have reported missing had it been run first is
 `P4-T001` — the task this commit accepts.
 
+**Run again by `P4-T002`'s acceptance, and it prints `accepted: 45 missing:
+none`.** Forty-four is the previous reading and it is left standing above, for the
+reason given there. The check was run *after* the `0bf09c2` entry was added, which
+is the order the paragraph above insists on, and the id it would have reported
+missing had it been run first is `P4-T002` — the task this commit accepts. **This
+is the fourth acceptance in a row to print a number here, and the first of the four
+is the only one that found anything**: it returned thirteen missing ids, and the
+three since have each printed `none`, because the entry and the check have shipped
+in the same commit every time since. **`none` three times running is not evidence
+that the check is unnecessary** — the gap it was written for took four acceptance
+commits to accumulate and was invisible for all four — so the standing cost stays
+one command per acceptance, and the alternative is recorded three paragraphs up.
+
 ## Next concrete action
-1. **`P4-T001` is implemented, pushed, read, and accepted by the commit carrying
+1. **`P4-T002` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it is one commit.** `0bf09c2` adds
+   `crates/sure-core/src/checks/mod.rs` (**651 lines**: `check_id` and the
+   `sure.check-id.v1` digest domain, `MissingKind` with its three variants, and
+   `MissingCommand`; 5 `#[test]` functions),
+   `crates/sure-core/src/checks/node.rs` (**1022 lines**: the four-row role table
+   over `ScriptRole`, `Runner::of`, and `NodeChecks::of/proposed/missing/is_empty/
+   not_checked`), `crates/sure-core/tests/node_checks.rs` (**731 lines, 9
+   `#[test]` functions**), three edits to `crates/sure-core/src/schedule.rs`
+   (+38 −25), `MANIFEST` made `pub` in `discover/node.rs`, `mod digest` made
+   `pub(crate)` in `fingerprint/mod.rs`, the `MAY_PROPOSE` list in
+   `tests/check_schedule.rs`, and one line of `lib.rs`. **This is the first
+   commit on the branch that proposes a check, and the rule saying nothing did
+   was written to fail here** — `tests/check_schedule.rs` carried it from
+   `P4-T001` and this commit is where somebody reads `MAY_PROPOSE` and the
+   paragraph above it. **Accepting this task unblocked nothing**: its only
+   dependent is `P4-T009`, whose four requirements include `P4-T003` and
+   `P4-T004`, both still `queued`, so the READY list went `15 → 14`. Run
+   `34969139607`, all five jobs `success`, Windows **1334** / macOS **1335** /
+   Ubuntu **1336** passed, 0 failed, 11 ignored, **50** result lines; **`+28` on
+   every platform** against `34964462368`, and the Windows name table decomposes
+   it as **`+18`** `sure_core`, **`+9`** the new `node_checks` binary, **`+1`**
+   `check_schedule`, **`+0`** on the other thirty-six names.
+   **Two things in the task are worth a reader's time before `P4-T003`.** The
+   first is the **vocabulary gap**, which is the whole of the task: the frozen
+   `NotCheckedReason` has no word meaning *"the project declares this and what it
+   declares is not something SURE can run"*, and the three ways a role ends up
+   with no command need different answers. `NotApplicable` is true for a project
+   that declares no `test` script and **false** for one that wrote
+   `"test": ["jest"]`; `ToolUnavailable` is a claim about the machine;
+   `UnsupportedStack` is false for the stack SURE checks best. Two of the three
+   therefore map onto `UnknownReason`, and **the choice is load-bearing rather
+   than cosmetic**, because `blocks_green` reads `is_scope_limit`: a project that
+   declares no test script should not be held out of green, and a project whose
+   manifest is broken should be, and the two fixtures that differ by exactly one
+   script name are what holds that apart. `progress/DECISIONS.md` carries the
+   argument over all ten variants and the four candidates it came down to.
+   The second is that **four mutations survived the first run and all four were
+   the same finding** — a policy stated in prose and held by no test. Flipping the
+   lint's severity, flipping the type check's criticality, dropping the
+   explanation from `MissingCommand::plain_description`, and answering `is_empty`
+   from `proposed` alone each passed the whole suite. **The test written to kill
+   the fourth then survived its own mutation**, because its fixture used a project
+   that declares one script and so `proposed.is_empty()` was `false` under both
+   readings — **a test for a conjunction is worth exactly as much as the case
+   where the two conjuncts differ**, and the fixture is now a project that
+   declares nothing. The final tally is twenty-three mutations, twenty-three
+   caught, eight by exactly one test.
+   **The renumbering, recorded the way the earlier acceptances recorded theirs.**
+   Inserting this item moved every item below it by one, and `grep -n "item
+   [0-9]"` found **26 lines, of which ten are live and sixteen are dated
+   narrative**. The ten live ones were bumped and each was then re-read against
+   the printed list **after** the renumbering rather than before it: the snapshot
+   item `17 → 18` (two lines in the state section and two in this list), the
+   `.cmd`/`.bat` owner decision `23 → 24` (five lines), and the `ComponentGraph`
+   reference `20 → 21`, which was checked by printing item 21's first line and
+   seeing `P2-T007`, the task that owns `components.rs`. **The sixteen dated lines
+   were deliberately not touched**, including the ones that narrate *earlier*
+   renumberings — `item 15 → 16`, `item 18 → 19`, `item 13 → 14`, `item 16 → 17`
+   — because each of those is a claim about what a specific acceptance found and
+   printed, and rewriting them would destroy the only record of the failure mode
+   they exist to warn about. **A dated number and a live number look identical in
+   a grep**, which is why the check is followed by printing the item the last of
+   them names.
+2. **`P4-T001` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it is one commit — which opens phase `P4`.** `97f0707` adds
    `crates/sure-core/src/schedule.rs` (**886 lines of module above its
    `#[cfg(test)]` and 1215 below it**, 20 `#[test]` functions),
@@ -8922,7 +9269,7 @@ insists on**, and the id it would have reported missing had it been run first is
    mode still refuses — where a caller would be told the check runs and would
    produce **no result for it at all**, so the check would vanish from the report
    rather than appear as one that did not happen.
-2. **`P3-T011` is implemented, pushed, read, and accepted, and it is one commit —
+3. **`P3-T011` is implemented, pushed, read, and accepted, and it is one commit —
    which closed phase `P3`.** `be02100` adds
    `crates/sure-core/src/browser.rs` (**843 lines of module and 418 of its own
    tests**, nineteen `#[test]` functions), `crates/sure-core/tests/browser_probe.rs`
@@ -8967,11 +9314,11 @@ insists on**, and the id it would have reported missing had it been run first is
    one. **This task also repaired two gaps in this file**, both recorded where
    they are: the run-index row for `34958280318`, `P3-T010`'s acceptance, which
    was read in the session that produced it and never written into the table, and
-   item 17 below, which `P3-T011` found three acceptances stale and which
+   item 18 below, which `P3-T011` found three acceptances stale and which
    `P4-T001` then found four — **the number in that sentence had to be rewritten
-   one acceptance later, which is the argument for the parenthesis at item 17's
+   one acceptance later, which is the argument for the parenthesis at item 18's
    own reading rule and against a bare number anywhere else in this list.**
-3. **`P3-T010` is implemented, pushed, read, and accepted by the commit carrying
+4. **`P3-T010` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it took four commits and three runs — one of them red.**
    `43c4a61` is the probe, `9ad32e6` is the two module unit tests and the mutation
    evidence, `0eb1ac3` corrects a claim that the module has no boolean asking
@@ -9011,7 +9358,7 @@ insists on**, and the id it would have reported missing had it been run first is
    "ready"; no body, no header and no `Content-Length` is parsed, and the end of a
    response is the end of the connection and nothing else. **It also repaired this
    file's header and the list below**, which is recorded there rather than here.
-4. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
+5. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it took two commits because the first run was red.** `6911e2a`
    is the supervisor and `12b81bc` is a one-assertion fix; the runs are
    `34952200942` and `34952509429`, read in full and attributed in "Reading runs
@@ -9040,9 +9387,9 @@ insists on**, and the id it would have reported missing had it been run first is
    and `Service::stop(self)` is the only way to be told what a service printed. The
    `.cmd`/`.bat` question **cannot arise in this task and the reason is structural
    rather than lucky**: a batch file is never admitted, so no `Supervisor` can be
-   handed one, and item 23 below carries the correction to the two predictions that
+   handed one, and item 24 below carries the correction to the two predictions that
    said otherwise.
-5. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
+6. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either — for a reason it states rather
    than one that happened.** `6ea9f46` is the implementation, run `34946515895`,
    all five jobs `success`, **Windows 1209 / macOS 1210 / Ubuntu 1211** parent
@@ -9082,7 +9429,7 @@ insists on**, and the id it would have reported missing had it been run first is
    no test, and removing it leaves the whole workspace green, measured — recorded
    in `DECISIONS.md` and in "What `P3-T008` added" above, and **this is the first
    recorded mutation on this branch that survived rather than being closed.**
-6. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
+7. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** Three commits rather than one,
    because the second and third were each found after the one before it had been
    pushed and read: `6353477` is the module, `18209d8` is the batch-file test,
@@ -9118,7 +9465,7 @@ insists on**, and the id it would have reported missing had it been run first is
    `P3-T006`'s *"`authorise` still has no caller"* is still true and this task did
    not obtain a consent; it turned the decision into a refusal without asking
    anyone.
-7. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
+8. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** `d58532a` is the
    implementation, run `34941955270`, all five jobs `success`, **Windows 1172 /
    macOS 1173 / Ubuntu 1174** parent tests with 0 failed and 9 ignored over **44
@@ -9145,7 +9492,7 @@ insists on**, and the id it would have reported missing had it been run first is
    and never reach a user — so a test that needs a consented command has to use a
    destructive one (`git push --force`), or it will panic on an empty list rather
    than fail.
-8. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
+9. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site.**
    `c940300` is the implementation, run `34938974624`, all five jobs `success`,
    **Windows 1142 / macOS 1143 / Ubuntu 1144** parent tests with 0 failed and 9
@@ -9168,7 +9515,7 @@ insists on**, and the id it would have reported missing had it been run first is
    command SURE cannot bound needs its own approval naming its exact argument
    vector, **no sixth category was invented**, and the "writes inside the project"
    gap is still open.
-9. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
+10. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
    headlines a number that is not the one it means.**
    `967c5e6` is the implementation and `ea0fe6c` the acceptance; run
    `34935781639`, all five jobs `success`, **Windows 1116 / macOS 1117 / Ubuntu
@@ -9182,7 +9529,7 @@ insists on**, and the id it would have reported missing had it been run first is
    mistake is in `c940300`'s own message in two smaller places. **This item exists
    because that acceptance did not prepend one**, which is why the list is two
    items short rather than one and why this acceptance renumbers both at once.
-10. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
+11. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
    carrying this file, and it changed no shipped code.** `b0dcc69` is the
    implementation and `ea2f826` is the fix CI asked for; run `34930744061` is the
    fix's run, all five jobs green, **Windows 1078 / macOS 1079 / Ubuntu 1080**
@@ -9196,7 +9543,7 @@ insists on**, and the id it would have reported missing had it been run first is
    test and 19 of the 33 parent result lines came after it. **Its run is read in
    the session that took it rather than committed** — the stopping rule at the top
    of this file, so the `P3-T003` chain ends at the acceptance.
-11. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
+12. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it changed no shipped code.** `fd878e6` is the implementation,
    run `34927065374`, all five jobs green, **Windows 1077 / macOS 1076 / Ubuntu
    1077** with 0 failed and 9 ignored over 43 results = **33 parents + 10
@@ -9209,7 +9556,7 @@ insists on**, and the id it would have reported missing had it been run first is
    children are identical **by name** on all three. **Its run is read in the
    session that took it rather than committed** — the stopping rule at the top of
    this file, so the `P3-T002` chain ends at the acceptance.
-12. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
+13. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
    `P3`.** `819d499` is the implementation, run `34924525793`, all five jobs
    green, **Windows 1082 / macOS 1081 / Ubuntu 1082** with 0 failed and 7 ignored
    over **43** result lines = **33 parents + 10 children** — read and attributed,
@@ -9220,7 +9567,7 @@ insists on**, and the id it would have reported missing had it been run first is
    yet**: no product path calls it, and `tests/spawn_sites.rs` fails the day one
    does without being added to it. `P3-T002` has now used it — in tests only — and
    the first task that would run anything in the product is `P3-T004`.
-13. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+14. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -9232,12 +9579,12 @@ insists on**, and the id it would have reported missing had it been run first is
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-14. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+15. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-15. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+16. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -9245,13 +9592,13 @@ insists on**, and the id it would have reported missing had it been run first is
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-16. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+17. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-17. **This item is a snapshot taken at `P3-T008`'s acceptance and it is now four
+18. **This item is a snapshot taken at `P3-T008`'s acceptance and it is now four
    acceptances stale — the live figures are in `## Exact current state` at the top
    of this file and behind `node scripts/taskctl.mjs status`.** It is kept rather
    than rewritten because the paragraph below records *how the list moves*, which
@@ -9283,7 +9630,7 @@ insists on**, and the id it would have reported missing had it been run first is
    reading before that one said the opposite and had to be corrected. **Read the
    list off `taskctl status`, not off this paragraph** — this is the item where a
    stale copy is most obviously a lie.
-   **The `.cmd`/`.bat` decision is item 23 below**, and it is the one whoever
+   **The `.cmd`/`.bat` decision is item 24 below**, and it is the one whoever
    starts `P3-T009` walks into. `P3-T007` reached it and did not settle it, which
    is the third time that has happened and the third time it was the intended
    outcome: that task's acceptance is *"project-controlled executable code is not
@@ -9294,7 +9641,7 @@ insists on**, and the id it would have reported missing had it been run first is
    closed**: an enforcement built from `enforce.rs` does not admit a batch file in
    any mode under any permission set, whatever a caller is allowed to name.
    **`P3-T008` did not reach that question, and this file predicted twice that it
-   would** — item 23 carries the correction, because it is the same fact and
+   would** — item 24 carries the correction, because it is the same fact and
    storing it in one item's prose did not make it available to the next.
    `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
    and `P8-T001` have been on the list since before this file was written.
@@ -9304,7 +9651,7 @@ insists on**, and the id it would have reported missing had it been run first is
    accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
    has its rule and its door and still no capture, and the task that supplies one
    is waiting on a task nobody has read.
-18. **`P2-T012` left an owner decision open, and it is the first one a reader
+19. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -9319,19 +9666,19 @@ insists on**, and the id it would have reported missing had it been run first is
    ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-19. **`P2-T012` also left the classification with no consumer.** `classify` is
+20. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
-   shape as `ComponentGraph` in item 20, and it is recorded rather than implied —
+   shape as `ComponentGraph` in item 21, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-20. **`P2-T007` is accepted, its two commits are pushed and read.**
+21. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-21. **The store now holds six rows that no user wrote, and that is the first item
+22. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -9365,7 +9712,7 @@ insists on**, and the id it would have reported missing had it been run first is
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-22. **`project_fingerprint` now has one caller, and it is not a check.**
+23. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -9375,7 +9722,7 @@ insists on**, and the id it would have reported missing had it been run first is
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
-23. **`P3-T001` left a second owner decision open, and it is the one the next
+24. **`P3-T001` left a second owner decision open, and it is the one the next
    three `P3` tasks will each run into: may a caller name a batch file?** The
    facts, all measured and held as tests rather than asserted: a name with no
    extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,
@@ -9621,7 +9968,7 @@ item, by the same author applying the same reasoning. **A grep over `item [0-9]`
 finds references that are numerically stale; nothing finds a committed paragraph
 that is *propositionally* stale**, and this acceptance found one only because the
 task it named had been finished by the time the item was re-read. The correction
-is in item 23 and it says outright that the file has been wrong twice, so the next
+is in item 24 and it says outright that the file has been wrong twice, so the next
 reader has the failure rather than the tidy version of it. **The general form is
 the one this file keeps arriving at**: a fact stored in one item's prose is not
 available to the next item that needs it, which is why the counts that matter are

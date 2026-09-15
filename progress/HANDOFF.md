@@ -2,12 +2,59 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 39 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 open (7/11).** `P3-T007` is
-implemented and pushed as three commits — `6353477`, `18209d8` and `719253e` —
-their runs `34943445326`, `34943853809` and `34944133634` are read in full below,
-and **the commit carrying this file is its acceptance**. What the task added is
-described under "What `P3-T007` added".
+Progress: 40 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 open (8/11).** `P3-T008` is
+implemented and pushed as one commit — `6ea9f46` — its run `34946515895` is read
+in full below, and **the commit carrying this file is its acceptance**. What the
+task added is described under "What `P3-T008` added".
+
+**The one thing about `P3-T008` a reader should know before the detail: the
+harder half of its acceptance was about prose, and four places were failing it.**
+The sentence is *"Container plan controls mounts/network/working dir and is
+described as limited isolation, not perfect sandboxing"*, and the second clause
+is not a type. `ExecutionMode::Container`'s doc comment **and its consent prompt**
+— the sentence a user reads before agreeing to run a stranger's code — plus
+`docs/adr/0009`'s `container` row and `docs/architecture/EXECUTION_SAFETY.md` all
+called the mode *isolated* and stopped there. All four now say **limited
+isolation**, and the wording is now a check rather than a one-time correction:
+`OVERCLAIMS` and `overclaims()` are applied by
+`tests/container_isolation_claim.rs` to every shipped `.rs` under `crates/` and
+every `.md` under `docs/`.
+
+**The second thing, and it is the first time this branch has recorded a coverage
+gap it did not close.** `doctor::find_in` documents that an empty `PATH` entry is
+skipped rather than read as the current directory — on Unix an empty entry *is*
+the current directory, which is where a checked project would keep a `docker` it
+would like SURE to run. **No test holds it.** The nearest test passes an empty
+*directory*, which is a different thing, and the only way to observe the
+difference needs a file in the working directory that the platform's `can_be_run`
+accepts. Measured rather than argued: removing the filter leaves the suite green.
+Recorded in `DECISIONS.md` and here, and not fixed, because the fix is a test
+about `doctor` rather than about this task.
+
+**The third thing, and it is the forward link this file has not had before.**
+`grep -c '"P3-T008"' tasks/tasks.json` answers **2** — its own `id` and one
+`depends_on` — so unlike `P3-T007` this task has a dependent: `P14-T006`,
+*"Implement execution-trust fixtures"*, whose second acceptance sentence is
+**"Container unavailable path is honest."** That is this task's first acceptance
+sentence arriving later in the DAG as a fixture, which is the strongest form of
+the check this branch keeps asking for: not a reader of the paragraph, a test.
+**That dependent did not enter the READY list, and the reason is worth knowing
+before reading the list's reading**: `P14-T006`'s `depends_on` is
+`["P3-T008","P7-T004"]`, and `P7-T004` is `queued`, so accepting this task
+unblocked nothing and the list shrank `14 → 13`.
+
+**The fourth thing, and it is about the mutation harness rather than the code.**
+`target/tmp/mutate3.py` is `mutate.py` generalised to any file and any filter, and
+**its own first run produced two false verdicts and said so.** `text=True` decodes
+subprocess output with the locale encoding — GBK here — and one mutation killed
+the harness inside a reader thread; the filter was passed as one `argv` element,
+so `cargo` rejected it and three prose mutations were reported as *survivors of a
+suite that never started*. Both are fixed, and the second is fixed in the
+reporting too: a run with no `test result:` line now prints **INCONCLUSIVE**
+rather than "this mutation survived". `mutate.py` has the same latent decode bug
+and did not hit it — its filter and its test names are ASCII, so the `P3-T007`
+record stands.
 
 **The one thing about `P3-T007` a reader should know before the detail:
 `inspect_only` has been true of this build by accident, and this is the task that
@@ -26,9 +73,9 @@ tasks/tasks.json` answers 1, which is its own `id`. So the gate exists and the r
 through it is still to be built, which is the same position `approval.rs` is in and
 is recorded rather than glossed.
 
-**The second thing, and it is a finding about the tests rather than the code.** A
-mutation that replaced the branch filling `CheckPlan`'s two lists — the whole of
-what a report can say about *how* a check will be performed — with an
+**The second thing about `P3-T007`, and it is a finding about the tests rather than
+the code.** A mutation that replaced the branch filling `CheckPlan`'s two lists —
+the whole of what a report can say about *how* a check will be performed — with an
 unconditional push to `static_checks` broke **exactly one test**, and that test was
 asserting `dynamic_checks.len() == 1` for an unrelated purpose. **A field whose
 contract hangs on one unrelated assertion is a field nothing is holding**, and the
@@ -37,13 +84,14 @@ effects of *admitted commands* and says nothing about which list a check went in
 Two different claims, only one of them had a test, and `719253e` is the test that
 holds the other one directly.
 
-**The third thing, and it is the shape this file has now recorded twice.** The
-enforcement is a rule about the caller; `P3-T009` — the service startup supervisor,
-*"Can start/stop supported local services with timeouts and captured logs"* — is
-the next task in the DAG whose acceptance is about starting something, and **its
-`depends_on` is `["P3-T001","P3-T006"]`.** A dependency edge says *do this after
-that*, and nothing in `tasks/tasks.json` makes a supervisor consult `enforce.rs`: it
-could satisfy its own acceptance sentence while this gate is bypassed entirely.
+**The third thing about `P3-T007`, and it is the shape this file has now recorded
+twice.** The enforcement is a rule about the caller; `P3-T009` — the service
+startup supervisor, *"Can start/stop supported local services with timeouts and
+captured logs"* — is the next task in the DAG whose acceptance is about starting
+something, and **its `depends_on` is `["P3-T001","P3-T006"]`.** A dependency edge
+says *do this after that*, and nothing in `tasks/tasks.json` makes a supervisor
+consult `enforce.rs`: it could satisfy its own acceptance sentence while this gate
+is bypassed entirely.
 
 **The one thing about `P3-T006` a reader should know before the detail: the first
 acceptance sentence would be vacuous without a field that is not about the
@@ -443,18 +491,89 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P3
-{ accepted: 39, queued: 127 }
-READY: P3-T008, P3-T009, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001,
-       P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
+{ accepted: 40, queued: 126 }
+READY: P3-T009, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
+       P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
 
-**`P3-T001` through `P3-T007` are `accepted`**, on runs `34924525793`,
-`34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270` and
+**`P3-T001` through `P3-T008` are `accepted`**, on runs `34924525793`,
+`34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270`,
 `34943445326` / `34943853809` / `34944133634` — the last three being `P3-T007`'s,
-which took three commits and therefore three runs — and **`in_progress` is 0**,
-so nothing is half-finished and the next session may start any READY task without
-adopting an orphan. **Phase `P3` is 7 of 11 and open**: the other four `P3` tasks
-are `queued`. `39 + 127 = 166`, which is every task in `tasks/tasks.json`.
+which took three commits and therefore three runs — and `34946515895`, which is
+`P3-T008`'s and whose five jobs all read `success`. **`in_progress` is 0**, so
+nothing is half-finished and the next session may start any READY task without
+adopting an orphan. **Phase `P3` is 8 of 11 and open**: the other three `P3` tasks
+— `P3-T009`, `P3-T010` and `P3-T011` — are `queued`. `40 + 126 = 166`, which is
+every task in `tasks/tasks.json`.
+
+**The READY list read 14 before `P3-T008` and reads 13 after it, and for the first
+time in this file the shrink happened at the `start` *because a dependent was
+blocked*.** `P3-T008` has exactly **one** dependent — `P14-T006`, *"Implement
+execution-trust fixtures"* — and `P14-T006` also names `P7-T004`, which is
+`queued`, so accepting this task unblocked nothing:
+
+```
+P14-T006 depends_on: ["P3-T008","P7-T004"]     (tasks/tasks.json)
+P7-T004: queued                                (progress/state.json)
+14 - 1 + 0 = 13
+```
+
+**`14 → 13` at the `start` and `13 → 13` at the `accept`,** which is the `P3-T003`
+shape for the step and a new shape for the reason. At `P3-T003` nothing entered
+because there was nothing to enter; here there is a dependent, the graph names it,
+and it still did not enter. **A reader who counted `1` from
+`dependents = [x.id for x in tasks if 'P3-T008' in x.depends_on]` would predict the
+list to stand still and be right about the number and wrong about the step** — the
+same arithmetic-versus-reading distinction `P3-T003` recorded, arriving from the
+opposite direction. And **it is the `P3-T004` reason**: that reading had seven
+dependents of which two failed to enter because each named a second requirement,
+and this is the third time a dependent has been held back by one.
+
+**This is the third time an acceptance has made the list shorter**, after
+`P3-T002` (`12 → 11`) and the reading in the paragraph below (`15 → 14`), and the
+three do not share a cause. `P3-T002` and `P3-T007` both have no dependents; this
+one has one and it is blocked. **A reader who took the two earlier shrinks as a
+rule about tasks with no dependents would have predicted this list to stand still**,
+and the paragraph below says in its own words that the two shrinks it could see
+were *"both 'no dependents'"* — which was true of the two it could see and is not
+true of the third. That is this file's ninth-and-tenth reading problem in its
+plainest form: **the shape was generalised from the readings available, and the
+next acceptance produced a third shape rather than a confirming instance.**
+
+**One thing about this acceptance is about the tool rather than the graph, and it
+is recorded here because `progress/state.json` cannot record it.** `taskctl accept`
+reads `--note` and not `--evidence`, so the first `accept` for `P3-T008` landed
+with an empty note; `accept` cannot be re-run from `accepted`, and the note was
+written by hand into the file afterwards. **The hand-written note then carried a
+stale figure** — it said eleven mutations were run and all eleven caught, because
+it was written before the twelfth was run — and that sentence has now been
+corrected in place. `taskctl validate` reports `state OK: 166 tasks` either way,
+**which is the point: the validator checks the shape of this file and not the truth
+of it, so a note that is merely wrong survives every gate this repository has.**
+
+    **And the hand-edit did a second thing nobody asked it to, which is the worse of
+    the two and was found by reading `git diff` rather than by a gate.** The edit
+    was made with Python's `json.dump` at its default `ensure_ascii=True`, so it
+    rewrote **every non-ASCII character in the file as an escape sequence** — 148
+    em-dashes across other tasks' notes — and `progress/state.json` then held a
+    mixture: 150 escapes and the 2 raw characters the replacement text happened to
+    contain. **The escaped form is the same JSON, so it parsed, so `taskctl
+    validate` said `state OK: 166 tasks`, and so did every other gate.** What made
+    it visible was that a change which should have touched four lines reported
+    **28 lines changed, 14 insertions against 14 deletions** — the same signal the
+    `P3-T001` acceptance used to catch a line-ending rewrite, and the general form
+    of it: **a diff much larger than the change is the only symptom this class of
+    mistake has.** The file was restored by loading it and re-dumping with
+    `ensure_ascii=False`, and the restore is checked by a property rather than by
+    the absence of a complaint — `json.dumps(d, indent=2, ensure_ascii=False)`
+    plus a newline reproduces the **committed** blob byte for byte, so the
+    formatting is the tool's and not this session's invention. After the restore
+    `git diff --stat progress/state.json` reads **4 insertions, 4 deletions**, and
+    those four lines are the acceptance. **`scripts/taskctl.mjs` is not the cause,
+    and that was checked rather than assumed**: its `save()` is
+    `JSON.stringify(state, null, 2)`, which leaves non-ASCII alone, so every
+    acceptance before this one wrote the file in the raw form this acceptance has
+    put back.
 
 **The READY list got *shorter* at this acceptance, which no previous reading of it
 has done.** It read 15 before — `P3-T007` plus the fourteen above — and reads 14
@@ -570,19 +689,28 @@ than being a thing this file asks to be believed.
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
 and `evidence` is `[]`; `taskctl accept` sets `status`, `finished_at` and `notes`
-and nothing else. **That is true of the SHAs for all 34 accepted tasks — 0 carry
+and nothing else. **That is true of the SHAs for all 40 accepted tasks — 0 carry
 a `base_sha` or a `head_sha` — but it is NOT true of `evidence` or `notes`,
 and a blanket claim would have been wrong in two directions:** `P2-T003` is the
-one accepted task of the 34 with a non-empty `evidence` array (three strings,
+one accepted task of the 40 with a non-empty `evidence` array (three strings,
 added when that acceptance was recorded), and `P0-T009`, `P1-T001` and `P1-T002`
-carry no notes at all where the other 31 do. So the commits and the run for
+carry no notes at all where the other 37 do. So the commits and the run for
 `P2-T010` are recorded **here**, and the fields in `progress/state.json` are not
 a substitute for this file — they are not even uniform across tasks. **This
-paragraph has now been re-read at 28, 33, 34 and 39 accepted tasks and every count in
+paragraph has now been re-read at 28, 33, 34, 39 and 40 accepted tasks and every count in
 it held except the totals**: the three always-empty-notes tasks are still the
 same three, `P2-T003` is still the only one with evidence, and no task has ever
 gained a SHA. That is a fact about the tool rather than about the tasks, so it
 should survive the next reading too — and if it stops, the tool changed.
+**The `P3-T008` note is the first on this branch that was written by hand rather
+than by the tool**, because `accept` was given `--evidence`, which it ignores, and
+it cannot be re-run from `accepted`. The tool wrote an empty one and a person
+typed the real one, **which means `progress/state.json` now holds a note no gate
+has checked** — a claim in this file of exactly the kind this repository exists to
+distrust. The note's mutation count was stale when it was first written and was
+corrected in place; **the correction is recorded here rather than left silent,
+because the interesting fact is not the number but that nothing would have caught
+it.**
 
 **A correction that was made and then overtaken, kept because both halves are
 worth having.** An earlier draft of this file said `accepted: 26` and "nothing is
@@ -734,6 +862,206 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
 
+## What `P3-T008` added
+
+One file, `crates/sure-core/src/container.rs`, 16 module tests, and one new
+integration test file, `crates/sure-core/tests/container_isolation_claim.rs`, with
+5. `crates/sure-core/src/lib.rs` gains a line; `doctor.rs`, `sure-domain`'s
+`execution.rs`, `docs/adr/0009` and `docs/architecture/EXECUTION_SAFETY.md` are
+each corrected in place. **The module states the boundary it is not**: nothing in
+it builds a `std::process::Command` and nothing names a `ProcessRequest`, so the
+census in `tests/spawn_sites.rs` is unchanged and that test is what says so.
+
+### The first acceptance sentence is a missing variant
+
+*"Docker/Podman absence is nonfatal."* `Availability` is `Found { runtime,
+program }` or `Absent`, and **there is no third arm, no `Result` and no error
+type.** That is not brevity — it is the sentence, expressed as a shape. A caller
+who wants a `Runtime` has to handle the absence to get one, so "nonfatal" is a
+property of the type rather than a convention somebody remembers. The alternative
+was an `Err(String)` that a caller could `?` past, and the failure mode of that is
+a machine told its setup is broken when it is the ordinary case: most machines
+have neither Docker nor Podman, and SURE's answer to that is that checks run on
+the host under the mode `P3-T007` built.
+
+`Availability::explain()` is where the nonfatality is legible: the `Absent` arm
+says what *does* happen rather than only what is missing, and both arms are
+asserted in the unit tests and again from outside the crate. **The asymmetry
+between the two arms is deliberate** — the found arm names the runtime and where
+it is, because "which one" is a support question that is unanswerable after the
+fact if the answer was never recorded.
+
+`in_path` takes a search path, `on_this_machine` reads `PATH`, and both go
+through `doctor::find_in`, which is now `pub(crate)`. That was the smallest
+change that could work: a second copy of *what SURE would execute* would be a
+second answer to a question `sure doctor` already answers, and the two could
+disagree about whether a program is installed. Two callers is a shared helper;
+the doc comment says a third is where it moves into a module of its own, which is
+the same move `consent::runs_project_code` got in `P3-T007`.
+
+### The plan is a value, and its defaults are the whole of the safety story
+
+`ContainerPlan` holds an image, a `Mount` (host path, container path, `Access`),
+a `Network` and a working directory. `arguments()` returns the vector as
+`Vec<String>`; `arguments_as_os_strings()` is the same vector in the form a runner
+would be handed. **No argument is ever interpolated through a shell**, and the
+image is the last element with the command left to the caller: a plan that named a
+command would be this module deciding what to run, which is `enforce.rs`'s
+question and not this one's.
+
+The three defaults are the acceptance's second clause in the only form that can be
+asserted: **`Access::ReadOnly`**, **`Network::Off`**, and a working directory of
+`/project` — never the host's path, which does not exist inside a Linux image.
+`with_writable_project()` and `with_network(...)` exist, and they are *calls*, so
+the one widening this plan can make is a line somebody wrote and a reviewer can
+see. A test walks three plans and fails on `--privileged`, `--publish`, `-p`,
+`--pid` or `--cap-add`: **the two widenings this plan has no method for are
+checked rather than documented**, because a plan that gained either would be one
+whose isolation claim is no longer the one `isolation_claim()` makes.
+
+Three things are refused at construction rather than emitted: an empty image, a
+working directory outside the container's view of the project, and **a host path
+containing `,` or `=`**. That last one is the interesting refusal. `--mount` is a
+comma-separated `key=value` list, so a path with either character in it re-splits
+into fields that are not this plan's; the short `-v source:target:ro` form takes
+the path but cannot carry a Windows path at all. **There is no spelling that works,
+so there is a refusal instead of a fallback** — and refusing fails closed, which is
+the direction an ambiguity like this has to fail in. A space is not an ambiguity
+and is accepted, which a test states, because refusing spaces would refuse most
+Windows paths.
+
+### The asymmetry between the mount and the network is the point
+
+`Network` is one of the five `CommandClass` categories, so a command's effects
+**can** answer *does this need a route out?*, and `ContainerPlan::for_command`
+derives it. **Nothing can answer *may this write inside the project?*** — the five
+categories are static, dynamic host, install, network and destructive, and `npm
+test` writing `target/` is `DynamicHost` while `git status` writing nothing is
+`Static`. The missing category is the open owner decision this file has carried
+since `P3-T004`, and **this is the first task to be blocked by it rather than
+merely to mention it.** So `Access` is an argument, the default is read-only, and
+nothing guesses.
+
+Both halves are tested, and the second is the one that matters:
+`the_network_never_widens_the_mount` walks `static_only()`, `anything()` and an
+install-only set past `for_command` and fails if any of them moves the access
+mode. **The asymmetry is a test rather than a comment**, because the tempting
+simplification — derive both from effects, default the one you cannot derive — is
+exactly how a guess arrives wearing a rule's clothes.
+
+### The second acceptance sentence is about prose, and four places were failing it
+
+*"…and is described as limited isolation, not perfect sandboxing."* The wording
+half is not a type. Four places called this mode **isolated** and stopped there:
+
+| where | what a reader took from it |
+|---|---|
+| `ExecutionMode::Container`'s doc comment | that the mode is a boundary |
+| `ExecutionMode::Container::plain_description()` | **the sentence a user reads before agreeing** |
+| `docs/adr/0009`, the `container` row | that the decision was for an isolated environment |
+| `docs/architecture/EXECUTION_SAFETY.md` | that SURE executes in an isolated container |
+
+None of the four was written carelessly — *isolated* is the word the whole industry
+uses for this, which is exactly why a one-time correction would not have been
+enough. `OVERCLAIMS` is the list (two phrases), `overclaims(sentence, phrase)` is
+the rule, and `tests/container_isolation_claim.rs` applies both to every shipped
+`.rs` under `crates/` and every `.md` under `docs/`. **`progress/` and
+`MASTER_PROMPT.md` are excluded and the exclusion is argued**: those are dated
+records of what was written at a time, and editing them to agree with today would
+be the document half of rewriting history.
+
+The prompt was rewritten inside a constraint that made it harder and better. The
+consent prompt is the one sentence here that reaches somebody who did not go
+looking for it, and `mode_descriptions_are_plain_language` bans the word
+*sandbox* in it as jargon — so *"not a sandbox"* was not available. It says
+**"That is limited isolation: it narrows what a check can reach, and it is not a
+separate computer"**, which is the honest everyday form of *shares the host's
+kernel* and does not require the reader to know what a kernel is.
+
+### The rule that holds the wording made both of its own mistakes, and the tests found both
+
+`overclaims` excuses a phrase only inside the clause that contains it, because
+*"Docker is not installed, and the container is an isolated container"* is two
+claims and a rule that read the whole sentence would excuse the second.
+
+**The first clause-boundary set was `.` `;` `:` and the newline, and the sentence
+just quoted — written into the function's own test as the example of what it must
+catch — passed the rule.** A comma is where English puts the joint between two
+independent clauses, and a rule that understands only full stops reads the second
+one as part of the first. Adding `,` makes the rule **stricter**, so the mistake
+was in the safe direction and was still real: the check would have excused exactly
+the sentence its documentation named as its purpose.
+
+**The second was in the ADR correction itself.** The first version quoted the old
+wording in order to correct it, and the scan flagged it — correctly, because the
+rule cannot tell a quotation from a claim and does not pretend to. The fix is to
+**name which word moved rather than reproduce it**, and the ADR now says so and
+says why. That is a limitation stated rather than papered over: a rule that read
+intent could be argued with, and the cheap checkable version is worth more than
+the clever one.
+
+### The check found a coverage gap in a file it only borrowed from
+
+`doctor::find_in` documents that an empty `PATH` entry is skipped rather than read
+as the current directory — on Unix an empty entry *is* the current directory, and
+the working directory is where a checked project would keep a `docker` it would
+like SURE to run. **No test holds it.** The nearest test,
+`a_program_that_is_not_there_is_not_found`, passes an empty *directory*, which is
+a different thing entirely; the only way to observe the difference is a file in
+the working directory that the platform's `can_be_run` accepts, and on Unix that
+needs an execute bit no file in the crate root has.
+
+**Measured rather than reasoned.** The thirteen-line filter is deleted from
+`doctor.rs` and the whole workspace suite is run: **45 result lines, 0 failed, 0
+failing lines, exit code 0.** The mutation survives, which is what "no test holds
+this rule" means in the only form that can be checked. `doctor.rs` was restored
+from a backup in a `finally` and the worktree blob equals `HEAD`'s afterwards —
+`6a1869bb7c9dea0c13ff08b48da962837515d0fc`, checked rather than assumed.
+
+The gap is recorded in `DECISIONS.md` and here, and it is deliberately **not
+fixed** — the fix belongs to `doctor`, whose task is accepted, and folding an
+unrelated test into this commit would make the change harder to read than the gap
+is dangerous. What `P3-T008` does instead is stop *repeating* the rule: the
+module's own test that claimed to cover it was asserting nothing (it created a
+fake `docker` and then asserted only that the current directory had not changed)
+and was replaced by `the_first_runtime_in_the_search_order_is_the_one_reported`,
+which builds a real directory holding a real `docker.exe` and a real `podman` and
+asserts which one comes back.
+
+### No spawn site was added, and this time it is not a near miss
+
+`tests/spawn_sites.rs` counts three files that build a `Command`, all inside
+`sure-core/src/process/`, and fails if a fourth appears or if anything outside the
+runner names a `ProcessRequest`. **`container.rs` does neither**, and the reason it
+was written that way is stated in its own module documentation: starting a
+container is where the first spawn site outside the runner would go, and that is
+the task *after* this one. What makes the restraint checkable rather than
+intentional is that the census runs on all three platforms and the new module is
+inside its walk.
+
+### What this does not establish
+
+**Nothing about a container that exists.** No process is started, so everything
+here is a claim about an argument vector and not one about Docker's behaviour:
+whether the runtime accepts these arguments, whether the image is present, whether
+the mount actually appears, and whether the isolation is what the runtime claims
+are all unverified by this task. **`isolation_claim()` is this build's sentence
+about containers, not a measurement of one.**
+
+**Nothing about resources.** No `--memory`, `--cpus`, `--pids-limit` or timeout
+appears in the plan; a check inside a container can still take the whole machine,
+and *"limited isolation"* is about reach and not about load.
+
+**Nothing about `Access::ReadWrite`.** The method exists, is tested, and no
+caller receives `ReadWrite` by any path other than naming it — and whether any
+check should ever get it is the missing category's question, not this task's.
+
+**Nothing about the plan being used.** Like `enforce.rs` and `approval.rs`, this
+module has no caller. `P14-T006`, *"Implement execution-trust fixtures"*, is the
+one dependent the task graph records, and its second acceptance sentence —
+**"Container unavailable path is honest."** — is this task's first sentence
+arriving later as a fixture.
+
 ## What `P3-T007` added
 
 `crates/sure-core/src/enforce.rs`, 857 lines, 16 tests, plus a `pub mod enforce;`
@@ -842,7 +1170,7 @@ task's enforcement; this is the third of those to meet it and the third to leave
 it open — which is exactly what this file predicted would happen to whoever
 started `P3-T007`. The question is recorded in `crates/sure-core/src/process/mod.rs`
 (*"Whether a batch file may be named is not decided here"*) and in
-`process/error.rs`, and **the owner decision is still item 18 below**.
+`process/error.rs`, and **the owner decision is still item 19 below**.
 
 ### The four mutations, and the one that found the tests were the thin part
 
@@ -3114,6 +3442,72 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34946515895`, `P3-T008`'s — and a delta that closes from four directions at once, one of which is a tool caveat
+
+Run `34946515895`, commit `6ea9f461288eaa6d6bc70947650b5a727c1fd155`. All five jobs
+`success`, and the three platform logs read rather than taken from the job colour:
+
+| job | result lines | parents | children | passed | failed | ignored |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rust (windows-latest)` | 45 | 35 | 10 | **1209** | 0 | 9 |
+| `rust (macos-latest)` | 45 | 35 | 10 | **1210** | 0 | 9 |
+| `rust (ubuntu-latest)` | 45 | 35 | 10 | **1211** | 0 | 9 |
+
+**Windows CI equals this machine's own `cargo test --workspace --no-fail-fast`
+exactly, 1209 for 1209** — 45 result lines, 1219 raw passed, 0 failed, 9 ignored,
+and 1209 = 1219 − the 10 `store_concurrency` children. macOS is +1 and Ubuntu +2,
+the standing shape. The parent count moves 34 → 35 and the result-line count 44 →
+45 for the same reason: one new integration test file,
+`container_isolation_claim.rs`, is one new test binary.
+
+**The delta is read four ways, because each of the four can fail on its own.** A
+count can be right while the names behind it moved, and a name diff cannot tell an
+addition from a rename — so the fourth is the one that settles it.
+
+| reading | before → after | delta |
+| --- | --- | --- |
+| parent sum, Windows CI | 1188 → 1209 | **+21** |
+| source `#[test]` functions | 1184 → 1205 | **+21** |
+| by-name, all three platforms | — | **+21 −0** |
+| result lines (parents) | 44 (34) → 45 (35) | +1 (+1) |
+
+**And `−0` on all three platforms is what makes it an addition.** The 21 names are
+the sixteen `container::tests::*` and the five bare integration names:
+`a_machine_with_no_container_runtime_is_a_value_and_not_a_failure`,
+`no_description_of_container_mode_calls_it_isolated_without_denying_that_it_is`,
+`the_consent_prompt_for_container_mode_says_limited_isolation`,
+`the_modules_own_claim_is_the_same_claim_the_documents_make`,
+`the_rule_tells_a_claim_from_a_denial_and_the_list_is_not_empty`. Not one name was
+removed anywhere, which a rename would have required.
+
+**The platform difference did not move, and that is a fact about these tests rather
+than luck.** `read-run.py` prints `windows vs macos: -13 +14` and `windows vs
+ubuntu: -12 +14` at `0f9273b` and at `6ea9f46` alike — the same two lines as at
+`664575b`, `6353477` and `18209d8`. Twenty-one new tests and **not one entered a
+platform difference**, which is what a module of pure data construction and a scan
+over both `crates/` and `docs/` predicts: none of the 21 names is `#[cfg]`-gated.
+The one place a platform does appear — `EXECUTABLE_SUFFIX` in the module's test
+helpers — is a `cfg!`-free `#[cfg]` pair inside a test module, and the name it
+belongs to is present on all three platforms, which is how a reader can tell it
+compiled rather than vanished.
+
+**The fourth reading nearly reported the wrong thing, and the harness said so.**
+The source-level count was first taken with `git grep -h '#\[test\]' -- crates`,
+which reported **1184** — the same number as at `0f9273b`, for a worktree holding
+**1205**. `git grep` with no revision reads the index and worktree but **skips
+untracked files**, and both new files were untracked at that moment. The reading is
+a `grep -rh` over the tree instead, and the four earlier source-count readings in
+this file were taken on committed trees, where `git grep` is correct and where
+every one of them is reproduced by this run's numbers.
+
+**The two jobs that are not about Rust are the ones that examine this commit's
+own claims.** `bootstrap-validate-windows` runs `node scripts/validate-bootstrap.mjs`
+— *"SURE bootstrap validation OK: 17 phases, 166 tasks"* — then
+`node scripts/taskctl.mjs validate` — *"state OK: 166 tasks"* — then the PowerShell
+validator, so the job reads `progress/state.json` as this commit wrote it and the
+acceptance claim about that file is what it checks. `shellcheck-secondary` is
+`success` and has no count to read.
 
 ### Reading runs `34943445326`, `34943853809` and `34944133634`, `P3-T007`'s three — and a delta read three times for `+14`, `+1` and `+1`
 
@@ -5636,6 +6030,91 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P3-T008`
+
+Twelve mutations, two harnesses and one mutation that was not against the code.
+`target/tmp/mutate3.py` is `mutate.py` generalised to any file and any `cargo test`
+filter, so that the *wording* half of this task's acceptance could be mutated too —
+three of the twelve change a document or a `&'static str` rather than a branch, and
+without a general harness that half would have been asserted rather than checked.
+
+| # | what was broken | caught by | verdict |
+| --- | --- | --- | --- |
+| 1 | the mount's `ReadOnly` default → `ReadWrite` | 3 tests | caught |
+| 2 | `for_command`'s network branch → always `On` | 1 | caught |
+| 3 | the `,readonly` suffix removed from the specification | 2 | caught |
+| 4 | the working-directory guard disabled | 1 | caught |
+| 5 | the `,`/`=` path refusal removed | 1 | caught |
+| 6 | `Runtime::ALL` reversed | 2 | caught |
+| 7 | the clause boundary loses its comma | 1 | caught |
+| 8 | the denial list always grants | 1 | caught |
+| 9 | `EXECUTION_SAFETY.md` reverted to "isolated container" | 1 | caught |
+| 10 | ADR 0009 reverted to "isolated environment" | 1 | caught |
+| 11 | the consent prompt reverted to "isolated container" | 2 | caught |
+| 12 | **`doctor.rs`'s empty-`PATH`-entry filter deleted** | **none — SURVIVED** | **gap** |
+
+**Number 12 is a finding rather than a mutation that failed**, and it is the first
+one this branch has recorded that it did not close. `doctor::find_in` documents
+the rule; no test holds it; the whole workspace suite is green with the filter
+gone (45 result lines, 0 failed, exit 0, measured this session with the worktree
+restored afterwards and the blob checked). The nearest existing test passes an
+empty *directory*, which exercises nothing, and the observable difference needs a
+file in the working directory that `can_be_run` accepts — which on Unix means an
+execute bit no file in this crate's root has. See the `P3-T008` section above for
+why the fix was left to `doctor` rather than folded in.
+
+**Numbers 7 and 11 are corrections to this commit's own first version, and both
+were found by tests rather than by review.** Number 7's rule — the clause boundary
+— originally lacked the comma, and the sentence its own documentation names as the
+thing it exists to catch (*"Docker is not installed, and the container is an
+isolated container"*) passed it. Number 9's document originally quoted the old
+wording in order to correct it, and the scan flagged it correctly: the rule cannot
+tell a quotation from a claim. Both fixes make the rule **stricter**, so both
+mistakes were in the safe direction and both were real.
+
+#### The harness failed its own first run, and reported both failures
+
+`mutate3.py` produced two false verdicts on its first execution and neither was in
+the code under test.
+
+1. **`text=True` decodes subprocess output with the locale encoding, which is GBK
+   on this machine.** A mutation whose `cargo test` output contained a byte GBK
+   cannot decode raised inside the reader thread: the subprocess finished, the
+   decode failed, and the harness died before it could report anything. One
+   mutation was reported as *nothing at all*. The tree was restored by the
+   `finally` regardless — the next mutation's `before` blob proved it — but a
+   harness that can lose a result is a harness whose silence means nothing. Fixed
+   with `encoding="utf-8", errors="replace"` on the subprocess call.
+   **`mutate.py` has the same latent bug and did not hit it**: its filter and its
+   test names are ASCII, so the `P3-T007` record stands unchanged.
+2. **The filter was passed as one `argv` element**, so `cargo` answered
+   `unexpected argument '--test container_isolation_claim' found` and three
+   mutations were reported as *survivors of a suite that never started*. Both
+   halves are fixed: the filter is split, and **the reporting now says
+   `INCONCLUSIVE` rather than "this mutation survived" when there is no
+   `test result:` line.** That second half is the one that matters — the run
+   printed the diagnostic and then contradicted it in the summary, which is the
+   same shape as the `P3-T007` finding one level up.
+
+#### What the guards are, and why each exists
+
+The exactly-once anchor check, the restore in a `finally`, and a blob comparison
+after the restore, all carried over from `mutate.py` with the same doc comments.
+Two more were exercised this session rather than assumed:
+
+- **The exactly-once check refused an anchor that had been mangled by the shell
+  that wrote it.** Mutation 7's `.old` file contained a real newline where the
+  anchor needed the two characters `\` and `n`, so it matched zero times and the
+  harness refused without touching the tree. A wrong anchor and an applied
+  mutation are indistinguishable from a count, which is why the refusal prints the
+  file and the count rather than a bare boolean — the same lesson `P3-T004`
+  recorded about its own harness.
+- **The restore is checked rather than trusted.** Every run prints the blob
+  before and after. For an uncommitted file the harness compares with the
+  *pre-run* blob and says so, because comparing with `HEAD` would report a mismatch
+  for every file this session has edited and has not committed — which it did, on
+  the first three document mutations, and which is noise rather than a finding.
+
 ### `P3-T007`
 
 **Four mutations, run one at a time rather than by a driver script, and the
@@ -6893,7 +7372,47 @@ and one covers none.
 
 ## Next concrete action
 
-1. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
+1. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it added no spawn site either — for a reason it states rather
+   than one that happened.** `6ea9f46` is the implementation, run `34946515895`,
+   all five jobs `success`, **Windows 1209 / macOS 1210 / Ubuntu 1211** parent
+   tests with 0 failed and 9 ignored over **45 result lines = 35 parents + 10
+   children** on each — read in full and attributed in "Reading run
+   `34946515895`", where Windows CI matches this machine's own `cargo test` value
+   for value and each platform's nameset moved **+21 −0** against `0f9273b`, the
+   twenty-one additions named rather than counted. It adds
+   `crates/sure-core/src/container.rs` (16 tests) and
+   `crates/sure-core/tests/container_isolation_claim.rs` (5), makes
+   `doctor::find_in` `pub(crate)`, corrects `ExecutionMode`'s doc comment and
+   consent prompt, and corrects `docs/adr/0009` and
+   `docs/architecture/EXECUTION_SAFETY.md`. **Three things in it matter to whoever
+   starts `P3-T009`, `P3-T011` or `P14-T006`.** The first is that **a missing
+   container runtime is a value and not an error**: `Availability` is
+   `Found { runtime, program }` or `Absent`, with no third arm and no `Result`, so
+   a caller that wants a `Runtime` has to handle the absence to get one. `Absent`
+   is the ordinary case on a machine like this one, and the honest path is the one
+   that says what **does** happen rather than only what is missing — **which is
+   the same sentence `P3-T011`'s acceptance asks for in another domain**
+   (*"Browser unavailable => skipped/unknown"*) and the same one `P14-T006`'s
+   second sentence asks for in this one (*"Container unavailable path is
+   honest"*). Two later tasks with the same shape and one module that already has
+   the shape written down. The second is that **the mount cannot be derived and
+   the network can**: `Network` is one of the five `CommandClass` categories so
+   `for_command` derives it, and there is no "writes inside the project" category
+   so `Access` is an argument whose default is read-only. That missing category is
+   the owner decision this file has carried since `P3-T004`, and `P3-T008` is
+   **the first task blocked by it rather than merely mentioning it** — the blocked
+   work is named (deriving `Access`) rather than left to be rediscovered. The
+   third is that **`isolation_claim()` is this build's sentence about containers
+   and not a measurement of one**: no process is started, nothing verifies that
+   Docker accepts these arguments, and no `--memory`, `--cpus` or `--pids-limit`
+   appears in the plan, so *limited isolation* is a claim about reach and not
+   about load. `P3-T008` also **found and did not fix** a coverage gap in
+   `doctor::find_in` — the rule that an empty `PATH` entry is skipped is held by
+   no test, and removing it leaves the whole workspace green, measured — recorded
+   in `DECISIONS.md` and in "What `P3-T008` added" above, and **this is the first
+   recorded mutation on this branch that survived rather than being closed.**
+2. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** Three commits rather than one,
    because the second and third were each found after the one before it had been
    pushed and read: `6353477` is the module, `18209d8` is the batch-file test,
@@ -6929,7 +7448,7 @@ and one covers none.
    `P3-T006`'s *"`authorise` still has no caller"* is still true and this task did
    not obtain a consent; it turned the decision into a refusal without asking
    anyone.
-2. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
+3. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** `d58532a` is the
    implementation, run `34941955270`, all five jobs `success`, **Windows 1172 /
    macOS 1173 / Ubuntu 1174** parent tests with 0 failed and 9 ignored over **44
@@ -6956,7 +7475,7 @@ and one covers none.
    and never reach a user — so a test that needs a consented command has to use a
    destructive one (`git push --force`), or it will panic on an empty list rather
    than fail.
-3. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
+4. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site.**
    `c940300` is the implementation, run `34938974624`, all five jobs `success`,
    **Windows 1142 / macOS 1143 / Ubuntu 1144** parent tests with 0 failed and 9
@@ -6979,7 +7498,7 @@ and one covers none.
    command SURE cannot bound needs its own approval naming its exact argument
    vector, **no sixth category was invented**, and the "writes inside the project"
    gap is still open.
-4. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
+5. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
    headlines a number that is not the one it means.**
    `967c5e6` is the implementation and `ea0fe6c` the acceptance; run
    `34935781639`, all five jobs `success`, **Windows 1116 / macOS 1117 / Ubuntu
@@ -6993,7 +7512,7 @@ and one covers none.
    mistake is in `c940300`'s own message in two smaller places. **This item exists
    because that acceptance did not prepend one**, which is why the list is two
    items short rather than one and why this acceptance renumbers both at once.
-5. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
+6. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
    carrying this file, and it changed no shipped code.** `b0dcc69` is the
    implementation and `ea2f826` is the fix CI asked for; run `34930744061` is the
    fix's run, all five jobs green, **Windows 1078 / macOS 1079 / Ubuntu 1080**
@@ -7007,7 +7526,7 @@ and one covers none.
    test and 19 of the 33 parent result lines came after it. **Its run is read in
    the session that took it rather than committed** — the stopping rule at the top
    of this file, so the `P3-T003` chain ends at the acceptance.
-6. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
+7. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it changed no shipped code.** `fd878e6` is the implementation,
    run `34927065374`, all five jobs green, **Windows 1077 / macOS 1076 / Ubuntu
    1077** with 0 failed and 9 ignored over 43 results = **33 parents + 10
@@ -7020,7 +7539,7 @@ and one covers none.
    children are identical **by name** on all three. **Its run is read in the
    session that took it rather than committed** — the stopping rule at the top of
    this file, so the `P3-T002` chain ends at the acceptance.
-7. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
+8. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
    `P3`.** `819d499` is the implementation, run `34924525793`, all five jobs
    green, **Windows 1082 / macOS 1081 / Ubuntu 1082** with 0 failed and 7 ignored
    over **43** result lines = **33 parents + 10 children** — read and attributed,
@@ -7031,7 +7550,7 @@ and one covers none.
    yet**: no product path calls it, and `tests/spawn_sites.rs` fails the day one
    does without being added to it. `P3-T002` has now used it — in tests only — and
    the first task that would run anything in the product is `P3-T004`.
-8. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+9. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -7043,12 +7562,12 @@ and one covers none.
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-9. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+10. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-10. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+11. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -7056,45 +7575,51 @@ and one covers none.
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-11. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+12. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-12. **The next task is a real choice, and the list is 14 long.**
-   `P3-T008`, `P3-T009`, `P4-T001`, `P4-T005`, `P4-T006`, `P4-T007`, `P4-T008`,
+13. **The READY list is 13 long, and the next task is no longer a choice.**
+   `P3-T009`, `P4-T001`, `P4-T005`, `P4-T006`, `P4-T007`, `P4-T008`,
    `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`,
    `P13-T004` — read off `node scripts/taskctl.mjs status` at this acceptance,
-   which prints `{ accepted: 39, queued: 127 }`. **`P3` is open and `P3-T001`
-   through `P3-T007` are accepted**, so **two `P3` tasks are READY**: `P3-T008`
-   (container execution adapter) and `P3-T009` (service startup supervisor).
-   **The list *shrank*, which no previous acceptance has made it do, and the
-   reason is the one thing `P3-T007` established about the graph: it has no
-   dependents.** `grep -c '"P3-T007"' tasks/tasks.json` answers **1** — its own
-   `id` — so no task names it in a `depends_on` and accepting it removed one from
-   the list and added none, **15 → 14**. That is the ninth reading of this list
-   and the fourth shape, and it is a movement that no rule about dependents
-   predicts *because there are no dependents to make the prediction from*.
-   **Read the list off `taskctl status`, not off this paragraph** — this is the
-   item where a stale copy is most obviously a lie.
-   `P3-T008` is the container adapter, and its acceptance names Docker/Podman
-   absence, mounts, network and the wording of the isolation claim — **it is not
-   the task that meets the `.cmd`/`.bat` question**, which is why the entry was
-   read rather than guessed at when this paragraph was written.
-   `MASTER_PROMPT.md` §14 prefers **the lowest-numbered READY phase/task unless
-   another ordering is required by the DAG**, which is `P3-T008`.
-   **The `.cmd`/`.bat` decision is item 18 below**, and it is the one whoever
-   starts `P3-T008` or `P3-T009` walks into. `P3-T007` reached it and did not
-   settle it, which is the third time that has happened and the third time it was
-   the intended outcome: that task's acceptance is *"project-controlled
-   executable code is not launched in inspect-only mode"*, and a mode whose whole
-   job is deciding what is **not** launched still has to say whether a batch file
-   counts as a program — which is the same question `safety::classify` already
-   answers one way for classification. **The half that does not depend on the
-   owner's answer is now closed**: an enforcement built from `enforce.rs` does not
-   admit a batch file in any mode under any permission set, whatever a caller is
-   allowed to name.
+   which prints `{ accepted: 40, queued: 126 }`. **`P3` is open and `P3-T001`
+   through `P3-T008` are accepted**, so **one `P3` task is READY**: `P3-T009`,
+   the service startup supervisor. `MASTER_PROMPT.md` §14 prefers **the
+   lowest-numbered READY phase/task unless another ordering is required by the
+   DAG**, and `P3-T009` is both the lowest-numbered and the only `P3` task whose
+   dependencies are satisfied — `["P3-T001","P3-T006"]`, both accepted — so the
+   preference and the DAG agree for the first time in several acceptances.
+   **The list shrank again, 14 → 13, and this is the third time an acceptance has
+   made it shorter.** The shrink landed at the `start` rather than at the
+   `accept`, which is the `P3-T003` shape, and the reason is new: `P3-T008` has
+   exactly **one** dependent, `P14-T006`, and `P14-T006` also names `P7-T004`,
+   which is `queued`. So there was a dependent to enter and it did not, which is
+   the `P3-T004` reason arriving at the `P3-T003` step. **A reader who counted
+   dependents would predict the list to stand still and be right about the number
+   and wrong about the step** — the same arithmetic-versus-reading distinction
+   `P3-T003` recorded, from the opposite direction. The previous reading of this
+   item said **14**, listed `P3-T008` first, and said `P3-T008` was **not** the
+   task that meets the `.cmd`/`.bat` question; that was right, and it was right
+   because it was read out of `tasks/tasks.json` rather than reasoned about. The
+   reading before that one said the opposite and had to be corrected. **Read the
+   list off `taskctl status`, not off this paragraph** — this is the item where a
+   stale copy is most obviously a lie.
+   **The `.cmd`/`.bat` decision is item 19 below**, and it is the one whoever
+   starts `P3-T009` walks into. `P3-T007` reached it and did not settle it, which
+   is the third time that has happened and the third time it was the intended
+   outcome: that task's acceptance is *"project-controlled executable code is not
+   launched in inspect-only mode"*, and a mode whose whole job is deciding what is
+   **not** launched still has to say whether a batch file counts as a program —
+   which is the same question `safety::classify` already answers one way for
+   classification. **The half that does not depend on the owner's answer is now
+   closed**: an enforcement built from `enforce.rs` does not admit a batch file in
+   any mode under any permission set, whatever a caller is allowed to name.
+   **`P3-T008` did not reach that question, and this file predicted twice that it
+   would** — item 19 carries the correction, because it is the same fact and
+   storing it in one item's prose did not make it available to the next.
    `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
    and `P8-T001` have been on the list since before this file was written.
    **Read the task entry before choosing**; do not choose from this paragraph.
@@ -7103,7 +7628,7 @@ and one covers none.
    accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
    has its rule and its door and still no capture, and the task that supplies one
    is waiting on a task nobody has read.
-13. **`P2-T012` left an owner decision open, and it is the first one a reader
+14. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -7118,19 +7643,19 @@ and one covers none.
    ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-14. **`P2-T012` also left the classification with no consumer.** `classify` is
+15. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
-   shape as `ComponentGraph` in item 15, and it is recorded rather than implied —
+   shape as `ComponentGraph` in item 16, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-15. **`P2-T007` is accepted, its two commits are pushed and read.**
+16. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-16. **The store now holds six rows that no user wrote, and that is the first item
+17. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -7164,7 +7689,7 @@ and one covers none.
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-17. **`project_fingerprint` now has one caller, and it is not a check.**
+18. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -7174,7 +7699,7 @@ and one covers none.
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
-18. **`P3-T001` left a second owner decision open, and it is the one the next
+19. **`P3-T001` left a second owner decision open, and it is the one the next
    three `P3` tasks will each run into: may a caller name a batch file?** The
    facts, all measured and held as tests rather than asserted: a name with no
    extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,
@@ -7194,8 +7719,27 @@ and one covers none.
    produce rather than a lapse in either. **`P3-T006` and `P3-T007` have now both
    been accepted without settling it too**, which makes five tasks that have met
    the question and five that have left it open; `P3-T007`'s part is recorded in
-   `progress/DECISIONS.md` and in "What `P3-T007` added" above. The next two to
-   reach it are `P3-T008` and `P3-T009`.
+   `progress/DECISIONS.md` and in "What `P3-T007` added" above.
+   **`P3-T008` was then accepted and never reached it at all** — the container
+   adapter builds no command and names no program, so the question does not arise
+   in it — and the sentence that said it would is the second wrong prediction about
+   this same task in this file. The first was corrected one acceptance earlier, at
+   `P3-T006`'s, where the same claim was checked against `tasks/tasks.json` and
+   found false; **it was then re-written here in a different item, in the same
+   wrong form, one acceptance later.** The lesson is the one this file keeps
+   relearning: the correction was applied to the sentence in front of the reader
+   and not to the belief that produced it, and a fact stored in one item's prose
+   is not available to the next item that needs it. **What is measured now is that
+   five tasks have met the question and left it open — `P3-T001`, `P3-T004`,
+   `P3-T005`, `P3-T006`, `P3-T007` — and `P3-T008` is not a sixth.** Whether
+   `P3-T009` becomes a sixth **is not written here as a prediction, because this
+   file has now been wrong twice predicting exactly that about exactly this
+   question**; what can be said is that its acceptance is *"can start/stop
+   supported local services with timeouts and captured logs"* and a supervisor that
+   starts `npm` on Windows starts a batch file, so the question is live for it in
+   a way it was never live for `P3-T008`. **Read `P3-T009`'s task entry before
+   deciding that either way** — the same instruction item 13 gives about the READY
+   list, for the same reason.
    **This is not a defect to be fixed in the runner**: the completion rule is the
    operating system's and the interpreter is the operating system's doing, and the
    runner's part — that it never *builds* a command line for either — is already
@@ -7361,6 +7905,49 @@ one in "What `P3-T007` added" above, which was written at 18 rather than moved t
 it. **A grep that finds fifteen and needs three is the useful shape here**, because
 the risk is not missing a reference, it is rewriting a sentence that is supposed to
 say what it said at an earlier acceptance.
+
+**`P3-T008`'s acceptance prepended one item, moved three live references by one,
+and for the first time one of them was not a moved number but a sentence that had
+become false.** The prepend used `target/tmp/renumber5.py` **unmodified for the
+second acceptance running** — its docstring already required exactly one new item
+and already moved everything by `+1`, so this acceptance's only change was again
+to the input. It renumbered 1..19 with the sequence verified before the write, the
+CRLF count is 0 after it, and the read-back is `printitems.py`, which reads the
+file rather than the writer's return value and refused nothing — nineteen items,
+no gap, no repeat, no two sharing a first line. The reference check was
+`grep -n "item [0-9]"` before and after, which found **fifteen lines, the same
+fifteen as the previous acceptance**, of which **three are live** and twelve are
+dated narrative. The `ComponentGraph` reference went **15 → 16** and the batch-file
+decision **18 → 19**, both re-read against the printed list after the renumbering
+rather than before it.
+
+**The third live reference was a different kind of error, and it is the one worth
+keeping.** The other two are numbers that move; the third was the sentence in
+item 13 reading *"The next two to reach it are `P3-T008` and `P3-T009`"* — a
+**prediction** that this acceptance proved false, because `P3-T008` is a container
+adapter that builds no `Command` and names no program, so the `.cmd`/`.bat`
+question never arises in it. **And this is the second time this file has made that
+same wrong prediction about that same task**: at `P3-T006`'s acceptance the claim
+was checked against `tasks/tasks.json`, found wrong, and corrected — and the
+correction was written into the item that was being edited at the time, not into
+the belief. One acceptance later the wrong form was written again, in a different
+item, by the same author applying the same reasoning. **A grep over `item [0-9]`
+finds references that are numerically stale; nothing finds a committed paragraph
+that is *propositionally* stale**, and this acceptance found one only because the
+task it named had been finished by the time the item was re-read. The correction
+is in item 19 and it says outright that the file has been wrong twice, so the next
+reader has the failure rather than the tidy version of it. **The general form is
+the one this file keeps arriving at**: a fact stored in one item's prose is not
+available to the next item that needs it, which is why the counts that matter are
+put in one place and re-read from `taskctl status` rather than restated.
+
+**Item 13 was rewritten rather than patched, and that is the convention it now
+states about itself.** Its title changed from *"the list is 14 long"* to *"The
+READY list is 13 long, and the next task is no longer a choice"*, and the previous
+reading is named inside it in the past tense rather than deleted — because the
+previous reading was right about `P3-T008` and the one before it was wrong, and a
+reader who cannot see both cannot see what made the difference. That difference is
+one command: the right version was read out of `tasks/tasks.json`.
 
 
 **What `P2-T002` left for later, and what `P2-T003` then did with it.**

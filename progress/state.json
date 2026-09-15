@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P3",
-  "last_updated": "2026-09-15T08:08:55.638Z",
+  "last_updated": "2026-09-15T08:24:41.107Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -364,13 +364,13 @@
       "notes": "Implemented in crates/sure-core/src/enforce.rs (857 lines, 16 tests) across 6353477, 18209d8 and 719253e. inspect_only is now a property of a plan rather than true because no runner exists: Enforcement::admitted() is the only iterator a runner may take command lines from, a check is a unit, NeedsConsent becomes a stop under ExecutionNotAuthorized rather than a question, and a command planned for an unscheduled check is reported and never admitted. Both acceptance sentences are held by tests: no command that runs project code is admitted in inspect_only, and a check that would run project code is excluded from the plan under inspect_only. Runs 34943445326, 34943853809 and 34944133634 are all five jobs success with 1186/1187/1188, 1187/1188/1189 and 1188/1189/1190 parents and 0 failed, and the namesets move +14 -0, +1 -0 and +1 -0 on all three platforms. Four mutations were run and all four were caught; the third found that the static/dynamic classification was held by one unrelated assertion and that is what 719253e fixes. No spawn site was added."
     },
     "P3-T008": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-15T08:08:55.638Z",
-      "finished_at": null,
+      "finished_at": "2026-09-15T08:24:41.106Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Implemented in crates/sure-core/src/container.rs (16 tests) and crates/sure-core/tests/container_isolation_claim.rs (5 tests), commit 6ea9f46. Both acceptance sentences are held: `Availability` has no error variant, so a machine with neither Docker nor Podman is a value rather than a failure, and `ContainerPlan` controls the image, the project mount and its access, the network mode and the working directory as fields, with read-only and network-none as defaults. Nothing in the module builds a Command, so the spawn-sites census is unchanged. **Four places were calling this mode isolated and were corrected** — ExecutionMode's doc comment and consent prompt, ADR 0009's container row and docs/architecture/EXECUTION_SAFETY.md — and the wording is now checked rather than corrected once: OVERCLAIMS plus overclaims() are applied to every shipped .rs under crates/ and every .md under docs/. Twelve mutations were run; eleven were caught — eight against the module and three that revert the prose to the overclaim — and the twelfth survived the whole workspace suite, which is the coverage gap named in the next sentence. (This sentence first said eleven were run and all eleven were caught, because it was written before the twelfth was run; the number is corrected here rather than left standing, and `taskctl validate` cannot detect a note that is merely out of date.) Run 34946515895: five jobs success, windows 1209 / macos 1210 / ubuntu 1211 parent-sum, 0 failed, 9 ignored, 45 result lines = 35 parents + 10 children; by-name delta against 0f9273b is +21 -0 on all three platforms. **A coverage gap was found and NOT fixed**: doctor::find_in documents that an empty PATH entry is skipped rather than read as the current directory, no test holds it, and removing the filter leaves the whole suite green. This note was written by hand: `taskctl accept` reads `--note` and I passed `--evidence`, which the tool ignores, so the acceptance landed with an empty note and `accept` cannot be re-run from `accepted`."
     },
     "P3-T009": {
       "status": "queued",

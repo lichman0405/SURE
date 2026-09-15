@@ -1623,3 +1623,187 @@ shape can be checked.
   what a started process can reach. **Nothing about a check with no commands**: it
   goes to `static_checks` because nothing is launched for it, which is a statement
   about this module and not a promise about whatever performs it.
+
+## P3-T008 — the container adapter, and four places that were calling a container isolated
+
+- **The absence is a shape rather than a message.** `Availability` is
+  `Found { runtime, program }` or `Absent`, and there is no third arm, no `Result`
+  and no error type. The acceptance sentence is *"Docker/Podman absence is
+  nonfatal"*, and a type with no failure to represent is a stronger form of that
+  sentence than a convention that says so. The rejected alternative was
+  `Result<Runtime, String>` with an ordinary message, and the failure mode of that
+  is specific: a `?` in a caller three modules away turns the ordinary case —
+  most machines have neither runtime — into an error a user reads as *your setup
+  is broken*. `Availability::explain()` carries the meaning instead, and the
+  `Absent` arm says what **does** happen rather than only what is missing.
+
+- **`find_in` is shared rather than copied, and the doc says where the line is.**
+  `doctor::find_in` became `pub(crate)`, because a second implementation of *what
+  SURE would execute* could disagree with `sure doctor` about whether a program is
+  installed, and two answers to that question is worse than one answer in the
+  wrong module. Two callers is a shared helper. **The doc comment now states that
+  a third caller is where it moves into a module of its own**, which is the same
+  threshold `consent::runs_project_code` crossed in `P3-T007` — the rule is
+  written down where the next person will read it rather than left as precedent.
+
+- **The plan is a value, and the defaults are the safety story.** `Access::ReadOnly`,
+  `Network::Off` and `/project` are the three defaults, and each is a test. The
+  working directory is never the host's path because the host's path does not
+  exist inside a Linux image — a plan that emitted it would produce a container
+  that starts and fails somewhere unrelated to the mistake. `with_writable_project()`
+  and `with_network(...)` exist so the one widening this plan permits is a line
+  somebody wrote and a reviewer can see; **no argument is ever interpolated
+  through a shell**, and the image is the last element with the command left to
+  the caller, because a plan that named a command would be deciding what to run
+  and that is `enforce.rs`'s question.
+
+- **The mount and the network are asymmetric, and the asymmetry is a test rather
+  than a comment.** A command's effects **can** answer *does this need a route
+  out?* — `Network` is one of the five `CommandClass` categories — so
+  `for_command` derives it. **Nothing can answer *may this write inside the
+  project?*** — `npm test` writing `target/` is `DynamicHost` and `git status`
+  writing nothing is `Static`, and the five categories cannot separate them. So
+  `Access` is an argument, the default is read-only, and nothing guesses.
+  `the_network_never_widens_the_mount` walks `static_only()`, `anything()` and an
+  install-only set past `for_command` and fails if any of them moves the access
+  mode, **because the tempting simplification — derive both from effects and
+  default the one you cannot derive — is exactly how a guess arrives wearing a
+  rule's clothes.** This is the missing-category decision the handoff has carried
+  since `P3-T004`, and **`P3-T008` is the first task blocked by it rather than
+  merely mentioning it**: the blocked work is named (deriving `Access`) rather
+  than left to be rediscovered.
+
+- **A path with `,` or `=` is refused, and there is no fallback on purpose.**
+  `--mount` is a comma-separated `key=value` list, so a source path containing
+  either character re-splits into fields that are not this plan's; the short
+  `-v source:target:ro` form takes the path but cannot carry a Windows path at
+  all. **There is no spelling that works**, so the choice is between a refusal and
+  a silent wrong mount, and refusing fails closed. A space is **not** an ambiguity
+  and is accepted, which a test states — refusing spaces would refuse most Windows
+  paths, and that test is what stops the refusal from growing into a rule about
+  unusual paths in general.
+
+- **The second acceptance sentence is about prose, so it is checked as prose.**
+  *"…and is described as limited isolation, not perfect sandboxing."* Four places
+  called this mode **isolated** and stopped: the `Container` variant's doc comment,
+  its `plain_description()`, the `container` row in `docs/adr/0009`, and
+  `docs/architecture/EXECUTION_SAFETY.md`. None was careless — *isolated* is the
+  industry's word for this, which is exactly why a one-time correction would not
+  have held. `OVERCLAIMS` (two phrases), `overclaims(sentence, phrase)` and
+  `tests/container_isolation_claim.rs` make it a rule over every shipped `.rs`
+  under `crates/` and every `.md` under `docs/`. **`progress/` and
+  `MASTER_PROMPT.md` are excluded and the exclusion is argued**: those are dated
+  records of what was written at a time, and editing them to agree with today
+  would be the document half of rewriting history.
+
+- **The consent prompt was rewritten inside a constraint that made it better.**
+  The prompt is the one sentence here that reaches somebody who did not go looking
+  for it, and `mode_descriptions_are_plain_language` bans *sandbox* in it as jargon
+  — so *"not a sandbox"* was not available. It says **"That is limited isolation:
+  it narrows what a check can reach, and it is not a separate computer"**, the
+  everyday form of *shares the host's kernel* that does not require the reader to
+  know what a kernel is. **Two rules that each make sense alone constrained each
+  other into a sentence neither alone would have produced**, and that is the useful
+  part of the record: the ban is what forced the honest sentence to be plain.
+
+- **The rule made both of its own mistakes and its tests found both.** `overclaims`
+  excuses a phrase only inside the clause that contains it, because *"Docker is
+  not installed, and the container is an isolated container"* is two claims. **The
+  first clause-boundary set was `.` `;` `:` and the newline — and that sentence,
+  written into the function's own test as the example of what it must catch,
+  passed it.** A comma is where English puts the joint between two independent
+  clauses, so the rule read the second clause as part of the first. Adding `,`
+  makes the rule **stricter**, so the mistake was in the safe direction, and it was
+  still real: the check would have excused the sentence its own documentation named
+  as its purpose. **The second was in the ADR correction**, which quoted the old
+  wording in order to correct it and was flagged — correctly, because the rule
+  cannot tell a quotation from a claim and does not pretend to. The fix names which
+  word moved rather than reproducing it. **A rule that read intent could be argued
+  with; the cheap checkable version is worth more than the clever one.**
+
+- **A coverage gap found in a borrowed file, measured, and deliberately not
+  fixed.** `doctor::find_in` documents that an empty `PATH` entry is skipped rather
+  than read as the current directory — on Unix an empty entry **is** the current
+  directory, which is where a checked project would keep a `docker` it would like
+  SURE to run. **No test holds it.** The nearest test passes an empty *directory*,
+  which exercises nothing; the observable difference needs a file in the working
+  directory that the platform's `can_be_run` accepts, which on Unix means an
+  execute bit no file in the crate root has. Measured rather than reasoned:
+  deleting the filter leaves the whole workspace green (45 result lines, 0 failed,
+  exit 0, worktree restored and the blob checked afterwards). **The fix belongs to
+  `doctor`, whose task is accepted**, and folding an unrelated test into this
+  commit would make the change harder to read than the gap is dangerous. What this
+  task does instead is stop *repeating* the rule: its own test that claimed to
+  cover it was asserting nothing — it created a fake `docker` and then asserted
+  only that the current directory had not changed — and was **replaced** by
+  `the_first_runtime_in_the_search_order_is_the_one_reported`, which builds a real
+  directory with a real `docker.exe` and a real `podman` and asserts which one
+  comes back.
+
+- **The mutation harness failed its own first run, in two ways, and both were
+  reported.** `mutate3.py` generalises `mutate.py` to any file and any `cargo test`
+  filter, so the wording half of the acceptance could be mutated too — three of its
+  twelve mutations change a document or a `&'static str` rather than a branch.
+  **`text=True` decodes subprocess output with the locale encoding, which is GBK
+  here**, so one mutation died inside a reader thread and was reported as *nothing
+  at all*; and **the filter was passed as one `argv` element**, so `cargo` rejected
+  it and three mutations were reported as survivors of a suite that never started.
+  Both are fixed, and the second is fixed **in the reporting as well**: a run with
+  no `test result:` line now prints **INCONCLUSIVE** rather than *"this mutation
+  survived"*. **That second half is the one that matters**, because printing a
+  diagnostic and then contradicting it in the summary is the same shape as the
+  `P3-T007` finding one level up. `mutate.py` carries the same latent decode bug
+  and did not hit it — its filter and its test names are ASCII — so the `P3-T007`
+  record stands unchanged, and saying so is part of the finding.
+
+- **A tool caveat, measured, that nearly produced a wrong number.** The source-level
+  `#[test]` count was first taken with `git grep -h '#[test]' -- crates`, which
+  reported **1184** — the same figure as the previous commit — for a worktree
+  holding **1205**. **`git grep` with no revision reads the index and worktree but
+  skips untracked files**, and both new files were untracked at that moment. The
+  count in the record is a `grep -rh` over the tree instead. The four earlier
+  source-count readings on this branch were taken on committed trees, where
+  `git grep` is correct and where this run's own numbers reproduce them — **so the
+  caveat corrects a reading rather than a conclusion, and the distinction is
+  recorded rather than the earlier figures being quietly re-taken.**
+
+- **Two tool findings, both about a green check and neither about the code.**
+  The first is `git grep`'s documented-in-hindsight behaviour (next-but-one
+  bullet). The second is that **`taskctl accept` cannot record evidence and cannot
+  be re-run**: it reads `--note`, ignores `--evidence`, and refuses a task that is
+  already `accepted`, so the acceptance for this task landed with an empty note and
+  the real one was written by hand. **A hand-written note is a claim no gate
+  checks** — `taskctl validate` reports `state OK: 166 tasks` whatever the note
+  says — and this one promptly demonstrated it by carrying a stale mutation count,
+  which was corrected in place. **And the edit that wrote it did something worse
+  than the stale figure**: made with Python's `json.dump` at its default
+  `ensure_ascii=True`, it rewrote every non-ASCII character in
+  `progress/state.json` as an escape sequence — 148 em-dashes in other tasks'
+  notes — while leaving 2 raw, so the file was neither one form nor the other.
+  **It parsed, so every gate passed.** The only symptom was `git diff --stat`
+  reading 28 changed lines for a change of four, which is the same signal
+  `P3-T001` used to catch a line-ending rewrite: **this class of mistake has no
+  symptom except a diff that is larger than the change.** The file was restored
+  and the restore is checked by a property rather than by silence —
+  `json.dumps(d, indent=2, ensure_ascii=False)` reproduces the committed blob byte
+  for byte, so the canonical form is the tool's. `scripts/taskctl.mjs` was checked
+  and is not the cause: its `save()` is `JSON.stringify(state, null, 2)`, which
+  leaves non-ASCII alone.
+
+- **What is not established.** **Nothing about a container that exists**: no
+  process is started, so everything here is a claim about an argument vector and
+  not one about Docker's behaviour — whether the runtime accepts these arguments,
+  whether the image is present, whether the mount appears, and whether the
+  isolation is what the runtime claims are all unverified, and `isolation_claim()`
+  is this build's sentence about containers rather than a measurement of one.
+  **Nothing about resources**: no `--memory`, `--cpus`, `--pids-limit` or timeout
+  appears in the plan, so a check inside a container can still take the whole
+  machine, and *limited isolation* is a claim about reach and not about load.
+  **Nothing about `Access::ReadWrite`**: the method exists, is tested, and no
+  caller receives it by any path other than naming it, and whether any check
+  should ever get it is the missing category's question. **Nothing about the plan
+  being used**: like `enforce.rs` and `approval.rs`, this module has no caller —
+  `P14-T006`, *"Implement execution-trust fixtures"*, is the one dependent the task
+  graph records, and its second acceptance sentence, *"Container unavailable path
+  is honest."*, **is this task's first sentence arriving later as a fixture**, which
+  is the graph agreeing with the type rather than with the prose.

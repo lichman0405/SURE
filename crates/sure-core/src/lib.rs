@@ -11,6 +11,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod discover;
 pub mod doctor;
+pub mod documents;
 pub mod fingerprint;
 pub mod paths;
 pub mod project_intent;

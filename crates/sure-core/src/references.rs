@@ -742,13 +742,19 @@ const PYTHON_EXTENSIONS: &[&str] = &["py", "pyi"];
 const RUST_EXTENSIONS: &[&str] = &["rs"];
 
 /// Which kind of declaring file this is, or `None` if it declares nothing.
+///
+/// The document test is [`crate::documents::is_document`] rather than the two
+/// name shapes written out again. Two modules that read a project's Markdown
+/// would otherwise each own half of the answer to *which files are documents*,
+/// and the day one of them learned about `.markdown` the other would still be
+/// reading the older list.
 #[must_use]
 pub fn declaration_candidate(path: &Path) -> Option<DeclarationKind> {
     let name = path.file_name()?.to_string_lossy().to_lowercase();
     if is_env_template(&name) {
         return Some(DeclarationKind::Example);
     }
-    if name.starts_with("readme") || name.ends_with(".md") {
+    if crate::documents::is_document(path) {
         return Some(DeclarationKind::Document);
     }
     None

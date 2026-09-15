@@ -31,7 +31,7 @@ use sure_domain::evidence::{
     AnchorSubject, ClaimAssessment, EvidenceClass, Freshness, StalenessReason,
 };
 use sure_domain::execution::{
-    ActionKind, ConsentGrantor, ExecutionDecision, ExecutionMode, Permission,
+    ActionKind, CommandClass, ConsentGrantor, ExecutionDecision, ExecutionMode, Permission,
 };
 use sure_domain::ids::{IdKind, ProjectId};
 use sure_domain::intent::{IntentSource, RequirementAuthority};
@@ -197,6 +197,14 @@ frozen!(ExecutionDecision, test: execution_decision_wire_names_are_frozen, {
     Allowed => "allowed",
     NeedsConsent => "needs_consent",
     Denied => "denied",
+});
+
+frozen!(CommandClass, test: command_class_wire_names_are_frozen, {
+    Static => "static",
+    DynamicHost => "dynamic_host",
+    Install => "install",
+    Network => "network",
+    Destructive => "destructive",
 });
 
 frozen!(IdKind, test: id_kind_wire_names_are_frozen, {

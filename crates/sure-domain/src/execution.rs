@@ -480,6 +480,234 @@ pub fn decide(
     ExecutionDecision::Allowed
 }
 
+/// What a command may do, in the categories SURE keeps apart.
+///
+/// `P3-T004` acceptance: *"Static/read-only, dynamic host, install, network,
+/// destructive categories are distinct."* **Distinct is the load-bearing word.**
+/// These are not rungs of one ladder, and the answer for a command is not a
+/// single value: `cargo add serde` installs a package *and* reaches the
+/// registry, and collapsing those into one category would lose the fact the
+/// consent path needs — that two separate permissions are involved. The set is
+/// [`CommandEffects`].
+///
+/// The list is short on purpose. Categories the acceptance does not name —
+/// writing inside the project, connecting to a service — are [`ActionKind`]'s
+/// and [`Permission`]'s, and a classifier that invented a sixth value here
+/// would be answering a question this vocabulary does not have. A command whose
+/// only visible effect is one of those is *not* classified as
+/// [`Static`](Self::Static): it is unrecognised, which is the cautious answer
+/// rather than the tidy one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandClass {
+    /// Reads and reports.
+    ///
+    /// It runs a program — a rule that only ever answered "nothing happened"
+    /// would be about a different question — but not the project's code, it
+    /// installs nothing, it does not reach the network, and it cannot destroy
+    /// anything. `git status` is the shape of it.
+    Static,
+    /// Runs project-controlled code on this machine.
+    ///
+    /// The project's own tests, its build, its start command: whatever the
+    /// command is, the code that runs was written by whoever wrote the project.
+    DynamicHost,
+    /// Changes which packages the project depends on.
+    Install,
+    /// Reaches the network.
+    Network,
+    /// Can destroy work that re-running the command does not bring back.
+    ///
+    /// Deletion, history rewriting, forced pushes. Deliberately not folded into
+    /// [`Permission::WriteProject`]: `rm -rf` outside the project and
+    /// `git push --force` are neither of them a write inside the project, and a
+    /// consent for one would be read as a consent for the other.
+    Destructive,
+}
+
+variants!(CommandClass {
+    Static,
+    DynamicHost,
+    Install,
+    Network,
+    Destructive
+});
+
+impl CommandClass {
+    /// The stable wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::DynamicHost => "dynamic_host",
+            Self::Install => "install",
+            Self::Network => "network",
+            Self::Destructive => "destructive",
+        }
+    }
+
+    /// The permission that covers a command of this category, when one does.
+    ///
+    /// **`Destructive` answers `None`, and that is a finding rather than a gap
+    /// left open by accident.** [`Permission`] has six values and not one of
+    /// them is about destruction: [`Permission::WriteProject`] is writing
+    /// *inside the project*, which `rm -rf ..\..\` is not, and
+    /// `git push --force` is not a write at all. Mapping the category onto the
+    /// nearest of the six would make a user who granted one permission read as
+    /// having granted the other, which is the false green this repository calls
+    /// the worst outcome there is. The narrow thing the domain does cover is
+    /// [`ActionKind::DeleteProjectFile`]; the category is wider than it, so the
+    /// honest answer is that nothing here covers it — and deciding what should
+    /// is `P3-T005`'s question, which is why this returns the question rather
+    /// than an answer.
+    #[must_use]
+    pub const fn required_permission(self) -> Option<Permission> {
+        match self {
+            Self::Static => Some(Permission::Inspect),
+            Self::DynamicHost => Some(Permission::RunProjectCode),
+            Self::Install => Some(Permission::InstallDependencies),
+            Self::Network => Some(Permission::Network),
+            Self::Destructive => None,
+        }
+    }
+}
+
+/// Every category one command may fall into.
+///
+/// A set rather than a severity, and **never empty**. The order is
+/// [`CommandClass::ALL`]'s rather than the order rules happened to fire in, so
+/// two runs that agree about a command produce the same value and a report
+/// written today is readable tomorrow.
+///
+/// Constructed by union rather than assembled from a list, so emptiness is not
+/// a state this type can reach by accident: [`single`](Self::single) is one
+/// category, [`union`](Self::union) of two non-empty sets is non-empty, and the
+/// two named constructors are the two answers that are not about a single
+/// category. The only door that takes an arbitrary list is [`of`](Self::of),
+/// and what it does with an empty one is stated there.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct CommandEffects {
+    /// Canonical: sorted by [`CommandClass::ALL`]'s order, no duplicates, never
+    /// empty. Every constructor routes through [`CommandEffects::canonical`].
+    classes: Vec<CommandClass>,
+}
+
+impl CommandEffects {
+    /// One category on its own.
+    #[must_use]
+    pub fn single(class: CommandClass) -> Self {
+        Self {
+            classes: vec![class],
+        }
+    }
+
+    /// Everything except [`CommandClass::Static`].
+    ///
+    /// "SURE did not read this command" is an answer about danger, not about
+    /// safety, so it is the four categories that carry a risk and not all five.
+    /// A value that included `Static` would say both "this reads and reports"
+    /// and "this may destroy", which is not a cautious answer but a meaningless
+    /// one — and it would make [`is_static_only`](Self::is_static_only) false
+    /// for the wrong reason.
+    #[must_use]
+    pub fn anything() -> Self {
+        Self::of(
+            &CommandClass::ALL
+                .iter()
+                .copied()
+                .filter(|class| *class != CommandClass::Static)
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// Exactly [`CommandClass::Static`].
+    ///
+    /// Spelled out rather than left to `single(Static)` at the call sites: this
+    /// is the one value the product treats as permission to proceed without
+    /// asking, so it should be readable as that sentence in the code that
+    /// answers it.
+    #[must_use]
+    pub fn static_only() -> Self {
+        Self::single(CommandClass::Static)
+    }
+
+    /// Every category in `classes`, and nothing else.
+    ///
+    /// # An empty list is `anything`, and that is deliberate
+    ///
+    /// A rule that named no category has not said the command is safe; it has
+    /// said nothing. The two ways to read that are "no effects" — which would
+    /// be a rule that silently permits everything it forgot to mention — and
+    /// "unknown", which is what [`anything`](Self::anything) means. So an empty
+    /// list lands on the cautious side, and a caller that meant "static" has to
+    /// say [`CommandClass::Static`].
+    #[must_use]
+    pub fn of(classes: &[CommandClass]) -> Self {
+        if classes.is_empty() {
+            return Self::anything();
+        }
+        Self::canonical(classes)
+    }
+
+    /// Both sets at once.
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        let mut classes = self.classes;
+        classes.extend(other.classes);
+        Self::canonical(&classes)
+    }
+
+    /// Sorted by the enum's own order, without duplicates.
+    fn canonical(classes: &[CommandClass]) -> Self {
+        let mut kept: Vec<CommandClass> = CommandClass::ALL
+            .iter()
+            .copied()
+            .filter(|class| classes.contains(class))
+            .collect();
+        if kept.is_empty() {
+            // Only reachable from a list that holds something `ALL` does not,
+            // which cannot happen while both are generated from the same enum.
+            kept = vec![CommandClass::Static];
+        }
+        Self { classes: kept }
+    }
+
+    /// The categories, in [`CommandClass::ALL`] order.
+    #[must_use]
+    pub fn classes(&self) -> &[CommandClass] {
+        &self.classes
+    }
+
+    /// Whether this command may fall into `class`.
+    #[must_use]
+    pub fn contains(&self, class: CommandClass) -> bool {
+        self.classes.contains(&class)
+    }
+
+    /// Whether the only thing SURE can say about this command is that it reads
+    /// and reports.
+    ///
+    /// The one predicate a caller should branch on to proceed without asking,
+    /// and it is true of exactly one value.
+    #[must_use]
+    pub fn is_static_only(&self) -> bool {
+        self.classes.len() == 1 && self.classes[0] == CommandClass::Static
+    }
+}
+
+impl std::fmt::Display for CommandEffects {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (index, class) in self.classes.iter().enumerate() {
+            if index > 0 {
+                formatter.write_str(", ")?;
+            }
+            formatter.write_str(class.as_str())?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -660,5 +888,191 @@ mod tests {
                 assert!(!text.contains(banned), "{mode:?} uses jargon '{banned}'");
             }
         }
+    }
+
+    #[test]
+    fn command_classes_have_the_frozen_wire_names() {
+        assert_eq!(CommandClass::Static.as_str(), "static");
+        assert_eq!(CommandClass::DynamicHost.as_str(), "dynamic_host");
+        assert_eq!(CommandClass::Install.as_str(), "install");
+        assert_eq!(CommandClass::Network.as_str(), "network");
+        assert_eq!(CommandClass::Destructive.as_str(), "destructive");
+    }
+
+    #[test]
+    fn the_five_command_classes_are_distinct() {
+        // The acceptance sentence, as a loop rather than a reading: for every
+        // ordered pair the two are different values, carry different wire
+        // names, and — where both name a permission — need different
+        // permissions. `Destructive` is the one with no permission, and the
+        // test below is where that is held.
+        for &left in CommandClass::ALL {
+            for &right in CommandClass::ALL {
+                if left == right {
+                    continue;
+                }
+                assert_ne!(left.as_str(), right.as_str());
+                if let (Some(a), Some(b)) =
+                    (left.required_permission(), right.required_permission())
+                {
+                    assert_ne!(
+                        a, b,
+                        "{left:?} and {right:?} are separate categories that need the same permission"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn destructive_is_not_folded_into_writing_the_project() {
+        // The nearest of the six permissions is `WriteProject`, and it is the
+        // wrong answer: `rm -rf` outside the project is not a write inside it,
+        // and `git push --force` is not a write at all. Folding the category
+        // into it would let a user who granted a write consent read as having
+        // granted consent to destroy.
+        assert_eq!(CommandClass::Destructive.required_permission(), None);
+
+        // And the categories that *do* have a permission have the specific one
+        // rather than a neighbouring one.
+        assert_eq!(
+            CommandClass::Static.required_permission(),
+            Some(Permission::Inspect)
+        );
+        assert_eq!(
+            CommandClass::DynamicHost.required_permission(),
+            Some(Permission::RunProjectCode)
+        );
+        assert_eq!(
+            CommandClass::Install.required_permission(),
+            Some(Permission::InstallDependencies)
+        );
+        assert_eq!(
+            CommandClass::Network.required_permission(),
+            Some(Permission::Network)
+        );
+    }
+
+    #[test]
+    fn a_command_can_be_in_two_classes_at_once() {
+        // `cargo add serde` installs a package and reaches the registry, and a
+        // set is what keeps both facts. A single-valued answer would have to
+        // drop one of them.
+        let effects = CommandEffects::of(&[CommandClass::Install, CommandClass::Network]);
+        assert_eq!(effects.classes().len(), 2);
+        assert!(effects.contains(CommandClass::Install));
+        assert!(effects.contains(CommandClass::Network));
+        assert!(!effects.contains(CommandClass::Static));
+        assert!(!effects.is_static_only());
+    }
+
+    #[test]
+    fn the_order_classes_were_named_in_does_not_change_the_answer() {
+        let forward = CommandEffects::of(&[
+            CommandClass::Network,
+            CommandClass::Install,
+            CommandClass::Destructive,
+        ]);
+        let reversed = CommandEffects::of(&[
+            CommandClass::Destructive,
+            CommandClass::Install,
+            CommandClass::Network,
+        ]);
+        assert_eq!(forward, reversed);
+        assert_eq!(
+            forward.classes(),
+            [
+                CommandClass::Install,
+                CommandClass::Network,
+                CommandClass::Destructive
+            ],
+            "the canonical order is the enum's, so a report written today is readable tomorrow"
+        );
+
+        // Duplicates are the same set, not a longer one.
+        let repeated = CommandEffects::of(&[CommandClass::Network, CommandClass::Network]);
+        assert_eq!(repeated, CommandEffects::single(CommandClass::Network));
+    }
+
+    #[test]
+    fn no_set_of_command_classes_is_empty() {
+        // A rule that named no class has not said the command is safe, it has
+        // said nothing, and "nothing" has to land on the cautious side.
+        let unnamed = CommandEffects::of(&[]);
+        assert_eq!(unnamed, CommandEffects::anything());
+        assert!(!unnamed.is_static_only());
+
+        for effects in [
+            CommandEffects::anything(),
+            CommandEffects::static_only(),
+            CommandEffects::of(&[]),
+            CommandEffects::single(CommandClass::Install),
+            CommandEffects::static_only().union(CommandEffects::anything()),
+            CommandEffects::single(CommandClass::Install)
+                .union(CommandEffects::single(CommandClass::Network)),
+        ] {
+            assert!(!effects.classes().is_empty(), "{effects:?} is an empty set");
+        }
+    }
+
+    #[test]
+    fn anything_is_every_class_but_static() {
+        let anything = CommandEffects::anything();
+        assert_eq!(
+            anything.classes(),
+            [
+                CommandClass::DynamicHost,
+                CommandClass::Install,
+                CommandClass::Network,
+                CommandClass::Destructive,
+            ],
+            "an unread command is a statement about danger, and `static` is not one of the dangers"
+        );
+        assert!(!anything.contains(CommandClass::Static));
+    }
+
+    #[test]
+    fn only_static_alone_reads_as_safe_to_proceed() {
+        // The one value a caller branches on to run without asking.
+        assert!(CommandEffects::static_only().is_static_only());
+        for &class in CommandClass::ALL {
+            let single = CommandEffects::single(class);
+            assert_eq!(
+                single.is_static_only(),
+                class == CommandClass::Static,
+                "{class:?} alone was read as static"
+            );
+        }
+    }
+
+    #[test]
+    fn union_of_two_sets_holds_both_and_neither_loses_static() {
+        let read = CommandEffects::static_only();
+        assert!(read.contains(CommandClass::Static));
+
+        let read_installing = read
+            .clone()
+            .union(CommandEffects::single(CommandClass::Install));
+        assert_eq!(
+            read_installing.classes(),
+            [CommandClass::Static, CommandClass::Install]
+        );
+        assert!(!read_installing.is_static_only());
+
+        // Unioning the same set twice is the same set.
+        assert_eq!(read.clone().union(read), CommandEffects::static_only());
+    }
+
+    #[test]
+    fn command_effects_display_as_their_wire_names() {
+        assert_eq!(CommandEffects::static_only().to_string(), "static");
+        assert_eq!(
+            CommandEffects::of(&[CommandClass::Install, CommandClass::Network]).to_string(),
+            "install, network"
+        );
+        assert_eq!(
+            CommandEffects::anything().to_string(),
+            "dynamic_host, install, network, destructive"
+        );
     }
 }

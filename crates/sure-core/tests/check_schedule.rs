@@ -129,8 +129,8 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          project's declared scripts into checks. `schedule.rs`'s own \
          documentation named this task as the one that would arrive, and the \
          rule below is what made its arrival a deliberate edit rather than a \
-         quiet one. `P4-T003` (Python) and `P4-T004` (Rust) belong here too when \
-         they land, and each of them is a diff to this list",
+         quiet one. `P4-T003` and `P4-T004` did belong here too when they \
+         landed, and each of them was a diff to this list",
     ),
     (
         "src/checks/python.rs",
@@ -143,6 +143,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          `CheckProposal` is the whole of what the acceptance asks: the type \
          discipline is what makes *without silent package installation* structural \
          instead of a convention",
+    ),
+    (
+        "src/checks/rust.rs",
+        "`P4-T004`, the third and the last one the other two entries named: it \
+         turns a Rust project's `Cargo.toml` and toolchain declarations into \
+         checks. It is here for the same reason as the two above — a file that \
+         decides which checks exist is a decision, and this list is where the \
+         decision is written down — and its own module documentation is where \
+         the interesting part is argued: `cargo fmt` rewrites the source tree, so \
+         this proposer runs `cargo fmt --check` instead and titles the check \
+         accordingly, because evidence from a command that changed the tree \
+         cannot be bound to the state the change was made to",
     ),
 ];
 

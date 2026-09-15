@@ -104,7 +104,7 @@
 
 use std::fmt;
 
-use sure_domain::evidence::EvidenceClass;
+use sure_domain::evidence::{AnchorSubject, EvidenceAnchor, EvidenceClass};
 use sure_domain::execution::{
     ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions, Permission, decide,
 };
@@ -205,6 +205,52 @@ impl CheckReason {
             }
             Self::FilePresent { path } => !path.trim().is_empty(),
             Self::ProjectWide => true,
+        }
+    }
+
+    /// Where a reader goes to check this reason for themselves.
+    ///
+    /// **A reason is a claim about the project, and a claim without a place to
+    /// look is one a reader has to take on trust.** The reason already carries
+    /// the detail; this is that detail in the shape
+    /// [`EvidenceAnchor`](sure_domain::evidence::EvidenceAnchor) asks for, so
+    /// that the evidence a check produces points at the same file the check's
+    /// own sentence named rather than at a second copy of it that could drift.
+    ///
+    /// **`None` is [`Self::ProjectWide`] and nothing else, and it is a real
+    /// limit rather than a placeholder.** Every other variant here was built
+    /// from a path or a component the discovery found, so it has somewhere to
+    /// point. `ProjectWide` says the check applies to the project as a whole,
+    /// which is a true thing to say and is not a location: a reader asking
+    /// *where do I look* has no answer, and
+    /// [`EvidenceAnchor::is_checkable`](sure_domain::evidence::EvidenceAnchor::is_checkable)
+    /// would answer `false` for an anchor filled in with the project's own name.
+    /// Returning `None` says so where a caller has to deal with it; filling in a
+    /// plausible path would be the lookup that fails into a wrong anchor. No
+    /// proposer in the product uses `ProjectWide` today, and when one does, this
+    /// is the function that will say so.
+    #[must_use]
+    pub fn anchor(&self) -> Option<EvidenceAnchor> {
+        match self {
+            Self::DeclaredCommand {
+                declared_in,
+                command,
+            } => Some(EvidenceAnchor::new(
+                AnchorSubject::Command,
+                declared_in.clone(),
+                command.clone(),
+            )),
+            Self::StackPresent { component, stack } => Some(EvidenceAnchor::new(
+                AnchorSubject::File,
+                component.clone(),
+                stack.clone(),
+            )),
+            Self::FilePresent { path } => Some(EvidenceAnchor::new(
+                AnchorSubject::File,
+                path.clone(),
+                "the file this check is about",
+            )),
+            Self::ProjectWide => None,
         }
     }
 }

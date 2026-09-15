@@ -76,13 +76,15 @@
 //! `tests/spawn_sites.rs` counts the callers of.
 //!
 //! **It is not the only proposer.** `P4-T003` added [`python`] beside [`node`],
-//! `P4-T004` (Rust) adds a third, and the reason the identifier scheme lives
-//! here rather than in any one of them is that the identifiers share a
+//! `P4-T004` added [`rust`] beside them, and the reason the identifier scheme
+//! lives here rather than in any one of them is that the identifiers share a
 //! namespace: two ecosystems describing one directory must not name one check
-//! twice. The identifier recipe is the whole of what they share — each
-//! ecosystem's module decides for itself which of its own declarations become
-//! checks, and [`MissingKind`] is the vocabulary they have in common without
-//! any of them producing all of it.
+//! twice. [`MissingKind`] is the vocabulary they have in common without any of
+//! them producing all of it, and [`evidence_of`] is the second thing they share
+//! without sharing a rule — it is the one door from a finished check to the
+//! evidence it is worth, and it takes the state off the result rather than from
+//! its caller. [`python`]'s documentation said `P4-T004` would add a third
+//! proposer and that the module would be a diff to this paragraph; it was.
 //!
 //! **It witnesses nothing about whether these checks are the right ones.** A
 //! `package.json` that declares `"test": "true"` gets a test check that passes,
@@ -92,10 +94,12 @@
 
 pub mod node;
 pub mod python;
+pub mod rust;
 
+use sure_domain::evidence::{Evidence, EvidenceAnchor, EvidenceClass};
 use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::severity::Severity;
-use sure_domain::status::{CheckResult, NotCheckedReason};
+use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
 
 use crate::fingerprint::digest::Digest;
 
@@ -449,11 +453,98 @@ impl MissingCommand {
     }
 }
 
+/// Evidence a finished check is worth, bound to the state it ran against.
+///
+/// # The binding is taken from the result and not from the caller
+///
+/// [`Evidence::fingerprint`] is an `Option<FingerprintId>`, and `None` is not a
+/// default that costs nothing: [`freshness`](sure_domain::evidence::freshness)
+/// reads it as `Stale(UnknownProvenance)`, so evidence without a state **can
+/// never support anything**. A check that produced a result and handed back
+/// evidence with no state attached would be a green nothing could confirm —
+/// and the type would not have noticed, because
+/// [`Evidence::new`](sure_domain::evidence::Evidence::new) takes the fingerprint
+/// as an `Option` and leaving it out is one keystroke away from filling it in.
+///
+/// So the fingerprint comes off the result. [`CheckResult::project_fingerprint`]
+/// is a required field with no `Default`, every constructor in `sure-domain` sets
+/// it, and a `CheckResult` that exists therefore has a state — which makes
+/// *a result's evidence is bound to the state that result is about* a property
+/// of the signature rather than a rule for a caller to remember.
+/// `the_evidence_a_result_produces_is_fresh_for_the_result_and_only_for_that_state`
+/// holds it over every status and both directions.
+///
+/// # `None` is one case, and it is the check that established nothing
+///
+/// The class decides, and it is the domain's own field rather than a status
+/// list written again here. [`EvidenceClass::Unknown`] means *not enough
+/// evidence to say anything*, and the domain's own constructors set it exactly
+/// where that is true: [`CheckResult::not_run`](sure_domain::status::CheckResult::not_run)
+/// and [`CheckResult::errored`](sure_domain::status::CheckResult::errored) do
+/// not offer a caller a choice, because an error means SURE does not know and a
+/// check that never ran established nothing.
+///
+/// **This is what keeps a gap from ever becoming a green**, and it is the same
+/// rule as [`MissingCommand`]'s seen from the other side: a missing command
+/// becomes a skipped result, and a skipped result has no evidence to give. The
+/// two are tested together in
+/// `a_missing_command_produces_a_result_that_produces_no_evidence`.
+///
+/// [`CheckResult::unknown`](sure_domain::status::CheckResult::unknown) **does**
+/// produce evidence, and that is the distinction it exists for: it is the one
+/// status whose class is a parameter, because it means *SURE has evidence that
+/// supports no verdict* rather than *SURE has none*.
+///
+/// # It does not decide that the evidence is any good
+///
+/// Everything but the class comes straight off the result — the summary is the
+/// result's own title and status, the severity is the result's own — and nothing
+/// here can tell a real pass from a `"test": "true"` that exits zero. That is
+/// the limit this whole layer states about itself, arriving one type further on.
+#[must_use]
+pub fn evidence_of(result: &CheckResult, anchor: EvidenceAnchor) -> Option<Evidence> {
+    if result.evidence_class == EvidenceClass::Unknown {
+        return None;
+    }
+    Some(Evidence::new(
+        result.evidence_class,
+        format!("{}: {}.", result.title, outcome_phrase(result.status)),
+        anchor,
+        Some(result.project_fingerprint.clone()),
+        result.severity,
+    ))
+}
+
+/// How a check's outcome reads in the middle of a sentence.
+///
+/// A function of the status rather than of the result, so the six sentences are
+/// six values in one place and `a_report_can_tell_all_six_outcomes_apart` can
+/// ask whether any two of them read the same. Deliberately not
+/// [`CheckStatus::as_str`](sure_domain::status::CheckStatus::as_str): that is the
+/// wire name, and a person reading a report should not be shown `skipped`.
+///
+/// **A sentence rather than a verdict.** Nothing here says the project is fine —
+/// `passed` is a statement about what the check found and about nothing else —
+/// and nothing here is project text, for the reason every sentence in this
+/// repository is a constant: a project must not be able to write a line SURE says.
+fn outcome_phrase(status: CheckStatus) -> &'static str {
+    match status {
+        CheckStatus::Pass => "passed",
+        CheckStatus::Fail => "failed",
+        CheckStatus::Warning => "only partly passed",
+        CheckStatus::Skipped => "was not checked",
+        CheckStatus::Error => "could not be completed",
+        CheckStatus::Unknown => "reached no conclusion",
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use sure_domain::evidence::EvidenceClass;
+    use sure_domain::evidence::{
+        AnchorSubject, EvidenceClass, Freshness, StalenessReason, freshness,
+    };
     use sure_domain::status::CheckStatus;
 
     /// Component paths and tags chosen to be hostile rather than representative.
@@ -688,5 +779,181 @@ mod tests {
                 "two missing kinds render identically: {sentence}"
             );
         }
+    }
+
+    /// An anchor pointing at a file and a line that could be checked.
+    fn anchor() -> EvidenceAnchor {
+        EvidenceAnchor::new(
+            AnchorSubject::File,
+            "package.json",
+            "the scripts it declares",
+        )
+    }
+
+    /// A finished check, with every field the type has set by hand.
+    ///
+    /// **A struct literal rather than a constructor, and the status is why.** The
+    /// six constructors each pin a class — `not_run` and `errored` force
+    /// [`EvidenceClass::Unknown`], `pass`, `fail` and `warning` force a fixed one,
+    /// and only `unknown` offers a choice — so a sweep written with them would be
+    /// testing six constructors rather than the matrix they produce. What the tests
+    /// below ask is what `evidence_of` does with a *result*, and a result is a
+    /// value with nine public fields.
+    fn finished(
+        status: CheckStatus,
+        class: EvidenceClass,
+        fingerprint: &FingerprintId,
+    ) -> CheckResult {
+        CheckResult {
+            id: check_id("package.json", "nodetest"),
+            title: "run the tests".to_owned(),
+            status,
+            severity: Severity::MustFix,
+            evidence_class: class,
+            project_fingerprint: fingerprint.clone(),
+            not_checked_reason: None,
+            reason: String::new(),
+            critical: true,
+        }
+    }
+
+    #[test]
+    fn a_report_can_tell_all_six_outcomes_apart() {
+        // **The question `outcome_phrase`'s documentation says can be asked, asked
+        // here.** Six statuses, six sentences in the middle of a sentence, and the
+        // failure this guards is the one that reads as writing rather than as a bug:
+        // two arms of a `match` collapsing into one phrase, so a report says a check
+        // "failed" when it was never run.
+        let phrases: Vec<&'static str> = CheckStatus::ALL
+            .iter()
+            .copied()
+            .map(outcome_phrase)
+            .collect();
+        assert_eq!(
+            phrases.len(),
+            CheckStatus::ALL.len(),
+            "the sweep did not visit every status"
+        );
+
+        for (index, phrase) in phrases.iter().enumerate() {
+            assert!(
+                !phrase.trim().is_empty(),
+                "{:?} says nothing",
+                CheckStatus::ALL[index]
+            );
+            assert!(
+                !phrase.ends_with('.'),
+                "{phrase:?} ends a sentence in the middle of one"
+            );
+            assert!(
+                !phrases[index + 1..].contains(phrase),
+                "two statuses render identically: {phrase:?}"
+            );
+            // The sentence is never the wire name, which is the thing
+            // `outcome_phrase` explicitly is not: a person reading a report should
+            // not be shown `not_checked`.
+            assert_ne!(
+                *phrase,
+                CheckStatus::ALL[index].as_str(),
+                "{:?} prints its own wire name",
+                CheckStatus::ALL[index]
+            );
+        }
+
+        // Written out as a value, because the six are a decision rather than a
+        // derivation and a seventh status would have to be argued for here.
+        assert_eq!(
+            phrases,
+            vec![
+                "passed",
+                "failed",
+                "only partly passed",
+                "was not checked",
+                "could not be completed",
+                "reached no conclusion",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_evidence_a_result_produces_is_fresh_for_the_result_and_only_for_that_state() {
+        // **The claim `evidence_of`'s documentation makes about the signature,
+        // asked over the whole matrix.** The fingerprint comes off the result rather
+        // than from a caller, so "a result's evidence is bound to the state that
+        // result is about" is a property of the shape of the function — and a
+        // property of a shape is checked by sweeping the values the shape admits,
+        // not by reading it.
+        let ran_at = FingerprintId::generate();
+        let moved_on = FingerprintId::generate();
+
+        let mut checked = 0;
+        for status in CheckStatus::ALL {
+            for class in EvidenceClass::ALL {
+                let result = finished(*status, *class, &ran_at);
+                let evidence = evidence_of(&result, anchor());
+
+                if *class == EvidenceClass::Unknown {
+                    assert_eq!(
+                        evidence, None,
+                        "{status:?} with {class:?} produced evidence, and {class:?} is \
+                         the class that means nothing was established"
+                    );
+                    continue;
+                }
+
+                let evidence =
+                    evidence.unwrap_or_else(|| panic!("{status:?} with {class:?} is None"));
+                checked += 1;
+
+                // The first direction: fresh for the state the result names.
+                assert_eq!(
+                    freshness(&evidence, &ran_at),
+                    Freshness::Fresh,
+                    "{status:?} is not bound to the state it ran against"
+                );
+                // The second: and for no other. This is the half that matters —
+                // evidence that stayed fresh after the project moved on is the green
+                // that outlived what earned it.
+                assert_eq!(
+                    freshness(&evidence, &moved_on),
+                    Freshness::Stale(StalenessReason::FingerprintChanged),
+                    "{status:?} stayed usable against a state it was not earned in"
+                );
+                // And not the third way to be bound wrongly, which reads as caution
+                // rather than as a defect: no provenance at all is stale against
+                // *everything*.
+                assert!(
+                    evidence.fingerprint.is_some(),
+                    "{status:?} produced evidence that applies to nothing"
+                );
+
+                // Everything but the class comes straight off the result, which is
+                // what makes the summary a sentence about this check rather than a
+                // sentence about checks in general.
+                assert_eq!(evidence.class, *class);
+                assert_eq!(evidence.severity, result.severity);
+                assert!(
+                    evidence.summary.contains(&result.title),
+                    "{}",
+                    evidence.summary
+                );
+                assert!(
+                    evidence.summary.contains(outcome_phrase(*status)),
+                    "{} does not say what happened",
+                    evidence.summary
+                );
+            }
+        }
+        // The vacuity guard: a matrix that visited nothing would satisfy every
+        // assertion above. Six statuses times five non-`Unknown` classes.
+        assert_eq!(
+            checked,
+            CheckStatus::ALL.len() * (EvidenceClass::ALL.len() - 1)
+        );
+        assert_eq!(
+            CheckStatus::ALL.len() * EvidenceClass::ALL.len(),
+            30,
+            "the matrix is not the six times five this test claims to sweep"
+        );
     }
 }

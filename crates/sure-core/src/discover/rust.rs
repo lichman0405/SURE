@@ -70,7 +70,12 @@ use super::{
 use crate::scan::Scan;
 
 /// The manifest every Rust project has, relative to the project root.
-const MANIFEST: &str = "Cargo.toml";
+///
+/// Public because it is the file a Rust check is about, for the reason
+/// [`python::MANIFEST`](super::python::MANIFEST) is: the layer above needs to
+/// name the file it read the project from, and a second copy of the string up
+/// there is a second thing to keep in step with this one.
+pub const MANIFEST: &str = "Cargo.toml";
 
 /// The lockfile, whose existence says a resolver has run here.
 const LOCKFILE: &str = "Cargo.lock";

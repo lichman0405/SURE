@@ -19,9 +19,17 @@
 //!
 //! **Nothing about process trees on a platform that cannot reach them.**
 //! [`Stop`] says which of the two stops happened, and the test asserts what the
-//! platform can actually do rather than what would be nicest. `P3-T002` owns
-//! the lifecycle coverage and `P3-T003` the Windows/Linux comparison; what is
-//! here is the runner's own contract.
+//! platform can actually do rather than what would be nicest. `P3-T003` owns
+//! the Windows/Linux comparison; what is here is the runner's own contract, and
+//! — added by `P3-T002` — the platform's answer to it.
+//!
+//! **The lifecycle claims are about a process, not about a report.** A stop is
+//! asked to prove itself against a grandchild that is given a way to say
+//! whether it is still alive, because the runner's own answer to "did you stop
+//! it" is the thing under test and not the thing that can settle it. That
+//! instrument is written up at [`child_waits_to_be_released`], and the reason
+//! the positive control is not optional is written up beside the assertion that
+//! uses it.
 //!
 //! **Not that a command that does not exist is classified.** Refusing to run
 //! something is a decision about *whether*, which `P3-T004` and `P3-T005` make.
@@ -80,6 +88,63 @@ const SAID_ON_STDERR: &str = "this is what went wrong\n";
 /// deadline use a short one, and that is stated where it is used.
 const PATIENT: Duration = Duration::from_secs(60);
 
+/// How long the run in a tree test is given before its deadline stops it.
+///
+/// Generous rather than tight, and for a measured reason: what the test needs
+/// is for the grandchild to have **started** before the deadline arrives, and
+/// that costs two process starts on a machine nobody controls. Two seconds
+/// leaves that twenty times over. What it must **not** be is long enough for
+/// anything to happen after it, which is why the grandchild is given no
+/// lifetime of its own — see [`child_waits_to_be_released`].
+const TREE_DEADLINE: Duration = Duration::from_secs(2);
+
+/// How often a waiting child looks for its release file.
+///
+/// Milliseconds, and the unit is in the name because the number goes through
+/// the same channel as everything else a child is told.
+const POLL_INTERVAL: u64 = 25;
+
+/// How long a stopped run gets to prove a released grandchild is gone.
+///
+/// The grandchild polls every [`POLL_INTERVAL`], so a grandchild that is still
+/// running writes within a small multiple of that; a second is forty of them.
+/// This is a wait for something that must **not** happen, which is the only
+/// kind of wait that has to be bounded by the observer rather than by the
+/// observed.
+const RELEASE_WAIT: Duration = Duration::from_secs(1);
+
+/// How long a waiting child waits for a release that may never come.
+///
+/// A child whose parent failed its own test is a child nobody will release, and
+/// a grandchild that waits forever is a process left on the machine by a
+/// failing test — which is the thing these tests exist to prevent. Thirty
+/// seconds bounds it without ever reaching it, because a released grandchild
+/// writes in milliseconds and a dead one writes never.
+const ABANDONED: Duration = Duration::from_secs(30);
+
+/// A directory name that is ordinary on both platforms and mangles easily.
+///
+/// One spelling used by every test that needs it, so that "a path with a space
+/// and a character outside ASCII" means the same thing in all of them and a
+/// test cannot pass by being awkward in a way the others are not. **The space
+/// is the half that breaks first**: a path is re-split on whitespace by
+/// anything that turns a path into a command line, and the non-ASCII half is
+/// the half that breaks silently, by arriving as different bytes rather than as
+/// two pieces.
+const AWKWARD: &str = "a directory with a space and \u{00e9}\u{4e2d}\u{6587}";
+
+/// A string that is not ASCII, for the argument and output tests.
+///
+/// It carries three different problems on purpose, and they fail differently:
+/// `\u{00e9}` and `\u{00f6}` are Latin-1 characters that a byte-oriented path
+/// would pass through unchanged and a code-page conversion would not;
+/// `\u{4e2d}\u{6587}` is outside Latin-1, so nothing but a real encoding
+/// survives it; and `\u{1f389}` is **outside the Basic Multilingual Plane**, so
+/// on Windows it is two UTF-16 code units and a surrogate pair — the case a
+/// conversion that stops at the first unit truncates and a length computed in
+/// code units gets wrong.
+const NOT_ASCII: &str = "h\u{00e9}llo w\u{00f6}rld \u{4e2d}\u{6587} \u{1f389}";
+
 /// A scratch directory for one test, named after the test and this process.
 ///
 /// The name is not removed on entry: a path left behind by a killed run is
@@ -110,23 +175,56 @@ fn run_child(
     cancellation: Cancellation,
 ) -> Result<Outcome, ProcessError> {
     let executable = std::env::current_exe().expect("the test binary's own path");
-    let request = ProcessRequest::new(executable, working_directory, limits, cancellation)
-        .with_arguments([
-            // `--exact`, so the filter cannot match another test whose name
-            // starts the same way. `--ignored`, because a child is not a test
-            // on its own. `--nocapture`, so what the child prints reaches the
-            // stdout this runner captured rather than libtest's capture buffer.
-            "--exact",
-            mode,
-            "--ignored",
-            "--quiet",
-            "--nocapture",
-            // The payload, in the vector, one element. libtest treats it as a
-            // skip filter, which matches nothing and removes nothing.
-            "--skip",
-            payload,
-        ])
-        .with_environment(environment);
+    run_child_at(
+        &executable,
+        mode,
+        payload,
+        working_directory,
+        environment,
+        limits,
+        cancellation,
+    )
+}
+
+/// The same, but with the program named rather than assumed.
+///
+/// Only one test needs this, and it needs it for the reason the program path is
+/// worth testing at all: **the program is the one part of a request that cannot
+/// be given a name the test controls while it is still this binary.** Every
+/// other test here runs `current_exe()`, whose path is whatever the build
+/// directory happens to be. The test that is about the program's own path has
+/// to put a copy somewhere awkward first, and that copy is what it hands here.
+fn run_child_at(
+    executable: &Path,
+    mode: &str,
+    payload: &str,
+    working_directory: &Path,
+    environment: Environment,
+    limits: Limits,
+    cancellation: Cancellation,
+) -> Result<Outcome, ProcessError> {
+    let request = ProcessRequest::new(
+        executable.to_path_buf(),
+        working_directory,
+        limits,
+        cancellation,
+    )
+    .with_arguments([
+        // `--exact`, so the filter cannot match another test whose name
+        // starts the same way. `--ignored`, because a child is not a test
+        // on its own. `--nocapture`, so what the child prints reaches the
+        // stdout this runner captured rather than libtest's capture buffer.
+        "--exact",
+        mode,
+        "--ignored",
+        "--quiet",
+        "--nocapture",
+        // The payload, in the vector, one element. libtest treats it as a
+        // skip filter, which matches nothing and removes nothing.
+        "--skip",
+        payload,
+    ])
+    .with_environment(environment);
     sure_core::process::run(&request)
 }
 
@@ -139,6 +237,34 @@ fn instructions(report: &Path, number: u64) -> OsString {
 /// A report file nothing has written yet.
 fn report_path(directory: &Path) -> PathBuf {
     directory.join("report.tsv")
+}
+
+/// The marker a waiting child writes the moment it is running.
+///
+/// A sibling of the report rather than a line inside it, because the whole
+/// point of the marker is that it is written **before** anything the child is
+/// waiting on. A child that has to finish before it reports has already proven
+/// nothing about the moment in between.
+fn started_path(report: &Path) -> PathBuf {
+    report.with_extension("started")
+}
+
+/// The file that tells a waiting child it may finish.
+fn released_path(report: &Path) -> PathBuf {
+    report.with_extension("release")
+}
+
+/// Where the grandchild in a tree test writes, in a directory of its own.
+///
+/// The directory is made here rather than by the child: the grandchild is
+/// started by another process, and a child that had to create its own report
+/// directory would be a child that could fail for a reason the test is not
+/// about.
+fn grandchild_report(directory: &Path) -> PathBuf {
+    let report = report_path(&directory.join("grandchild"));
+    fs::create_dir_all(report.parent().expect("a grandchild directory"))
+        .expect("a grandchild directory");
+    report
 }
 
 /// Read a child's report as `key -> value`, keeping repeated keys in order.
@@ -242,13 +368,63 @@ fn child_floods_stdout() {
     stdout.flush().expect("a flush");
 }
 
+/// The child that stays alive until a file says it may go, and says first that
+/// it is there.
+///
+/// Two files at two moments, and the pair is the whole instrument.
+/// [`started_path`] is written **before** the wait and is the positive control:
+/// it is the only thing that tells "the stop reached this process" apart from
+/// "this process never ran", and an assertion that a file is *absent* cannot
+/// tell those apart on its own — both leave nothing behind. That is not
+/// hypothetical here: a grandchild whose name did not match the filter it was
+/// started with runs zero tests, exits cleanly and writes nothing, and the
+/// "was it stopped?" assertion on Windows was satisfied by exactly that,
+/// measured before this marker existed.
+/// [`released_path`] is what a parent drops afterwards to ask whether this
+/// process is still alive: one that survived notices within a poll and writes
+/// its report, and one that was stopped cannot write anything at all.
+///
+/// Waiting on a file rather than sleeping for a fixed time, on purpose. A sleep
+/// races the parent's deadline — it must be long enough not to finish early and
+/// short enough to be worth waiting out, and on a fast machine the first of
+/// those is what breaks. A release file takes the clock out of it: this process
+/// is alive exactly until something stops it, whatever the machine did with the
+/// time. The number it is given is the poll interval, not a duration to wait.
+#[test]
+#[ignore = "spawned by the parent tests, not run on its own"]
+fn child_waits_to_be_released() {
+    let (given, number) = child_instructions();
+    let mut lines = given.split('\n');
+    let report = PathBuf::from(lines.next().expect("a report path"));
+
+    fs::write(started_path(&report), "started\n").expect("the started marker");
+
+    let release = released_path(&report);
+    let poll = Duration::from_millis(number);
+    let give_up = Instant::now() + ABANDONED;
+    while !release.exists() {
+        if Instant::now() >= give_up {
+            // Nobody released this process, which means the test that started
+            // it has already failed and is not waiting for an answer. Exiting
+            // without a report is the honest outcome: nothing was measured.
+            return;
+        }
+        std::thread::sleep(poll);
+    }
+    fs::write(&report, "finished\n").expect("the child's report");
+}
+
 /// The child that starts another process, and then stays alive itself.
 ///
 /// Two processes deep, because one is not enough to test a claim about a tree.
-/// The grandchild writes its report after sleeping, so **whether that file
-/// exists** is how the parent tells a stop that reached it from a stop that
-/// left it running — without a signal, a handle or a platform-specific
-/// question, which is the only way the answer can be read on both platforms.
+/// The grandchild writes a marker when it starts and a report if it is ever
+/// released, and the **pair** is how the parent reads the answer: the marker
+/// says the tree went two deep and the grandchild was alive, and the report
+/// says whether it is still alive now. Neither alone is enough, and the marker
+/// is the half that was missing — a stop that reached a process and a process
+/// that never existed leave the same nothing behind. No signal, no handle and
+/// no platform-specific question is involved, which is the only way the answer
+/// can be read on both platforms.
 #[test]
 #[ignore = "spawned by the parent tests, not run on its own"]
 // The grandchild is deliberately not waited on. Waiting for it would make this
@@ -266,7 +442,7 @@ fn child_starts_a_grandchild() {
     Command::new(executable)
         .args([
             "--exact",
-            "child_sleeps",
+            "child_waits_to_be_released",
             "--ignored",
             "--quiet",
             // The grandchild gets no fresh environment: it inherits this
@@ -305,6 +481,26 @@ fn child_writes_both_streams() {
     stderr
         .write_all(SAID_ON_STDERR.as_bytes())
         .expect("a write");
+    stderr.flush().expect("a flush");
+}
+
+/// The child that says something that is not ASCII, on both streams.
+///
+/// Written as bytes rather than as a formatted string on purpose: the claim is
+/// that what the program wrote is what SURE read, and a child that built its
+/// output with `format!` would be reporting its own encoding decision rather
+/// than the bytes it wrote.
+#[test]
+#[ignore = "spawned by the parent tests, not run on its own"]
+fn child_says_something_not_ascii() {
+    use std::io::Write;
+
+    let _ = child_instructions();
+    let mut stdout = std::io::stdout();
+    stdout.write_all(NOT_ASCII.as_bytes()).expect("a write");
+    stdout.flush().expect("a flush");
+    let mut stderr = std::io::stderr();
+    stderr.write_all(NOT_ASCII.as_bytes()).expect("a write");
     stderr.flush().expect("a flush");
 }
 
@@ -422,6 +618,219 @@ fn the_program_runs_in_the_directory_the_request_named() {
     );
 
     let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs() {
+    // The test above holds the working directory. This holds the **program**,
+    // which is a different position in the request and fails differently: a
+    // working directory is handed to the operating system as a value of its
+    // own, while a program path has to survive being turned into a command
+    // line. On Windows the program and its arguments end up in one string that
+    // the operating system splits again, so a path with a space in it starts
+    // only if whoever built that string quoted it — and quoted it exactly once,
+    // because a runner that quotes a path the process API was going to quote
+    // itself has got it wrong in the other direction. That second failure is
+    // not hypothetical: it is one of the mutations this module is held against,
+    // and applied, this test fails in 0.01s with `os error 123`,
+    // `ERROR_INVALID_NAME`, before any process is started.
+    //
+    // So the copy is placed in an awkward **directory** and given an awkward
+    // **name**, because those are the two halves of "the path has a space in
+    // it" and quoting fixes one of them.
+    let parent = scratch("program-path");
+    let directory = parent.join(AWKWARD);
+    fs::create_dir_all(&directory).expect("a directory with an awkward name");
+
+    // Windows starts a program by its extension, so the copy keeps one there and
+    // does not need one on the platforms that mark a program with a mode bit
+    // instead. `fs::copy` carries whichever of the two this source has, so the
+    // copy is runnable for the same reason the original is — and if it were not,
+    // the runner would refuse to start it and this test would fail on that
+    // rather than pass for a reason nobody chose.
+    let name = if cfg!(windows) {
+        "a program with a space and \u{00e9}\u{4e2d}\u{6587}.exe"
+    } else {
+        "a program with a space and \u{00e9}\u{4e2d}\u{6587}"
+    };
+    let program = directory.join(name);
+    let source = std::env::current_exe().expect("the test binary's own path");
+    fs::copy(&source, &program).expect("a copy of this test binary");
+
+    // The report is what proves the copy **ran**: the child writes it into the
+    // scratch directory, and nothing on this machine writes that file except a
+    // process that reads the variable the child is given. The outcome is not
+    // that evidence — it carries the request's program back to the caller, so
+    // it says what was asked for rather than what ran, and it is asserted below
+    // as the one thing about the copy that the outcome can speak to.
+    let report = report_path(&parent);
+    let outcome = run_child_at(
+        &program,
+        "child_reports_what_it_was_given",
+        "unused",
+        &directory,
+        Environment::inherited().with(CHILD_ENV, instructions(&report, 0)),
+        Limits::new(PATIENT, 64 * 1024, 64 * 1024),
+        Cancellation::new(),
+    )
+    .expect("the copied program runs");
+
+    assert!(
+        matches!(outcome.termination(), Termination::Exited { code: Some(0) }),
+        "the copy should have run and ended cleanly; it ended with {:?}",
+        outcome.termination()
+    );
+    // The outcome is about the copy rather than about some other path, which is
+    // the whole of what it can say here: it is the request's program echoed
+    // back, so it answers "which program is this outcome about", not "which file
+    // did the operating system start".
+    assert_eq!(
+        Path::new(outcome.program()),
+        program.as_path(),
+        "the outcome is about a different program"
+    );
+
+    let reported = consequences(&report);
+    let cwd = value(&reported, "cwd").expect("the copy reported its directory");
+    assert_eq!(
+        fs::canonicalize(Path::new(cwd)).expect("the copy's directory exists"),
+        fs::canonicalize(&directory).expect("the directory we asked for exists"),
+        "the copied program ran somewhere else"
+    );
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn an_argument_that_is_not_ascii_arrives_as_one_argument_unchanged() {
+    // The payload test above is about *splitting*: a shell-hostile string that
+    // must stay one argument. This is about **encoding**, which fails without
+    // splitting anything — a conversion that loses a character, truncates at a
+    // surrogate pair, or re-encodes through a code page produces the right
+    // number of arguments with the wrong bytes in them. An ASCII payload cannot
+    // tell those two failures apart, and neither can an assertion that counts
+    // arguments.
+    let directory = scratch("non-ascii-argument");
+    let report = report_path(&directory);
+
+    let outcome = run_child(
+        "child_reports_what_it_was_given",
+        NOT_ASCII,
+        &directory,
+        Environment::inherited().with(CHILD_ENV, instructions(&report, 0)),
+        Limits::new(PATIENT, 64 * 1024, 64 * 1024),
+        Cancellation::new(),
+    )
+    .expect("the child runs");
+    assert!(matches!(outcome.termination(), Termination::Exited { .. }));
+
+    let reported = consequences(&report);
+    let arguments = values(&reported, ARGUMENT_LINE);
+    assert!(
+        arguments.contains(&NOT_ASCII),
+        "the argument should have arrived unchanged; the child saw {arguments:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_report_path_with_a_space_and_unicode_is_the_path_the_child_writes_to() {
+    // The third of the four positions a path can occupy in a request, after the
+    // program and the working directory: **inside a variable**. It is the one
+    // where a path stops being a path and becomes an `OsString`, and on Windows
+    // that is the environment block rather than the command line — a second
+    // encoding surface, with its own conversion, its own length rule, and a
+    // runner that is free to get one right and the other wrong.
+    //
+    // The assertion is deliberately the *file* rather than the string the child
+    // read back. A child that reported the value it received would be reporting
+    // what it read, and the claim is that the value it read is the value that
+    // was sent: if the path arrived mangled, the write lands somewhere else and
+    // there is no file to read. So the failure is loud and it cannot be
+    // satisfied by echoing.
+    let parent = scratch("non-ascii-variable");
+    let directory = parent.join(AWKWARD);
+    fs::create_dir_all(&directory).expect("a directory with an awkward name");
+    let report = directory.join("report with a space \u{00e9}\u{4e2d}\u{6587}.tsv");
+
+    let outcome = run_child(
+        "child_reports_what_it_was_given",
+        "unused",
+        // The child's working directory is the ordinary parent; only the report
+        // path is awkward, so a pass cannot come from the directory test above
+        // by accident.
+        &parent,
+        Environment::inherited().with(CHILD_ENV, instructions(&report, 0)),
+        Limits::new(PATIENT, 64 * 1024, 64 * 1024),
+        Cancellation::new(),
+    )
+    .expect("the child runs");
+    assert!(matches!(outcome.termination(), Termination::Exited { .. }));
+
+    assert!(
+        report.exists(),
+        "the child did not write to {} — it wrote nowhere, or somewhere else",
+        report.display()
+    );
+    let reported = consequences(&report);
+    assert!(
+        value(&reported, "cwd").is_some(),
+        "the file at an awkward path is not a report the child wrote"
+    );
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn what_a_program_writes_outside_ascii_comes_back_as_the_bytes_it_wrote() {
+    // The fourth surface, and the only one that is not about what SURE *sends*:
+    // this is about what it *reads back*. The drain copies bytes and never
+    // decodes, so the contract is that the bytes arrive exactly — which is a
+    // claim a `String`-shaped capture could not make, because by then an
+    // encoding decision has already been made on the child's behalf.
+    //
+    // Standard error is asserted by equality and standard output by `contains`,
+    // and the asymmetry is the platform's rather than a convenience: libtest
+    // shares the child's standard output and prints its own summary there when
+    // the child returns normally, so equality on standard output would be
+    // asserting libtest's output as well as the child's. Standard error is not
+    // shared, so equality there is exact.
+    let directory = scratch("non-ascii-output");
+    let report = report_path(&directory);
+
+    let outcome = run_child(
+        "child_says_something_not_ascii",
+        "unused",
+        &directory,
+        Environment::inherited().with(CHILD_ENV, instructions(&report, 0)),
+        Limits::new(PATIENT, 64 * 1024, 64 * 1024),
+        Cancellation::new(),
+    )
+    .expect("the child runs");
+    assert!(matches!(outcome.termination(), Termination::Exited { .. }));
+
+    assert_eq!(
+        outcome.stderr().bytes(),
+        NOT_ASCII.as_bytes(),
+        "standard error did not come back as the bytes the child wrote"
+    );
+    assert!(
+        outcome
+            .stdout()
+            .bytes()
+            .windows(NOT_ASCII.len())
+            .any(|window| window == NOT_ASCII.as_bytes()),
+        "standard output did not contain the bytes the child wrote; it held {:?}",
+        outcome.stdout().text_lossy()
+    );
+    // Nothing was thrown away to get there, which is the part a truncating
+    // conversion would get wrong without failing either assertion above on a
+    // stream short enough to fit the bound.
+    assert_eq!(outcome.stderr().discarded_bytes(), 0);
+    assert!(outcome.stderr().unfinished().is_none());
+
+    let _ = fs::remove_dir_all(&directory);
 }
 
 #[test]
@@ -590,52 +999,69 @@ fn a_run_that_passes_its_deadline_is_stopped_and_says_so() {
     let _ = fs::remove_dir_all(&directory);
 }
 
-#[test]
-fn a_stopped_run_reaches_what_the_run_started_or_says_that_it_did_not() {
-    // `Stop::WholeTree` is a claim, and a claim nothing holds is the failure
-    // this repository goes looking for. The test above asserts which variant
-    // comes back; this one asserts whether it is **true** — the difference
-    // between a runner that stops a tree and a runner that says it did.
-    //
-    // The grandchild sleeps, then writes a file. Nothing sends it a signal and
-    // nothing asks the platform what happened to it: the file either appears or
-    // it does not, and that is the whole answer on both platforms.
-    let directory = scratch("process-tree");
-    let grandchild = report_path(&directory.join("grandchild"));
-    fs::create_dir_all(grandchild.parent().expect("a parent")).expect("a grandchild directory");
-    const GRANDCHILD_SLEEP_MS: u64 = 1_500;
-
+/// Start a child that starts a grandchild, stop it, and ask the grandchild
+/// whether it is still there.
+///
+/// The asking is the same on both platforms and involves nothing but the file
+/// system: the grandchild was alive when the stop was asked for (asserted here,
+/// because every caller needs it and a caller that forgot would be reading an
+/// absence that proves nothing), and afterwards it is either released and
+/// writes or it is gone and cannot.
+fn a_grandchild_after_the_stop(
+    directory: &Path,
+    grandchild: &Path,
+    limits: Limits,
+    cancellation: Cancellation,
+) -> Outcome {
     let outcome = run_child(
         "child_starts_a_grandchild",
         "unused",
-        &directory,
-        Environment::inherited().with(CHILD_ENV, instructions(&grandchild, GRANDCHILD_SLEEP_MS)),
-        Limits::new(Duration::from_millis(250), 64 * 1024, 64 * 1024),
-        Cancellation::new(),
+        directory,
+        Environment::inherited().with(CHILD_ENV, instructions(grandchild, POLL_INTERVAL)),
+        limits,
+        cancellation,
     )
     .expect("the child starts");
 
-    let stopped = match outcome.termination() {
-        Termination::TimedOut { stopped } => stopped,
-        other => panic!("expected the deadline to stop the run, got {other:?}"),
-    };
+    assert!(
+        started_path(grandchild).exists(),
+        "the grandchild never started, so this run says nothing about whether a stop reaches a \
+         tree — a stop that reached it and a grandchild that never existed leave the same nothing \
+         behind, which is why the marker is asserted before the absence is read"
+    );
 
-    // Long enough for the grandchild to have written its report if it were
-    // still running when the parent stopped the outer process.
-    std::thread::sleep(Duration::from_millis(GRANDCHILD_SLEEP_MS + 1_000));
+    // The question is asked by giving the grandchild a way to answer: a process
+    // that is still running writes within a poll, and a process that was
+    // stopped cannot write at all.
+    fs::write(released_path(grandchild), "go\n").expect("the release");
+    std::thread::sleep(RELEASE_WAIT);
+    outcome
+}
 
+/// Assert where the grandchild stands, against what this platform can do.
+///
+/// Not a skip on either branch. The Unix side asserts the **opposite** outcome,
+/// so the day a Unix build can reach a process tree this fails and the report
+/// has to change on purpose rather than being discovered by a reader.
+fn assert_what_the_platform_could_reach(stopped: Stop, grandchild: &Path) {
     if cfg!(windows) {
-        assert_eq!(stopped, Stop::WholeTree);
+        assert_eq!(
+            stopped,
+            Stop::WholeTree,
+            "the stop was reported as {stopped:?} on a platform that reaches a tree"
+        );
         assert!(
             !grandchild.exists(),
-            "the run reported that it stopped the whole tree, and the grandchild ran to the end \
-             of its sleep — so the report was wrong"
+            "the run reported that it stopped the whole tree, and the grandchild it was given \
+             time to answer wrote its report anyway — so the report was wrong"
         );
     } else {
-        // Not a skip. The gap is **measured** rather than described, so the day
-        // a Unix build can reach a process tree this test fails and has to be
-        // changed on purpose rather than being discovered by a reader.
-        assert_eq!(stopped, Stop::ProcessOnly);
+        assert_eq!(
+            stopped,
+            Stop::ProcessOnly,
+            "the stop was reported as {stopped:?} on a platform expected to reach only the \
+             process itself"
+        );
         assert!(
             grandchild.exists(),
             "this platform was expected to reach only the process itself, and the grandchild was \
@@ -643,6 +1069,76 @@ fn a_stopped_run_reaches_what_the_run_started_or_says_that_it_did_not() {
              say so"
         );
     }
+}
+
+#[test]
+fn a_stopped_run_reaches_what_the_run_started_or_says_that_it_did_not() {
+    // `Stop::WholeTree` is a claim, and a claim nothing holds is the failure
+    // this repository goes looking for. The test above asserts which variant
+    // comes back; this one asserts whether it is **true** — the difference
+    // between a runner that stops a tree and a runner that says it did.
+    let directory = scratch("process-tree");
+    let grandchild = grandchild_report(&directory);
+
+    let outcome = a_grandchild_after_the_stop(
+        &directory,
+        &grandchild,
+        Limits::new(TREE_DEADLINE, 64 * 1024, 64 * 1024),
+        Cancellation::new(),
+    );
+
+    let stopped = match outcome.termination() {
+        Termination::TimedOut { stopped } => stopped,
+        other => panic!("expected the deadline to stop the run, got {other:?}"),
+    };
+    assert_what_the_platform_could_reach(stopped, &grandchild);
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_cancelled_run_reaches_what_it_started_too() {
+    // The stop above is the runner's own clock deciding. This one is somebody
+    // else deciding, and it is a separate claim: a caller that asks for a run
+    // to stop needs the same tree reached as a deadline that expires, and one
+    // of the two reaching it is not evidence about the other. The two are
+    // separate tests rather than one with two branches because they are
+    // separate promises.
+    //
+    // The cancellation is asked for **after the grandchild is up**, which is
+    // what makes the answer mean something: cancelling a hundred milliseconds
+    // in would race the two process starts, and a machine that lost that race
+    // would report a tree that was never there. So the cancelling thread waits
+    // for the marker the grandchild writes, and the wait has its own bound.
+    let directory = scratch("process-tree-cancelled");
+    let grandchild = grandchild_report(&directory);
+
+    let cancellation = Cancellation::new();
+    let cancelled_by = cancellation.clone();
+    let marker = started_path(&grandchild);
+    let canceller = std::thread::spawn(move || {
+        let give_up = Instant::now() + ABANDONED;
+        while !marker.exists() && Instant::now() < give_up {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        cancelled_by.cancel();
+    });
+
+    let outcome = a_grandchild_after_the_stop(
+        &directory,
+        &grandchild,
+        // Patient, because the cancellation is what should end this run; a
+        // deadline that fired first would make the test about the wrong stop.
+        Limits::new(PATIENT, 64 * 1024, 64 * 1024),
+        cancellation,
+    );
+    canceller.join().expect("the cancelling thread");
+
+    let stopped = match outcome.termination() {
+        Termination::Cancelled { stopped } => stopped,
+        other => panic!("expected the cancellation to stop the run, got {other:?}"),
+    };
+    assert_what_the_platform_could_reach(stopped, &grandchild);
 
     let _ = fs::remove_dir_all(&directory);
 }

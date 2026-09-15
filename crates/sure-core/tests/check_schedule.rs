@@ -132,6 +132,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          quiet one. `P4-T003` (Python) and `P4-T004` (Rust) belong here too when \
          they land, and each of them is a diff to this list",
     ),
+    (
+        "src/checks/python.rs",
+        "`P4-T003`, the second: it turns a Python project's declared tools into \
+         checks. The entry above said this file would be a diff to this list when \
+         it landed, and it is — which is the rule working rather than the rule \
+         being inconvenient. It is also the first proposer whose module produces \
+         something that is *not* a check (an `InstallStep`), and the reason it \
+         may still name these four types is that keeping an install out of a \
+         `CheckProposal` is the whole of what the acceptance asks: the type \
+         discipline is what makes *without silent package installation* structural \
+         instead of a convention",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

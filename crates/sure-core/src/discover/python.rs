@@ -83,10 +83,14 @@ use super::{DiscoverOptions, Ecosystem, EcosystemReport, Findings, Source, Unrea
 use crate::scan::Scan;
 
 /// The manifest modern Python projects declare themselves in.
-const MANIFEST: &str = "pyproject.toml";
+///
+/// Public for the same reason [`super::node::MANIFEST`] is: a check about this
+/// project has to name the file it was read from, and a copy of the string one
+/// layer up is a copy that stops agreeing the day this one changes.
+pub const MANIFEST: &str = "pyproject.toml";
 
 /// pipenv's manifest, which is TOML too and is read by the same accessors.
-const PIPFILE: &str = "Pipfile";
+pub const PIPFILE: &str = "Pipfile";
 
 /// The file that says what interpreter the project asks for.
 const VERSION_FILE: &str = ".python-version";
@@ -376,12 +380,21 @@ impl Managers {
         None
     }
 
-    /// The one installer SURE would use, or `None` when it cannot pick one.
+    /// The evidence that decided which installer, or `None` when it cannot pick
+    /// one.
+    ///
+    /// **The tier order lives here and nowhere else**, and [`Self::agreed`] is a
+    /// view of this function rather than a second copy of the walk. A caller
+    /// that needs to name *the file that decided* — a report line saying where an
+    /// install step comes from — cannot get that from an [`Installer`], and a
+    /// second walk written to fetch it would be a second answer to the same
+    /// question, free to drift from the first.
     ///
     /// `None` for two different reasons that are not the same finding: no
-    /// evidence at all, and evidence pointing two ways.
+    /// evidence at all, and evidence pointing two ways. A caller that has to tell
+    /// them apart asks [`Self::disagreement`], as [`super`](crate::checks) does.
     #[must_use]
-    pub fn agreed(&self) -> Option<Installer> {
+    pub fn agreed_finding(&self) -> Option<&InstallerFinding> {
         if self.disagreement().is_some() {
             return None;
         }
@@ -389,7 +402,15 @@ impl Managers {
             .first()
             .or_else(|| self.locked.first())
             .or_else(|| self.requirements.first())
-            .map(|found| found.installer)
+    }
+
+    /// The one installer SURE would use, or `None` when it cannot pick one.
+    ///
+    /// `None` for two different reasons that are not the same finding: no
+    /// evidence at all, and evidence pointing two ways.
+    #[must_use]
+    pub fn agreed(&self) -> Option<Installer> {
+        self.agreed_finding().map(|found| found.installer)
     }
 }
 
@@ -1656,6 +1677,45 @@ impl PythonProject {
         self.tooling.iter().any(|tool| tool.package == package)
     }
 
+    /// Every dependency name the project declared in a shape SURE could not read.
+    ///
+    /// Project text, carried as data for the reason
+    /// [`PyProject::dependencies_not_text`] gives: a dependency that is there and
+    /// unreadable is not a dependency that is not there, and a report that
+    /// dropped the name would leave a person with nothing to go and look at.
+    #[must_use]
+    pub fn unreadable_dependencies(&self) -> Vec<&str> {
+        self.project()
+            .into_iter()
+            .chain(self.pipfile.project())
+            .flat_map(|manifest| manifest.dependencies_not_text.iter().map(String::as_str))
+            .collect()
+    }
+
+    /// Whether a declaration SURE could not read names a tool for this role.
+    ///
+    /// **The question a caller cannot answer for itself.** [`TOOLS`] is matched
+    /// through the packaging metadata's normalisation — `Scikit_Learn` and
+    /// `scikit-learn` are one row — and that rule is this module's, so a caller
+    /// holding a raw project spelling would have to rewrite it and would get a
+    /// different answer for every project that spelled a name with an
+    /// underscore.
+    ///
+    /// Poetry's table form is the case this is for:
+    /// `mypy = { version = "^1.8", extras = ["types-requests"] }` is a real and
+    /// ordinary declaration, it lands in [`PyProject::dependencies_not_text`]
+    /// rather than in [`PyProject::dependencies`], and so it never reaches
+    /// [`TOOLS`]. [`Self::tooling_of_role`] then answers that the project
+    /// declares no type checker, which is false — and this is the other half of
+    /// the question, asked separately so that "declares none" and "declared one
+    /// SURE could not read" cannot be confused.
+    #[must_use]
+    pub fn declares_unreadable(&self, role: ToolRole) -> bool {
+        self.unreadable_dependencies()
+            .into_iter()
+            .any(|name| tool_roles_of(name).any(|(_, found)| found == role))
+    }
+
     /// The root manifest, if there is a readable one.
     #[must_use]
     pub fn project(&self) -> Option<&PyProject> {
@@ -2615,6 +2675,10 @@ mod tests {
             })
         );
         assert!(managers.agreed().is_none());
+        // Both, and not merely the one this test is about: `agreed` is a view of
+        // `agreed_finding`, so a disagreement that stopped one of them would be
+        // two answers to one question.
+        assert!(managers.agreed_finding().is_none());
     }
 
     #[test]
@@ -2639,6 +2703,18 @@ mod tests {
         };
         assert_eq!(managers.disagreement(), None);
         assert_eq!(managers.agreed(), Some(Installer::Uv));
+        // And the finding behind it, which is what a caller names a file from.
+        // The lockfile decides while the requirements file is sitting right
+        // there, so a caller that picked the *pip* finding would name
+        // `requirements.txt` for a project whose installer is uv — an anchor
+        // pointing at a file that did not decide, which is the defect this
+        // accessor exists to make unspellable.
+        assert_eq!(
+            managers
+                .agreed_finding()
+                .map(|found| found.source.path.as_path()),
+            Some(Path::new("uv.lock"))
+        );
 
         // And with nothing stronger, the requirements file is what decides.
         let only_requirements = Managers {
@@ -2646,6 +2722,12 @@ mod tests {
             ..Managers::default()
         };
         assert_eq!(only_requirements.agreed(), Some(Installer::Pip));
+        assert_eq!(
+            only_requirements
+                .agreed_finding()
+                .map(|found| found.source.path.as_path()),
+            Some(Path::new("requirements.txt"))
+        );
     }
 
     #[test]
@@ -2678,6 +2760,10 @@ mod tests {
             })
         );
         assert!(managers.agreed().is_none());
+        // Both, and not merely the one this test is about: `agreed` is a view of
+        // `agreed_finding`, so a disagreement that stopped one of them would be
+        // two answers to one question.
+        assert!(managers.agreed_finding().is_none());
     }
 
     #[test]

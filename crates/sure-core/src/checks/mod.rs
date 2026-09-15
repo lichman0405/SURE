@@ -75,11 +75,14 @@
 //! each proposal declares, which is the same thing
 //! `tests/spawn_sites.rs` counts the callers of.
 //!
-//! **It is not the only proposer there will be.** `P4-T003` (Python) and
-//! `P4-T004` (Rust) add siblings to [`node`], and the reason the identifier
-//! scheme lives here rather than in any one of them is that the identifiers
-//! share a namespace: two ecosystems describing one directory must not name one
-//! check twice.
+//! **It is not the only proposer.** `P4-T003` added [`python`] beside [`node`],
+//! `P4-T004` (Rust) adds a third, and the reason the identifier scheme lives
+//! here rather than in any one of them is that the identifiers share a
+//! namespace: two ecosystems describing one directory must not name one check
+//! twice. The identifier recipe is the whole of what they share — each
+//! ecosystem's module decides for itself which of its own declarations become
+//! checks, and [`MissingKind`] is the vocabulary they have in common without
+//! any of them producing all of it.
 //!
 //! **It witnesses nothing about whether these checks are the right ones.** A
 //! `package.json` that declares `"test": "true"` gets a test check that passes,
@@ -88,6 +91,7 @@
 //! the same limit [`crate::browser`] states about its drivers.
 
 pub mod node;
+pub mod python;
 
 use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::severity::Severity;
@@ -171,12 +175,22 @@ pub fn check_id(component: &str, tag: &str) -> CheckId {
 /// [`NotCheckedReason`] alone: the frozen vocabulary is what a report groups by,
 /// this is what it prints, and the two answer different questions.
 ///
-/// **The variants are the three ways a project can leave SURE without a
+/// **The variants are the four ways a project can leave SURE without a
 /// command**, and they are not interchangeable. A project that declares nothing
 /// is a project whose shape puts the check out of scope; a project that declares
-/// something unusable, or declares it and cannot say what runs it, has a defect
-/// in it — the difference decides whether a critical check holds the run out of
-/// green, and that is what each variant's reason is argued for.
+/// something unusable, or declares it in a shape SURE could not read, or cannot
+/// say what runs it, has a defect in it — the difference decides whether a
+/// critical check holds the run out of green, and that is what each variant's
+/// reason is argued for.
+///
+/// **No single ecosystem produces all four, and that is expected rather than a
+/// gap.** [`NotACommand`](Self::NotACommand) is reachable only where a project
+/// declares *commands*, which is `package.json` and nothing else SURE reads yet:
+/// a Python manifest declares packages, and its equivalent failure — a
+/// declaration in a shape the reader refused — is
+/// [`NotReadable`](Self::NotReadable). [`NoRunner`](Self::NoRunner) means
+/// something different in each: which of several package managers starts a
+/// script, and which of several interpreters has the project's packages in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MissingKind {
     /// Nothing in the project declares a way to do this.
@@ -203,6 +217,22 @@ pub enum MissingKind {
     /// is [`UnknownReason`](NotCheckedReason::UnknownReason) rather than
     /// [`NotApplicable`](NotCheckedReason::NotApplicable).
     NotACommand,
+    /// The project declares one, and SURE could not read the declaration.
+    ///
+    /// Poetry's dependency table is the case this is for:
+    /// `mypy = { version = "^1.8", extras = ["types-requests"] }` is an
+    /// ordinary, valid declaration with a value that is not a requirement
+    /// string, and the discovery records the *name* in
+    /// [`PyProject::dependencies_not_text`](crate::discover::python::PyProject::dependencies_not_text)
+    /// rather than guessing at it. The package is therefore absent from the
+    /// tooling list, and a report built from that list alone says *your project
+    /// declares no type checker* about a manifest that has `mypy` written in it.
+    ///
+    /// **Not a scope limit**, for [`Self::NotACommand`]'s reason: what is wrong
+    /// is a line in the project, and the person reading the report is the only
+    /// one who can fix it. The two differ in what they are about — a command,
+    /// and a declaration — which is why they are two variants rather than one.
+    NotReadable,
     /// The project declares one and does not say what runs it.
     ///
     /// `why` is a constant sentence from the discovery — the one that says
@@ -234,6 +264,7 @@ impl MissingKind {
     pub const ALL: &'static [Self] = &[
         Self::NotDeclared,
         Self::NotACommand,
+        Self::NotReadable,
         Self::NoRunner {
             why: NOTHING_NAMES_A_RUNNER,
         },
@@ -241,10 +272,10 @@ impl MissingKind {
 
     /// The frozen reason this maps onto.
     ///
-    /// **`NotACommand` and `NoRunner` both answer
+    /// **`NotACommand`, `NotReadable` and `NoRunner` all answer
     /// [`UnknownReason`](NotCheckedReason::UnknownReason), and that word is
-    /// wrong.** SURE knows exactly why neither ran. The vocabulary has no word
-    /// for *the project declared this and what it declared is not something
+    /// wrong.** SURE knows exactly why none of them ran. The vocabulary has no
+    /// word for *the project declared this and what it declared is not something
     /// SURE can run*, and the three candidates that come close are each false in
     /// a way that costs something:
     ///
@@ -269,7 +300,9 @@ impl MissingKind {
     pub const fn not_checked_reason(&self) -> NotCheckedReason {
         match self {
             Self::NotDeclared => NotCheckedReason::NotApplicable,
-            Self::NotACommand | Self::NoRunner { .. } => NotCheckedReason::UnknownReason,
+            Self::NotACommand | Self::NotReadable | Self::NoRunner { .. } => {
+                NotCheckedReason::UnknownReason
+            }
         }
     }
 
@@ -280,6 +313,11 @@ impl MissingKind {
             Self::NotDeclared => "Your project does not declare a way to do this.".to_owned(),
             Self::NotACommand => {
                 "What your project declares for this is not a command SURE can run.".to_owned()
+            }
+            Self::NotReadable => {
+                "What your project declares for this is written in a shape SURE could not \
+                 read, so it will not guess at it."
+                    .to_owned()
             }
             Self::NoRunner { why } => (*why).to_owned(),
         }
@@ -382,8 +420,8 @@ impl MissingCommand {
     /// **The printed sentence is replaced.** `not_run` fills `reason` with
     /// `not_checked_reason.plain_explanation()`, which is the frozen
     /// vocabulary's generic sentence for the word it was given; for
-    /// [`MissingKind::NotDeclared`] that sentence is true and for the other two
-    /// it is not, so the line a person reads is SURE's own and the vocabulary's
+    /// [`MissingKind::NotDeclared`] that sentence is true and for the other
+    /// three it is not, so the line a person reads is SURE's own and the vocabulary's
     /// word stays in `not_checked_reason` for anything that groups by it.
     /// `browser.rs` does the same thing for the same reason.
     #[must_use]
@@ -536,8 +574,10 @@ mod tests {
         // saying which reason. An empty component is refused by the discovery
         // rather than here — what is held here is that the three kinds are three
         // values, so a caller that has one cannot be read as having another.
-        assert_eq!(MissingKind::ALL.len(), 3);
+        assert_eq!(MissingKind::ALL.len(), 4);
         assert_ne!(MissingKind::NotDeclared, MissingKind::NotACommand);
+        assert_ne!(MissingKind::NotACommand, MissingKind::NotReadable);
+        assert_ne!(MissingKind::NotDeclared, MissingKind::NotReadable);
         assert_ne!(
             MissingKind::NotDeclared,
             MissingKind::NoRunner {
@@ -621,6 +661,7 @@ mod tests {
         // in place of a true one about the project's.
         for kind in [
             MissingKind::NotACommand,
+            MissingKind::NotReadable,
             MissingKind::NoRunner {
                 why: NOTHING_NAMES_A_RUNNER,
             },
@@ -640,7 +681,7 @@ mod tests {
             .iter()
             .map(MissingKind::plain_explanation)
             .collect();
-        assert_eq!(sentences.len(), 3);
+        assert_eq!(sentences.len(), 4);
         for (index, sentence) in sentences.iter().enumerate() {
             assert!(
                 !sentences[index + 1..].contains(sentence),

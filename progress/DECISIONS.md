@@ -541,3 +541,140 @@ label is actually for.
   come back *unchanged from the row above* as a measured result and not an
   expectation. The rule this leaves: **a list in the handoff is a claim, and the
   check for it is a set comparison against the file that owns the data.**
+
+## P3-T001 — the bounded process runner
+
+The acceptance is two sentences: *"Executable/args/cwd/env/timeout/cancel/output
+limits are explicit"* and *"Direct args used instead of unsafe shell string
+construction where possible."* The first is a claim about a **description**
+having no unstated parts, so most of the tests hand a value back before anything
+runs; the second is a claim about a shape, and source text is the only place a
+shape can be checked.
+
+- **The Windows shell claim this task was written against was wrong, and
+  measuring it is what showed the difference.** The module was written saying a
+  `.cmd` cannot be run at all, "because `CreateProcess` appends `.exe` and runs
+  nothing else". Half of that is true, and the two halves are one extension
+  apart. A name with **no** extension really is completed with `.exe` and nothing
+  else: `npm` is *not found* on a machine where `npm.cmd` is on `PATH`, and a
+  bare `build` does not reach the `build.cmd` sitting beside it — which is the
+  rule that matters, because that is the shape a project directory has. But a
+  `.cmd` or `.bat` named **with its extension** starts, and the image of the
+  process that runs is `C:\Windows\System32\cmd.exe`: Windows starts a command
+  interpreter for a batch file itself. Measured three ways on Windows 11 with
+  Rust 1.98 — `CreateProcessW` called directly with the arguments
+  `Command::new` passes it, `Command::output` from a standalone probe, and
+  `sure_core::process::run` through the tests that now hold it — and the reading
+  of the child's image is `QueryFullProcessImageName`. A `.ps1` is the case the
+  old sentence was right about, for a different reason: it fails with os error
+  193, "not a valid Win32 application", which is a different fact from "not
+  found" and is worth keeping distinct.
+- **Six shipped files carried a claim this task made false, and only prose was
+  wrong in every one.** Four carried the batch-file claim — `process/mod.rs`,
+  `process/request.rs`, `process/error.rs` and `doctor.rs` — and two more carried
+  the *neighbouring* claim that `sure-core`'s shipped code has exactly **one**
+  `Command::new`, which is now three: `documents.rs` and `support.rs`. Both were
+  true when written and are the kind of sentence a new module quietly falsifies,
+  which is why they were searched for rather than noticed. `doctor.rs`'s
+  *behaviour* was
+  already right — `EXECUTABLE_SUFFIXES = [".exe"]` is what a bare name really
+  does, and its "a name that already carries an extension is used as given" is
+  the other half of the same truth. What was wrong there was the reason given for
+  a right answer, which is the kind of error that survives longest: the sentence
+  "a `.cmd` is not something SURE can run" is false, and a reader who checked it
+  would have found the whole paragraph untrustworthy rather than the one clause.
+  The corrected sentence is narrower and is the one the product can stand behind
+  — **SURE builds no command line, and Windows supplies an interpreter anyway
+  when the program it is handed is a batch file.**
+- **Whether a caller may name a batch file is left open on purpose.** Running one
+  is running project-controlled shell text: that is `P3-T004`'s classification
+  and `P3-T005`'s permission question, with `P3-T007` enforcing the answer in
+  `inspect_only` mode. A mechanism that quietly refused `.cmd` would be making
+  policy inside the machinery, and one that quietly allowed it while the
+  documentation said "no shell" would be the false green this repository treats
+  as the worst outcome there is. Three tests hold the facts and are mutually
+  controlling, each in its own scratch directory and each asserting the **same
+  marker** the others do: one runs a `.cmd` by absolute path and requires the
+  marker to appear, one names a `build<pid>.cmd` by its **stem** and requires
+  `NotStarted` *and* no marker, one names a `.ps1` and requires the same. So a
+  runner that ran everything fails the refusals and a runner that refused
+  everything fails the run — and the bare-name one is written so that "the
+  current directory was not searched" is not an explanation for its pass, since
+  it runs in the directory the file is in and the name carries a process id no
+  copy of the file shares. They are `#[cfg(windows)]`, which
+  makes the Windows test count three higher than macOS and Ubuntu permanently;
+  that is a platform fact and not a discrepancy.
+- **"No product path calls `run` yet" is a test rather than a paragraph.**
+  `tests/spawn_sites.rs` holds two rules over the shipped sources: every file in
+  `crates/` whose **code** builds a `Command` is named in a list with a reason,
+  and nothing outside `crates/sure-core/src/process/` names `ProcessRequest`. The
+  second is the load-bearing one, because `run` takes a `&ProcessRequest` and
+  there is no other entry point, so a file that cannot name the type cannot be a
+  caller — a stronger statement than searching for `process::run`, which a `use`,
+  an alias or a re-export would walk straight past. The rule is *meant* to fail
+  the day `P3-T004`, `P3-T005`, or `P3-T007` wires the runner up, and the file
+  says so, because `sure_core::support`'s level-C ceiling is justified by no
+  project code running: the caller and the ceiling have to move in the same
+  commit. Both rules were proved non-vacuous by hand before the harness ran, with
+  the proving edits reverted in a `finally`.
+- **The one source-level guard this would have broken was found by the harness,
+  not by reading.** `fingerprint_git.rs`'s `git_is_started_in_exactly_one_place`
+  forbids `Command::new` on a program held in a variable anywhere outside
+  `fingerprint/git/mod.rs`, and the runner's `command()` is exactly that — so the
+  first harness run stopped at `BASELINE IS NOT GREEN` with that test failing,
+  which is the baseline check doing the job it exists for. The guard was
+  **narrowed rather than weakened**: `process/request.rs` is exempted *by name*,
+  with the reason written next to the exemption (the runner holds any program a
+  caller names and is not a Git entry point), while `Command::new("git")` stays
+  forbidden there and everywhere else. An earlier task had already written this
+  rule down in the only form that could catch this, which is the argument for
+  writing such rules at all.
+- **A test was added because a mutation could not otherwise be caught.**
+  `discarded_bytes() > 1` was among the mutations and nothing observed it: the
+  boundary test wrote thousands of bytes past the bound, so "at least one byte
+  was thrown away" and "more than one" agreed everywhere it was looked at. The
+  suite now holds both sides of the same boundary — exactly the bound is not cut
+  short, one byte past it is — and the reason there are two tests rather than one
+  is written where the second one is: a check spelled `>= limit` reports every
+  run that said exactly as much as it was allowed as having been cut off, and the
+  two ways of being wrong point in opposite directions, one hiding a truncation
+  and the other inventing one.
+- **Two mutations are declared unobservable, and the harness names them instead
+  of counting them as caught.** *"taskkill's own failure is read as the tree
+  having been stopped"* turns `is_ok_and(|status| status.success())` into
+  `is_ok_and(|_status| true)`, which differs only when `taskkill` runs and
+  reports failure for a tree that in fact died — indistinguishable from the
+  inside, and producing it on a machine where `taskkill` works means breaking the
+  thing being measured. The neighbouring mutation, a tree killed with a program
+  that is not there, *is* caught, so what the tests separate is "taskkill could
+  not run" from "taskkill ran", not the three-way case in between. *"the grace
+  for a stream that is still open is made an hour"* moves `DRAIN_GRACE` from five
+  seconds to an hour, and on Windows nothing observable changes: the same
+  `taskkill /T` that ends the child ends whatever was holding the pipe open, so
+  there is no open stream left for the grace to be spent on. A test that produced
+  one would have to keep a process alive on purpose and then wait the grace out —
+  five seconds of every future run to observe a constant, and an hour under the
+  mutation.
+- **`cargo test` writes its `Running` headers to standard error and its `test
+  result:` lines to standard output.** A parser that captures only stdout,
+  therefore, prints a well-formed table of zeros. The arithmetic reconciling this
+  build against CI was wrong in exactly that way before it was found — it
+  reported "-406" and nearly every binary as "only in CI" — and the fix is
+  `stderr=subprocess.STDOUT`. The trap underneath it, found the same day: a
+  parser that consumes one result line per `Running` header silently drops that
+  binary's children, which is `store_concurrency`'s ten, so the total came out at
+  1064 where the truth was 1079. The parents are the result lines whose
+  **`filtered out` is zero**, and the last number on the line is which one that
+  is.
+- **These tests cover most of `P3-T002`'s acceptance, and that is recorded where
+  its owner will read it rather than left to be discovered.** `P3-T002` ("native
+  Windows process lifecycle tests") accepts on start/timeout/cancel/output capture
+  on Windows, on process-tree cleanup without Unix signals, and on paths with
+  spaces and Unicode — and the runner's own contract cannot be tested without all
+  three, so `process_runner.rs` has them: the tree test stops a grandchild with
+  `taskkill /T` and no signal, and the working-directory test runs in
+  `a directory with a space and é中文`. They are `P3-T001`'s tests and they stay,
+  because they hold claims this module makes; what `P3-T002` must not do is count
+  them as its own work. What is genuinely left for it is a spaces-and-Unicode
+  matrix across every entry point rather than the working directory alone, and
+  lifecycle coverage that is about the platform rather than about the contract.

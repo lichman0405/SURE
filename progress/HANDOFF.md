@@ -2,18 +2,50 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 32 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12).** `P2-T011`'s implementation is committed and
-pushed as `73da9a6`, its run `34919714838` is read in full below, and **the commit
-carrying this file is its acceptance**. What the task added is described under
-"What `P2-T011` added".
+Progress: 33 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 open (1/11).** `P3-T001`'s
+implementation is committed and pushed as `819d499`, its run `34924525793` is read
+in full below, and **the commit carrying this file is its acceptance**. What the
+task added is described under "What `P3-T001` added".
 
-**This is the first acceptance on this branch that closes a phase.** Every `P2-*`
-task is `accepted`, `P3` is where the next work goes, and all eleven of its tasks
-are still `queued`. The `phase:` line in `taskctl status` goes on reading `P2`
-until a task is *started*, because `start` is what writes that field — it records
-what is being worked on rather than summarising the task list, so the two
-disagreeing for exactly one step is the designed behaviour and not a stale field.
+**The one thing about `P3-T001` a reader should know before the detail: SURE can
+now start a program, and nothing asks it to.** `sure_core::process` is a complete
+bounded runner — one request carrying program, arguments, working directory,
+environment, deadline, cancellation and output bounds, and one `Outcome` saying
+what became of the run — and **no product path calls it**. That is not an
+omission left to be discovered later: `tests/spawn_sites.rs` asserts that every
+place in shipped code that builds a `Command` is named in that file, and that
+nothing outside the runner names a process request at all, so the day a caller
+appears the test says so. The corollary a reader should carry: this task is the
+**prerequisite** for every check that runs something, and it is not itself a
+check. `P3-T002`, `P3-T003` and `P3-T004` all became READY when it was accepted.
+
+**The second thing, and the one that changes what the product will let SURE do:
+the module does not claim a batch file cannot run.** A name with no extension is
+completed to `.exe` and nothing else, so a bare `npm` is not found even where
+`npm.cmd` is on `PATH` — but a `.cmd` or `.bat` named *with its extension* does
+start, and the process that runs is `cmd.exe`, which Windows supplies rather than
+SURE. All three cases are measured and held as tests rather than asserted in a
+comment. **Whether a caller may name a batch file is left as an owner decision**,
+written up in three places, because it cuts both ways: refusing makes `npm`,
+`yarn`, `pnpm` and `gradlew` unrunnable on Windows, and permitting means SURE
+starts project-controlled shell text through an interpreter it never names.
+`P3-T004`, `P3-T005` and `P3-T007` will each run into it.
+
+**The third thing, which is a correction to something this session was about to
+record as a fact.** The gate log holds two runs of the suite and the first pass
+read them as disagreeing — 10 child result lines in one, 9 in the other. They
+agree completely; one child line arrives with its `; finished in 0.87s.` clause
+moved in front of its counts, because the children `store_concurrency` spawns
+share one stdout handle, and a matcher anchored on `test result: ok\.` slides off
+it. Matching on the five counts alone gives the same 43 lines / 33 parents /
+10 children / 1082 on both runs. See the gate-set section below.
+
+**This was the acceptance that opened a phase rather than closing one.** Phase
+`P2` closed at `P2-T011`; `P3` is now 1 of 11 with the other ten `queued`. The
+`phase:` line in `taskctl status` reads `P3` because `start` wrote it, which is
+what that field records — what is being worked on rather than a summary of the
+task list.
 
 **The one thing about `P2-T011` a reader should know before the detail: the label
 belongs to the door, and no door takes one.** Every channel that can produce a
@@ -171,55 +203,63 @@ Autonomous branch: `claude/v0.1-autonomous`
 `node scripts/taskctl.mjs status` reports:
 
 ```
-Project: SURE | status: in_progress | phase: P2
-{ accepted: 32, queued: 134 }
-READY: P3-T001, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007, P8-T001,
-       P12-T008, P13-T001
+Project: SURE | status: in_progress | phase: P3
+{ accepted: 33, queued: 133 }
+READY: P3-T002, P3-T003, P3-T004, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
+       P6-T007, P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T011` is `accepted`**, on run `34919714838`, and **`in_progress` is 0**, so
+**`P3-T001` is `accepted`**, on run `34924525793`, and **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. **Phase `P2` is 12 of 12 and closed**: every `P2-*` task in
-`tasks/tasks.json` is `accepted`, and `P2-T011` is the one that finished it. The
-`phase:` field above still reads `P2` because `taskctl start` is what advances
-it, so it moves to `P3` when the next task starts rather than when this one was
-accepted — the field is a record of which phase is being worked on and not a
-computed summary.
+adopting an orphan. **Phase `P3` is 1 of 11 and open**: the other ten `P3` tasks
+are `queued`. `33 + 133 = 166`, which is every task in `tasks/tasks.json`.
 
-**The READY list went 11 → 10, and this time the count moved with it.** The two
-previous acceptances each recorded the same shape — a task leaving by being
-accepted and a dependent entering in the same step, so the count stood still
-while the membership changed. This one did not, and the reason is worth the
-sentence: `P8-T005` names `P2-T011` first in its `depends_on`, so it is the
-dependent that *would* have entered, and it stays `queued` because its other
-dependency `P8-T003` is still `queued`. The list lost a member and gained none.
-Quoted from the command rather than compared by length, as before — the point of
-that rule is that both outcomes are visible, and here one of them is a number.
+**The READY list went 10 → 12, and it is the first time an acceptance has made the
+list longer.** `P3-T001` left by being accepted and **three** dependents entered —
+`P3-T002`, `P3-T003` and `P3-T004` — because all three name it in their
+`depends_on` and nothing else. The two acceptances before this one each recorded
+the same shape, a task leaving and a dependent entering in the same step so the
+count stood still; the one before that lost a member and gained none. **Three
+outcomes, three different numbers, which is the argument for quoting the command
+rather than reasoning about which way the count should have moved.**
 
-**The phase arithmetic in this file was wrong until that acceptance, and the
-correction is in the header rather than only here.** `P2` was described as 10 of
-12 with `P2-T009` finishing it; it was **11 of 12**, and `P2-T011` was the one
+**The phase arithmetic in this file was wrong until `P2-T011`'s acceptance, and
+the correction is in the header rather than only here.** `P2` was described as 10
+of 12 with `P2-T009` finishing it; it was **11 of 12**, and `P2-T011` was the one
 that finished it. The tally is read out of `tasks/tasks.json` joined with
 `progress/state.json` rather than counted forward from the previous session's
 sentence — and **the figures are a reading with a date on them**: *11 accepted and
 1 queued* when this paragraph was written, *12 and 0* at `P2-T011`'s acceptance,
-which is what closed the phase. **The method is the durable part and the numbers
-are not**, which is why the sentence gives both rather than replacing the old
-figures with new ones: a reader who compares this paragraph against the header
-should find them agreeing, and a reader who compares either against
-`taskctl status` should find the command winning.
+which is what closed the phase, and *1 and 10* at `P3-T001`'s. **The method is the
+durable part and the numbers are not**, which is why the sentence gives the
+successive readings rather than replacing the old ones: a reader who compares this
+paragraph against the header should find them agreeing, and a reader who compares
+either against `taskctl status` should find the command winning.
+
+**The `phase:` field moved to `P3` in the designed way, which is worth one
+sentence because the previous acceptance predicted it.** `P3-T001` was `start`ed
+rather than only accepted, and `start` is what writes `current_phase`, so the
+field reads `P3` because a `P3` task was worked on and not because `P2` closed.
+The prediction in the `P2-T011` block — that the field would go on reading `P2`
+until a task was started — was correct, and it is checkable in one command rather
+than being a thing this file asks to be believed.
 
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
 and `evidence` is `[]`; `taskctl accept` sets `status`, `finished_at` and `notes`
-and nothing else. **That is true of the SHAs for all 28 accepted tasks — 0 carry
+and nothing else. **That is true of the SHAs for all 33 accepted tasks — 0 carry
 a `base_sha` or a `head_sha` — but it is NOT true of `evidence` or `notes`,
 and a blanket claim would have been wrong in two directions:** `P2-T003` is the
-one accepted task of the 28 with a non-empty `evidence` array (three strings,
+one accepted task of the 33 with a non-empty `evidence` array (three strings,
 added when that acceptance was recorded), and `P0-T009`, `P1-T001` and `P1-T002`
-carry no notes at all where the other 25 do. So the commits and the run for
+carry no notes at all where the other 30 do. So the commits and the run for
 `P2-T010` are recorded **here**, and the fields in `progress/state.json` are not
-a substitute for this file — they are not even uniform across tasks.
+a substitute for this file — they are not even uniform across tasks. **This
+paragraph has now been re-read at 28 and at 33 accepted tasks and every count in
+it held except the totals**: the three always-empty-notes tasks are still the
+same three, `P2-T003` is still the only one with evidence, and no task has ever
+gained a SHA. That is a fact about the tool rather than about the tasks, so it
+should survive the next reading too — and if it stops, the tool changed.
 
 **A correction that was made and then overtaken, kept because both halves are
 worth having.** An earlier draft of this file said `accepted: 26` and "nothing is
@@ -360,6 +400,96 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P3-T001` added
+
+`crates/sure-core/src/process/` — five files, **1478 lines** — with 6 unit tests,
+and two integration test files beside it: `tests/process_runner.rs` (29 tests, of
+which 6 are `#[ignore]`d helper children that the parent tests spawn) and
+`tests/spawn_sites.rs` (2 tests). The acceptance is two sentences: *"Executable/
+args/cwd/env/timeout/cancel/output limits are explicit"* and *"Direct args used
+instead of unsafe shell string construction where possible."*
+
+**The first sentence is a shape rather than a checklist, and most of its tests
+hand a value back before anything runs.** `ProcessRequest` holds a program, a
+vector of arguments, a working directory, an `Environment`, a `Limits` and a
+`Cancellation`; `Limits::new` takes a timeout and both output bounds together and
+there is **no `Default`**, because a run with no deadline is a check that hangs
+and a check that hangs cannot be told from one that is still working — the
+failure `FINGERPRINTING.md` already names in those words. `Environment` has no
+default either, and `Cancellation` is one type over an `Arc<AtomicBool>` rather
+than a caller's half and a runner's half, because the two halves are the same
+fact. There is deliberately **no `PartialEq`**: every field but the cancellation
+could be compared, and comparing a live handle would make two identical commands
+read as different ones, so a caller that means "would these run the same command"
+reads the accessors and says so itself.
+
+**The second sentence is a door that is not there.** `command()` is the only
+place a `Command` is built from a request — so what the accessors report and what
+runs cannot drift apart — and it hands the vector to `args`, which neither joins
+nor quotes. There is no `from_command_line`, no `shell`, no field that is a
+command line. A caller holding `npm install && npm test` has a `String` and
+nowhere to put it. This is `documents.rs`'s shape for the same reason: splitting
+shell text into a program and its arguments *is* the act of starting a shell, and
+it is where a path with a space stops being one path.
+
+**What the runner does, in the order it matters.** Stdin is null, because nobody
+is there to answer a question and a program waiting for input is a run that hangs
+rather than one that fails. Both streams are piped and read to the end; a bound
+is on what SURE **keeps**, and going past it discards the rest rather than closing
+the pipe, because closing it makes a talkative program fail on a broken pipe and
+reports that as the command's fault. A run ends as `Exited`, a deadline, or a
+cancellation, and the **tree** is stopped — `taskkill /T /F` on Windows, read as
+a report rather than assumed, because a deadline that can be declined is not a
+deadline. `store_concurrency` is the precedent for the `#[ignore]`d children.
+
+**"There is no shell" was wrong in one direction, and measuring it is part of
+this task.** Windows starts a command interpreter for a batch file without being
+asked: hand the runner the path of a `.cmd` and it runs, and the image of the
+process created is `C:\Windows\System32\cmd.exe` — read with
+`QueryFullProcessImageNameW`, not inferred. Measured three ways before any of it
+was written down. A name with **no** extension is completed with `.exe` and
+nothing else, so a bare `npm` is not found where `npm.cmd` is installed and a
+`build.cmd` beside the child is not reached by its stem. A `.ps1` fails with
+`winerror 193`, "not a valid Win32 application", which is a different fact from
+"not found". Six shipped files carried a claim this made false — `process/mod.rs`,
+`process/request.rs`, `process/error.rs`, `doctor.rs` (the batch-file claim) and
+`documents.rs`, `support.rs` (the "one `Command::new` in shipped code" claim) —
+and in `doctor.rs` the **behaviour was already right and only the reason was
+wrong**, which survives longest because the answer looks correct.
+
+**Whether a caller may name a batch file is left open on purpose.** That is
+`P3-T004`'s classification, `P3-T005`'s permission and `P3-T007`'s enforcement;
+the runner neither asks for it nor prevents it, and the module doc records the
+fact and the open question together. The three tests holding it are
+**`#[cfg(windows)]`**, which is a permanent +3 in the Windows count and is
+recorded as a platform fact rather than a discrepancy.
+
+**"No product path calls `run` yet" is a test, not a paragraph.**
+`tests/spawn_sites.rs` holds two rules: every shipped file whose *code* builds a
+`Command` is named with a reason, and nothing outside `src/process/` names a
+`ProcessRequest` — the load-bearing one, because `run` takes a `&ProcessRequest`
+and there is no other entry point, so a file that cannot name the type cannot be
+a caller. That is stronger than searching for `process::run`, which a `use` or a
+re-export walks past. **The rule is meant to fail the day the runner is wired
+up**: `sure_core::support`'s level-C ceiling is justified by no project code
+running, so the caller and the ceiling have to move in one commit.
+
+**The one source-level guard this broke was found by the harness, not by
+reading.** `fingerprint_git.rs`'s `git_is_started_in_exactly_one_place` failed on
+the runner's `Command::new(&self.program)` and the first mutation run stopped at
+`BASELINE IS NOT GREEN` — the baseline check doing its job. The guard was
+**narrowed rather than weakened**: `process/request.rs` is exempted *by name*
+with its reason beside it, while `Command::new("git")` stays forbidden there and
+everywhere else.
+
+**One test was added because a mutation could not otherwise be caught.**
+`discarded > 0` → `discarded > 1` in `CapturedOutput::was_truncated` agreed with
+the original everywhere the suite looked, because the boundary test threw
+thousands of bytes past the bound. Both sides of the boundary are now held, and
+the second test says why there are two: a check spelled `>= limit` reports every
+run that said exactly as much as it was allowed as cut short, so the two ways of
+being wrong point in opposite directions.
 
 ## What `P2-T011` added
 
@@ -1691,6 +1821,75 @@ pins it.** Recorded at this length because the tempting sentence — "the multis
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
 
+### Reading run `34924525793`, `P3-T001`'s — and a headline convention that had to be found before two numbers could be compared
+
+Run `34924525793`, commit `819d499`. All five jobs `success`:
+`bootstrap-validate-windows`, `rust (windows-latest)`, `rust (macos-latest)`,
+`rust (ubuntu-latest)`, `shellcheck-secondary`. The three rust jobs each report
+**43 result lines = 33 parents + 10 children, 0 failed, 7 ignored**:
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 43 | 33 | 10 | 1082 | 0 | 7 |
+| `rust (macos-latest)` | 43 | 33 | 10 | 1081 | 0 | 7 |
+| `rust (ubuntu-latest)` | 43 | 33 | 10 | 1082 | 0 | 7 |
+
+**Windows CI equals the local Windows run exactly, value for value** — the parent
+multiset is `[0, 0, 0, 0, 2, 4, 4, 5, 6, 6, 7, 7, 7, 8, 8, 9, 12, 14, 15, 18,
+20, 23, 23, 24, 30, 30, 31, 33, 43, 46, 48, 88, 501]` on both, and the parents
+sum to 1072 on both. That is the comparison that means something; the totals
+agreeing would not have been.
+
+**The headline numbers in this file are the sum over the PARENT lines, and this
+run is where that had to be established rather than assumed.** The full
+`cargo test` total includes the ten child result lines `store_concurrency`'s
+spawned children print — one passed each — so 1082 is the total over all 43 lines
+while **1072 is the number comparable with `P2-T011`'s 1040**. The proof that the
+recorded headline is the parent sum is the multiset itself: the 31 values
+recorded for `P2-T011` sum to exactly 1040, and a multiset of parents cannot sum
+to a total that includes children. Comparing the other way would have produced
+"+42, attributed to +32 of name-level change and 10 of nothing".
+
+**The +32 against `408b821`'s 1040, attributed by binary name with no
+remainder**: the `sure-core` lib **495 → 501** (+6, the `process` unit tests),
+`Doc-tests sure_core` **4 → 5** (+1, the module's `no_run` example), the new
+`tests/process_runner.rs` binary at **23**, and the new `tests/spawn_sites.rs`
+binary at **2**. `6 + 1 + 23 + 2 = 32`. The parent count went **31 → 33 by
+exactly two**, which is the check that each new test file is one binary rather
+than functions scattered into existing ones.
+
+**The 37 names this task added were read out of all three logs by name**: 37 of
+37 on Windows, **34 of 37 on macOS and Ubuntu, with exactly the three
+`#[cfg(windows)]` batch-file tests absent** — which is the platform gate
+confirmed by measurement rather than by reading the attribute. The names come
+from the source files that define them (`target/tmp/names.py`), because a by-name
+counter can be wrong in both directions and this file has recorded both.
+
+**macOS is 1071 against Ubuntu's 1072, and the difference is named rather than
+left as a number.** Comparing the three logs as *sets of names*
+(`target/tmp/platformnames.py`) gives 11 names that run only on Windows and 12
+that run only on Unix. Eight of the eleven are pre-existing
+(`paths::compare::tests::windows::*`, seven, and
+`fingerprint::git::status::tests::a_path_that_is_not_valid_unicode_is_refused_on_windows`);
+the other three are this task's. All twelve Unix-only names are pre-existing —
+six unit tests (`doctor`, `fingerprint::git::status`, `paths::compare::tests::unix`)
+and six integration tests about links and pipes. The macOS/Ubuntu difference is
+two gates: `a_name_that_is_not_valid_unicode_is_ordered_by_the_name_and_not_by_its_text`
+is `#[cfg(not(target_os = "macos"))]` in `tests/scan_project.rs`, and the
+`the_default_entry_point_folds_*` pair in `paths/compare.rs` is one test per
+platform, macOS taking the case-insensitive one and Linux the case-sensitive one.
+**The multiset is consistent with all of this and cannot establish it** — the
+substitution `{501→498, 23→20, 23→20, 43→47, 30→25, 30→29}` reproduces the macOS
+multiset arithmetically and is not the only such mapping — which is the same
+limit recorded under `P2-T010`, reached again here.
+
+**A trap in reading these logs, hit once more and worth one line.** My own parser
+indexed the sixth field of a five-field `test result:` match and raised
+`IndexError` rather than folding a wrong number into a table — the loud failure
+this repository prefers. The GitHub log needed ANSI stripping for the `Running`
+headers (recorded under `P2-T010`) and `gh --log`'s `job<TAB>step<TAB>timestamp`
+prefix removed; both are handled in `target/tmp/cicheck.py`.
+
 ### Reading run `34919714838`, `P2-T011`'s — and a by-name count that was wrong in the safe direction
 
 Run `34919714838`, commit `73da9a6`. All five jobs `success`:
@@ -2519,6 +2718,80 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P3-T001`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | `FMT CLEAN` |
+| `cargo check --workspace --all-targets` | `CHECK CLEAN` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | `CLIPPY CLEAN` |
+| `node scripts/validate-bootstrap.mjs` | `SURE bootstrap validation OK: 17 phases, 166 tasks.` |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `cargo test --workspace --no-fail-fast` | **1082 passed, 0 failed, 7 ignored, across 43 result lines = 33 parent sections + 10 children** |
+| `pwsh -NoProfile -File scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+| `python target/tmp/mutate18.py` | **31 of 31 observable mutations caught, 2 declared unobservable and both missed as declared, 0 SKIP, 0 BUILD**, baseline green first |
+
+**This table is CI's command set, and the earlier tables in this file are one
+command wider than CI is.** Every gate table above records clippy as
+`--all-features`, and `.github/workflows/ci.yml:35` runs
+`cargo clippy --workspace --all-targets -- -D warnings` with no such flag; CI
+also runs `cargo check` and `validate-bootstrap.mjs`, which most of those tables
+omit. The difference has never mattered — `grep -rn '^\[features\]' --include=Cargo.toml .`
+finds no `[features]` section anywhere in the workspace, so `--all-features`
+selects nothing that is not already selected — but a recorded command that is
+not the command CI runs is the kind of thing this file exists to not leave
+standing. This table is what CI runs; the older tables are what was run.
+
+**The log holds two full runs of the suite, and this time they agree completely.**
+`Preflight-Windows.ps1` runs `cargo test` itself, so `target/tmp/p3t001-gates.log`
+contains **86** `test result:` lines — 66 parents and 20 children — and both runs
+report **1082 / 0 / 7** with **1072** passed in parents. The two runs' parent
+multisets are identical, value for value:
+
+```
+0 0 0 0 2 4 4 5 6 6 7 7 7 8 8 9 12 14 15 18 20 23 23 24 30 30 31 33 43 46 48 88 501
+```
+
+**A first reading of that log said the two runs disagreed — 10 children against
+9 — and the reading was wrong, in a way worth recording because this repository
+has now paid for it three times.** One child line arrives with its text
+rearranged:
+
+```
+test result: ok; finished in 0.87s. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out
+```
+
+The counts are all present and correct; the `; finished in 0.87s.` clause has
+landed between the `ok` and the counts, because the children `store_concurrency`
+spawns inherit one stdout handle and write to it concurrently. A regex that
+anchors on `test result: ok\.` — which is what libtest prints, every other time —
+slides off that line and reports 42 result lines where there are 43. The tell is
+that a *strict* pattern and a *loose* one (just the five counts) give different
+numbers on the same file; matching on the counts alone gives 43 / 33 / 10 / 1082
+on both runs. So the file's headline convention survived the scare: the parent
+sum was 1072 in both runs and in CI, and it is the parent sum that is comparable.
+This is the same failure as `cicheck.py`'s missing `--quiet` pattern and
+`names.py`'s 7-line window: a matcher that matches nothing prints a well-formed
+table of the wrong number.
+
+**1072 is `P2-T011`'s 1040 + 32, and the parent multiset difference closes with
+no remainder** — values that left, `4` and `495`; values that arrived, `2`, `5`,
+`23` and `501`; net +32. Those four substitutions are the four things this task
+added:
+
+| Change | Binary | Delta |
+| --- | --- | --- |
+| the six `#[test]`s in `src/process/mod.rs` | `unittests src\lib.rs` (`sure-core`) | 495 → 501 (**+6**) |
+| the one `no_run` example in `src/process/request.rs` | `Doc-tests sure_core` | 4 → 5 (**+1**) |
+| `crates/sure-core/tests/process_runner.rs` | new binary | **23** (29 tests, 6 `#[ignore]`d) |
+| `crates/sure-core/tests/spawn_sites.rs` | new binary | **2** |
+
+The parent count went 31 → 33, **by exactly two** for the two new binaries. The
+ignored count went 1 → 7, all six of the new ones inside `process_runner`'s
+children. Windows CI reports the same multiset as this local run value for value;
+that comparison, and the by-name platform gate behind it, are in the run-reading
+section above.
 
 ## Gate set, as run on `P2-T011`'s implementation commit
 
@@ -3379,6 +3652,65 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P3-T001`
+
+`target/tmp/mutate18.py` (git-ignored), 33 mutations over the four mutated files
+of `src/process/` (`mod.rs`, `outcome.rs`, `request.rs`, `terminate.rs`; `error.rs`
+is declarations only), exit 0: *"all 31 observable mutations caught by a failing
+test, and 2 declared unobservable as expected"* — 0 `SKIP`, 0 `BUILD`, and the
+unmutated baseline run first was green, which it has to be: a mutation cannot be
+credited with a failure that was already there.
+
+Three families, matching the three things the runner promises — the program it
+started, the time and output it allowed, and what became of it:
+
+- **The command** (5). Every way of running something other than what the request
+  named: joining the arguments and splitting them again the way a shell would;
+  putting the program through a command interpreter; running it wherever SURE
+  happens to be rather than in the working directory it was given; passing on
+  SURE's whole environment when the request named only a few variables; passing on
+  a variable the request explicitly asked to keep back. The first two are the
+  Windows spelling hazards `Command::new(&self.program)` exists to avoid, and they
+  are the reason `tests/spawn_sites.rs` holds the *shape* of the call as a test.
+- **The stop** (9). A deadline that passes and the run is not stopped; a
+  cancellation that arrives mid-run and is not noticed, or that was already set
+  before the run and the run starts anyway; the tree not claimed; a stop that
+  reached the whole tree reporting that it reached one process; the tree killed
+  with a program that is not there.
+- **The record** (17). Every way of making the `Outcome` say more than the run
+  supports: a timed-out run reported as a cancelled one and the reverse; every
+  program reported as having ended successfully; a run that never started reported
+  as one that ran and was stopped; a duration of zero; a start time that is not
+  when it started; the output bound keeping everything, or throwing bytes away
+  without counting them; a merely-non-empty stream called cut short, or a stream
+  with one discarded byte not called cut short; an interrupted read reported as a
+  failed one; a stream SURE could not finish reading reported as one that ended;
+  the two bounds written into each other's fields; a program that was not found
+  reported as a directory that is not there; a working directory that is not a
+  full path, or is a file, never checked; and `Cancellation` never set, always
+  set, and new-already-cancelled.
+
+**The two declared unobservable are both about a path that cannot be reached from
+a test, and each is declared with the condition that would make the declaration
+wrong.** The grace for a stream that is still open being raised to an hour is
+unobservable because no test holds a stream open past `DRAIN_GRACE` — the
+declaration is true only while that stays so. `taskkill`'s own failure being read
+as the tree having been stopped is unobservable because the tests can only reach
+`is_ok_and(|status| status.success())` on a `taskkill` that either exists and
+succeeds or does not exist at all; there is no way to make `taskkill` exist and
+fail without replacing it. **Both are recorded as holes rather than closed by a
+weaker assertion**, which is the whole point of declaring them.
+
+**`main()` prints only the first three names under each `CAUGHT`, and that capped
+display cost this session an hour of false reconciliation.** It prints
+`fired[:3]`, while the verdict is computed from the full list — so a mutation that
+fails five tests shows three, and two runs whose *verdicts are identical* can look
+like they disagree about which tests fired. The two runs were reconciled by
+reading the harness rather than by re-running it, and then confirmed by two
+isolated re-runs that produced the same five-name failure set for mutation 2. **A
+display cap is a display cap; the count that matters is the one in the sentence
+the harness prints when it is done.**
+
 ### `P2-T008`
 
 `target/tmp/mutate14.py` (git-ignored), 24 mutations over one file, exit 0:
@@ -4217,6 +4549,25 @@ it needs a Mac.
   same bytes in `sure.yaml` are a **request** and the user's own settings outside
   the project are the **grant** — asserted with one file, byte for byte, refused
   and then permitted. **This closed phase `P2`.**
+- `819d499` **`P3-T001`** — `crates/sure-core/src/process/` (`mod.rs`, `request.rs`,
+  `outcome.rs`, `terminate.rs`, `error.rs`; 1478 lines), `tests/process_runner.rs`
+  (29 tests, 6 of them `#[ignore]`d children) and `tests/spawn_sites.rs`
+  (2 tests) — the new **28th** and **29th** named test binaries, so the by-name
+  count goes 27 → 29 and the 4 `Doc-tests` targets make up the rest of the 33
+  parents. **The one task on this branch that can start a process, and the only
+  one whose central claim is held as a test about the code's shape rather than
+  about its behaviour**: `spawn_sites.rs` asserts that every place SURE builds a
+  `Command` is named in that file, and that **nothing outside the runner names a
+  process request at all** — so "no product path runs a program yet" is a test
+  that fails when that stops being true, rather than a sentence in a document.
+  Beyond the new module the task corrected six shipped files that carried a claim
+  it made false: four said no `.cmd`/`.bat` is ever named (`process/mod.rs`,
+  `process/request.rs`, `process/error.rs`, `doctor.rs`), and two more
+  (`documents.rs`, `support.rs`) said `sure-core`'s shipped code has exactly one
+  `Command::new`, which is now three. `doctor.rs` was the same shape of error one
+  step further in — its executable-suffix list was right and the reason stated
+  for it was wrong, so only the comment changed and no behaviour did.
+  **This opened phase `P3`.**
 - `0a577ca` — a defect fix, **not a task**, landed just before `P2-T004`'s
   implementation commit and found while verifying it. Five test helpers cleared a
   scratch directory with `let _ = remove_dir_all` and then treated the path as
@@ -4242,7 +4593,20 @@ pass, and it is recorded there rather than only here.
 
 ## Next concrete action
 
-1. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+1. **`P3-T001` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it opened phase `P3`.** `819d499` is the implementation, run
+   `34924525793`, all five jobs green, **Windows 1082 / macOS 1081 / Ubuntu 1082**
+   with 0 failed and 7 ignored over **43** result lines = **33 parents + 10
+   children** — read and attributed, with the Windows log matching this machine's
+   own run value for value, in "Reading run `34924525793`". All 37 new test names
+   were checked by name on each job: **37 of 37 on Windows, 34 of 37 on macOS and
+   Ubuntu**, the three absent ones being exactly the `#[cfg(windows)]` tests.
+   **Its run is read in the session that took it rather than committed** — the
+   stopping rule at the top of this file, so the `P3-T001` chain ends at the
+   acceptance. **The runner runs nothing yet**: no product path calls it, and
+   `tests/spawn_sites.rs` fails the day one does without being added to it.
+   The next task that would use it is `P3-T002`, which is `queued` on it.
+2. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -4254,12 +4618,12 @@ pass, and it is recorded there rather than only here.
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-2. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+3. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-3. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+4. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -4267,27 +4631,27 @@ pass, and it is recorded there rather than only here.
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-4. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+5. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-5. **The next task is a real choice, and the list is 10 long.**
-   `P3-T001`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`, `P6-T007`,
-   `P8-T001`, `P12-T008`, `P13-T001`. **Phase `P2` is closed at 12 of 12, so
-   whatever is chosen next opens `P3`** — all eleven `P3` tasks are `queued`, and
-   `P3-T001` ("implement centralized bounded process runner") is the one of them
-   that is `READY`. `P4-T007` and `P6-T005` remain **unread by any session**, and
-   `P6-T007` and `P8-T001` have been on the list since before this file was
-   written. **Read the task entry before choosing**; do not choose from this
-   paragraph.
+6. **The next task is a real choice, and the list is 12 long.**
+   `P3-T002`, `P3-T003`, `P3-T004`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`,
+   `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. **`P3` is open and
+   `P3-T001` is accepted, which is new since this item was last written** — the
+   list gained `P3-T002`, `P3-T003` and `P3-T004` in the same step it lost
+   `P3-T001`, so the phase's own tasks are now choosable and three of them at
+   once. `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
+   and `P8-T001` have been on the list since before this file was written.
+   **Read the task entry before choosing**; do not choose from this paragraph.
    **`P8-T005` is the task that would consume what `P2-T011` left**, and it is
    **not** on the list: its `depends_on` is `["P2-T011","P8-T003"]`, `P2-T011` is
-   now accepted, and it stays `queued` on `P8-T003`. So the observed-request
-   channel has its rule and its door and still no capture, and the task that
-   supplies one is waiting on a task nobody has read.
-6. **`P2-T012` left an owner decision open, and it is the first one a reader
+   accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
+   has its rule and its door and still no capture, and the task that supplies one
+   is waiting on a task nobody has read.
+7. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -4296,24 +4660,25 @@ pass, and it is recorded there rather than only here.
    `docs/product/SUPPORTED_STACKS.md`. **Do not settle it in a later task by
    quietly raising `CEILING`** — `the_ceiling_todays_build_claims_is_never_above_inspect_only`
    will fail if you do, which is the point of it. **The one thing that would
-   legitimately move it is a check that runs**, and the first prerequisite for
-   that is `P3-T001`, "implement centralized bounded process runner", which is
-   READY and depends only on `P1-T006`. It does not itself raise the ceiling —
+   legitimately move it is a check that runs**, and the prerequisite for that is
+   now `accepted`: `P3-T001`, "implement centralized bounded process runner",
+   landed as `819d499` and depends only on `P1-T006`. It does not itself raise the
+   ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-7. **`P2-T012` also left the classification with no consumer.** `classify` is
+8. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
-   shape as `ComponentGraph` in item 8, and it is recorded rather than implied —
+   shape as `ComponentGraph` in item 9, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-8. **`P2-T007` is accepted, its two commits are pushed and read.**
+9. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-9. **The store now holds six rows that no user wrote, and that is the first item
+10. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -4347,7 +4712,7 @@ pass, and it is recorded there rather than only here.
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-10. **`project_fingerprint` now has one caller, and it is not a check.**
+11. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -4357,6 +4722,24 @@ pass, and it is recorded there rather than only here.
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
+12. **`P3-T001` left a second owner decision open, and it is the one the next
+   three `P3` tasks will each run into: may a caller name a batch file?** The
+   facts, all measured and held as tests rather than asserted: a name with no
+   extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,
+   `pnpm` or `gradlew` is **not found** on a machine where all four are installed
+   and `npm.cmd` is on `PATH`; a `.cmd` or `.bat` named *with its extension*
+   **does** start, and the process that runs is `cmd.exe`, which Windows supplies
+   and SURE never names; a `.ps1` does not start at all. So the decision cuts both
+   ways and neither arm is free — refusing to name a batch file makes four common
+   Windows tools unrunnable, and permitting it means SURE hands project-controlled
+   shell text to an interpreter. `crates/sure-core/src/process/error.rs:81-83`
+   states whose question it is rather than deciding it, and this item exists so
+   that
+   `P3-T004`, `P3-T005` and `P3-T007` do not each settle it quietly in passing.
+   **This is not a defect to be fixed in the runner**: the completion rule is the
+   operating system's and the interpreter is the operating system's doing, and the
+   runner's part — that it never *builds* a command line for either — is already
+   true.
 
 **The item numbers in this list had rotted, and they are repaired here: there
 were two `3.`s, three `4.`s and two `5.`s over nine items.** Each acceptance
@@ -4374,6 +4757,22 @@ header, and now the numbering. All three were found by checking the file against
 something outside it (`progress/state.json`, `git show --stat`, and the list
 itself) rather than by reading it, which is the only method that has ever found
 one.
+
+**And `P3-T001`'s acceptance rotted that same reference again, with the
+renumbering done by script — which is the part worth keeping.** The repair above
+established the method: prepend the new item, then renumber every item below it.
+That was done here by `target/tmp/renumber.py`, which found all eleven items,
+renumbered them 1..11, and **verified the result was 1..n with no gap and no
+repeat before writing it out**. The list is now correct and the reference was
+still wrong, because **renumbering a list is not the same operation as
+renumbering the references into it**: `P2-T007` moved from 8 to 9, and the
+sentence pointing at it went on saying "item 8", which after the shift names the
+`P2-T012` classification item instead. So the rule for the next acceptance is two
+steps and not one — **renumber the items, then re-read every `item N` in the file
+and check it still points where it did**, and the check that found this one was
+`grep -n "item [0-9]"`, not a reading. A script that verifies its own output can
+still leave the file inconsistent, because the thing it verified was not the
+thing that was broken.
 
 **What `P2-T002` left for later, and what `P2-T003` then did with it.**
 `P2-T002` left the Git fingerprint asked for explicitly, by a caller that had
@@ -4403,6 +4802,19 @@ ignored, which is how the earliest tasks came to record an empty note.
   is `gbk` on this machine, and a source file with a `—` in it fails with
   `UnicodeDecodeError: 'gbk' codec can't decode byte 0x94`. Pass
   `encoding='utf-8'` and `newline='\n'`.
+- **`Path.write_text` silently converts every line ending, and `.gitattributes`
+  says this repository is `eol=lf`.** `p.read_text()` strips `\r\n` to `\n` and
+  `p.write_text()` puts back `os.linesep`, so on Windows one round trip rewrites
+  a whole file as CRLF **with no error and no visible symptom in the script**.
+  `P3-T001`'s acceptance hit this on `progress/HANDOFF.md` while renumbering a
+  list in it. What catches it is `git diff --stat` reporting thousands of changed
+  lines for a change of a few, and `diff` printing `1,5112c1,5125` — both files
+  "entirely different" — because an LF file and a CRLF file share no lines. The
+  fix is `p.write_bytes(text.replace('\r\n', '\n').encode('utf-8'))`, or
+  `open(p, 'w', encoding='utf-8', newline='\n')`. **The committed blob is
+  unaffected either way** (git normalises on the way in and says so in a warning),
+  so this is a working-tree defect rather than a history one — which is exactly
+  why it is easy to leave behind.
 - **Parse the command line with `clap::Parser::try_parse`, never `parse`.**
   `parse` calls `process::exit` itself, which would put one row of SURE's
   documented status table in a library's hands. `status_of` maps clap's exit code
@@ -4629,6 +5041,47 @@ ignored, which is how the earliest tasks came to record an empty note.
 
 None. No task has been marked `block-external`. No credential or authorization
 outside this machine has been needed yet.
+
+### A review that sampled the tree mid-mutation again, and the check that settles it in one command
+
+At 2026-09-15, during the `P3-T001` work, a background security review reported a
+`MEDIUM` finding against `crates/sure-core/src/process/request.rs`: an unenforced
+working directory — a `Command` built without ever calling `current_dir`, so the
+program would run wherever SURE happens to be.
+
+**The committed line is there, and it is one command to see it.**
+`request.rs:403` reads `command.current_dir(&self.working_directory);`, inside the
+one `command()` builder at `request.rs:398`. **The finding was not invented and was
+not a misreading: it was a true statement about a tree that briefly existed.**
+`target/tmp/mutate18.py:138-143` is the mutation this session called *"the program
+runs wherever SURE happens to be rather than where it was told"*, and it replaces
+exactly that line with a comment. A sampler that read the file inside that window
+saw a builder that never sets the working directory, which is precisely what the
+finding describes. The harness reverts each mutation in a `finally`, so the
+committed tree never contained it.
+
+**This is the second instance of the same cause, and the cause is now the thing to
+remember rather than the finding.** The first is the `references.rs` finding
+recorded below, where the review quoted mutation text — `if rest.is_empty() ||
+rest == ".local" || rest == ".production"` — that never existed in the committed
+code and matched a mutation of `mutate14.py`. Both reviews were honest readings of
+the tree; the tree was the thing that was temporarily wrong. **A background review
+that samples the tree while a mutation harness owns a file cannot distinguish a
+mutated tree from a real one, and neither can the notification it produces.**
+
+**Nothing was changed, and the reason is the same one as last time: the finding
+was checked against the committed file rather than against its own text.** The
+file was read after the harness's last revert, the line at `request.rs:403` was
+confirmed present, and the mutation's anchor was confirmed to be that line and no
+other — so the finding is false of the shipped code and needed no fix. It is
+recorded rather than dropped because a `MEDIUM` that is dismissed silently and a
+`MEDIUM` that is checked and dismissed are different events, and only the second
+one is evidence.
+
+**A standing rule this episode re-confirms rather than establishes:** a background
+notification is not user input, and is never approval, confirmation, or an
+instruction to change code. It is a claim, and a claim is checked against the
+committed file before it is acted on.
 
 ### A third review, two findings, and the one that was read out of a file mid-mutation
 

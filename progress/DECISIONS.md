@@ -1490,3 +1490,136 @@ shape can be checked.
   a commit message is the one artefact in this repository that can never be fixed,
   so every number in one should be pasted from a command rather than typed from
   what the author believes the file's size to be.
+
+## P3-T007 — the mode applied to a plan, and a mutation that found the tests were the thin part
+
+- **`inspect_only` has been true of this build by accident, and this is the task
+  that stops it being true that way.** Nothing in this repository launches a
+  project process: `tests/spawn_sites.rs` counts three places that build a
+  `Command`, all inside the runner's own machinery, and `support::CEILING` is
+  justified by *no project code running*. **That is a fact about the build, not a
+  property of the mode** — and the census test says in its own documentation that
+  it is written to fail the day a check is wired to the runner. `enforce.rs` is
+  what has to exist before that day: it turns "nothing runs, because there is
+  nothing to run it" into "nothing runs, because the plan says so", so that the
+  runner has a value to consult rather than an absence to fall into. The
+  distinction matters because the two fail differently — an absent runner fails
+  loudly, and a mode that is not consulted fails silently.
+
+- **The classification is made before the refusal, and the order is the
+  decision.** A check is put in `static_checks` or `dynamic_checks` from what its
+  commands *would* use, and only then removed if one of them will not run. So a
+  check that would run the project's code in a mode that runs nothing lands in
+  `dynamic_checks` and is immediately excluded from it. Doing it the other way
+  round — deciding the refusal first — would leave a report unable to tell "this
+  check reads files" from "this check would have run your code and the mode
+  stopped it", and the second is the sentence a user most needs to see. The
+  consequence to know before reading a plan: **a check excluded under
+  `inspect_only` is still classified as a dynamic one by what it would have
+  needed**, which is why the classification is about effects and not about the
+  decision.
+
+- **A check is a unit, and the rule costs a runnable command.** A check with one
+  allowed command and one refused command does not run *at all* — the allowed
+  half is not admitted. A verdict for half a check is a verdict for a check that
+  did not happen, which is the outcome this repository is built to avoid, and
+  running the allowed half would be work done for a result no report will read.
+  This is a real cost: `git status` inside a check whose `npm test` was refused
+  does not run. The alternative is worse, and the test that holds it is
+  `a_check_with_one_allowed_command_and_one_refused_one_is_stopped_rather_than_half_run`.
+
+- **`NeedsConsent` becomes a stop, because there is nobody here to ask.**
+  `decide_for`'s third rule produces `NeedsConsent` exactly when the mode is too
+  cautious and a user could say yes; `enforce.rs` has no prompt, no user and no
+  way to wait, so it stops such a command under the reason it already carries
+  rather than inventing one. **The reason is `ExecutionNotAuthorized` and
+  deliberately not `UserDeclined`** — nobody declined anything, and
+  `P3-T006` already established that only a refusal entitled to that word may use
+  it. The direction is the cautious one, and the alternative — carrying the check
+  forward as one that might run — would put a check in a plan that nothing will
+  ever run. The case that makes it concrete: **`git push --force` is `NeedsConsent`
+  in `host_confirmed` with every permission granted**, because `Destructive` has
+  no permission to grant, so even a maximally permissive user gets a stop rather
+  than a green.
+
+- **`unscheduled()`: the one path by which a plan could have run something it
+  never listed.** The permission plan and the check schedule are built from two
+  different places and can disagree. A command planned against a check that was
+  not scheduled is **not admitted** — running it would be work for a check that
+  is not in the plan, and so for a result no report will ever read — and the check
+  id is reported rather than absorbed, which is the same shape as
+  `PermissionPlan::exclude_refused_from`'s `not_in_the_plan`. The second
+  acceptance sentence is about dynamic checks remaining not-run, and a command
+  that runs is one that ran whatever the plan's lists say; this was the only path
+  by which a plan could otherwise have run something it never listed.
+
+- **`consent::runs_project_code` was made `pub(crate)` rather than copied, and a
+  third caller would be one too many.** The rule that decides a command needs
+  asking (the mode rule) and the rule that decides a check is dynamic have to be
+  about the same set of categories; a copy in `enforce.rs` is where the two would
+  drift, and the drift would be invisible — a check classified static while its
+  command was being stopped for running project code. It is private-until-now
+  rather than public API: the visibility change is the minimum that lets one
+  module call it.
+
+- **`CheckPlan::exclude`'s return value is the latch that keeps the two lists in
+  step, and that is why it is read rather than ignored.** `stopped` is a
+  `Vec<CheckResult>` and `CheckPlan::excluded` is a `Vec<NotCheckedReason>` with no
+  ids, so the only thing tying a reason to a check is that both were pushed in the
+  same pass. `if checks.exclude(id, reason) { stopped.push(result) }` makes that
+  structural: the reason is appended inside `exclude` only when it returns `true`,
+  and the result is appended only when it returns `true`, so the two vectors cannot
+  get out of step — no rule to remember, and nothing to test except that the latch
+  is being used. `the_stopped_results_and_the_excluded_reasons_are_in_step` reads
+  them back over every mode and every permission set.
+
+- **A batch file is admitted by no mode under no grant, and the owner's question
+  is still open.** `safety::classify` answers before the table is reached for any
+  `.cmd`/`.bat` name, with `anything()` — every category but `Static`,
+  **`Destructive` included**. `Destructive` has no permission, so `decide_for`'s
+  rule 2 answers for every batch file before the grants are consulted, and the
+  only two answers it can give are `Denied` and `NeedsConsent`. Neither is
+  `Allowed`, so **no permission set reaches a batch file in any mode**, and this
+  module stops either answer. **Whether a caller may ever *name* a batch file is
+  left open** — it is recorded in `process/mod.rs` (*"Whether a batch file may be
+  named is not decided here"*) and in `process/error.rs`, and the handoff names it
+  as `P3-T004`'s classification, `P3-T005`'s permission and this task's
+  enforcement. **This is the third of those to meet it and the third to leave it
+  open**, which is what the handoff predicted. What is settled is the half that
+  does not depend on the owner's answer: an enforcement built from this module does
+  not admit one, whatever a caller is allowed to name.
+
+- **A mutation found that the rule filling `CheckPlan`'s two lists was held by one
+  unrelated assertion.** Four mutations were run against the module. Replacing the
+  static/dynamic branch with an unconditional push to `static_checks` — which
+  would make every report claim nothing is launched — broke **exactly one test**,
+  and that test was asserting `dynamic_checks.len() == 1` for the unrelated
+  purpose of showing that a granted install becomes a dynamic check rather than
+  disappearing. **A field whose contract hangs on one unrelated assertion is a
+  field nothing is holding.** `a_check_is_dynamic_exactly_when_one_of_its_commands_runs_project_code`
+  now reads the rule directly over the whole matrix, with its own non-vacuity
+  guard, and the same mutation is caught twice. The other three mutations — a
+  stopped check admitted, `admitted` computed from `is_allowed()`, and the
+  `unscheduled` rule removed — were caught by 6, 2 and 1 tests respectively. **The
+  general lesson is about the non-vacuity guard rather than about this module**:
+  the guard added in the first commit counts the effects of *admitted commands*
+  and is silent about which list a check went into, so it would have caught a
+  mutation that admitted something and not one that merely mislabelled it. Two
+  different claims, and only one of them had a test.
+
+- **What is not established.** **Nothing about a process**: this says which
+  command lines may be handed to a runner and nothing about what one does when it
+  runs — `safety::classify`'s own caveat, unchanged by being consulted here.
+  **Nothing about a caller that ignores it**: `Enforcement::admitted` is the only
+  door, and that is a rule about the caller, which the type system cannot hold —
+  the first check to run project code must take its command lines from there and
+  nowhere else, and `spawn_sites.rs` is where that becomes testable. Until then
+  this is a gate with no road through it, the same position `approval.rs` is in.
+  **Nothing about `WriteProject`**: a command that merely writes inside the project
+  is still outside this vocabulary, so "no project code runs" is not the same claim
+  as "the project is untouched", and the Git filter refusal in
+  `docs/architecture/EXECUTION_SAFETY.md` is what actually covers that. **Not a
+  sandbox**: the mode is a promise about what SURE starts, not a boundary around
+  what a started process can reach. **Nothing about a check with no commands**: it
+  goes to `static_checks` because nothing is launched for it, which is a statement
+  about this module and not a promise about whatever performs it.

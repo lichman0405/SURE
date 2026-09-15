@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P3",
-  "last_updated": "2026-09-15T07:39:24.230Z",
+  "last_updated": "2026-09-15T08:02:01.686Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -355,13 +355,13 @@
       "notes": "Implement host_confirmed execution mode. Acceptance: (1) only approved command categories execute; (2) approval state is locally auditable. Builds on P3-T005's PermissionPlan/PlannedCommand/decide_for: the consent record the domain already declares (HostConsent/ApprovedCommand/ConsentGrantor, with can_grant() rejecting ProjectRequestEscalated) has no constructor anywhere, and NeedsConsent is a decision with no prompt. This task supplies the constructor, the enforcement gate that admits only what the consent covers, and a durable OS-native record of the approval so it can be audited after the fact. P3-T009 (service supervisor) depends on this task, and it is the first task in the DAG that starts anything in the product."
     },
     "P3-T007": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-15T07:39:24.230Z",
-      "finished_at": null,
+      "finished_at": "2026-09-15T08:02:01.686Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Implemented in crates/sure-core/src/enforce.rs (857 lines, 16 tests) across 6353477, 18209d8 and 719253e. inspect_only is now a property of a plan rather than true because no runner exists: Enforcement::admitted() is the only iterator a runner may take command lines from, a check is a unit, NeedsConsent becomes a stop under ExecutionNotAuthorized rather than a question, and a command planned for an unscheduled check is reported and never admitted. Both acceptance sentences are held by tests: no command that runs project code is admitted in inspect_only, and a check that would run project code is excluded from the plan under inspect_only. Runs 34943445326, 34943853809 and 34944133634 are all five jobs success with 1186/1187/1188, 1187/1188/1189 and 1188/1189/1190 parents and 0 failed, and the namesets move +14 -0, +1 -0 and +1 -0 on all three platforms. Four mutations were run and all four were caught; the third found that the static/dynamic classification was held by one unrelated assertion and that is what 719253e fixes. No spawn site was added."
     },
     "P3-T008": {
       "status": "queued",

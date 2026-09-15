@@ -410,3 +410,134 @@ have to reverse-engineer from the code.
 - **Nothing in the product reads a `DocumentReport` yet.** `sure-cli` builds
   none, so this is a produced-and-read-by-nothing module in the same family as
   `ComponentGraph`, recorded rather than presented as wired up.
+
+## P2-T011 — intent sources
+
+The acceptance is two sentences: *"Intent sources preserve provenance/trust
+labels"* and *"Inferred intent cannot satisfy user requirements."* The first is a
+claim about a label **surviving**, and a test can hold it wrongly by reading the
+label off and agreeing with it — so every test that asserts a label here also
+drives the statement through `may_claim_full_fulfilment`, which is the gate the
+label is actually for.
+
+- **The label belongs to the door, and no door takes one.** Every channel has a
+  function that produces a `Requirement` and writes its own `IntentSource`. No
+  function here that *produces* a `Requirement` takes a source as an argument, so
+  a caller holding a command it read out of a README has nothing to ask for:
+  there is no parameter to ask with. Provenance survives by a shape the module
+  does not offer an alternative to, rather than by a rule its code follows. The
+  one function that does take a source, `from_source`, goes the other way — it
+  reads statements *back* by the label they arrived with — and the module doc
+  names it rather than leaving a reader to find it and doubt the rule.
+- **`observed_user_request` takes an `&Authority` and not a `&Config`, and the
+  same bytes on disk give opposite answers.** `sure.yaml` lives inside the
+  project, and the project is written by the same agent whose work is being
+  judged, so `privacy.full_recording: true` there is a **request**.
+  `Authority::privilege(ProjectRequest::FullRecording)` is asked whether anyone
+  was able to grant it, and only the user's own settings outside the project can.
+  The integration test holds this with one `sure.yaml`, byte for byte, refused
+  first as an escalation and then granted — with a control asserting the kept
+  request is worth exactly what a goal that was typed is worth, because the
+  privacy decision is about whether the words are kept and not about how much
+  they count.
+- **Six rows in the module's table, five labels, and the two `project_spec` rows
+  are one channel reached by two doors.** `documented_goal` and
+  `DocumentReport::as_requirements` both ask `Config::goal_source()` rather than
+  naming the label themselves, so `P2-T009`'s decision point is still the only
+  one. The table lists doors and not producers, and the module doc says so: a
+  table of five labels reads as a pipeline whether or not one exists, and three
+  of these doors have nobody knocking.
+- **`documented_goal` answers `None` for a goal with no words rather than an
+  error.** `Config::from_yaml` refuses such a file before a `Config` can hold
+  one, so the only caller that reaches this with one built it by hand.
+  Manufacturing a requirement with no words in it would be the worse answer to a
+  case the reader already refuses — and it would put a blank row in a history
+  that reads as something somebody asked for.
+- **`agent_claim` and `inferred` leave `raw_retained` false, and each door says
+  why.** The flag is about *captured* material. The claim door does not know
+  whether the caller kept the agent's sentence or restated it, and defaulting the
+  flag to true on the caller's behalf would be the door claiming something it
+  does not know; a caller that did quote it says so with
+  `with_raw_retained(true)`. An inference has no original wording behind it at
+  all, because the words are SURE's own. For the two doors that *do* set it — the
+  project's goal and the kept request — the flag is a claim about the exact
+  wording, which is why both are tested with input whose spacing `trim` would have
+  changed: a door that tidied the words and still said `true` would be reporting
+  something it did not do.
+- **This module does not derive what a label is worth.** `RequirementAuthority`
+  derives that from the label in the domain, in one place, and a second derivation
+  here is how the two would come to disagree. Nor does it compare a statement
+  against a project (`P6-T008`) or assemble a whole project's intent — one of the
+  five channels is reached by reading a goal back out of the store, and
+  `PROJECT_INTENT.md` records the `HistoryFilter` gap in the way of a reader
+  asking for one project's goal.
+- **`from_source` is one query over the closed vocabulary rather than an accessor
+  per variant**, so a source added to the domain is one this can answer for on the
+  day it is added rather than on the day somebody notices. `IntentSource::ALL` is
+  generated from the vocabulary itself, which is what makes that true.
+- **A test of my own made a claim it could not hold, and it was deleted rather
+  than reworded.** `a_documented_goal_is_labelled_by_the_one_place_that_decides_it`
+  compared the door's answer against `Config::goal_source()` and its comment said
+  *"this is the assertion that fails on that day"* — but the mutation that writes
+  the literal `IntentSource::ProjectSpec` instead of asking is **invisible** to
+  that comparison, and **no test can move a `const`**. It would have passed for a
+  different reason than its name said, which is the failure `P2-T009` punished in
+  `command_from`'s unreachable guard. The claim is now declared unobservable in
+  `target/tmp/mutate16.py` with the condition that would falsify it, and a
+  distinctness test replaced it — asserting that the three channels' identifiers
+  all differ, because a collision is what would make two statements one, and that
+  *is* observable.
+- **Three claims in the module's own comment could not hold, and they were found
+  by reading it against the code before the harness ran.** It said *"no function
+  in this module takes an `IntentSource` as an argument"*, which `from_source`
+  does; it said *"one of the four channels"*, where `IntentSource::ALL` has five;
+  and it said `P8-T005` *writes* `OBSERVED_REQUEST_ID`, in the present tense about
+  a task that is `queued`. All three were fixed before the mutation run, so the
+  run describes the committed revision.
+- **`project_intent.spec_path` is validated and read by nothing, and this task
+  deliberately declines to close it.** `Config::validate_intent` refuses a
+  `spec_path` outside the project, and no code opens the file it names. Reading it
+  is a change to what a *document* is — it belongs with the documents pass, and it
+  carries a Windows deduplication risk, because a `spec_path` naming a file the
+  walker also reaches would make one document arrive twice under two paths. It is
+  recorded as a gap rather than implemented here: the acceptance does not ask for
+  it, and a reader who found a second door into the same file would be right to
+  ask which one owns the provenance.
+- **The mutation harness's own evidence was wrong, and the first run of
+  `P2-T011`'s harness is what exposed it.** `cargo test --quiet` passes `-q` to
+  libtest, which prints one character per test: a failing test gets a `.` like
+  every other, and the `test <name> ... FAILED` line **is never printed**. The
+  filter both harnesses used — lines starting with `test ` and containing
+  ` FAILED` — therefore collected the per-binary `test result: FAILED.` summaries
+  and printed a binary count under a heading that read as a list of tests. **The
+  verdicts `P2-T009` was accepted on are unaffected**: `CAUGHT` turned on that list
+  being non-empty, and a summary line can only come from a harness that ran and
+  failed. What was wrong was the evidence, not the conclusion — which is exactly
+  the distinction this repository refuses to let anyone make quietly, so both
+  harnesses now read the names out of libtest's `failures:` list, and both refuse
+  to run at all if a mutation appears to be left applied. That last check exists
+  because a killed run leaves one behind: `apply` restores the file in a
+  `finally`, which covers an exception but not the process being stopped, and one
+  was found on disk only because the anchors were re-checked by hand.
+
+- **Four stale structures were found in `progress/HANDOFF.md` by this acceptance,
+  and all four are the same shape: a list that is wrong in a way that reads as
+  complete.** The "Accepted work on this branch" list was missing four accepted
+  tasks — 23 entries where `progress/state.json` records 32 acceptances; the
+  ordered list of this branch's commits stopped one commit short of the tip; the
+  "Next concrete action" list carried two `3.`s, three `4.`s and two `5.`s over
+  nine items, which had already rotted a cross-reference (*"the same shape as
+  `ComponentGraph` in item 3"* was written about `P2-T007` and by then pointed at
+  `P2-T008`); and the CI table was four commits short, so three accepted tasks had
+  a prose section below and no row in the index. Each was found by checking the
+  file against something **outside** it — `progress/state.json`, `git show
+  --stat`, `gh run list --branch claude/v0.1-autonomous` — and not one by reading
+  it, which is the only method that has ever found one. **They are repaired rather
+  than recorded as gaps**, because a handoff is the artefact the next session
+  trusts before it trusts the code, and a reader who counts 23 entries under a
+  heading that says "accepted work on this branch" has no way to know the number
+  is not the answer. The CI rows were read out of freshly downloaded logs rather
+  than copied from the rows they follow, which is why all four acceptance runs
+  come back *unchanged from the row above* as a measured result and not an
+  expectation. The rule this leaves: **a list in the handoff is a claim, and the
+  check for it is a set comparison against the file that owns the data.**

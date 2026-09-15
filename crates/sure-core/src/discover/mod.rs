@@ -69,6 +69,11 @@ pub use node::NodeProject;
 pub use pattern::{Unresolved, UnresolvedReason};
 pub use python::PythonProject;
 pub use read::UnreadReason;
+
+// The case-folding rule a path is looked up by, for the checks that compare a
+// path they know against the paths a walk found. Exposed rather than duplicated
+// so that the rule is written once — see `read::lookup_key`'s own note.
+pub(crate) use read::lookup_key;
 pub use rust::RustProject;
 
 /// One ecosystem this build knows how to look for.

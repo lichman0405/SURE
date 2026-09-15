@@ -641,9 +641,11 @@ impl Budget {
 /// The key a path is looked up by, for a caller that needs to name one.
 ///
 /// Used by the workspace expansion, which compares the path a pattern produced
-/// against the paths the walk found. Exposed rather than duplicated so that the
-/// folding rule is written once.
-pub(super) fn lookup_key(path: &Path, case: CaseSensitivity) -> String {
+/// against the paths the walk found, and by `crate::db_migrations`, which
+/// compares a path a framework convention names against the paths the walk
+/// found. Exposed rather than duplicated so that the folding rule is written
+/// once.
+pub(crate) fn lookup_key(path: &Path, case: CaseSensitivity) -> String {
     let text = crate::scan::display_path(path);
     match case {
         CaseSensitivity::Sensitive => text,

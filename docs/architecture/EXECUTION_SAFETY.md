@@ -50,6 +50,43 @@ When Docker/Podman or another supported container runtime is present, SURE may e
 
 Container mode must not be marketed as a perfect security boundary without evaluating mount/network/privilege configuration.
 
+## How a mode is enforced
+
+A mode is not a setting that a check consults. It is applied to a plan, once,
+before anything runs, and what comes out is a value:
+
+- `sure_core::consent` decides what each planned command *needs* and whether it
+  may run, and — with `sure_core::approval` — what a user was asked and what they
+  allowed.
+- `sure_core::enforce` applies the mode to the whole set of checks. Each check
+  ends up in exactly one of three states: **reads only**, **would run the
+  project's code**, or **stopped by the mode, with the reason the command gave**.
+  The three lists are disjoint, and a check stopped by the mode also produces a
+  `Skipped` result carrying the vocabulary's own plain-language sentence, so it
+  stays visible in the report rather than disappearing from it.
+- A check is one unit. If any of its commands will not run, the check does not
+  run — including the commands in it that would have been allowed. A verdict for
+  half a check is a verdict for a check that did not happen.
+
+**The commands that may run are the ones `Enforcement::admitted()` yields, and
+that iterator is the only door.** Anything that launches a project process takes
+its command line from there. That is a rule about the caller, not something the
+type system can hold on its own, so it is stated here and will be tested where
+the runner's spawn sites are enumerated.
+
+Two limits belong with it, because a reader who takes the mechanism for more than
+it is will be wrong in the direction that matters:
+
+- **It is not a sandbox.** The mode is a promise about what SURE starts. It says
+  nothing about what a started process can reach once it is running — that is
+  what container mode's mount, network and privilege evaluation is for, and even
+  there the honest word is "limited isolation".
+- **A question is turned into a stop.** A command that the domain says needs a
+  conversation (`NeedsConsent`) is stopped exactly like one that was denied,
+  because the code that applies the mode has no prompt and no user. Reporting it
+  as a check that might still run would put a check in a plan that nothing will
+  ever run.
+
 ## Separate permissions
 
 Treat separately:

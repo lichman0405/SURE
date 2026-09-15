@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod discover;
 pub mod doctor;
 pub mod documents;
+pub mod enforce;
 pub mod fingerprint;
 pub mod intent_model;
 pub mod paths;

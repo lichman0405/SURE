@@ -519,7 +519,14 @@ fn decide_for(
 /// fetch runs no project code, which is why `decide` answers `Allowed` for
 /// `NetworkAccess` in a mode that runs nothing; and `Destructive` never reaches
 /// this rule, because rule 2 answers for it first.
-fn runs_project_code(effects: &CommandEffects) -> bool {
+///
+/// **Not private, and the one caller outside this module is deliberate.**
+/// [`crate::enforce`] asks the same question to decide whether a check is a
+/// dynamic one, and the two answers have to be about the same set of categories:
+/// a check is dynamic exactly when this function says one of its commands runs
+/// project code, so a copy of the rule over there is where the two would drift.
+/// A third caller would be one too many.
+pub(crate) fn runs_project_code(effects: &CommandEffects) -> bool {
     effects.contains(CommandClass::DynamicHost) || effects.contains(CommandClass::Install)
 }
 

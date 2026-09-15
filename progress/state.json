@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P3",
-  "last_updated": "2026-09-15T07:33:23.459Z",
+  "last_updated": "2026-09-15T07:39:24.230Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -355,8 +355,8 @@
       "notes": "Implement host_confirmed execution mode. Acceptance: (1) only approved command categories execute; (2) approval state is locally auditable. Builds on P3-T005's PermissionPlan/PlannedCommand/decide_for: the consent record the domain already declares (HostConsent/ApprovedCommand/ConsentGrantor, with can_grant() rejecting ProjectRequestEscalated) has no constructor anywhere, and NeedsConsent is a decision with no prompt. This task supplies the constructor, the enforcement gate that admits only what the consent covers, and a durable OS-native record of the approval so it can be audited after the fact. P3-T009 (service supervisor) depends on this task, and it is the first task in the DAG that starts anything in the product."
     },
     "P3-T007": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-15T07:39:24.230Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

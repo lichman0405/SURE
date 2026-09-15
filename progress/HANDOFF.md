@@ -5,8 +5,10 @@ Branch: `claude/v0.1-autonomous`
 Progress: 40 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 open (8/11).** `P3-T008` is
 implemented and pushed as one commit — `6ea9f46` — its run `34946515895` is read
-in full below, and **the commit carrying this file is its acceptance**. What the
-task added is described under "What `P3-T008` added".
+in full below, and **the commit carrying this file is its acceptance**, pushed as
+`1f403d8` and read in `34949042220` where the three platform counts and both
+pairwise lines are **identical to `34946515895`**, which is what a progress-only
+change should show. What the task added is described under "What `P3-T008` added".
 
 **The one thing about `P3-T008` a reader should know before the detail: the
 harder half of its acceptance was about prose, and four places were failing it.**
@@ -3442,6 +3444,47 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34949042220`, `P3-T008`'s acceptance — and a run that had to read *exactly* like the one before it
+
+Run `34949042220`, commit `1f403d8372c7d55aee40489db88e104e4af32a13` — the commit
+carrying this file. All five jobs `success`, and the three platform logs read
+rather than taken from the job colour:
+
+| job | result lines | parents | children | passed | failed | ignored |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rust (windows-latest)` | 45 | 35 | 10 | **1209** | 0 | 9 |
+| `rust (macos-latest)` | 45 | 35 | 10 | **1210** | 0 | 9 |
+| `rust (ubuntu-latest)` | 45 | 35 | 10 | **1211** | 0 | 9 |
+
+**The three figures are identical to `34946515895` for the same reason `0f9273b`
+and `6ea9f46` gave the same pairwise lines: this commit changes no source file.**
+`git diff --stat` over it is `progress/DECISIONS.md`, `progress/HANDOFF.md` and
+`progress/state.json` and nothing else, so a difference here would have meant a
+gate had failed differently for a reason no commit in it explains. **That is the
+one property this reading had to establish and the one the earlier readings could
+not**: the four `P3-T008` deltas were taken against a moving target, and this one
+is taken against a target that did not move.
+
+`read-run.py` prints `windows vs macos: -13 +14` and `windows vs ubuntu: -12 +14`
+— **the same two lines as at `664575b`, `6353477`, `18209d8`, `0f9273b`,
+`6ea9f46` and now here.** Seven consecutive readings of the same pair, across five
+tasks and three commits of one task, and not one of them moved. **A pairwise line
+that never changes is worth reading every time anyway**, because the failure it
+would catch — a new `#[cfg]`-gated test, or a platform-conditional one silently
+dropping out of the census — is invisible in the parent sum, which is the number
+every headline uses.
+
+**The two jobs that are not about Rust are the ones that examine this commit's own
+claims.** `bootstrap-validate-windows` reads `progress/state.json` as this commit
+wrote it: *"SURE bootstrap validation OK: 17 phases, 166 tasks"*, *"state OK: 166
+tasks"*, then the PowerShell validator's *"PowerShell bootstrap validation OK."*
+**That is the closest thing this repository has to a check on the acceptance, and
+it checks the shape of the file rather than the truth of it** — which is exactly
+why the note it accepted was the one a hand corrected afterwards, and why the
+148-escape rewrite inside it passed every job on this run. `shellcheck-secondary`
+is `success` and has no count to read.
+
 
 ### Reading run `34946515895`, `P3-T008`'s — and a delta that closes from four directions at once, one of which is a tool caveat
 

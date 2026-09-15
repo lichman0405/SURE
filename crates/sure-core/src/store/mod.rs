@@ -93,7 +93,7 @@ mod record;
 
 pub use error::StoreError;
 pub use migrations::{LATEST as LATEST_SCHEMA_VERSION, Migration, MigrationError};
-pub use record::{RECORDING, RecordKind, StoredRecord};
+pub use record::{APPROVAL, RECORDING, RecordKind, StoredRecord};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -102,6 +102,7 @@ use std::time::{Duration, Instant};
 use rusqlite::Connection;
 use rusqlite::types::Value as SqlValue;
 use serde_json::Value;
+use sure_domain::execution::HostConsent;
 use sure_domain::ids::FingerprintId;
 
 use crate::diagnostics::Timestamp;
@@ -173,6 +174,23 @@ impl HistoryFilter<'_> {
             kind: Some(RecordKind::Recording),
             include_recordings: true,
             project_fingerprint: None,
+        }
+    }
+
+    /// Only recorded approvals, for one project state.
+    ///
+    /// A named constructor rather than a struct literal at the call site, for
+    /// the same reason [`HistoryFilter::recordings`] is one: the filter that
+    /// answers *what has SURE been allowed to run here* should be readable as
+    /// that sentence, and an approval is always about a project state
+    /// (`docs/architecture/EVIDENCE_MODEL.md`), so there is no version of this
+    /// filter that does not name one.
+    #[must_use]
+    pub fn approvals(fingerprint: &FingerprintId) -> HistoryFilter<'_> {
+        HistoryFilter {
+            project_fingerprint: Some(fingerprint),
+            kind: Some(RecordKind::Approval),
+            include_recordings: false,
         }
     }
 }
@@ -382,6 +400,46 @@ impl Store {
         project_root: Option<&str>,
     ) -> Result<i64, StoreError> {
         self.insert(RecordKind::Recording, recording, project_root, None)
+    }
+
+    /// Store a consent the user gave, so that it can be read back afterwards.
+    ///
+    /// A method of its own rather than
+    /// `append_for(RecordKind::Approval, ..)`, for the reason
+    /// [`Store::append_recording`] is one: `ADR 0009` is that host execution is
+    /// conditional on *recorded* per-command consent, so writing one down is a
+    /// thing a call site should have to have typed on purpose.
+    ///
+    /// The document is the [`HostConsent`] itself rather than a projection of
+    /// it. A projection would be a second reading of the same approval, and the
+    /// audit question is *was this exact command approved*, which only the
+    /// record as it was given can answer.
+    ///
+    /// It takes a project state for the same reason every other record about a
+    /// project does: a consent given for one project state and read against
+    /// another is a consent for something else.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::MalformedRow`] if the consent cannot be turned into JSON,
+    /// plus everything [`Store::append`] reports. There is no schema for this
+    /// kind, so there is no [`StoreError::Rejected`] from a schema.
+    pub fn append_approval(
+        &self,
+        consent: &HostConsent,
+        project_root: &str,
+        fingerprint: &FingerprintId,
+    ) -> Result<i64, StoreError> {
+        let document = serde_json::to_value(consent).map_err(|error| StoreError::MalformedRow {
+            id: 0,
+            message: error.to_string(),
+        })?;
+        self.insert(
+            RecordKind::Approval,
+            &document,
+            Some(project_root),
+            Some(fingerprint.as_str()),
+        )
     }
 
     /// Read records, newest first.

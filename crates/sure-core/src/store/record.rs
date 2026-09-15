@@ -48,6 +48,12 @@ use crate::store::error::StoreError;
 /// collide with a document name has something to compare against.
 pub const RECORDING: &str = "recording";
 
+/// The name [`RecordKind::Approval`] is stored under.
+///
+/// A constant for the same reason [`RECORDING`] is one: the test that proves no
+/// document is called this has to compare against something.
+pub const APPROVAL: &str = "approval";
+
 /// One thing the store can hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordKind {
@@ -59,6 +65,24 @@ pub enum RecordKind {
     /// deletable on its own. `docs/security/PRIVACY.md` is the rule; this type
     /// is what makes the rule expressible.
     Recording,
+    /// A recorded approval to run project commands on this machine.
+    ///
+    /// **The third shape a stored row can have, and it is not a document.**
+    /// `ADR 0009` makes host execution conditional on *recorded per-command
+    /// consent*, and `P3-T006`'s second acceptance sentence makes the state of
+    /// that consent auditable locally. Neither of those is satisfied by a value
+    /// that lives only as long as the process that built it, so the record has
+    /// to be written down — and writing it down as a document would put it in
+    /// the integration protocol, which is a contract with harnesses rather than
+    /// a place for SURE's own audit trail.
+    ///
+    /// It is kept in history rather than excluded from it, unlike a recording.
+    /// A consent is a statement about what SURE was allowed to do to a project,
+    /// it names the project state it was given for, and a user asking *what has
+    /// SURE been allowed to run here* is asking the question this row exists to
+    /// answer. It is still deletable, because `docs/security/PRIVACY.md` gives
+    /// the user the whole local history and not a part of it.
+    Approval,
 }
 
 impl RecordKind {
@@ -75,6 +99,7 @@ impl RecordKind {
         RecordKind::Document(DocumentKind::ProjectIntent),
         RecordKind::Document(DocumentKind::Repair),
         RecordKind::Recording,
+        RecordKind::Approval,
     ];
 
     /// The stable name, used as the value of the `kind` column.
@@ -83,6 +108,7 @@ impl RecordKind {
         match self {
             Self::Document(kind) => kind.as_str(),
             Self::Recording => RECORDING,
+            Self::Approval => APPROVAL,
         }
     }
 
@@ -97,6 +123,9 @@ impl RecordKind {
         if name == RECORDING {
             return Some(Self::Recording);
         }
+        if name == APPROVAL {
+            return Some(Self::Approval);
+        }
         documents::ALL
             .iter()
             .copied()
@@ -106,14 +135,18 @@ impl RecordKind {
 
     /// The document this kind stores, if it stores one.
     ///
-    /// A recording has no schema, and this is where that shows: there is
-    /// nothing to validate it against, which is why the write path treats it
-    /// separately rather than as a document with a missing schema.
+    /// A recording and an approval have no schema, and this is where that
+    /// shows: there is nothing to validate them against, which is why the write
+    /// path treats them separately rather than as a document with a missing
+    /// schema. **The absence is not a gap — neither is a statement about a
+    /// project in the protocol's sense.** A recording is not a statement at all,
+    /// and an approval is a statement about SURE's own authority, which
+    /// `sure-protocol` does not describe.
     #[must_use]
     pub const fn document(self) -> Option<DocumentKind> {
         match self {
             Self::Document(kind) => Some(kind),
-            Self::Recording => None,
+            Self::Recording | Self::Approval => None,
         }
     }
 
@@ -121,6 +154,12 @@ impl RecordKind {
     #[must_use]
     pub const fn is_recording(self) -> bool {
         matches!(self, Self::Recording)
+    }
+
+    /// Whether this is a recorded approval rather than a document.
+    #[must_use]
+    pub const fn is_approval(self) -> bool {
+        matches!(self, Self::Approval)
     }
 
     /// Whether SURE will write this as a record about a project.
@@ -234,6 +273,34 @@ mod tests {
     }
 
     #[test]
+    fn the_name_of_an_approval_is_not_the_name_of_any_document_either() {
+        for &kind in documents::ALL {
+            assert_ne!(kind.as_str(), APPROVAL);
+        }
+        assert_ne!(APPROVAL, RECORDING);
+    }
+
+    #[test]
+    fn an_approval_is_stored_in_history_rather_than_kept_out_of_it() {
+        // The opposite of a recording, and the difference is the point. A
+        // recording is private material the user opted into; an approval is a
+        // statement about what SURE was allowed to do, and the sentence this
+        // kind exists for is that the state of those approvals is auditable.
+        // A kind that `HistoryFilter::default` excludes would make the audit
+        // trail invisible to the command a user would look in.
+        assert!(!RecordKind::Approval.is_recording());
+        assert!(RecordKind::Approval.is_approval());
+        assert!(RecordKind::Approval.is_storable());
+        assert!(RecordKind::Approval.document().is_none());
+
+        let filter = crate::store::HistoryFilter::default();
+        assert!(
+            !filter.include_recordings,
+            "the default filter is the privacy default, and it excludes recordings only"
+        );
+    }
+
+    #[test]
     fn the_storable_documents_are_every_document_except_the_fixture_schema() {
         // The drift guard. A document gaining a schema and no way to be stored
         // — or a stored kind with no schema to check it — shows up here rather
@@ -267,10 +334,27 @@ mod tests {
     }
 
     #[test]
-    fn only_a_recording_lacks_a_schema() {
+    fn only_the_two_recorded_kinds_lack_a_schema() {
+        // The drift guard, and it has already done its job once: adding
+        // `Approval` broke the version of this test that said `is_recording`,
+        // which is what it is for. What it now pins is that the schema-less
+        // kinds are exactly the two that were chosen rather than the two that
+        // happened to be there.
         for &kind in RecordKind::ALL {
-            assert_eq!(kind.document().is_none(), kind.is_recording(), "{kind}");
+            assert_eq!(
+                kind.document().is_none(),
+                kind.is_recording() || kind.is_approval(),
+                "{kind} disagrees with itself about whether it has a schema"
+            );
         }
+        assert_eq!(
+            RecordKind::ALL
+                .iter()
+                .filter(|kind| kind.document().is_none())
+                .count(),
+            2,
+            "a third schema-less kind arrived without this test being read"
+        );
     }
 
     #[test]

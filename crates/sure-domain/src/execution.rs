@@ -361,6 +361,24 @@ pub struct ApprovedCommand {
     pub working_directory: String,
     /// Which planned check this approval covers.
     pub check: CheckId,
+    /// What SURE had read the command as when the user was shown it.
+    ///
+    /// **The other four fields say what would run. This one says what the user
+    /// was told it was, and it is the only field a later build can disagree
+    /// with.** [`crate::execution`] has no classifier in it — the reading comes
+    /// from `sure_core::safety`, which is deterministic on the program and the
+    /// argument vector — so within one build the two always agree. But an
+    /// approval is a record that outlives the build that wrote it, and the
+    /// question *may this run* is put again by a classifier that may since have
+    /// learned something. `P3-T006`'s acceptance is about categories, and a
+    /// record that does not carry the categories the user approved cannot be
+    /// checked against the categories the command now falls into.
+    ///
+    /// It is also the audit answer to a question the other four cannot answer:
+    /// a reader of this record can see that the user was told the command
+    /// *can destroy data*, rather than having to trust that whoever wrote the
+    /// prompt said so.
+    pub effects: CommandEffects,
 }
 
 impl ApprovedCommand {
@@ -718,6 +736,56 @@ impl CommandEffects {
     pub fn is_static_only(&self) -> bool {
         self.classes.len() == 1 && self.classes[0] == CommandClass::Static
     }
+
+    /// Whether this set holds every category in `other`.
+    ///
+    /// The relationship between a set of categories somebody agreed to and the
+    /// set a command actually falls into, and it is deliberately one-way: a
+    /// consent given for `git clean` *covers* nothing else, while a category set
+    /// that has grown a category the agreement does not name is not covered by
+    /// it. Writing it as equality would refuse a command that narrowed — and
+    /// more importantly it would make the interesting direction, the one where
+    /// something gained a danger nobody agreed to, unreadable at the call site.
+    #[must_use]
+    pub fn covers(&self, other: &Self) -> bool {
+        other
+            .classes
+            .iter()
+            .all(|class| self.classes.contains(class))
+    }
+}
+
+impl<'de> Deserialize<'de> for CommandEffects {
+    /// Read a set of categories back, refusing one that names nothing.
+    ///
+    /// **The door that does not match [`of`](CommandEffects::of), and the
+    /// difference is the direction "cautious" points in.** `of` answers
+    /// [`anything`](CommandEffects::anything) for an empty list, because a rule
+    /// that named no category has said nothing about a command, and for a
+    /// *classification* saying nothing must land on the dangerous side. A value
+    /// arriving over a wire is not a classification — it is a claim about
+    /// something that already happened — and for the set of categories a user
+    /// approved, the cautious direction is the other one. Reading an empty list
+    /// as `anything` would turn *this approval covers nothing* into *this
+    /// approval covers everything*, which is the false green in its purest form.
+    ///
+    /// Everything else goes through [`canonical`](CommandEffects::canonical), so
+    /// the order the classes arrive in and any repetition are the writer's
+    /// business rather than the reader's.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let classes = Vec::<CommandClass>::deserialize(deserializer)?;
+        if classes.is_empty() {
+            return Err(<D::Error as serde::de::Error>::custom(
+                "a set of command categories is never empty: `of(&[])` answers `anything` for a \
+                 rule that named nothing, but a value that says a command falls into no category \
+                 has said something SURE cannot read",
+            ));
+        }
+        Ok(Self::canonical(&classes))
+    }
 }
 
 impl std::fmt::Display for CommandEffects {
@@ -889,6 +957,7 @@ mod tests {
             args: vec!["test".to_owned(), "--all-features".to_owned()],
             working_directory: ".".to_owned(),
             check: CheckId::generate(),
+            effects: CommandEffects::single(CommandClass::DynamicHost),
         };
         assert_eq!(command.display(), "cargo test --all-features");
 
@@ -897,6 +966,95 @@ mod tests {
             ..command
         };
         assert_eq!(spaced.display(), "cargo --path \"C:\\Program Files\\x\"");
+    }
+
+    #[test]
+    fn an_approval_says_what_the_user_was_told_the_command_was() {
+        // The fifth field, and the one an audit reads. The first four say what
+        // would run; this one says what SURE told the user it would be doing,
+        // and it survives the trip through the store so that a reader does not
+        // have to trust that whoever wrote the prompt said so.
+        let command = ApprovedCommand {
+            program: "git".to_owned(),
+            args: vec!["clean".to_owned(), "-fdx".to_owned()],
+            working_directory: ".".to_owned(),
+            check: CheckId::generate(),
+            effects: CommandEffects::single(CommandClass::Destructive),
+        };
+        let text = serde_json::to_string(&command).expect("a consent record is serializable");
+        assert!(
+            text.contains("\"destructive\""),
+            "the reading is in the record: {text}"
+        );
+        let read: ApprovedCommand =
+            serde_json::from_str(&text).expect("and it reads back as the same value");
+        assert_eq!(read, command);
+    }
+
+    #[test]
+    fn a_set_of_categories_read_back_is_canonical_or_refused() {
+        // Two rules, and they are the same rule: what comes off a wire is a
+        // *set*, so order and repetition are the writer's business — and a set
+        // with nothing in it is not a value this type has, so it is refused
+        // rather than widened to `anything`.
+        let read = |text: &str| serde_json::from_str::<CommandEffects>(text);
+
+        assert_eq!(
+            read("[\"network\",\"install\",\"network\"]").expect("a set, however spelled"),
+            CommandEffects::of(&[CommandClass::Install, CommandClass::Network]),
+            "the canonical order is the enum's, whatever order arrived"
+        );
+        assert!(
+            read("[]").is_err(),
+            "an empty set is not a value SURE reads"
+        );
+        assert!(
+            read("[\"telepathy\"]").is_err(),
+            "a category this build does not know is not guessed at"
+        );
+    }
+
+    #[test]
+    fn only_a_rule_that_named_nothing_widens_to_anything() {
+        // The two doors, side by side. `of(&[])` is a classifier that forgot to
+        // name a category, and saying nothing about a command has to land on the
+        // dangerous side. A deserialized `[]` is a record claiming a command
+        // falls into no category at all, which is not a claim this type can
+        // hold, and reading it as `anything` would turn "approved nothing" into
+        // "approved everything".
+        assert_eq!(CommandEffects::of(&[]), CommandEffects::anything());
+        assert!(serde_json::from_str::<CommandEffects>("[]").is_err());
+    }
+
+    #[test]
+    fn covers_is_one_way_and_says_which_way() {
+        let approved = CommandEffects::of(&[CommandClass::Install, CommandClass::Network]);
+        assert!(approved.covers(&CommandEffects::single(CommandClass::Install)));
+        assert!(approved.covers(&approved));
+
+        // A command that gained a category nobody agreed to is not covered —
+        // which is the direction the whole rule exists for.
+        let grown = CommandEffects::of(&[
+            CommandClass::Install,
+            CommandClass::Network,
+            CommandClass::Destructive,
+        ]);
+        assert!(!approved.covers(&grown));
+        assert!(grown.covers(&approved));
+
+        // And a command that still falls inside what was approved is covered even
+        // when it no longer falls into all of it, because nothing unapproved is
+        // executing and refusing it would be refusing the safer reading.
+        assert!(approved.covers(&CommandEffects::single(CommandClass::Install)));
+        assert!(approved.covers(&CommandEffects::single(CommandClass::Network)));
+
+        // Falling inside is not the same as shrinking, and `Static` is not a subset
+        // of `Install, Network` — it is a different reading, and this answers
+        // `false` for it. That combination cannot reach a gate: a static-only
+        // command is permitted by `Permission::Inspect` before any consent is
+        // consulted, so the question this method answers is only ever asked about a
+        // command that needs consent.
+        assert!(!approved.covers(&CommandEffects::static_only()));
     }
 
     #[test]

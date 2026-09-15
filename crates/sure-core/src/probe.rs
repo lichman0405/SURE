@@ -816,3 +816,52 @@ impl fmt::Display for ProbeOutcome {
         formatter.write_str(&self.reason())
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_deadline_is_recognized_in_both_shapes_the_platforms_give_it() {
+        // The one test in this module rather than in `tests/`, because the claim
+        // cannot be measured from a socket on more than one platform per run.
+        // Windows reports an expired socket read timeout as `TimedOut`; a Unix
+        // reports the same condition as `WouldBlock`. This was found by a
+        // mutation — deleting the `WouldBlock` arm — that **survived** the whole
+        // integration suite on Windows, and could not have done anything else:
+        // nothing reachable from a socket on this machine produces the Unix
+        // spelling.
+        //
+        // What that arm protects is stated where it lives, and it is not
+        // cosmetic: without it a Unix build reports a port that said nothing as
+        // a port that could not be reached — an observation about the project
+        // turned into a failure of the probe.
+        assert!(is_a_timeout(&std::io::Error::from(ErrorKind::TimedOut)));
+        assert!(is_a_timeout(&std::io::Error::from(ErrorKind::WouldBlock)));
+        assert!(!is_a_timeout(&std::io::Error::from(
+            ErrorKind::ConnectionReset
+        )));
+    }
+
+    #[test]
+    fn a_contradicted_first_line_is_decided_before_the_line_ends() {
+        // Also unreachable from a socket in the discriminating cases: every
+        // server in `tests/` that sends a complete response sends a blank line
+        // too, so the split path is what a socket exercises.
+        assert!(could_still_be_a_status_line(b""));
+        assert!(could_still_be_a_status_line(b"HTTP/"));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1"));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1 "));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1 2"));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1 200"));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1 200 OK\r\n"));
+        assert!(could_still_be_a_status_line(b"HTTP/1.1 200 OK\r\nX: 1"));
+
+        assert!(!could_still_be_a_status_line(b"S"));
+        assert!(!could_still_be_a_status_line(b"SSH-2.0-x"));
+        assert!(!could_still_be_a_status_line(&[0x15, 0x03, 0x03]));
+        assert!(!could_still_be_a_status_line(b"HTTP/1.1 2000"));
+        assert!(!could_still_be_a_status_line(b"HTTP/1.1 20x"));
+    }
+}

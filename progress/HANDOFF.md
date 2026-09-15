@@ -3651,6 +3651,34 @@ acceptance**, which is the order this file states and not an extra step: the
 branch's checkpoint is the acceptance commit, and a checkpoint whose run has not
 been read is a push, not a checkpoint.
 
+**`af2cd75`'s own run, `34953980527`, was read the same way and reads the same
+way**: five jobs `success`, Windows **1217** / macOS **1218** / Ubuntu **1219**,
+the same 46 = 36 + 10, and `+0 −0` against `34953593684` on all three platforms.
+**Reading it produced the next instrument trap, and the trap is in this file's own
+tool.** `read-run.py` takes each log's job name from the *filename*: `label_of`
+splits the stem on `-` and keeps everything after the second one, so a log named
+`run34953980527-104331457670.log` — the job id, which is what `gh run view --json
+jobs` hands out — is labelled with its whole stem. It does not fail. It printed
+
+```
+run34953980527-104331457670 vs run34953980527-104331457764: -3 +2
+run34953980527-104331457670 vs run34953980527-104331457856: -14 +12
+```
+
+which are the differences between **whichever two platforms happened to sort
+first**, Ubuntu against macOS and Ubuntu against Windows, under labels that name
+neither. **The standing lines are `-13 +14` and `-12 +14`; these are not those,
+and that is the only reason the mistake was caught.** The tool already refuses a
+*duplicate* label — the docstring records that an empty label once made two logs
+displace one another silently — and it cannot refuse a meaningless one, because a
+job id is a perfectly good string. Renaming the three logs to `…-windows.log`,
+`…-macos.log` and `…-ubuntu.log` reproduced `-13 +14` and `-12 +14` exactly, and
+the `+0 −0` name deltas were then recomputed against the correctly paired logs
+rather than the ones the shell globbed first. **The lesson is not "name the
+files"**, which this file already says: it is that a tool whose labels come from
+outside its input will answer a question nobody asked, and the only check that
+caught it was holding the answer against the number that was expected.
+
 ### Reading runs `34952200942` and `34952509429`, `P3-T009`'s — and a red that was the test's fault rather than the product's
 
 **Two runs, because the first one was red and a red run is not finished until the

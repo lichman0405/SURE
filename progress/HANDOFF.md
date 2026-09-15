@@ -502,9 +502,11 @@ READY: P3-T010, P3-T011, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001,
 `34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270`,
 `34943445326` / `34943853809` / `34944133634` — the last three being `P3-T007`'s,
 which took three commits and therefore three runs — `34946515895`, which is
-`P3-T008`'s and whose five jobs all read `success`, and **`34952200942` and
-`34952509429`**, which are `P3-T009`'s: the first red on macOS and the second,
-carrying the one-assertion fix, green on all five jobs. **`in_progress` is 0**, so
+`P3-T008`'s and whose five jobs all read `success`, and three for `P3-T009` —
+**`34952200942` and `34952509429`**, its implementation and the one-assertion fix
+that answered the first's macOS red, and **`34953593684`**, which carries the
+acceptance commit `a6bc8df` and reads identically to `34952509429` on all three
+platforms. **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
 adopting an orphan. **Phase `P3` is 9 of 11 and open**: the remaining two `P3`
 tasks — `P3-T010` and `P3-T011` — are `queued` and both READY.
@@ -3620,6 +3622,34 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34953593684`, `P3-T009`'s acceptance — and a progress-only commit whose reading had to be the one before it
+
+**Five jobs, all `success`**, and every number is the previous run's number
+exactly:
+
+| job | result lines | parents | children | passed | failed | ignored | parent sum |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `rust (windows-latest)` | 46 | 36 | 10 | 1227 | 0 | 11 | **1217** |
+| `rust (macos-latest)` | 46 | 36 | 10 | 1228 | 0 | 11 | **1218** |
+| `rust (ubuntu-latest)` | 46 | 36 | 10 | 1229 | 0 | 11 | **1219** |
+
+**`name-delta.py` against `34952509429` is `+0 −0` on all three platforms, and
+that is the whole of what this run had to show.** `a6bc8df` changes three files —
+`progress/state.json`, `progress/DECISIONS.md` and `progress/HANDOFF.md` — and
+nothing under `crates/` or `tests/`, so **a census that had moved would have been
+the finding**; a census that did not is the claim, measured rather than assumed.
+This is the second run in this file whose job was to read identically to the one
+before it (`a2d08a6`, `P3-T008`'s acceptance), and the first is the reason the
+check is run at all rather than reasoned about.
+
+**The pairwise lines are the standing two**: `windows vs macos: -13 +14` and
+`windows vs ubuntu: -12 +14`, unchanged from `664575b`, `6353477`, `18209d8`,
+`719253e`, `0f9273b`, `6ea9f46`, `1f403d8` and both of this task's own earlier
+runs. **The acceptance commit is pushed and its run read as part of the
+acceptance**, which is the order this file states and not an extra step: the
+branch's checkpoint is the acceptance commit, and a checkpoint whose run has not
+been read is a push, not a checkpoint.
 
 ### Reading runs `34952200942` and `34952509429`, `P3-T009`'s — and a red that was the test's fault rather than the product's
 

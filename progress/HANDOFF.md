@@ -2,26 +2,96 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 46 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 47 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 open
-(3/9).** `P4-T003` is implemented and pushed as one commit, `4fd5663`, its run is
-read in full below, and **the commit carrying this file is its acceptance**. What
-the task added is described under "What `P4-T003` added", which is this section;
-`P4-T002`'s is the next one down. **Accepting `P4-T002` unblocked nothing,
-because its only dependent is `P4-T009` and two of `P4-T009`'s four requirements
-were still `queued`**, so the READY list was 14 long and the next concrete action
-was the lowest-numbered of them, which was `P4-T003`; **accepting `P4-T003`
-unblocked nothing either**, so the READY list went `14 → 13` and the next
-concrete action is `P4-T004`, *"Implement Rust deterministic checks"*.
+(4/9).** `P4-T004` is implemented and pushed as **two** commits, `c9d594f` and
+`702cfee`, **both runs are read in full below**, and **the commit carrying this
+file is its acceptance**. What the task added is described under "What `P4-T004`
+added", which is this section; `P4-T003`'s is the next one down.
 
-**The acceptance also repaired the record, and that is more of this commit than
-`P4-T003` is.** Running the two mechanical checks the run-table section below
-prescribes turned up three things it had never caught: **nine runs with no row**,
-five of which were named nowhere in this file at all; **two rows in the wrong
-order**; and **twenty-nine consecutive rows reporting `parent_passed` under the
-label "passed"**. The nine rows and the swap are corrected here, the twenty-nine
-figures are left as read and labelled instead, and all three are described in the
-table's own section below. Nothing in `crates/` was touched by this commit.
+**Accepting `P4-T004` unblocked exactly one task, `P4-T009`, and the READY list
+was the same length before and after it.** `P4-T009`, *"Implement deterministic
+check aggregation"*, names four requirements — `P0-T004`, `P4-T002`, `P4-T003`,
+`P4-T004` — and `P4-T004` was the last of them; `P14-T003` also names `P4-T004`
+and is **not** ready, because its other requirement `P7-T005` is not accepted.
+The list went **13 → 13** with one swap, `P4-T004` out and `P4-T009` in, read by
+replaying the dependency rule against `git show HEAD:progress/state.json` rather
+than by comparing two printouts. So the next concrete action is still the
+lowest-numbered READY entry, `P4-T005`, *"Implement README/setup validation"*,
+and `P4-T009` waits behind it rather than jumping the queue.
+
+**Two things about this acceptance are corrections to the record rather than to
+the code, and both are in the run-table section below.** The `P4-T003`
+acceptance's own run had **no row** in the table a reader scans, which is the
+same gap that acceptance had just repaired nine times over; and the paragraph
+further down that reads this file's `base_sha`/`head_sha`/`evidence` fields off
+the tasks asked to be re-read at each acceptance and predicted it would hold
+"unless the tool changed" — **it has stopped holding, and the tool did not
+change.** Both are described where they belong.
+
+## What `P4-T004` added
+
+**The one thing about `P4-T004` a reader should know before the detail: its
+acceptance names four words, and the second half of the sentence is what decides
+what one of them means.** The sentence is *"fmt/check/clippy/test evidence binds
+to current fingerprint."* The four words are four `CommandRole`s — `Format`,
+`Check`, `Lint`, `Test` — and for three of them the check is the command the
+discovery already planned. **`cargo fmt` is not a check and `cargo fmt --check`
+is**, because evidence binds to a fingerprint and `cargo fmt` *rewrites the tree
+the fingerprint was taken of*: the result would describe the project before the
+run and there is no state it is still true of afterwards. `format_command`
+appends that one flag to the discovery's own string rather than composing a
+command, and `titled` gives the check its own sentence (*"check that the source is
+formatted"*) instead of the role's `plain_name` (*"rewrite the source to a
+style"*) — because a title is what a person reads in the consent prompt, and one
+describing the writing form while the reason named the reading form would be SURE
+telling a user it will change their files when it will not. Both halves are
+mutated, and both mutations are caught.
+
+**The second thing: the binding is the signature rather than a rule a caller
+keeps.** `checks::evidence_of` takes the fingerprint off
+`CheckResult::project_fingerprint`, which is a required field with no `Default`,
+so *a result's evidence is bound to the state that result is about* cannot be got
+wrong by a caller that forgets. `None` from that function is exactly
+`EvidenceClass::Unknown`, which is exactly what a `MissingCommand`'s result
+carries, so a tool the project never asked for cannot reach a report as anything
+but a sentence saying it was not checked — held over `MissingKind::ALL` rather
+than over the two kinds this module happens to produce.
+
+**The third thing, and the finding this task is most about: one mutation survived
+the whole suite, and what it found was a doc comment rather than a missing test.**
+Dropping the second half of `RustChecks::is_empty`'s conjunction is caught by
+**zero** tests, and it always will be — for Rust the two halves cannot disagree,
+because `CommandRole::Check` and `CommandRole::Test` name `cargo`, a root
+`Cargo.toml` is what declares `cargo`, and so `proposed` is never empty while
+`missing` is not. **The two versions are extensionally equal for every value the
+type can hold**, which is why no test can tell them apart and why the honest
+answer is not another test. The comment above that method claimed the second half
+was *"the one a mutation can drop"* and named a project that asked for neither
+tool as the case proving it — and that project proposes two checks, so both
+versions answer `false` and the named case proved nothing. **The comment was the
+defect.** It now says why the halves agree, says plainly that the second half is
+not reachable through `RustChecks::of` today, and points at `super::python`, where
+the conjunction *is* load-bearing because all four of its roles can be unplanned.
+`the_layer_is_empty_exactly_when_sure_read_no_manifest` holds the equivalence over
+every fixture shape, so the day a role table change parts the halves is a failing
+test rather than a stale paragraph — and a thirteenth mutation, which takes
+`Check` out of discovery and is exactly that change, is caught by nineteen tests
+**including the new one.**
+
+**The fourth thing is not this task's code at all: the implementation run came
+back red on macOS, and what it found was a test from `P3-T009` that assumed its
+premise instead of waiting for it.** `a_service_that_is_dropped_is_stopped_anyway`
+drops a service and then measures the stop with the child's heartbeat. It waited
+for `started` and dropped — and the child writes `started` one statement before
+its first heartbeat, so a loaded scheduler can kill it in between, leaving a
+heartbeat that was never written. `wait_until_quiet` read a missing file as `""`
+twice and answered "quiet", and **the assertion that exists to refuse exactly that
+reading said so**: a stop that worked, reported as a failure to stop. The test now
+waits for the heartbeat before dropping, and the child writes each heartbeat aside
+and renames it into place so that a kill cannot leave a half-written one — the
+same reading, arrived at one statement later. **The failing commit touches none of
+it**, and the fix is `702cfee`, read below.
 
 ## What `P4-T003` added
 
@@ -657,35 +727,44 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P4
-{ accepted: 46, queued: 120 }
-READY: P4-T004, P4-T005, P4-T006, P4-T007, P4-T008, P5-T001, P6-T001, P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
+{ accepted: 47, queued: 119 }
+READY: P4-T005, P4-T006, P4-T007, P4-T008, P4-T009, P5-T001, P6-T001, P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
 
 **That block is the tool's output pasted whole, including the third line
-unwrapped**, and it was pasted **after** `P4-T003` was accepted rather than
+unwrapped**, and it was pasted **after** `P4-T004` was accepted rather than
 before — it is the run of `node scripts/taskctl.mjs status` taken once
 `state.json` had been updated. The thirteen-task READY list above is therefore
 read out of the tool rather than predicted, which is the discipline the paragraph
 below records the failure of.
 
-**`P4-T003` is `accepted`** on **`34974577185`**, which carries **`4fd5663`** and
-is read in full below. **`in_progress` is 0 again**, so nothing is half-finished
-and the next session may start any READY task without adopting an orphan. The
-READY list went `14 → 13`: **the READY list read 14 before `P4-T003` and reads 13
-after it, so accepting it unblocked nothing.** `P4-T003` has exactly **one**
-dependent — `P4-T009`, *"Implement deterministic check aggregation"* — and
-`P4-T009` names **four** requirements, one of which is still `queued`:
+**`P4-T004` is `accepted`** on **`34983449923`**, which carries **`702cfee`**, and
+both of the task's runs are read in full below. **`in_progress` is 0 again**, so
+nothing is half-finished and the next session may start any READY task without
+adopting an orphan. **`P4-T004` has two dependents and only one of them is now
+ready**, which is the arithmetic worth doing rather than asserting:
 
 ```
-P4-T009 depends_on: ["P0-T004","P4-T002","P4-T003","P4-T004"]  (tasks/tasks.json)
+P4-T009  depends_on: ["P0-T004","P4-T002","P4-T003","P4-T004"]  (tasks/tasks.json)
+P14-T003 depends_on: ["P4-T004","P7-T005"]
+
 P0-T004: accepted   P4-T002: accepted   P4-T003: accepted
-P4-T004: queued                                                (progress/state.json)
-14 - 1 + 0 = 13
+P4-T004: accepted   P7-T005: queued                            (progress/state.json)
+
+P4-T009:  all four accepted  -> READY
+P14-T003: P7-T005 queued     -> still not READY
 ```
 
-**`P4-T004` is now the only requirement `P4-T009` is still waiting for**, and it
-is also the lowest-numbered READY task, so it is the next concrete action by both
-readings.
+**So accepting `P4-T004` unblocked exactly one task, and the READY list is the
+same length before and after it: `13 → 13`.** That is not a coincidence of two
+numbers that happen to match — it is `13 - 1 + 1`, the task accepted leaving and
+`P4-T009` arriving — and the two readings are computed by replaying the
+dependency rule over `git show HEAD:progress/state.json` and the working copy
+rather than by comparing two printouts of the READY line, because the READY line
+in the session banner is **`ready.slice(0, 8)`** (`scripts/dev-context.mjs:6-8`)
+and is a window rather than a count. **`P4-T005` is the next concrete action by
+the ordering rule**, and `P4-T009` is now READY but waits behind it rather than
+jumping the queue.
 
 **Two things in the paragraph this one replaces are wrong, and both are worth
 recording because of how they were found — by printing the files, not by reading
@@ -986,6 +1065,28 @@ it held except the totals**: the three always-empty-notes tasks are still the
 same three, `P2-T003` is still the only one with evidence, and no task has ever
 gained a SHA. That is a fact about the tool rather than about the tasks, so it
 should survive the next reading too — and if it stops, the tool changed.
+
+**The re-read this paragraph asked for, at 47 accepted tasks, and the prediction
+it made is the thing that failed rather than a count.** It said *"no task has
+ever gained a SHA"* and *"if it stops, the tool changed"*. **It has stopped, and
+the tool did not change**: `taskctl accept` still writes `status`, `finished_at`
+and `notes` and nothing else, and **two** tasks carry a `base_sha` and a
+`head_sha` because a person typed them — `P4-T003` (`424b213` → `4fd5663`) and
+`P4-T004` (`22b518d` → `702cfee`). The same is true of the evidence count, which
+read 1 of 40 and now reads **6 of 47**: `P2-T003` plus `P3-T011`, `P4-T001`,
+`P4-T002`, `P4-T003` and `P4-T004`. So the two halves of that paragraph have
+**not** held in the same way — the *notes* half is still exact, the same three
+tasks (`P0-T009`, `P1-T001`, `P1-T002`) have no notes and every other accepted
+task has one — and the reason is worth the sentence: **the fields stopped being
+a fact about the tool and became a fact about the person accepting, which is
+exactly the kind of claim this file exists to distrust.** Every SHA and every
+evidence string in those five tasks is hand-entered, no gate reads them, and the
+authority for them is the run table below rather than the field itself.
+**`base_sha` and `head_sha` now mean the pair of commits this acceptance spans**
+— `P4-T003`'s `head_sha` is its implementation commit because that task had one,
+and `P4-T004`'s is `702cfee` because that task had two and the green run carries
+the second — so a reader who diffs the pair gets everything the task did and not
+only its first commit.
 **The `P3-T008` note is the first on this branch that was written by hand rather
 than by the tool**, because `accept` was given `--evidence`, which it ignores, and
 it cannot be re-run from `accepted`. The tool wrote an empty one and a person
@@ -4138,6 +4239,9 @@ Three of the five jobs were failing the whole time.
 | 34969139607 | `0bf09c2` — **the `P4-T002` implementation** | **all five green.** Windows **1334** / macOS **1335** / Ubuntu **1336** passed, 0 failed, 11 ignored, **50** result lines = **40 parents + 10 children**. The parent count moved **39 → 40** for the new `node_checks` binary and **+28 on every platform** against `34964462368`. Detail above, where the Windows name table decomposes that `+28` into `+18` `sure_core`, `+9` new `node_checks`, `+1` `check_schedule` and `+0` on the other thirty-six names |
 | 34970543344 | `424b213` — **the `P4-T002` acceptance** | **all five green**, and **1334 / 1335 / 1336** with 0 failed, 11 ignored, **50** result lines = **40 parents + 10 children** on each — the row above's figures to the test, **+0 on every platform** |
 | 34974577185 | `4fd5663` — **the `P4-T003` implementation** | **all five green.** Windows **1363** / macOS **1364** / Ubuntu **1365** passed, 0 failed, 11 ignored, **51** result lines = **41 parents + 10 children**. The parent count moved **40 → 41** for the new `python_checks` binary and **+29 on every platform** against `34970543344`, which is the 15 `python::tests::*` unit tests added to `sure_core` and the 14 integration tests in the new binary. Namesets **`+29 −0`** with the identical added set on all three platforms. Detail above |
+| 34976801249 | `22b518d` — **the `P4-T003` acceptance** | **all five green**, and **1363 / 1364 / 1365** with 0 failed, 11 ignored, **51** result lines = **41 parents + 10 children** on each — the row above's figures to the test, **+0 on every platform**, on a commit that touches only `progress/`. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. **This row was missing**: a run is read, its reading is written as a section, and the index a reader scans is not extended — the same gap as the six rows `P2-T011`'s acceptance and the nine `P4-T003`'s found. Measured from the logs during `P4-T004`'s acceptance, not transcribed |
+| 34982674189 | `c9d594f` — **the `P4-T004` implementation** | **failure: `rust (macos-latest)`.** The other four jobs green, Windows **1394** and Ubuntu **1396** passed with 0 failed. macOS **1394 passed, 1 failed**, and **exactly one failing test**: `a_service_that_is_dropped_is_stopped_anyway`. **52** result lines = **42 parents + 10 children** on each, **11 ignored**. The parent count moved **41 → 42** for the new `rust_checks` binary and **+31 on every platform** against `34976801249`, which is the 15 `rust::tests::*` unit tests, the 14 integration tests in the new binary and the 2 added to `checks::mod` — and macOS's total is +31 too, with one of them moved from the passed column to the failed one. **The failing test is not this commit's**: it is `P3-T009`'s, it failed on the one platform whose scheduler put the child between two adjacent statements, and the guard inside it is what refused to call the resulting measurement a pass. Detail below |
+| 34983449923 | `702cfee` — **the `P3-T009` fix the row above forced** | **all five green.** **1394 / 1395 / 1396** passed, **0 failed**, 11 ignored, **52** result lines = **42 parents + 10 children** on each — the row above's figures with the one macOS failure back in the passed column, so **+1 on macOS and +0 on the other two**, on a commit that changes an existing test and a child helper rather than adding a test. A **nameset** diff against `34976801249` reads **+27 added, 0 removed** while the passed delta is **+31**, and the four-name gap is a limit of the instrument rather than a lost test: 4 of `rust_checks.rs`'s 14 tests carry names P4-T003's `python_checks.rs` already printed (`a_manifest_that_is_not_there_is_not_a_project_that_declares_nothing`, `every_fixture_sits_at_a_path_two_platforms_disagree_about`, `the_command_a_check_names_is_the_line_sure_would_run`, `two_independent_readings_of_one_project_give_the_same_identifiers`), and a set difference cannot see a name a second binary has in common with an older one. **The green here is not evidence about the race the row above found** — the fix removes the window the guard refused, and an idle runner would have passed the old test too |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and

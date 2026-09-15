@@ -2503,3 +2503,68 @@ execution mode. Missing commands are not passes."*
   asserting that **every exemption is still a proposer** — so an entry cannot be
   left behind by a file that stopped proposing, which is the way an exemption list
   rots.
+
+## P4-T004 — `cargo fmt` is not a check, a conjunction whose halves cannot disagree, and a doc comment the mutation set found
+
+Acceptance: *"fmt/check/clippy/test evidence binds to current fingerprint."*
+
+- **The decision the second half of that sentence forces: the format check runs
+  `cargo fmt --check`, and the title moves with the flag.** `cargo fmt` rewrites
+  the source tree, so a check built from it would change the state it was about —
+  the fingerprint would be taken before the run and there would be nothing on disk
+  afterwards that the result was still true of. *Evidence binds to current
+  fingerprint* is therefore not a rule about storing identifiers; it is a
+  constraint on which commands may be checks at all. `format_command` appends the
+  one flag to the discovery's own string rather than composing a command, so a
+  change to what discovery plans moves the check with it, and `titled` gives the
+  role its own sentence because `plain_name` for `Format` is *"rewrite the source
+  to a style"* — a title a person reads in a consent prompt, describing a write
+  while the reason beside it named a read. **This is also where the module parts
+  company with `super::node` and `super::python`**, which *drop* their format
+  role: `prettier --write` and `ruff format` are those ecosystems' conventional
+  format commands and neither proposer invents a flag because a check would be
+  convenient. Rust is the case where the flag *is* the conventional form, so
+  dropping the role would leave the first word of the acceptance with no check
+  under it.
+
+- **A mutation survived the entire suite, and the right response turned out not
+  to be another test.** Dropping `&& self.missing.is_empty()` from
+  `RustChecks::is_empty` is caught by **zero** tests, and re-running the set after
+  the test written for it landed left it surviving again. The reason is not a
+  coverage gap: `CommandRole::Check` and `CommandRole::Test` name `cargo`, a root
+  `Cargo.toml` is what declares `cargo`, and `of` returns early when no manifest
+  was read — so `proposed` is never empty while `missing` is not, and **the two
+  versions of that method are extensionally equal for every value the type can
+  produce.** For Python the conjunction *is* load-bearing, because all four of its
+  roles can be unplanned. **What the run actually found was the doc comment**,
+  which claimed the second half was *"the one a mutation can drop"* and named a
+  project that asked for neither tool as the proof — a shape where both versions
+  answer `false`. The comment was the defect and it is rewritten to say why the
+  halves agree and that the second half is unreachable here.
+  `the_layer_is_empty_exactly_when_sure_read_no_manifest` holds the equivalence,
+  which is the property that *can* fail the day a role table change parts them.
+
+- **A test added in response to a survivor's finding has to be shown to have
+  teeth, or it is a sentence in a different medium.** The thirteenth mutation of
+  the set was added after the first run for exactly this: it takes
+  `CommandRole::Check` out of `command_for`, which is the change that would make
+  the two halves of `is_empty` disagree, and the new test is among the nineteen
+  that catch it. **Without that row, "the comment now says why they agree" would
+  be a claim with prose and no test** — the same defect the P4-T002 section above
+  records four times over.
+
+- **A red run whose failing test belongs to an accepted task is still this task's
+  to read.** `P4-T004`'s implementation run `34982674189` came back macOS-red on
+  `a_service_that_is_dropped_is_stopped_anyway`, a `P3-T009` test that had been
+  green in every run since. The failing assertion was the test's own guard saying
+  it had measured the wrong thing, and it was right: the test dropped the service
+  the moment `started` appeared, and the child writes `started` one statement
+  before its first heartbeat, so a loaded macOS scheduler could kill the child in
+  between. `wait_until_quiet` read a file that had never been created, treated two
+  equal empty readings as "quiet", and the guard refused the reading. **The fix
+  establishes the premise instead of asserting it** — wait for the heartbeat, then
+  drop — and closes the window one statement later by having the child write each
+  heartbeat aside and rename it into place, because `fs::write` truncates before
+  it writes and the only reader reads the file *after* killing the writer. **The
+  colour of a run is not the finding; the sentence the failing assertion printed
+  is**, and it printed that the instrument had never been written.

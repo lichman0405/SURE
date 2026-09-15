@@ -984,3 +984,155 @@ shape can be checked.
   stream that is still open being made an hour and `taskkill`'s own failure being
   read as the tree having been stopped, are still declared unobservable rather
   than newly covered.
+
+## P3-T004 — the five categories, and the answer nothing SURE could read is never allowed to give
+
+- **Nothing is `Static` unless a rule in the file says so, and that is the whole
+  safety argument.** `crates/sure-core/src/safety.rs` is new and is the first
+  thing in the product that reads a command line. A program the table has no row
+  for, a known program with an operation the table has no name for, and a command
+  line whose meaning is in text SURE cannot read all come back as **every category
+  but `Static`** — not an empty set, not "unknown", not a default. A classifier
+  that answered "read-only" about a command it did not recognise is the false
+  green this product exists to prevent, and **it is the one mistake here that no
+  later check could notice**: everything downstream would be reading a command
+  SURE believed it had understood. The three causes are kept apart in `Source`
+  anyway, because they have three different follow-ups — an unknown program means
+  the table needs a row, an unknown operation means the same program needs a row,
+  and unread text is the one more table work cannot fix, since the command line
+  SURE assembled is not what decides what runs.
+
+- **The fourth cause is the one that is easy to leave out: an argument that is not
+  text SURE can read makes the whole line unread rather than being dropped.**
+  Dropping one token from `git <bytes> status` leaves SURE reading the `status`
+  behind the bytes and answering `Static` — about a command line it did not read.
+  That is the same failure as the three above wearing a different hat, and it is
+  the kind a `filter_map` or a `filter_ok` writes by accident.
+
+- **`Destructive` has no permission that covers it, and the tempting answer is
+  wrong in both directions.** `CommandClass::required_permission()` answers `None`
+  for it. `WriteProject` is writing *inside* the project, which `rm -rf ..\..\` is
+  not, and `git push --force` is not a write at all — so folding destruction in
+  would let **a consent to write a file read as a consent to destroy the
+  machine**, which is the class of mistake this module exists to prevent.
+  `ungrantable()` is the door a caller uses to find that out. **What should cover
+  `Destructive` is `P3-T005`'s question**, and answering it here would have put a
+  permission decision inside the classifier.
+
+- **There is no category for "writes inside the project", so the commands that do
+  it are `UnknownOperation` rather than `Static` or a sixth class.** The
+  acceptance names five categories and none of them is "changes files in this
+  directory without destroying anything". `git commit` and `git branch -m` are
+  therefore unread operations. **Inventing a sixth class would have satisfied the
+  acceptance sentence by making it describe something other than the code**, and
+  answering `Static` beside them would have said a command that writes the
+  repository only reads it. `git pull` *is* classified, and the distinction is the
+  rule: one of *its* effects is a category the vocabulary already has. `git
+  branch`, `tag`, `config`, `remote`, `stash`, `cargo clean` and `npm audit` are
+  absent on the rule the file writes down — **a verb is in the table only when
+  every form SURE can name has an effect SURE can name**. The visible consequence
+  is that `git commit` reads as "I do not know this operation" on any repository:
+  a *true* answer and a temporary one, and where the sixth category lives is the
+  next task's decision.
+
+- **The answer is a set, and it is an upper bound rather than a description.**
+  `cargo add serde` installs a package *and* reaches the registry, so one value
+  would have to drop one of those facts. `CommandEffects` holds the categories a
+  command **may** fall into and never claims it does all of them, and the
+  direction is deliberate: asking for one consent too many costs a prompt, asking
+  for one too few is the failure. Two rules are per-flag rather than per-program
+  for the same reason. `--dry-run` takes `Install` and `Destructive` away and
+  leaves `Network`, because a dry run still looks, and where a command is left
+  with nothing it takes its program's own class instead — which is how `git clean
+  --dry-run` reads as the report it is rather than as the deletion it is not.
+  `--offline` takes away `Network` and only that spelling, because `--frozen`
+  means "do not update the lockfile" to some tools and "do not touch the network"
+  to others, and a rule that guessed would be reading two tools' grammars as one.
+
+- **The classifier is not in `process`, and it takes a program and an argument
+  vector rather than a `ProcessRequest`.** `process/mod.rs` holds that
+  classification "belongs to a caller that has decided *whether* to run
+  something, not to the machinery that runs it", and the shape follows from it:
+  taking a `ProcessRequest` would make this module a caller of the runner, which
+  is the edge `tests/spawn_sites.rs` exists to notice, and it would put the
+  question "may I run this" on the wrong side of the thing that runs it. The
+  census passes, and that is the load-bearing gate for this task rather than a
+  formality.
+
+- **A `.cmd` or `.bat` name is unread text whatever it is called and whatever is
+  in it, because a name is not evidence of behaviour.** `npm.cmd` on a Windows
+  `PATH` forwards to a JavaScript file, and reading the name and answering for the
+  file behind it would be comfortable and would be reading a name.
+  `process/mod.rs` records that Windows starts a command interpreter for such a
+  name without being asked; this module's answer is that SURE cannot see what
+  runs. **This is a decision stated rather than a problem dodged**, and whether a
+  caller should ever be allowed to name one remains the owner's question — it is
+  on the open list below.
+
+- **The name rule is `cfg!(windows)` and not `#[cfg(windows)]`, and this run is
+  where that was measured rather than asserted.** Both arms compile and the
+  difference is a value, so
+  `windows_elides_an_exe_suffix_and_ignores_case_and_unix_does_neither` exists and
+  runs on **all three platforms**, reading the arm belonging to the platform it is
+  on. The measurement: `P3-T004` added 38 test names and **not one of them is in a
+  platform-gated set** — the +1 and +2 name differences between the three CI jobs
+  are the sets accumulated since `P2-T004`. A task about a platform-dependent name
+  rule that added zero platform-gated tests is the difference between this choice
+  and `#[cfg]`, which would have put its central test in exactly one column.
+
+- **One correction during the work, against my own first table, and a test found
+  it.** `python -m pip install` was filed as `Install` alone. The integration test
+  that walks the command set **SURE's own discovery builds** failed on it, and the
+  domain was the authority: `ActionKind::InstallDependencies` has
+  `executes_project_code()` true and `can_touch_network()` true, because a source
+  distribution is built by a build backend the package brought with it and npm
+  runs `preinstall`/`install`/`postinstall`/`prepare` around an install.
+  Everything that may run a package's own install steps is `INSTALLS_AND_RUNS`;
+  `RESOLVES` is what cargo's manifest-only operations get. **The test that caught
+  it walks the commands SURE actually builds**, so a change that stops classifying
+  one of them fails rather than going unnoticed — which is the form in which "the
+  table holds what SURE runs" is a fact rather than an intention, and it is the
+  reason the correction was found at all rather than shipped.
+
+- **The mutation run found a real hole, and it was closed with a test rather than
+  an argument.** 29 mutations, **27 caught, 2 declared unobservable**.
+  `is_batch_file`'s `to_ascii_lowercase()` is a second copy of a rule `normalise`
+  has already run on Windows, so **deleting it is invisible through `classify` on
+  this platform** — the integration test that passes `NPM.CMD` and `thing.Bat`
+  stayed green, and it is a good test that simply cannot see this. On a platform
+  whose normalisation leaves the case alone it is the only copy, and what it
+  protects is the *reason* SURE reports rather than the answer it gives, since an
+  unknown program and unread text are both every category but `Static`. It is now
+  held by a module test that calls `is_batch_file` directly, **the only surface on
+  this machine where the difference exists**.
+
+- **The harness's first run corrected my prediction about which mutations this
+  platform cannot see, and the correction is the useful part.** I had declared
+  that forcing the *Unix* half of the name rule would be invisible on Windows.
+  Both came back CAUGHT: `cfg!` makes both arms compile and then **one of them
+  runs**, so the test asserts *this machine's* rule, and forcing the other
+  platform's rule into the code breaks it here. What no test on this machine can
+  see is the **Windows** rule applied everywhere, because on Windows that is not a
+  change at all — and that pair is what the declarations name now. Each is marked
+  so that **a Unix CI run would report "DECLARED UNOBSERVABLE BUT CAUGHT"**: a
+  stale declaration, which is a fact about the harness rather than about the code,
+  and the intended failure. The pair is kept for that reason — it is a standing
+  written record of the one behaviour in `normalise` this platform cannot check.
+
+- **What is not established, and it is stated in the module rather than left to be
+  inferred.** Nothing about **the code the command runs**: a project's test script
+  can delete a directory, and that is a fact about the script. Nothing about
+  **what is on `PATH`**: this reads names, does not find, stat or open the
+  program, and a project that puts its own `git.exe` first is classified as git —
+  finding the program is a different question, and answering it here would not
+  make the answer safe, because the file can be replaced between the looking and
+  the running. **No shell grammar and no wrapper is read through**: `env`,
+  `timeout`, `nice`, `xargs`, `sudo` and `cmd` are not looked behind, because a
+  wrapper is an argument grammar SURE would have to implement before it could see
+  the program behind it, and one implemented by guesswork produces a confident
+  answer about a program nobody read. **Not a list of every program SURE will ever
+  run**: the table holds what SURE's own discovery names today and the neighbours a
+  reader would expect, and everything else is `UnknownProgram`, which is the safe
+  answer *and* a visible one. **And nothing in the product calls `classify` yet** —
+  it is a module with tests and one line in `lib.rs`, and the first task that runs
+  anything under it is `P3-T005`.

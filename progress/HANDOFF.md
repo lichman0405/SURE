@@ -2,12 +2,46 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 35 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 open (3/11).** `P3-T003`'s
-implementation and its fix are committed and pushed as `b0dcc69` and `ea2f826`,
-the fix's run `34930744061` is read in full below, and **the commit carrying this
-file is its acceptance**. What the task added is described under "What `P3-T003`
-added".
+Progress: 36 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 open (4/11).** `P3-T004`'s
+implementation is committed and pushed as `967c5e6`, its run `34935781639` is
+read in full below, and **the commit carrying this file is its acceptance**.
+What the task added is described under "What `P3-T004` added".
+
+**The one thing about `P3-T004` a reader should know before the detail: the
+acceptance names five categories, and the module that decides which one a command
+falls into can be wrong in exactly one way that nothing downstream could
+catch.** `crates/sure-core/src/safety.rs` is new and is the first thing in the
+product that reads a command line. Its answer is a set of the categories a
+command *may* fall into, and the whole module is arranged around one rule:
+**nothing is `Static` unless a rule in the file says so.** A program with no row,
+a known program with an operation the table has no name for, and a command line
+whose meaning is in text SURE cannot read all come back as *every category but
+`Static`* — not as an empty set, and not as "unknown". A classifier that answered
+"read-only" for a command it did not recognise is the false green this product
+exists to prevent, and it is the one mistake here that no later check could
+notice. The three causes are kept apart anyway, because they have three different
+follow-ups: an unknown program means the table needs a row, an unknown operation
+means the same program needs a row, and unread text is the one that table work
+cannot fix.
+
+**The second thing, and it is a correction to my own prediction rather than to
+the code: the mutation harness's first run said the two mutations I had declared
+unobservable were caught.** The claim was that forcing the *Unix* half of the
+name rule — answering a name without lowercasing it — would be invisible on
+Windows. It is not: `cfg!` makes both arms compile and then one of them runs, so
+the test asserts **this machine's** rule and forcing the other platform's rule
+into the code breaks it here. What no test on this machine can see is the
+**Windows** rule applied everywhere, which is not a change here at all, and that
+pair is what the declarations name now. A third finding in the same run was a
+real hole and was fixed with a test rather than argued away:
+`is_batch_file`'s lowercasing is a second copy of a rule `normalise` has already
+run on Windows, so deleting it is invisible through `classify` on this platform —
+the integration test that passes `NPM.CMD` stayed green — while on a platform
+whose normalisation leaves the case alone it is the only copy, and what it
+protects is the *reason* SURE reports rather than the answer it gives. It is now
+held by a module test that calls it directly, which is the only surface on this
+machine where the difference exists.
 
 **The one thing about `P3-T003` a reader should know before the detail: CI said
 the first version of it was wrong, and CI was right.** The acceptance is one
@@ -283,19 +317,31 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P3
-{ accepted: 35, queued: 131 }
-READY: P3-T004, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
-       P8-T001, P12-T008, P13-T001
+{ accepted: 36, queued: 130 }
+READY: P3-T005, P3-T007, P3-T008, P4-T005, P4-T006, P4-T007, P4-T008,
+       P6-T001, P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
 
-**`P3-T001`, `P3-T002` and `P3-T003` are `accepted`**, on runs `34924525793`,
-`34927065374` and `34930744061`, and **`in_progress` is 0**, so nothing is
-half-finished and the next session may start any READY task without adopting an
-orphan. **Phase `P3` is 3 of 11 and open**: the other eight `P3` tasks are
-`queued`. `35 + 131 = 166`, which is every task in `tasks/tasks.json`.
+**`P3-T001`, `P3-T002`, `P3-T003` and `P3-T004` are `accepted`**, on runs
+`34924525793`, `34927065374`, `34930744061` and `34935781639`, and **`in_progress`
+is 0**, so nothing is half-finished and the next session may start any READY task
+without adopting an orphan. **Phase `P3` is 4 of 11 and open**: the other seven
+`P3` tasks are `queued`. `36 + 130 = 166`, which is every task in
+`tasks/tasks.json`.
 
-**The READY list read 10 before this acceptance and reads 10 after it, and that
-is a fifth outcome rather than a repeat of the four below.** `P3-T003` has no
+**The READY list went 10 → 14 at this acceptance, and that is the sixth shape and
+the first one that is a jump rather than a step.** `P3-T004` has **seven** direct
+dependents — `dependents = [x.id for x in tasks if 'P3-T004' in x.depends_on]` is
+`P3-T005, P3-T007, P3-T008, P4-T005, P10-T006, P11-T006, P13-T004` — of which
+**five entered** and **two did not**. The two that did not are the interesting
+half: `P10-T006` also depends on `P10-T002` and `P11-T006` also depends on
+`P11-T002`, so both are still blocked, and **a reader counting dependents would
+have predicted seven entering.** `10 − 1 + 5 = 14` is a reading rather than a
+rule, and the rule it displaces is the one the five earlier readings might have
+taught: that an acceptance moves the list by one.
+
+**The READY list read 10 before `P3-T003`'s acceptance and read 10 after it, and
+that is a fifth outcome rather than a repeat of the four below.** `P3-T003` has no
 dependents — `[x for x in tasks if 'P3-T003' in x.depends_on]` is empty — so
 nothing entered, exactly as at `P3-T002`. What is new is the other half:
 **`P3-T003` was not on the list to leave it.** `taskctl start` had already taken
@@ -515,6 +561,200 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P3-T004` added
+
+Implement command/operation classification. Acceptance: *"Static/read-only,
+dynamic host, install, network, destructive categories are distinct."*
+
+One commit, `967c5e6`, five files, purely additive — 424 insertions and 1 deletion
+across the tracked files, and the deletion is an import line that got longer.
+
+| file | change | what it is |
+| --- | --- | --- |
+| `crates/sure-core/src/safety.rs` | +1278 (new) | the classifier and its table |
+| `crates/sure-core/tests/command_safety.rs` | +637 (new) | the acceptance-facing tests |
+| `crates/sure-domain/src/execution.rs` | +414 | `CommandClass`, `CommandEffects`, 10 module tests |
+| `crates/sure-domain/tests/wire_contract.rs` | +10 / −1 | the five wire names, frozen |
+| `crates/sure-core/src/lib.rs` | +1 | `pub mod safety;` |
+
+### Distinct by construction and distinct in behaviour are two claims, and the second is the acceptance
+
+An enum whose variants differ is distinct by construction, and `rustc` enforces
+it; what it does not enforce is that a *command* can be told apart under one
+category from the same command under another. That is the acceptance sentence,
+and it is held by a test that takes **every ordered pair of the five** and shows a
+witness command answers differently under one than under the other. The witnesses
+are `git status`, `npm test`, `cargo add serde --offline`, `git fetch` and `git
+reset --hard`, one carrying each category alone, and the test asserts the witness
+table is as long as `CommandClass::ALL` — **so a sixth category added without a
+witness fails the test rather than passing quietly**, which is the property a
+hand-written list cannot have.
+
+### The one rule the module is arranged around, and the direction it fails in
+
+**Nothing is `Static` unless a rule in the file says so.** A program the table has
+no row for, a known program with an operation the table has no name for, and a
+command line whose meaning is in text SURE cannot read all come back as *every
+category but `Static`* — not an empty set, not "unknown". A classifier that
+answered "read-only" about a command it did not recognise is the false green this
+product exists to prevent, and **it is the one mistake here that nothing
+downstream could catch**: every later check would be reading a command SURE
+believed it had understood.
+
+The three causes are kept apart in `Source` anyway, because they have three
+different follow-ups — an unknown program means the table needs a row, an unknown
+operation means the same program needs a row, and unread text is the one more
+table work cannot fix, since the command line SURE assembled is not what decides
+what runs. A reader who sees only "not static" learns none of that.
+
+A fourth cause is the one that is easy to miss and is worth naming: **an argument
+that is not text SURE can read makes the whole line unread rather than being
+dropped.** Dropping one token from `git <bytes> status` would leave SURE reading
+the `status` behind the bytes and answering `Static` — about a command line it did
+not read, which is the same failure wearing a different hat. It is held by
+`an_argument_sure_cannot_read_makes_the_whole_command_unreadable`.
+
+### `Destructive` has no permission that covers it, and that is the deliberate half of `P3-T005`'s question
+
+`CommandClass::required_permission()` answers `None` for `Destructive`. The
+tempting answer is `WriteProject`, and it is wrong in both directions that matter:
+`WriteProject` is writing *inside* the project, which `rm -rf ..\..\` is not, and
+`git push --force` is not a write at all. Folding destruction in would let **a
+consent to write a file read as a consent to destroy the machine**, which is
+exactly the class of mistake this module exists to prevent. `ungrantable()` is the
+door a caller uses to find that out, and a test holds it. What *should* cover
+`Destructive` is `P3-T005`'s question; answering it here would have put a
+permission decision inside the classifier.
+
+### The answer is a set, and it is an upper bound
+
+`cargo add serde` installs a package *and* reaches the registry, so one value
+would have to drop one of those facts. `CommandEffects` holds the categories a
+command **may** fall into and never claims it does all of them, and the direction
+is deliberate: asking for one consent too many costs a prompt, asking for one too
+few is the failure. Two rules are per-flag rather than per-program for the same
+reason. `--dry-run` takes `Install` and `Destructive` away and leaves `Network` —
+a dry run still looks — and where a command is left with nothing it takes its
+program's own class instead, which is how `git clean --dry-run` reads as the
+report it is rather than as the deletion it is not. `--offline` takes away
+`Network` and only that spelling, because `--frozen` means "do not update the
+lockfile" to some tools and "do not touch the network" to others, and a rule that
+guessed would be reading two tools' grammars as one.
+
+### One correction during the work, against my own first table, caught by a test
+
+`python -m pip install` was filed as `Install` alone. The integration test that
+walks the command set **SURE's own discovery builds** failed on it, and the domain
+was the authority: `ActionKind::InstallDependencies` has `executes_project_code()`
+true and `can_touch_network()` true, because a source distribution is built by a
+build backend the package brought with it and npm runs `preinstall`/`install`/
+`postinstall`/`prepare` around an install. The table was wrong. Everything that may
+run a package's own install steps is `INSTALLS_AND_RUNS` now; `RESOLVES` is what
+cargo's manifest-only operations get, and the single-category `Install` witness
+survived as `cargo add serde --offline`, which edits a manifest and runs nothing.
+The test that caught it walks `cargo test`, `npm test`, `npm run build`,
+`python -m pytest`, `python -m pip install -r requirements.txt`, `python -m build`,
+`uv run pytest`, `uv sync` and `poetry run pytest`, **so a change that stops
+classifying one of them fails rather than going unnoticed** — which is the form in
+which "the table holds what SURE runs" is a fact rather than an intention.
+
+### The vocabulary gap, stated rather than papered over
+
+The acceptance names five categories and **none of them is "changes files in this
+directory without destroying anything"**. So `git commit` and `git branch -m` are
+`UnknownOperation` — not `Static`, and not a sixth class invented here, because
+inventing one would have satisfied the acceptance sentence by making it describe
+something other than the code. `git pull` *is* classified, and the distinction is
+the rule: one of *its* effects is a category the vocabulary has. `git branch`,
+`tag`, `config`, `remote`, `stash`, `cargo clean` and `npm audit` are absent on
+the rule the file writes down — **a verb is in the table only when every form SURE
+can name has an effect SURE can name.**
+
+This is worth a reader's attention because it will read as a gap to anyone who
+runs SURE on a repository: `git commit` answering "I do not know this operation"
+is a *true* answer and a temporary one, and where the sixth category lives is the
+next task's decision.
+
+### A name is read the way the operating system resolves it, and the gate is a value
+
+`normalise` takes the last path component on both separators, and on Windows it
+does two more things the operating system does — ignores case and elides a
+trailing `.exe`. The condition is `cfg!(windows)`, **not** `#[cfg(windows)]`, so
+both arms compile and the difference is a value rather than a deleted branch. That
+is `P3-T003`'s lesson applied rather than restated, and this run is where it was
+checked rather than assumed: the test holding the rule is present and runs **on all
+three platforms**, reading each platform's own arm. A `.cmd` or `.bat` **name** is
+unread text whatever it is called and whatever is in it, because a name is not
+evidence of behaviour.
+
+### The mutation run: three findings, two of them corrections to me
+
+`target/tmp/mutate20.py`, 29 mutations: **27 observable mutations caught by a
+failing test, and 2 declared unobservable as expected.**
+
+**The first finding is that the harness refused to start, and the refusal earned
+its keep on its first run.** It reported an anchor matching 0 times — which is
+what a leftover mutation from an interrupted run looks like — and the cause was a
+wrong anchor instead: the `is_static_only` predicate lives in `execution.rs`
+(`Classification`'s is a one-line delegation) and I had aimed at `safety.rs`. **A
+wrong anchor and an applied mutation are indistinguishable from a count**, which
+is the reason the guard prints the anchor, the file and the count rather than just
+refusing.
+
+**The second finding is that the two mutations I declared unobservable came back
+CAUGHT, and my prediction was backwards.** The claim was that forcing the *Unix*
+half of the name rule — answering a name without lowercasing it — would be
+invisible on Windows. It is not. `cfg!` makes both arms compile and then **one of
+them runs**, so `windows_elides_an_exe_suffix_and_ignores_case_and_unix_does_neither`
+asserts *this machine's* rule, and forcing the other platform's rule into the code
+breaks it here. The predicate was written the other way round: what no test on this
+machine can see is the **Windows rule applied everywhere**, because on Windows that
+is not a change at all. The declarations name that pair now, and each is marked so
+that **a Unix CI run would report "DECLARED UNOBSERVABLE BUT CAUGHT"** — which is a
+stale declaration, a fact about the harness rather than about the code, and the
+intended failure. The pair is kept for exactly that reason: it is a standing
+written record of the one behaviour in `normalise` that the platform this
+repository develops on cannot check.
+
+**The third finding is a real hole, and it was closed with a test rather than an
+argument.** `is_batch_file`'s `to_ascii_lowercase()` is a second copy of a rule
+`normalise` has already run on Windows, so **deleting it is invisible through
+`classify` on this platform** — the integration test that passes `NPM.CMD` and
+`thing.Bat` stayed green, and it is a good test that simply cannot see this. On a
+platform whose normalisation leaves the case alone it is the only copy, and what
+it protects is the *reason* SURE reports rather than the answer it gives, since an
+unknown program and unread text are both every category but `Static`. It is now
+held by `a_batch_file_is_recognised_in_whatever_case_its_name_is_written`, which
+calls `is_batch_file` directly — **the only surface on this machine where the
+difference exists** — and the mutation is CAUGHT. This is the P3-T003 shape a third
+time, in a new place: a platform's own behaviour hiding a path from the tests that
+run on it.
+
+### What `P3-T004` does not establish
+
+- **Nothing about the code the command runs.** A project's test script can delete
+  a directory, and that is a fact about the script. The categories are a statement
+  about the command, which is also the domain's own model — `RunProjectCode` and
+  `Network` are separate decisions and neither implies the other.
+- **Nothing about what is on `PATH`.** This reads names; it does not find, stat or
+  open the program, and a project that puts its own `git.exe` first gets it
+  classified as git. Finding the program is a different question, and answering it
+  here would not make the answer safe: the file can be replaced between the looking
+  and the running.
+- **No shell grammar, and no wrapper is read through.** `env`, `timeout`, `nice`,
+  `xargs`, `sudo` and `cmd` are not looked behind, because a wrapper is an argument
+  grammar SURE would have to implement before it could see the program behind it,
+  and one implemented by guesswork produces **a confident answer about a program
+  nobody read**. All of them are unknown programs or unread text, which is the
+  loud answer.
+- **Not a list of every program SURE will ever run.** The table holds what SURE's
+  own discovery names today and the neighbours a reader would expect beside them;
+  everything else is `UnknownProgram`, which is the safe answer *and* a visible
+  one — the source says where the work is.
+- **Nothing has been wired to it.** No product path calls `classify` yet; it is a
+  module with tests and one caller in `lib.rs`. The first task that runs anything
+  under it is `P3-T005`.
 
 ## What `P3-T003` added
 
@@ -2088,6 +2328,7 @@ Three of the five jobs were failing the whole time.
 | 34927892786 | `601c171` — **the `P3-T002` acceptance** | **all five green**, and **1077 / 1076 / 1077** with 0 failed, 9 ignored, **43** result lines = **33 parents + 10 children** on each — the implementation's figures to the test, unchanged. **This row was missing until `P3-T003`'s acceptance, and the logs were downloaded before it was written** |
 | 34929385200 | `b0dcc69` — **the `P3-T003` implementation** | **failure: `rust (macos-latest)`.** The other four jobs green. Windows **1078** / macOS **1078** / Ubuntu **1080** passed over **43** result lines = **33 parents + 10 children** on each, 9 ignored, and **exactly one failing test**, `a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs`, which is the `#[cfg(unix)]` test macOS cannot satisfy. **The failing test is not the last thing in the log**: 14 more binaries started after it and 19 of the 33 parent result lines came after it, which is the `--no-fail-fast` change doing its job on the run that needed it. Detail below |
 | 34930744061 | `ea2f826` — **the `P3-T003` fix** | **all five green.** Windows **1078** / macOS **1079** / Ubuntu **1080** passed, 0 failed, 9 ignored, **43** physical lines = **43 results** = **33 parents + 10 children** on each — the splice the `fd878e6` row records did not occur. **Three different deltas, one per platform, because the three jobs compile different code: +1 on Windows, +3 on macOS, +3 on Ubuntu**, and the parent and child counts stand still on all three. Detail below |
+| 34935781639 | `967c5e6` — **the `P3-T004` implementation** | **all five green.** Windows **1126** / macOS **1127** / Ubuntu **1128** passed, 0 failed, 9 ignored, **44** result lines = **44 result tuples** = **34 parents + 10 children** on each. **Windows equals this machine's own run to the test — 1126 over 44 results** — the parent count moved **33 → 34** for the new `command_safety` binary, and all **38** new test names were found by name on all three jobs. **No `P3-T004` test is platform-gated**, so the +1 and +2 are the sets accumulated since `P2-T004`. Detail below, including a third variant of the log-prefix trap |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and
@@ -2221,6 +2462,83 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading run `34935781639`, `P3-T004`'s — and a log prefix that was a third variant of a trap this file already records
+
+Run `34935781639`, commit `967c5e6`. All five jobs `success`:
+`bootstrap-validate-windows`, `rust (windows-latest)`, `rust (macos-latest)`,
+`rust (ubuntu-latest)`, `shellcheck-secondary`.
+
+| job | result lines | result tuples | parents | children | passed | failed | ignored | **parents only** |
+|---|---|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 44 | 44 | 34 | 10 | 1126 | 0 | 9 | **1116** |
+| `rust (macos-latest)` | 44 | 44 | 34 | 10 | 1127 | 0 | 9 | **1117** |
+| `rust (ubuntu-latest)` | 44 | 44 | 34 | 10 | 1128 | 0 | 9 | **1118** |
+
+**`rust (windows-latest)` reports 1126 passed over 44 results, which is this
+machine's own run to the test** — same 44 lines, same 34 parents, same 10
+children, same 1126. The parent count went **33 → 34** against `P3-T003` and the
+child count stood still, which is the new `command_safety` test binary and
+nothing else.
+
+**macOS and Ubuntu are +1 and +2 over Windows, and the count of distinct test
+names is the same +1 and +2 (1109 / 1110 / 1111), so the three jobs run the same
+number of tests as they report passing.** The per-name set difference is much
+larger than the net figure: macOS has **14** names Windows does not and Windows has
+**13** macOS does not, and Ubuntu against Windows is **14** and **12**. Those sets
+are the platform gates accumulated since `P2-T004` — `paths::compare::unix` versus
+`paths::compare::windows`, the symlink and pipe cases, the not-valid-UTF-8 pair —
+and **not one of the 38 names `P3-T004` added is in any of them.** That is the
+`cfg!` choice measured rather than asserted: a task about a platform-dependent name
+rule added **zero** platform-gated tests, where `#[cfg]` would have put its central
+test in exactly one column.
+
+**The result-line count and the result-tuple count are printed as two columns
+because they are two facts, and this run is where they differ in the logs.** The
+`logs.zip` this run was read from holds its per-job files with an **ISO-8601
+timestamp prefix** — `2026-09-15T06:10:40.2991740Z test result: ok. 19 passed; …`
+— where `gh run view --log` writes `job<TAB>step<TAB>timestamp ` and the extracted
+per-step files write neither. **A `^test result:` pattern matches nothing in this
+shape**, which is how the first reading of this run returned 0 result lines for
+all three jobs while the logs plainly held 44 each. This file already records the
+`gh run view` prefix as a trap; what is new is that **the prefix is a property of
+which command produced the log, and there are at least three shapes** — so the
+durable rule is to count `test result:` anywhere in the line and to read the file
+rather than assume the shape. Both columns agree at 44 on all three jobs here, so
+**the splice recorded against `fd878e6` did not occur this time.**
+
+#### All 38 new test names, by name, on all three jobs
+
+The check is per-name and per-job rather than a total, because a total cannot tell
+a test that is present from a test that is absent while another is added. The
+names were taken from the tree rather than typed: the ten in `execution.rs` by set
+difference between `HEAD~1` and `HEAD`, and the rest by reading the two new files.
+
+| group | count | windows | macos | ubuntu |
+|---|---|---|---|---|
+| `command_safety::*` (the new integration binary) | 19 | 19 | 19 | 19 |
+| `safety::tests::*` (the classifier's module tests) | 8 | 8 | 8 | 8 |
+| `execution::tests::*` (the domain's) | 10 | 10 | 10 | 10 |
+| `command_class_wire_names_are_frozen` (`frozen!`-generated) | 1 | 1 | 1 | 1 |
+| **total** | **38** | **38** | **38** | **38** |
+
+**`windows_elides_an_exe_suffix_and_ignores_case_and_unix_does_neither` is in all
+three columns, and that is the point of it.** It is written with `cfg!` rather than
+`#[cfg]`, so it exists and runs everywhere and reads the arm belonging to the
+platform it is on — which is why a by-name check finds it three times rather than
+once. The `P3-T003` table one section below is the counter-example that made this
+worth doing: three of its five names ran on one job each.
+
+**A correction to the by-name check itself, made while taking this reading.** The
+first pass looked for `command_safety::<name>` and found 19 of 38 — the whole
+integration binary missing on all three jobs, including Windows, where a platform
+gate could not explain it. **The names were wrong, not the logs**: in an
+integration test the file *is* the crate root, so libtest prints `test
+<name> ... ok` with no module prefix, and the `command_safety::` I had prepended
+is a path that exists only for the module tests inside `src/`. A checker that
+prefixes everything uniformly will report a green run as 19 missing tests, which is
+the safe direction — but it is the same class of error as the log-prefix trap one
+paragraph up, and it is recorded for the same reason.
 
 ### Reading run `34930744061`, `P3-T003`'s fix — and three deltas that are three different numbers on purpose
 

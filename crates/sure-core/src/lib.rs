@@ -7,6 +7,7 @@
 //! first commit rather than introduced later.
 
 pub mod approval;
+pub mod browser;
 pub mod components;
 pub mod config;
 pub mod consent;

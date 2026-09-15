@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P3",
-  "last_updated": "2026-09-15T08:24:41.107Z",
+  "last_updated": "2026-09-15T09:31:53.593Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -373,13 +373,13 @@
       "notes": "Implemented in crates/sure-core/src/container.rs (16 tests) and crates/sure-core/tests/container_isolation_claim.rs (5 tests), commit 6ea9f46. Both acceptance sentences are held: `Availability` has no error variant, so a machine with neither Docker nor Podman is a value rather than a failure, and `ContainerPlan` controls the image, the project mount and its access, the network mode and the working directory as fields, with read-only and network-none as defaults. Nothing in the module builds a Command, so the spawn-sites census is unchanged. **Four places were calling this mode isolated and were corrected** — ExecutionMode's doc comment and consent prompt, ADR 0009's container row and docs/architecture/EXECUTION_SAFETY.md — and the wording is now checked rather than corrected once: OVERCLAIMS plus overclaims() are applied to every shipped .rs under crates/ and every .md under docs/. Twelve mutations were run; eleven were caught — eight against the module and three that revert the prose to the overclaim — and the twelfth survived the whole workspace suite, which is the coverage gap named in the next sentence. (This sentence first said eleven were run and all eleven were caught, because it was written before the twelfth was run; the number is corrected here rather than left standing, and `taskctl validate` cannot detect a note that is merely out of date.) Run 34946515895: five jobs success, windows 1209 / macos 1210 / ubuntu 1211 parent-sum, 0 failed, 9 ignored, 45 result lines = 35 parents + 10 children; by-name delta against 0f9273b is +21 -0 on all three platforms. **A coverage gap was found and NOT fixed**: doctor::find_in documents that an empty PATH entry is skipped rather than read as the current directory, no test holds it, and removing the filter leaves the whole suite green. This note was written by hand: `taskctl accept` reads `--note` and I passed `--evidence`, which the tool ignores, so the acceptance landed with an empty note and `accept` cannot be re-run from `accepted`."
     },
     "P3-T009": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
+      "finished_at": "2026-09-15T09:31:53.592Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Implementation 6911e2a, one-assertion fix 12b81bc. Run 34952200942: windows success, ubuntu success, macOS FAILURE on one assertion (a_service_that_ends_by_itself... compared the child's resolved current_dir against an unresolved temp_dir path; /var is a symlink to /private/var on macOS) — a false red, the test was wrong and the service was right. Run 34952509429: all five jobs success. Windows 1217 / macOS 1218 / Ubuntu 1219 parent tests, 46 result lines = 36 parents + 10 children, 0 failed, 11 ignored on every job; name-delta between the red run and the green one is +0 -0 on all three platforms. 7 mutations, 7 caught, each by exactly one test. The .cmd/.bat question cannot arise here: a batch file is never admitted, so no Supervisor can be handed one."
     },
     "P3-T010": {
       "status": "queued",

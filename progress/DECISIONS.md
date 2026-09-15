@@ -1807,3 +1807,158 @@ shape can be checked.
   graph records, and its second acceptance sentence, *"Container unavailable path
   is honest."*, **is this task's first sentence arriving later as a fixture**, which
   is the graph agreeing with the type rather than with the prose.
+
+## P3-T009 — the service supervisor, and a door that is a type rather than a rule
+
+- **Policy above, mechanism below, and the split is the whole design.** `service.rs`
+  decides *when* something may run and what the caller is told; `process/` decides
+  *how*. It is the same split as `consent` and `enforce` against `process`, and the
+  consequence is that the supervisor holds no `Command::new` of its own — the census
+  in `tests/spawn_sites.rs` is what keeps that a fact rather than an intention.
+  `Supervisor::start` takes an `AdmittedCommand<'_>` and **nothing else**: not a
+  program name, not an argument list, not a `&str`.
+
+- **The door is a type.** `enforce::AdmittedCommand<'a>` has a private constructor,
+  so a caller cannot witness a decision nobody made, and *"a runner must take what
+  it launches from `admitted()`"* — a paragraph in `P3-T007` and a rule for callers
+  until this task — became something the compiler holds. **The rejected alternative
+  was a documented convention plus a test that greps for
+  `PermissionPlan::commands()`**, which is the shape `spawn_sites.rs` already uses
+  and which was rejected here for a stated reason: a grep holds a rule about
+  *text*, and this was a rule about *authority*. `Enforcement::admitted()` remains
+  the only producer, and the one place that consumed the iterator item directly was
+  rewritten to consume the witness instead.
+
+- **A callback at the last point before the wait, because "started" has to mean one
+  thing.** `process::run_when_started` fires the caller's closure after every
+  fallible step and after both streams are being read; every `return` above it is a
+  run that never began. `Supervisor::start` returns `Ok` only once that callback has
+  fired, so **a service reported as running is a process the operating system
+  accepted and SURE is reading** — not one that might still be failing to spawn.
+  The alternative was for `start` to return immediately and let the caller poll,
+  which moves a race into every caller and makes the module's central sentence false
+  whenever the spawn fails.
+
+- **`Service::stop` names every field in its destructure, and that is a bug fix
+  rather than a style.** `let Service { running, .. } = self;` leaves the un-moved
+  `stopper` alive until the end of the function — *after* the wait, and the wait is
+  on a run that ends only because `stopper` drops. **Deadlock.** It was proved with
+  a `Drop` that prints rather than by reading the code, and the ordering claim in
+  the doc comment is now backed by a test that fails when the mutation reverses it
+  (`m4`, caught in 30 s by the abandoned-file deadline rather than by hanging
+  forever). `Stopper` is a separate type for the same reason: `Service::stop` takes
+  `self` and must move the `JoinHandle` out, and a type with a `Drop` cannot have
+  its fields moved out.
+
+- **A stop that arrives before the deadline is a cancellation, not a timeout, and
+  the first version of the test asserted the opposite.** The deadline test asserted
+  `TimedOut` and got `Cancelled { stopped: WholeTree }`, because `stop` asks for the
+  cancellation *before* it waits. The test now waits for `has_finished()` (bounded
+  by its own patience) and then stops, and asserts `outcome.took() >= BRIEF`. The
+  word *already* in the documentation of `stop` is load-bearing.
+
+- **`CancelledBeforeStart` was planned, written into the design, and dropped as
+  unreachable.** The `Cancellation` is created inside `start`, so there is no handle
+  a caller could cancel through before a start, and the variant would have had a
+  match arm nothing could reach. **The arm that remains impossible is kept and
+  reported rather than asserted away**: a run that ends without ever having reported
+  that it was under way is `NotFollowed` carrying the termination, not a discarded
+  outcome. That arm was then **reached on purpose** by mutation `m2`, which deletes
+  the single `started()` call — so the documented-unreachable path is reachable, and
+  what it produces is the message its own comment predicted:
+  `NotFollowed { message: "the run ended as TimedOut { stopped: WholeTree } without
+  ever reporting that it was under way" }`.
+
+- **There is no `is_ready`, and the word does not appear in the module's
+  vocabulary.** Whether a service is *listening* and whether it *answers* are a
+  probe's questions, which is `P3-T010`; `start` returning `Ok` means the spawn was
+  accepted and SURE is reading the process, and nothing more. **Reporting readiness
+  from the fact that a process exists is the false green this product is built
+  against**, so the fact is named at the type level rather than left to prose: a
+  caller that wants readiness has to go and ask, and there is nothing here to
+  mistake for an answer. A service that comes up and immediately dies is `start`
+  returning `Ok` followed by `has_finished()` being true.
+
+- **`Limits::timeout` is the whole-life budget of the service, not a startup
+  timeout.** A service still running when it expires is stopped and comes back
+  `TimedOut`, whether it never came up or came up and was working. Stated in the
+  module doc rather than left to be inferred from behaviour, because the two
+  readings differ exactly in the case a caller is most likely to be in.
+
+- **Two gaps are stated as gaps rather than decided quietly.** **No environment
+  control**: a service gets the default of `ProcessRequest`,
+  `Environment::inherited()`, so a variable in SURE's own environment reaches the
+  project — which is what makes a real service find its tools, and is also the wrong
+  shape for confining one; `Environment::only` is one layer down for whoever closes
+  it. **No restart and nothing watching the watcher**: `has_finished()` is how a
+  caller finds out, and nothing calls it on the caller's behalf. **And the logs
+  arrive once, at the end, not as they are written** — that is the design of
+  `process` and not a choice made here, and a caller that needs a service's output
+  while it is still up is asking for something this build does not have.
+
+- **The child program is a copy of the test binary wearing another name, and the
+  limitation is written down rather than hidden.** `safety::classify` reads the last
+  path component, so the test binary's own name classifies as unknown and is never
+  admitted; naming the copy `python.exe` on Windows and `python` elsewhere makes it
+  admissible through the real classification rather than around it. The limitation
+  is that a name can be moved between files, which is a fact about names and not a
+  hole in this test — and it is stated in the module doc of the test file, where the
+  next person to write one will read it.
+
+- **Four instruments, because "it was stopped" is not one fact.** `.started` says
+  the process was live; the report is written **only on release**, so its absence
+  says the service never finished; `.abandoned` is the third state and is explicitly
+  not to be confused with either; and `.beating`, a heartbeat rewritten on every
+  poll, is the only instrument available in the drop test — which gets no outcome to
+  read, because dropping a `Service` stops it *and* discards the handle that would
+  have reported what came of it.
+
+- **Seven mutations, seven caught, and one test holds three of them.** m1 the
+  callback before the spawn, m2 the callback never, m3 dropping a service stops
+  nothing, m4 the wait before the cancel, m5 `has_finished` always true, m6 the
+  limits that do not reach the run, m7 the working directory ignored. **Every
+  mutation was caught by exactly one test**, and
+  `a_service_starts_is_stopped_and_both_of_its_streams_are_kept` is the one for m4,
+  m5 and m6. **That concentration is recorded because it is the shape a future
+  deletion would exploit**: the suite is not redundant here, and one test is
+  load-bearing for three properties at once.
+
+- **The `.cmd`/`.bat` question cannot arise in this task, and the reason is
+  structural rather than lucky.** `safety::classify` returns
+  `Classification::unread(BATCH_FILE)` for `.cmd`/`.bat`, so a batch file is never
+  admitted in any mode under any permission set — held by
+  `a_batch_file_is_refused_in_every_mode_and_never_admitted` in `enforce.rs` — and a
+  `Supervisor` cannot be handed one, because `start` only takes what was admitted.
+  **`HANDOFF.md` item 19 has predicted twice that this task would meet the question
+  and leave it open; it does not meet it at all.** The task that does is still to be
+  seen, and the item is corrected rather than left standing.
+
+- **A false red on macOS, from comparing two spellings of one directory, and the
+  precedent that was already in the repository.** The assertion *"a service runs in
+  the directory its supervisor was given"* compared the child's
+  `std::env::current_dir()` — resolved through every symlink — against a path built
+  from `std::env::temp_dir()`, which is not. Run `34952200942` was
+  **windows success, ubuntu success, macOS failure**, and the macOS log named the
+  assertion: `/private/var/folders/…` against `/var/folders/…`, the same directory,
+  because `/var` is a symlink to `/private/var`. **The service was right and the
+  test was wrong** — a false *red*, which is the mirror of the false green this
+  product exists to prevent, and it is recorded for the same reason: an assertion
+  that fails for a reason unrelated to its claim teaches a reader to distrust the
+  suite. **`P3-T001`'s `process_runner.rs` asserts this exact claim about this exact
+  runner and canonicalizes both sides**, with a comment explaining that Windows
+  returns the same directory with a different drive-letter case. **That comment
+  gives one platform's reason for a rule that holds on every platform**, and the
+  next file to compare a directory copied the shape and not the rule. The fix adopts
+  the idiom, and the comment now names both cases, because **a reason scoped to the
+  platform that produced it is how the next file gets this wrong again.**
+
+- **What is not established.** **Nothing about a real service**: every test starts a
+  copy of the test binary, so nothing here has started a server, and the claim is
+  about supervision rather than about any particular daemon. **Nothing about
+  readiness or ports** — that is the question of `P3-T010`, and the module has no
+  method that could be mistaken for an answer. **Nothing about the process tree of a
+  real service**: the tree-stop path belongs to `process` and is tested there; this
+  module asks for it and does not re-verify it. **Nothing about a caller in the
+  product**: the `CEILING` in `sure-core::support` is still `InspectOnly`, because
+  nothing in the product builds a `Supervisor` — the runner has a caller now, and
+  that caller has none.

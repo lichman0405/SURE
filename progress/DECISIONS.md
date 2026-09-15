@@ -1962,3 +1962,178 @@ shape can be checked.
   product**: the `CEILING` in `sure-core::support` is still `InspectOnly`, because
   nothing in the product builds a `Supervisor` — the runner has a caller now, and
   that caller has none.
+
+## P3-T010 — the local probe, five variants of which one is an answer, and a mutation the platform hid
+
+Acceptance: *"Probe records concrete response/outcome."* and *"Open port alone
+is not feature completeness."*
+
+- **The second acceptance sentence is answered by keeping the port question off
+  the verdict path, which is the same move `P3-T009` made one module over.**
+  `ProbeOutcome` has five variants — `Refused`, `Unreachable`, `NoAnswer`,
+  `NotHttp`, `Answered` — and `is_an_answer` is true for exactly one. **The
+  module does have a boolean that asks whether the port is open** —
+  `opened_a_connection`, true for `NoAnswer` — **and no verdict reads it**:
+  `status()` is an exhaustive match on the variant, with no `_` arm, so a caller
+  who learns the port is open still cannot turn that into a pass and a new
+  variant is a compile error rather than a silent route onto the green path.
+  *Something accepted the connection and said nothing* is `NoAnswer`, which maps
+  to `CheckStatus::Unknown` and is therefore **not checked** by `aggregate`. A
+  critical port-only probe cannot aggregate to green, and
+  `an_open_port_that_says_nothing_does_not_aggregate_to_green` measures that
+  through `aggregate` rather than through this module's own enum — the claim is
+  about the verdict, not about which variant came back.
+
+  **This bullet said "there is no boolean anywhere in the module" when it was
+  first written, and that was false.** The claim was checkable in one command and
+  was not checked until a grep for `pub fn … -> bool` returned two hits, one of
+  which — `opened_a_connection` — is exactly the port question the sentence said
+  could not be asked. The same false sentence was in the module's rustdoc header,
+  where it would have shipped as crate documentation, and in `HANDOFF.md`. **All
+  three are corrected and the correction is a commit of its own**, because a
+  claim a reader can check and the code contradicts is worse than a missing
+  claim: it reads as a defence that was built when it was only a sentence.
+
+- **A zero timeout makes no attempt, and the reason is a pass it would otherwise
+  produce.** Three implementations were considered and two are wrong. Rounding a
+  zero budget up to a millisecond is enough time for a loopback socket to connect
+  and a small service to answer, so **"spend no time at all" would have reported
+  a green check** — the one outcome this product may not manufacture. Passing the
+  zero to `TcpStream::connect_timeout` is worse: the platform rejects it, and the
+  caller is told the operating system refused something the caller had already
+  asked not to happen. A zero budget is therefore `Unreachable` with a reason
+  naming the budget, which is `CheckStatus::Error` and never aggregates to green.
+  **A zero *byte* bound is deliberately not treated the same way**, and the
+  asymmetry is stated in the module: with nothing kept, no header block can be
+  found, so a zero bound cannot reach a pass and needs no special case.
+
+- **A port that answers in a protocol that is not HTTP is `NotHttp`, and it is
+  decided from the first byte rather than from the blank line.** This started as
+  a bug and the bug is the interesting part. A port speaking TLS, probed with a
+  plaintext request, answers with a binary record that contains **no CRLF at
+  all**, and a service whose protocol name does not begin with `H` is
+  contradicted by its first byte — under a reader that waited for `\r\n\r\n`,
+  both were reported as *a port that said nothing*, which is the least useful
+  thing a report can say about a port that answered.
+  `could_still_be_a_status_line` reads the same grammar as `parse_status_line` as
+  a condition on a prefix, so the first line is settled as soon as its bytes can
+  no longer begin a status line. **The same predicate ends the read**, so a TLS
+  port does not cost the whole timeout either. That second half was found by a
+  test asserting on elapsed time, which failed at 5.0s against a five-second
+  hold: **the outcome was right and the deadline had produced it**, which is the
+  class of bug a value-only assertion cannot see.
+
+- **`CheckResult::unknown` is new in `sure-domain`, and it is the only status
+  whose evidence class is a parameter.** The frozen vocabulary exposed
+  `CheckStatus::Unknown` with no constructor; this is the first check that needs
+  one. The parameter is the whole of what separates it from `not_run`: **here
+  SURE has evidence and the evidence supports no verdict; there SURE has none.**
+  Its own test pins that it carries the class it was given and no
+  `not_checked_reason`, because two results differing only in their
+  `CheckStatus` would be a distinction a report could not explain.
+
+- **`verdict` claimed to be "written against" `status()` while re-implementing
+  the same match.** The doc said the two *cannot* disagree; they were two
+  statements of one rule held together by nothing. `verdict` now calls `status()`
+  and the claim is true. The catch-all `_` arm became an explicit
+  `Error | Warning | Skipped` arm so that adding a variant to `CheckStatus` is a
+  **compile error in this file** rather than a silent mis-mapping.
+
+- **A mutation survived the integration suite, and what it took to catch it is
+  the finding of this task.** `m8` deleted the `WouldBlock` arm of `is_a_timeout`
+  and **all twenty integration tests passed**. That is not a gap in the tests but
+  a gap in the platform: Windows reports an expired socket read timeout as
+  `TimedOut`, a Unix reports the same condition as `WouldBlock`, so **no test
+  reachable from a socket on this machine can produce the Unix spelling**. The
+  arm was held by nothing here, and without it a Unix build reports a port that
+  said nothing as a port that *could not be reached* — an observation about the
+  project turned into a failure of the probe, on two of the three CI platforms.
+  It is now held by a unit test in the module, which can run on all three, and
+  that test is the only thing in `sure-core` that catches it. **The harness's own
+  filter was the second half of the finding**: `--test probe_local_service`
+  selects an integration target and does not run the lib, so the first re-run
+  after adding the unit test still reported a survivor — a mutation reported as
+  surviving under a filter that could not have run the test that kills it is a
+  measurement of the filter.
+
+- **Eleven mutations, ten caught, seven of those ten by exactly one test each —
+  and two of those seven share a test.** `m5` (widening `is_an_answer`) and `m7`
+  (replacing the silence reason) both land on
+  `an_open_port_that_says_nothing_does_not_aggregate_to_green`, which is also the
+  test the acceptance is about. **Ten-for-ten would be true about the caught set
+  and misleading about the task**, because the eleventh is the one that survived
+  and the concentration is the shape a future deletion would exploit; both are
+  recorded rather than summarised.
+
+- **Three things the first draft got wrong that the tests caught, none of which
+  a green suite would have surfaced.** The byte bound was a *soft* bound —
+  checked between reads, so a 4 KiB chunk could put **1024 body bytes under a
+  512-byte bound**; it is now what is kept, exactly, and the test asserts the
+  arithmetic rather than a range. The first line of a never-ending reply is
+  "whatever arrived", up to the whole bound, so a report could have carried sixty
+  kilobytes of lossy-decoded binary; it is now cut at 120 bytes with the cut
+  marked, so a cut line cannot read as a whole one. And an early-break guard on
+  `header_block_end` was written, reasoned about and **removed**: the predicate
+  reads only as far as the code token, so a valid status line satisfies it
+  however long the buffer is, and the guard changed no behavior the tests could
+  see. Its comment now says why no guard is needed rather than claiming a
+  condition that does nothing.
+
+- **A free loopback port can accept a connection, and the probe reported its own
+  request line as the reply.** This is the task's second real bug and it was
+  found by **a run that could not have caused it**: `0eb1ac3` changes one doc
+  comment, and its run `34956776646` came back **windows `failure`, macos
+  `success`, ubuntu `success`** on
+  `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable`, whose
+  message read `NotHttp { first_line: "GET / HTTP/1.1" }` — **the bytes the probe
+  had written**. When the operating system hands the dialled port out as the
+  **source** port of the connection, the connection loops back on itself and
+  everything written arrives in its own receive queue. Nothing is listening; the
+  probe talked to itself. **It is not a Windows quirk** — it is documented TCP
+  behaviour — and on loopback the giveaway is exact: **a real connection's local
+  port can never equal the port it dialled**, because that port is held by
+  whichever socket is listening, so it cannot also be an ephemeral source port.
+  Unfixed, SURE tells a project with a free port that its service *"did not start
+  with an HTTP status line"* — a false statement about the project produced by
+  an artefact of the kernel. `is_a_self_connect` is checked between the connect
+  and the write and maps to `Refused`, which is the same fact `ECONNREFUSED`
+  carries and the same `fail`. **The test was right and the product was wrong**,
+  which is the second time in this task the suite was ahead of the code.
+
+- **The predicate is tested and the branch that uses it is not, and that is
+  measured rather than hoped.** The unit test is deterministic on all three
+  platforms because it takes the two addresses directly. **The `get()` branch
+  cannot be exercised on demand**, and the mutation that deletes it — `m11` —
+  **survived the whole `sure-core` suite**, exactly as the test run immediately
+  before that commit did. Forcing a self-connect means asking the operating
+  system to choose a particular port, and it does not choose on request:
+  dialling ports that had just been released produced **0 self-connects in 40
+  attempts**, and the same measurement showed a refused connect on this machine
+  takes about **2.04 seconds** to come back — so a brute-force search is not a
+  test but a timeout, and a retry loop would have hidden the gap instead of
+  naming it.
+
+- **The budget covers the connect, and a refusal is slower than a connect, so a
+  short budget turns an observation into a tool failure.** A budget below the
+  platform's refusal latency reports `Unreachable` — the probe's own failure, an
+  `error` — where a longer one reports `Refused`, which is a `fail` about the
+  project. **Both are non-green**, so this cannot manufacture the false green the
+  module exists to prevent; what changes is which of two sentences a report
+  prints, and only the longer budget prints the one about the project. It is
+  stated in `get`'s documentation **without a number**, because the latency
+  belongs to the platform, and the measurement that found it belongs here rather
+  than in a doc comment.
+
+- **What is not established.** **Nothing about whether the feature works**: a
+  pass means a request was answered, the title names the request
+  (`local probe: GET /health HTTP/1.1 answered`) and a test asserts it does not
+  say "works" or "ready". **No body is parsed, decoded or matched**, so
+  `body_bytes` counts what arrived after the header block — the body for an
+  identity-encoded response, and including chunk framing for a chunked one.
+  **No header is parsed, `Content-Length` least of all**: the end of a response
+  is the end of the connection and nothing else, so a service that keeps its
+  socket open is `truncated` after costing the whole timeout even when it sent a
+  complete body. **Nothing here is asynchronous**, and one probe blocks for up to
+  its timeout. **Nothing about a hostile peer**: every server in the tests is one
+  this repository wrote, and what a peer that lies in its headers can make a
+  reader do is out of scope for a reader that parses no header.

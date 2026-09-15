@@ -2,13 +2,26 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 40 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 open (8/11).** `P3-T008` is
-implemented and pushed as one commit — `6ea9f46` — its run `34946515895` is read
-in full below, and **the commit carrying this file is its acceptance**, pushed as
-`1f403d8` and read in `34949042220` where the three platform counts and both
-pairwise lines are **identical to `34946515895`**, which is what a progress-only
-change should show. What the task added is described under "What `P3-T008` added".
+Progress: 42 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 open (10/11).** `P3-T010` is
+implemented and pushed as four commits — `43c4a61`, `9ad32e6`, `0eb1ac3` and
+`01fc2a7` — its runs `34955834313`, `34956776646` (the red) and `34957515713`
+(the green) are read in full below, and **the commit carrying this file is its
+acceptance**. What the task added is described under "What `P3-T010` added".
+
+**This paragraph said `P3-T008`, `40 / 166` and `8 / 11` until this commit, and
+that is a defect this commit repairs rather than a difference of opinion.**
+`a6bc8df`, which was `P3-T009`'s acceptance, updated the file everywhere except
+its first eleven lines, so for one whole task **the top of this file named a task
+that was not the one the file was carrying** — and the paragraph it left standing
+said "the commit carrying this file is its acceptance", which was false of the
+commit a reader was holding. **The other fifteen acceptance commits on this
+branch, back to `P2-T006`'s `48d1057`, each changed at least one line of this
+paragraph — `a6bc8df` is the only one of the sixteen that changed none of it** —
+so the omission is visible in `a6bc8df`'s diff as a hunk that is *absent* rather
+than as one that is wrong, which is the shape a reader skimming a diff does not
+see. **The list below had also
+fallen five entries behind**, and that is recorded where the entries are added.
 
 **The one thing about `P3-T008` a reader should know before the detail: the
 harder half of its acceptance was about prose, and four places were failing it.**
@@ -493,12 +506,12 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P3
-{ accepted: 41, queued: 125 }
-READY: P3-T010, P3-T011, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001,
-       P6-T005, P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
+{ accepted: 42, queued: 124 }
+READY: P3-T011, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
+       P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
 
-**`P3-T001` through `P3-T009` are `accepted`**, on runs `34924525793`,
+**`P3-T001` through `P3-T010` are `accepted`**, on runs `34924525793`,
 `34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270`,
 `34943445326` / `34943853809` / `34944133634` — the last three being `P3-T007`'s,
 which took three commits and therefore three runs — `34946515895`, which is
@@ -508,9 +521,56 @@ that answered the first's macOS red, and **`34953593684`**, which carries the
 acceptance commit `a6bc8df` and reads identically to `34952509429` on all three
 platforms. **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. **Phase `P3` is 9 of 11 and open**: the remaining two `P3`
-tasks — `P3-T010` and `P3-T011` — are `queued` and both READY.
-`41 + 125 = 166`, which is every task in `tasks/tasks.json`.
+adopting an orphan. **Phase `P3` is 10 of 11 and open**: the one remaining `P3`
+task — `P3-T011` — is `queued` and READY.
+`42 + 124 = 166`, which is every task in `tasks/tasks.json`.
+
+**`P3-T010` took four commits, three runs, and one of those runs is red.**
+`34955834313` carries the first two commits — `43c4a61` has no run of its own
+because the two were pushed together — and reads Windows **1250** / macOS
+**1251** / Ubuntu **1252** parent tests, 0 failed, 11 ignored, `+23 −0` on all
+three platforms against `34954317400`. **`34956776646` is red on
+`rust (windows-latest)` and is the run of a commit that changes one doc comment
+and no executable line**: macOS and Ubuntu report the previous run's figures to
+the test — 1251 and 1252 — while Windows reports **1249 passed and 1 failed**,
+the failing test being
+`a_port_with_nothing_behind_it_is_refused_rather_than_unreachable` and the
+reported first line being **the probe's own request line**. `34957515713` is the
+green on `01fc2a7`: Windows **1251** / macOS **1252** / Ubuntu **1253**, 0 failed,
+11 ignored, **+1 on every platform**, the failing test out of the failed column
+and one new unit test in.
+
+**That red is the reason this acceptance is three commits rather than two, and it
+is worth stating plainly because the shape is unusual: a documentation-only
+commit found a product defect.** A doc comment cannot cause a test to fail, so
+the failure was known to be in the code before its cause was known, and the cause
+turned out to be a **TCP self-connect** — the operating system can hand the
+dialled port out as the connection's own source port, in which case the
+connection loops back on itself and the probe reads back what it wrote. The fix
+is `is_a_self_connect`, and **`m11`, the mutation that deletes it, survives all
+591 tests in `sure-core`**: the predicate is tested with two addresses directly,
+the branch that calls it is not tested at all, and the gap is recorded rather
+than papered over. Run `34956776646` is also **the fourth CI red on this branch
+and the first one whose cause was neither a compile nor a platform-gated test**.
+
+**The READY list read 14 before `P3-T010` and reads 13 after it, and this is the
+`P3-T008` shape for both the number and the reason.** `P3-T010` has exactly **one**
+dependent — `P5-T001`, *"Implement runtime probe planner"* — and `P5-T001` also
+names `P4-T001`, which is `queued`, so accepting this task unblocked nothing:
+
+```
+P5-T001 depends_on: ["P3-T010","P4-T001"]      (tasks/tasks.json)
+P4-T001: queued                                (progress/state.json)
+14 - 1 + 0 = 13
+```
+
+**`14 → 13` at the accept, and `13 → 13` at the `start`** — the previous task's
+shape was `14 → 13` at the *start* and `13 → 13` at the accept, so the two
+neighbouring tasks share a final number and reach it at opposite steps. **And it is
+the fourth time a dependent has been held back by a second requirement**, after
+`P3-T004`, `P3-T007` and `P3-T008`. `P3-T011` was already READY before this
+acceptance — it depends on `P3-T009` alone — which is why the list shrank rather
+than standing still.
 
 **The READY list read 13 before `P3-T009` and reads 14 after it: it GREW, and this
 is the first acceptance in several to make it longer.** `P3-T009` has exactly
@@ -883,6 +943,208 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P3-T010` added
+
+One file, `crates/sure-core/src/probe.rs`, and one new integration test file,
+`crates/sure-core/tests/probe_local_service.rs` — **twenty `#[test]` functions**,
+plus **two unit tests inside the module**. `sure-domain`'s `status.rs` gains
+`CheckResult::unknown` and one test for it; `lib.rs` gains a line. **This is the
+first task since `P2-` to add a constructor to the frozen vocabulary**, and the
+reason is in the next section but one.
+
+### The acceptance's second sentence is a type, not a rule
+
+*"Open port alone is not feature completeness."* `ProbeOutcome` has five
+variants, `is_an_answer` is true for exactly one, and **the port question is a
+method `opened_a_connection` that no verdict consults** — `status()` matches the
+variant and never calls it, so a caller who learns the port is open still cannot
+turn that into a pass. The variant that means *something accepted the connection
+and said nothing* is `NoAnswer`, which maps to `CheckStatus::Unknown`, which
+`aggregate` treats as **not checked**. The test that holds this goes through
+`aggregate` rather than through the module's own enum:
+
+```
+an_open_port_that_says_nothing_does_not_aggregate_to_green
+the_same_open_port_that_answers_does_aggregate_to_green
+```
+
+**The pair is the instrument.** The first alone would be satisfied by a probe that
+never returns green at all; the second alone by the false green this product
+exists to prevent. They differ by one line of server behavior, and the servers are
+real sockets on `127.0.0.1:0` — the port is never hardcoded, so a machine with
+something already on `3000` cannot make them lie.
+
+**This section said "there is no boolean anywhere in the module" until a grep for
+`pub fn … -> bool` in that module returned two, and the sentence was false in
+three places.** `opened_a_connection` is public, returns `bool`, and is true for
+exactly the ported-yet-silent case the paragraph was about; the module's own
+rustdoc header carried the same false claim, so it was on course to ship in the
+crate's documentation. **What is true is narrower and checkable**: the boolean exists and
+is deliberately *named so it cannot be mistaken for the answer*, and no verdict
+path reads it — `status()` is an exhaustive match on the variant with no `_` arm,
+so a new variant is a compile error there rather than a silent route onto the
+green path. The correction is `P3-T010`'s third commit, and the mutation table
+does not change: no test could have caught a false sentence, which is why the
+false sentence is recorded rather than patched quietly.
+
+### `CheckResult::unknown`, and why the vocabulary needed a new door
+
+The frozen vocabulary exposed `CheckStatus::Unknown` with **no constructor**, and
+this is the first check that needs one. It is the only status whose evidence class
+is a *parameter*, and the parameter is the whole of what separates it from
+`not_run`: **here SURE has evidence and the evidence supports no verdict; there
+SURE has none.** A probe that found a port open and nothing said has an observed
+fact, and the fact is not a basis for saying the project is fine or that it is
+broken — which is a state nothing in the vocabulary could previously express.
+
+### A zero timeout makes no attempt, because rounding it up can produce a pass
+
+Three implementations were considered and two are wrong, and **the reason is the
+same for both**: a loopback socket connects in microseconds, so *any* budget small
+enough to be "no time" is also large enough to answer. Rounding a zero up would
+have reported a **green check out of a budget of zero**; handing the zero to
+`connect_timeout` lets the platform reject it, and the caller learns the operating
+system refused something the caller had already asked not to happen. It is
+`Unreachable` with a detail naming the budget — `CheckStatus::Error`, never green.
+
+**A zero *byte* bound is deliberately not treated the same way**, and the module
+says why rather than leaving the asymmetry to be noticed: with nothing kept, no
+header block can be found, so a zero bound cannot reach a pass.
+
+### `NotHttp` is decided from the first byte, and that started as a bug
+
+A port speaking TLS, probed with a plaintext request, answers with a binary record
+that contains **no CRLF at all**; a service whose protocol name does not begin with
+`H` is contradicted by its first byte. Under a reader that waited for `\r\n\r\n`,
+**both were reported as a port that said nothing** — the least useful thing a
+report can say about a port that answered. `could_still_be_a_status_line` reads the
+same grammar as `parse_status_line` as a condition on a prefix, so the first line
+is settled as soon as its bytes can no longer begin a status line.
+
+**The same predicate ends the read**, and that second half was found by a test
+asserting on *elapsed time* rather than on a value. It failed at 5.0s against a
+five-second hold: **the outcome was right and the deadline had produced it.** A
+value-only assertion cannot see this class of bug, which is why the TLS test and
+the early-break test both assert how long the probe took.
+
+### Ten mutations, ten caught — and the one that survived is the finding
+
+`m8` deleted the `WouldBlock` arm of `is_a_timeout` and **all twenty integration
+tests passed.** That is a gap in the platform, not in the tests: **Windows reports
+an expired socket read timeout as `TimedOut` and a Unix reports the same condition
+as `WouldBlock`, so no test reachable from a socket on this machine can produce the
+Unix spelling.** The arm was held by nothing here. Without it, a Unix build reports
+a port that said nothing as a port that *could not be reached* — an observation
+about the project turned into a failure of the probe, on two of the three CI
+platforms. It is now held by a unit test in the module, and **that test is the only
+thing in `sure-core` that catches it.**
+
+**The harness's own filter was the second half of the finding.**
+`--test probe_local_service` selects an integration target and does not run the
+lib, so the first re-run after adding the unit test still reported a survivor. **A
+mutation reported as surviving under a filter that could not have run the test that
+kills it is a measurement of the filter**, and the previous eight tasks' mutation
+tables all used integration filters.
+
+**Seven of the ten are caught by exactly one test each, and two of those seven
+share a test.** `m5` (widening `is_an_answer`) and `m7` (replacing the silence
+reason) both land on `an_open_port_that_says_nothing_does_not_aggregate_to_green`,
+which is also the test the acceptance is about. **Ten-for-ten would be true and
+misleading**; the concentration is recorded in `DECISIONS.md` because it is the
+shape a future deletion would exploit.
+
+### Two predicates a socket cannot discriminate, so they have unit tests
+
+The second unit test is not a mutation survivor — it is the same instrument
+pointed at the other predicate a socket cannot separate. Every server in `tests/`
+that sends a complete response sends a blank line with it, so **the socket route
+only ever exercises the split path**. `could_still_be_a_status_line` is therefore
+tested directly, on inputs a test server cannot produce.
+
+### A free port can connect to itself, and the run that found it could not have caused it
+
+`0eb1ac3` changes one doc comment and nothing else, and its run `34956776646` came
+back **windows `failure`, macos `success`, ubuntu `success`** on one assertion:
+
+```
+a closed loopback port refuses the connection; the probe reported
+NotHttp { first_line: "GET / HTTP/1.1" }
+```
+
+`GET / HTTP/1.1` is **the probe's own request line**. The test had released a
+loopback port and probed it; the connect *succeeded* and the bytes read back were
+the bytes the probe had written. **A doc-only commit cannot make a test fail**,
+which is how this was known to be the code before the cause was known.
+
+**When the operating system hands the dialled port out as the source port of the
+connection, the connection loops back on itself** and everything written arrives
+in its own receive queue. Nothing is listening; the probe talked to itself. It is
+documented TCP behaviour rather than a Windows quirk, and **on loopback the
+giveaway is exact: a real connection's local port can never equal the port it
+dialled**, because that port is held by whichever socket is listening and cannot
+also be an ephemeral source port. So `is_a_self_connect` is checked between the
+connect and the write, and it maps to `Refused` — the same fact `ECONNREFUSED`
+carries, and the same `fail`. **The test was right and the product was wrong**,
+which is the second time in this task the suite was ahead of the code.
+
+**The predicate is tested; the branch that uses it is not.** The unit test is
+deterministic on all three platforms because it takes two addresses directly.
+The branch in `get()` cannot be exercised on demand, and **`m11`, the mutation
+that deletes it, survived the whole `sure-core` suite** — as the test run
+immediately before that commit did. Forcing a self-connect means asking the
+operating system to choose a particular port: dialling ports that had just been
+released gave **0 self-connects in 40 attempts**, and the same measurement found
+that a refused connect on this machine takes about **2.04 seconds** to come back.
+A brute-force search is not a test but a timeout, and a retry loop would have
+hidden the gap rather than naming it, so the gap is named.
+
+**And the measurement turned up a property of the budget.** A refusal is slower
+than a connect, and the connect is charged to the budget, so **a budget below the
+platform's refusal latency reports `Unreachable` — an `error` and the probe's own
+failure — where a longer one reports `Refused`, which is a `fail` about the
+project.** Both are non-green, so nothing here can manufacture a false green;
+what changes is which of two sentences a report prints, and only the longer
+budget prints the one about the project. It is in `get`'s documentation without a
+number, because the latency belongs to the platform.
+
+### What the first draft got wrong, and the tests caught
+
+Three things, none of which a green suite would have surfaced, and the second and
+third are worth the reader's time:
+
+- **The byte bound was a *soft* bound** — checked between reads, so a 4 KiB chunk
+  could put **1024 body bytes under a 512-byte bound**. It is now what is kept,
+  exactly, and the test asserts the arithmetic rather than a range.
+- **The first line of a never-ending reply is "whatever arrived"**, up to the whole
+  bound, so a report could have carried sixty kilobytes of lossy-decoded binary.
+  It is now cut at 120 bytes with `…` marking the cut, so a cut line cannot read as
+  a whole one.
+- **An early-break guard on `header_block_end` was written, reasoned about and
+  removed.** The predicate reads only as far as the code token, so a valid status
+  line satisfies it however long the buffer is, and the guard changed no behavior
+  the tests could see. Its comment now says why no guard is needed rather than
+  claiming a condition that does nothing.
+
+And one claim in the module's own documentation was false when written:
+**`verdict`'s doc said it was "written against" `status()` while re-implementing
+the same match.** It now calls it, so the claim is true; the catch-all `_` arm
+became an explicit `Error | Warning | Skipped` arm so that adding a variant to
+`CheckStatus` is a compile error in that file rather than a silent mis-mapping.
+
+### What `P3-T010` does not establish
+
+**Nothing about whether the feature works.** A pass means a request was answered,
+the title names the request — `local probe: GET /health HTTP/1.1 answered` — and a
+test asserts the title does not say "works" or "ready". **No body is parsed,
+decoded or matched**, so `body_bytes` counts what arrived after the header block:
+the body for an identity-encoded response, and including chunk framing for a
+chunked one. **No header is parsed, `Content-Length` least of all** — the end of a
+response is the end of the connection and nothing else, so a service that keeps its
+socket open is `truncated` after costing the whole timeout even when it sent a
+complete body. **Nothing here is asynchronous**, and one probe blocks for up to its
+timeout. **Nothing about a hostile peer**: every server in the tests is one this
+repository wrote.
 
 ## What `P3-T009` added
 
@@ -3489,6 +3751,26 @@ Three of the five jobs were failing the whole time.
 | 34929385200 | `b0dcc69` — **the `P3-T003` implementation** | **failure: `rust (macos-latest)`.** The other four jobs green. Windows **1078** / macOS **1078** / Ubuntu **1080** passed over **43** result lines = **33 parents + 10 children** on each, 9 ignored, and **exactly one failing test**, `a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs`, which is the `#[cfg(unix)]` test macOS cannot satisfy. **The failing test is not the last thing in the log**: 14 more binaries started after it and 19 of the 33 parent result lines came after it, which is the `--no-fail-fast` change doing its job on the run that needed it. Detail below |
 | 34930744061 | `ea2f826` — **the `P3-T003` fix** | **all five green.** Windows **1078** / macOS **1079** / Ubuntu **1080** passed, 0 failed, 9 ignored, **43** physical lines = **43 results** = **33 parents + 10 children** on each — the splice the `fd878e6` row records did not occur. **Three different deltas, one per platform, because the three jobs compile different code: +1 on Windows, +3 on macOS, +3 on Ubuntu**, and the parent and child counts stand still on all three. Detail below |
 | 34935781639 | `967c5e6` — **the `P3-T004` implementation** | **all five green.** Windows **1126** / macOS **1127** / Ubuntu **1128** passed, 0 failed, 9 ignored, **44** result lines = **44 result tuples** = **34 parents + 10 children** on each. **Windows equals this machine's own run to the test — 1126 over 44 results** — the parent count moved **33 → 34** for the new `command_safety` binary, and all **38** new test names were found by name on all three jobs. **No `P3-T004` test is platform-gated**, so the +1 and +2 are the sets accumulated since `P2-T004`. Detail below, including a third variant of the log-prefix trap |
+| 34936301857 | `ea0fe6c` — **the `P3-T004` acceptance** | **all five green.** Windows **1126** / macOS **1127** / Ubuntu **1128** passed, 0 failed, 9 ignored, **44** result lines = **44 results** = **34 parents + 10 children** on each — the row above's three figures to the test, unchanged. **This row was missing until `P3-T010`'s acceptance**, when the check below was finally run and found twenty rows absent |
+| 34938974624 | `c940300` — **the `P3-T005` implementation** | **all five green.** Windows **1152** / macOS **1153** / Ubuntu **1154** passed, 0 failed, 9 ignored, **44** result lines = **44 results** = **34 parents + 10 children** on each. **+26 on every platform and the parent count stands still at 34**, so the new tests landed inside existing binaries rather than adding one |
+| 34940207615 | `63d5b19` — **the `P3-T005` acceptance** | **all five green**, and **1152 / 1153 / 1154** with 0 failed, 9 ignored, **34 parents + 10 children** — unchanged from the row above. **This row and the one above it were missing until `P3-T010`'s acceptance, and neither run was named anywhere in this file** |
+| 34941955270 | `d58532a` — **the `P3-T006` implementation** | **all five green.** Windows **1182** / macOS **1183** / Ubuntu **1184** passed, 0 failed, 9 ignored, **44** result lines = **34 parents + 10 children**. **+30 on every platform**, parent count unchanged |
+| 34942566982 | `664575b` — **the `P3-T006` acceptance** | **all five green**, and **1182 / 1183 / 1184** with 0 failed, 9 ignored, **34 parents + 10 children** — unchanged from the row above |
+| 34943445326 | `6353477` — **the `P3-T007` implementation** | **all five green.** Windows **1196** / macOS **1197** / Ubuntu **1198** passed, 0 failed, 9 ignored, **44** result lines = **34 parents + 10 children**. **+14 on every platform**, parent count unchanged |
+| 34943853809 | `18209d8` — **the `P3-T007` second commit** | **all five green.** Windows **1197** / macOS **1198** / Ubuntu **1199** passed, 0 failed, 9 ignored, **44** result lines = **34 parents + 10 children**. **+1 on every platform** |
+| 34944133634 | `719253e` — **the `P3-T007` third commit** | **all five green.** Windows **1198** / macOS **1199** / Ubuntu **1200** passed, 0 failed, 9 ignored, **44** result lines = **34 parents + 10 children**. **+1 on every platform** |
+| 34945070507 | `0f9273b` — **the `P3-T007` acceptance** | **all five green**, and **1198 / 1199 / 1200** with 0 failed, 9 ignored, **34 parents + 10 children** — unchanged from the row above |
+| 34946515895 | `6ea9f46` — **the `P3-T008` implementation** | **all five green.** Windows **1219** / macOS **1220** / Ubuntu **1221** passed, 0 failed, 9 ignored, **45** result lines = **45 results** = **35 parents + 10 children**. The parent count went 34 → 35 because `container_adapter` is a new test binary, and **+21 on every platform** |
+| 34949042220 | `1f403d8` — **the `P3-T008` acceptance** | **all five green**, and **1219 / 1220 / 1221** with 0 failed, 9 ignored, **35 parents + 10 children** — unchanged from the row above |
+| 34949484506 | `a2d08a6` — **the `P3-T008` run record** | **all five green**, and **1219 / 1220 / 1221** with 0 failed, 9 ignored, **35 parents + 10 children** — the row above's figures to the test for the third time in this chain |
+| 34952200942 | `6911e2a` — **the `P3-T009` implementation** | **failure: `rust (macos-latest)`.** The other four jobs green, Windows **1227** and Ubuntu **1229** passed with 0 failed. macOS **1227 passed, 1 failed**, and **exactly one failing test**: `a_service_that_ends_by_itself_reports_the_code_it_ended_with_and_where_it_ran`. **46** result lines = **36 parents + 10 children** on each, **11 ignored** — the ignored count moved 9 → 11 for two new children, and the parent count 35 → 36 for the new `service_supervisor` binary. Detail below |
+| 34952509429 | `12b81bc` — **the fix for that** | **all five green, including `rust (macos-latest)`, the job that failed.** Windows **1227** / macOS **1228** / Ubuntu **1229** passed, 0 failed, 11 ignored, **46** result lines = **36 parents + 10 children**. **+1 on macOS alone**, which is the one test the failing assertion lived in — Windows and Ubuntu did not move at all |
+| 34953593684 | `a6bc8df` — **the `P3-T009` acceptance** | **all five green**, and **1227 / 1228 / 1229** with 0 failed, 11 ignored, **36 parents + 10 children** — unchanged from the row above |
+| 34953980527 | `af2cd75` — **the `P3-T009` run record** | **all five green**, and **1227 / 1228 / 1229** with 0 failed, 11 ignored, **36 parents + 10 children** — unchanged again |
+| 34954317400 | `a0f101d` — **the `P3-T009` run record** | **all five green**, and **1227 / 1228 / 1229** with 0 failed, 11 ignored, **36 parents + 10 children** — a third consecutive identical reading, which is what a progress-only commit should produce |
+| 34955834313 | `9ad32e6`, carrying `43c4a61` — **the `P3-T010` implementation and its tests** | **all five green.** Windows **1250** / macOS **1251** / Ubuntu **1252** passed, 0 failed, 11 ignored, **47** result lines = **37 parents + 10 children**. The parent count went 36 → 37 for the new `probe_local_service` binary and **+23 on every platform**. **`43c4a61` has no run of its own** — the two commits were pushed together, so this one run is both. Detail above, including the `+23 −0` whose `−0` was predicted from the commit before the run was read |
+| 34956776646 | `0eb1ac3` — **a doc-comment correction** | **failure: `rust (windows-latest)`.** The other four jobs green, macOS **1251** and Ubuntu **1252** passed with 0 failed. Windows **1249 passed, 1 failed** — `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable` — over the same **47** result lines = **37 parents + 10 children**. **A commit that changes one doc comment and no executable line, failing on the platform it was written on**, which is what made this a product defect rather than a test flake. Detail above |
+| 34957515713 | `01fc2a7` — **the self-connect fix** | **all five green, including `rust (windows-latest)`, the job that failed.** Windows **1251** / macOS **1252** / Ubuntu **1253** passed, 0 failed, 11 ignored, **47** result lines = **37 parents + 10 children**. **+1 on every platform and the one failing test now passes**: the total on Windows went 1250 → 1251, which is the new unit test and nothing else, while the integration test moved from the failed column to the passed one. **No new binary, so the parent count stands still** |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and
@@ -3546,6 +3828,34 @@ feels like finishing the job. The check that catches it is mechanical and costs
 one command, which is why it is written here rather than trusted to attention: the
 table is an index, and an index nobody sets against its source is a reading of the
 source it was written from.
+
+**Twenty rows were missing when `P3-T010` was accepted, and the fourth gap breaks
+the rule the paragraph above just stated.** Twenty runs — every run from
+`P3-T004`'s acceptance to `P3-T010`'s fix — were absent, and **two of them,
+`34936301857` and `34940207615`, were not named anywhere in this file at all**,
+so no reading of any kind existed for them. The rule above says the shape is "a
+run whose reading was written somewhere else"; that covers eighteen of the
+twenty, and **it does not cover the two that were never read**. So the rule is
+amended rather than repeated: *every run on the branch gets a row, and a run
+gets a reading because the row is owed rather than because prose has already been
+written about it.*
+
+**The reason is in the arithmetic, and it is why the check has to be mechanical.**
+The check was run at `P2-T011`, `P3-T002` and `P3-T003` and found three rows each
+time; the table's last row was written at `P3-T004`. **The check stopped being run
+at exactly the point where it would have found the biggest gap**, because it is a
+command a person has to remember, and it had by then found a gap three times
+running — which is when a check stops feeling like a discovery and starts feeling
+like a chore. The three earlier paragraphs are each a paragraph; this one is
+twenty rows, and twenty rows is what "remember to run it" costs.
+
+**All twenty were downloaded and parsed per job before their rows were written**,
+with `target/tmp/backfill.py`, which fetches a run, splits it into one log per job
+the way `splitjobs.py` does, and hands the three to `read-run.py` — so the figures
+in the rows above are read out of the logs rather than copied from the prose
+sections that describe eighteen of these runs. The rows also carry what the
+sections never did: **the per-platform deltas**, which is how the two commits of
+`P3-T010` read as `+23 on every platform` and `+1 on every platform` respectively.
 
 ### Reading run `34869888350`, `P2-T010`'s — and a delta attributed by binary name
 
@@ -3622,6 +3932,108 @@ value was which, so on macOS a greedy positional alignment instead yields
 pins it.** Recorded at this length because the tempting sentence — "the multiset
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
+
+### Reading runs `34956776646` and `34957515713`, `P3-T010`'s last two — and a red on a commit that changes one comment
+
+**The pair is the whole reading, so the two runs are set against each other
+rather than described one at a time.** `0eb1ac3` changes one doc comment and no
+executable line; `01fc2a7` adds a predicate to `probe.rs`. One commit apart, and
+the two runs differ in exactly the ways the second commit predicts.
+
+| | `34956776646` (`0eb1ac3`) | `34957515713` (`01fc2a7`) |
+| --- | --- | --- |
+| `rust (windows-latest)` | **failure** — 1249 passed, **1 failed** | **success** — **1251** passed, 0 failed |
+| `rust (macos-latest)` | success — 1251 | success — **1252** |
+| `rust (ubuntu-latest)` | success — 1252 | success — **1253** |
+| result lines = results | **47** = **37 parents + 10 children** | **47** = **37 parents + 10 children** |
+| ignored | 11 | 11 |
+
+**macOS and Ubuntu are identical in both runs, and that is the measurement rather
+than a coincidence.** The doc-only commit's figures on those two jobs are the
+previous run's (`34955834313`) to the test — 1251 and 1252, 47 result lines, 11
+ignored — so on two of three platforms the commit changed nothing at all, which
+is what a doc-comment commit must produce. **Windows is the platform that
+moved**, from 1250 passed to 1249 passed + 1 failed: the total is unchanged and
+one test crossed the line, which is the signature of a test that failed rather
+than of a test that was added or removed.
+
+**The failing test is the one whose name says which half of the product it
+tests.** `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable`,
+with the assertion text `a closed loopback port refuses the connection; the probe
+reported NotHttp { first_line: "GET / HTTP/1.1" }`. **The reported first line is
+the probe's own request line** — the bytes the probe wrote came back to it — and
+because the commit under test changes one comment, the defect was known to be in
+the code before the cause was known. That is the reading a red on a
+documentation-only commit is worth: **a test cannot be flaky into reporting the
+bytes it wrote itself**, so the colour was information rather than noise, and the
+run did not need to be re-triggered to find out.
+
+**The green run then closes the pair from the other side.** Windows went **1250
+total → 1251**, which is **+1 and nothing else**: the integration test moved out
+of the failed column and the one new unit test,
+`a_connection_whose_local_address_is_the_one_it_dialled_did_not_reach_a_service`,
+was added. macOS and Ubuntu each moved **+1** as well — the same new unit test —
+so **the three platforms agree that exactly one test was added**, and the fix
+added no binary: the result-line count stays **47 = 37 parents + 10 children** on
+every job, and the pairwise lines are the standing two, `windows vs macos: -13
++14` and `windows vs ubuntu: -12 +14`, in both runs.
+
+**`01fc2a7` is also the first commit on this branch whose fix is one commit after
+a red found by a black-box test rather than by a compile or a lint**, and the run
+that confirms it was read rather than assumed — which matters here more than
+usual, because the fix's own branch is the part **no test in `sure-core` covers**
+(`m11` below).
+
+### Reading run `34955834313`, `P3-T010`'s implementation — and the first delta in this file whose `−0` was predicted from an arithmetic
+
+Five jobs, all `success`, on `9ad32e6`. Windows **1250** / macOS **1251** / Ubuntu
+**1252** parent tests, **0 failed**, 11 ignored, over **47 result lines = 37
+parents + 10 children** on every job. The pairwise lines are the standing two,
+`windows vs macos: -13 +14` and `windows vs ubuntu: -12 +14`, unchanged from
+`664575b` through `P3-T009`'s three runs.
+
+**The result-line count moved from 46 to 47, and this is the first time that
+number has moved for a reason other than a new child pair.** A new integration
+file is a new `Running … (tests/probe_local_service.rs)` section; the 37 parents
+are 36 plus one section header. **A reader who compared `lines` across these two
+runs without knowing that would see a number that moved by one and a parent count
+that moved by one, and conclude a test file had gained a section — which is right,
+and is not the same as a test having been added.**
+
+`name-delta.py` against `34954317400`, `P3-T009`'s tip, is **`+23 −0` on all three
+platforms**, and the three added *sets* are identical name for name:
+
+```
++20  tests/probe_local_service.rs          (the new file)
+ +2  probe::tests::…                       (the two unit tests, from the lib section)
+ +1  status::tests::an_unknown_check_carries_the_evidence_it_was_given_and_no_skip_reason
+=23
+```
+
+**The `−0` was predicted before the run was read**, which is the first time in
+this file that has been true of a delta. The prediction is available from the
+commit: it adds a module, a test file and a constructor, and touches no existing
+test — so a rename or a removal would have meant something the commit did not
+say. `+27 −2` and `+23 −0` both "pass" a suite; only the second is the commit
+that was written.
+
+**The three platforms agree on the added set, and that is the load-bearing part
+rather than the count.** Two of the twenty integration tests are the kind that
+could have been platform-sensitive — `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable`
+needs a closed loopback port to produce `ECONNREFUSED` rather than something else,
+and two tests assert on **elapsed time** — and all three platforms pass them. The
+elapsed-time assertions are the ones worth naming: they are what caught the read
+loop spending a whole deadline after the first byte had already settled the
+outcome, and a platform where they were merely lucky would be a platform where
+that bug could come back unseen.
+
+**And the local run agrees with the Windows job exactly**: `cargo test --workspace`
+on this machine reports **1250 passed, 0 failed**, which is the Windows job's
+number. That is the third time in this project a local and a CI Windows count have
+matched after a task, and it is worth stating because the two are computed by
+different code — the local figure by `target/tmp/count_tests.py`, the CI figure by
+`target/tmp/read-run.py`, whose parent/child convention this file has already had
+to correct twice.
 
 ### Reading run `34953593684`, `P3-T009`'s acceptance — and a progress-only commit whose reading had to be the one before it
 
@@ -6408,6 +6820,84 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P3-T010`
+
+**Eleven mutations: ten caught, one survived, and the survivor is the more
+useful of the two halves.** The harness is `target/tmp/mutate3.py`, unchanged for
+a fourth task; the pairs are in `target/tmp/mut-p3t010/` and, for `m11`, in
+`target/tmp/mut-p3t010b/`, and each was checked to match its target **exactly
+once** before the harness ran, so a mistyped pair would have failed before
+producing a result rather than after producing a wrong one.
+
+| mutation | caught by |
+| --- | --- |
+| m1 `status()` success bound `400` → `500` | `the_status_mapping_and_the_verdict_agree_on_every_variant` |
+| m2 read deadline stops the read without flagging `truncated` | `a_response_still_arriving_when_the_probe_stops_reading_is_marked_truncated` |
+| m3 path predicate dropped to "starts with `/`" | `a_path_that_would_add_a_header_or_split_the_request_line_is_refused` |
+| m4 zero-budget guard deleted | `a_budget_of_zero_makes_no_attempt_and_cannot_report_a_pass` |
+| m5 `is_an_answer` widened to include `NoAnswer` | `an_open_port_that_says_nothing_does_not_aggregate_to_green` |
+| m6 `Refused` and `Unreachable` swapped | `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable` |
+| m7 the silence reason replaced by the generic one | `an_open_port_that_says_nothing_does_not_aggregate_to_green` |
+| m8 `WouldBlock` dropped from `is_a_timeout` | **survived all 20 integration tests**; `probe::tests::a_read_deadline_is_recognized_in_both_shapes_the_platforms_give_it` |
+| m9 the early break removed | `a_reply_that_could_not_be_http_from_its_first_byte_is_not_http` |
+| m10 the prefix `NotHttp` branch removed from `classify` | three tests: the cut first line, the TLS reply, the SSH banner |
+| m11 the self-connect branch deleted from `get` | **nothing** — survived all 591 tests in `sure-core`, unit tests included |
+
+**m8 survived, and no test in this repository could have caught it on this
+machine.** Windows reports an expired socket read timeout as `TimedOut`; a Unix
+reports the same condition as `WouldBlock`. Deleting the `WouldBlock` arm changes
+nothing on Windows, so twenty integration tests — every one of which runs a real
+socket — passed against a `is_a_timeout` that would report a silent port as *an
+unreachable one* on macOS and Ubuntu. **The arm was held by nothing on the
+platform it was written on.** The answer is a unit test inside the module, which
+can run on all three platforms, and it is the only test in `sure-core` that
+catches the mutation.
+
+**The harness's filter was the second half of that finding, and it is worth
+recording because every mutation table in this file used the same shape.**
+`--test probe_local_service` selects an integration target and does **not** run
+the lib, so the first re-run after the unit test was added still printed
+`(NONE — this mutation survived)`. **A mutation reported as surviving under a
+filter that could not have run the test that kills it measures the filter, not
+the mutation.** Re-run with an empty filter — the whole `sure-core` suite, 591
+tests — it is caught by exactly one:
+
+```
+### m8-wouldblock-not-a-timeout
+    filter ''
+    test result: FAILED. 590 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+    caught by 1 test(s):
+      - probe::tests::a_read_deadline_is_recognized_in_both_shapes_the_platforms_give_it
+```
+
+**m11 survived the whole suite, and this time there was no wrong filter to
+blame.** It deletes the self-connect branch added by `01fc2a7`, the fix for the
+Windows failure `34956776646` found — and **the complete `sure-core` suite, lib
+and integration targets, 591 tests, reports it caught by 0 test(s).** The blob
+was restored to the pre-run hash `99fe44955357994bcf70f29686f74b7d1a7f00aa`, so
+the run is a measurement rather than a lost edit. The reason is in the section
+about the self-connect and it is a property of the operating system rather than
+an oversight: a self-connect happens when the kernel chooses a particular port,
+and it does not choose on request. **The predicate `is_a_self_connect` is covered
+deterministically by a unit test that hands it two addresses; the branch that
+calls it is covered by nothing, and the honest reading of `m11` is that the fix
+is held by a test one level of indirection away from the line that was wrong.**
+Forcing a self-connect by dialling ports that had just been released produced
+**0 in 40 attempts**, and the same measurement put a refused loopback connect at
+about **2.04 seconds**, so a search would be a timeout rather than a test.
+
+**Seven of the ten caught are caught by exactly one test each, and two of those
+seven share a test.** m5 and m7 both land on
+`an_open_port_that_says_nothing_does_not_aggregate_to_green`, which is also the
+test the acceptance is about. **Ten-for-ten is true and would be misleading**: a
+reader who took it as redundancy would be wrong about two of them, and the
+concentration is the shape a future deletion would exploit. `P3-T009` recorded
+the same finding about its own seven, where one test held three.
+
+**Every run printed the blob restored to the pre-run hash**, and the harness
+compares against the pre-run blob rather than `HEAD`, because this file's target
+was uncommitted work at the time — the case `P3-T008` added that wording for.
+
 ### `P3-T008`
 
 Twelve mutations, two harnesses and one mutation that was not against the code.
@@ -7482,6 +7972,42 @@ it needs a Mac.
 
 ## Accepted work on this branch
 
+- `82650ac` **`P0-T001`** and `dc44ae0` **`P0-T002`** — and **the two commits
+  disagree with their own messages, which is why they are one entry.** `82650ac`
+  is P0-T001's commit: it validates the 17-phase / 166-task bootstrap package
+  against `validate-bootstrap.mjs`, `taskctl.mjs validate` and
+  `Validate-Bootstrap.ps1` at `0c85181` — **and it also adds
+  `scripts/git-guard.mjs` (+149, new), which its message does not mention.**
+  `dc44ae0` is P0-T002's commit and it is **empty — it changes no file at all** —
+  while its message opens *"Add `scripts/git-guard.mjs`"*. **So the guard that
+  mechanically enforces the Git policy is `P0-T002`'s deliverable and it landed
+  under `P0-T001`'s id**, and a reader who trusted the subjects would attribute it
+  to the wrong task and believe P0-T002's commit contained something.
+- `06e64b2` **`P0-T003`** — 16 files: all eight modules of the frozen vocabulary
+  (`status.rs` +812, `vocabulary.rs` +711, `execution.rs` +628, `evidence.rs`
+  +492, `ids.rs` +465, `intent.rs` +407, `capability.rs` +371, `severity.rs`
+  +151), `sure-domain/src/lib.rs` (+55), `sure-core/src/lib.rs` (+40),
+  `sure-cli/src/main.rs` (+67 −7), three `Cargo.toml`s and `Cargo.lock`. **4204
+  source lines under `crates/`, which is the largest of the eight `P0` commits and
+  the fourth largest on this branch** — behind `68e51d8` (4490), `9c931d0` (4421)
+  and `e10f620` (4410), measured rather than estimated, because the first draft of
+  this sentence said "the largest on this branch" and three `P2` commits are
+  larger.
+- `69bde28` **`P0-T004`**, `84f1dd0` **`P0-T005`**, `f643187` **`P0-T006`**,
+  `fe7ad52` **`P0-T007`** and `9d95e1a` **`P0-T008`** — **five commits, and every
+  one of them is empty: together they change no file at all.** They freeze, in
+  prose: six explicit `CheckStatus` values and the aggregation rule that keeps a
+  critical check which failed, errored, is `unknown` or was skipped for a reason
+  other than an honest scope limit from reaching green (`P0-T004`);
+  `IntentSource`, and the rule that an inference or an agent claim can never
+  become a user requirement (`P0-T005`); six independent permissions where none
+  implies network access, file writes or service connections (`P0-T006`); the
+  three harness tiers plus a self-consistency rule that rejects a protected-tier
+  claim with no pre-action control (`P0-T007`); and the no-daemon,
+  no-hosted-model decision encoded as an absent dependency rather than as a
+  promise (`P0-T008`). **An empty commit is a legitimate artefact here — it is a
+  decision that has no code — and this entry exists because the alternative is
+  five task ids that are `accepted` and appeared nowhere below this heading.**
 - `4f2d75d` P0-T009 — foundational ADRs, plus `FROZEN_SEMANTICS.md`.
 - `4ce2ce6` P1-T001 — declared crate boundaries, mechanically enforced by
   `sure_testkit::workspace` and `sure_testkit::integrations`.
@@ -7723,6 +8249,110 @@ it needs a Mac.
   **Not established:** any consent record, prompt or host-execution
   authorisation; anything about the TOCTOU window between planning a command line
   and running it.
+- `d58532a` **`P3-T006`** — `crates/sure-core/src/approval.rs` (+1777, new),
+  `store/mod.rs` (+59 −1), `store/record.rs` (+90 −6),
+  `crates/sure-domain/src/execution.rs` (+158) and `pub mod approval;`. **The
+  gate that decides which commands may run, and the record that outlives the
+  process that made it**: `P3-T005` could decide that a command `NeedsConsent`
+  but nothing could construct the consent record it named, and nothing kept the
+  answer — so this supplies the constructor, the gate that admits only what a
+  grant covers, and a durable OS-native record of the approval. Run
+  `34941955270`, all five jobs `success`, **1172 / 1173 / 1174** parents with 0
+  failed and 9 ignored over 44 result lines = 34 parents + 10 children; the
+  namesets move **`+30 −1` on all three platforms**, where the one name that left
+  is a rename, so **a naive diff of the same change says `+31` and nothing on this
+  machine would have contradicted it**. **A number in `d58532a`'s own message is
+  wrong and cannot be rewritten**: it says `approval.rs` is 1490 lines and
+  `git show --numstat` reads `1777 0`, because the figure was taken from a note
+  while the file was still growing. **Not established:** any prompt, any grant a
+  user actually gave, and anything about what a granted command then does.
+- `6353477` + `18209d8` + `719253e` **`P3-T007`** — `enforce.rs` (+777, new, then
+  +39 and +41: 921 lines today, 16 tests), `consent.rs` (+8 −1),
+  `docs/architecture/EXECUTION_SAFETY.md` (+37) and `pub mod enforce;`. **The
+  first task that makes `inspect_only` true for a reason rather than true because
+  no runner exists**: `Enforcement::admitted()` is the only iterator a runner may
+  take a command line from, a check is a unit, `NeedsConsent` is a stop rather
+  than a question under `inspect_only`, and a command planned for an unscheduled
+  check is reported and never admitted. Runs `34943445326`, `34943853809` and
+  `34944133634` are all five jobs `success` with **1186 / 1187 / 1188**,
+  **1187 / 1188 / 1189** and **1188 / 1189 / 1190** parents and 0 failed; the
+  namesets move **`+14 −0`**, **`+1 −0`** and **`+1 −0`**. Four mutations, four
+  caught, **and the third is the one worth reading**: the static/dynamic
+  classification was held by one unrelated assertion, which is what `719253e`
+  adds a direct test for. **No spawn site was added.**
+- `6ea9f46` **`P3-T008`** — `crates/sure-core/src/container.rs` (+1010, new, 16
+  tests), `crates/sure-core/tests/container_isolation_claim.rs` (+276, 5 tests),
+  `doctor.rs` (+11 −2), `crates/sure-domain/src/execution.rs` (+17 −4),
+  `docs/adr/0009-explicit-execution-trust.md` (+17 −1) and
+  `EXECUTION_SAFETY.md` (+22 −3). **Its harder acceptance sentence is about
+  prose**: four places called the container mode *isolated* and were corrected to
+  **limited isolation**, and the wording is now a check rather than a one-time
+  correction — `OVERCLAIMS` and `overclaims()` are applied by the new test file
+  to every shipped `.rs` under `crates/` and every `.md` under `docs/`.
+  **`Availability` has no error variant**, so a machine with neither Docker nor
+  Podman is a value rather than a failure, and `ContainerPlan` holds the image,
+  the mount and its access, the network mode and the working directory as fields.
+  Run `34946515895`, all five `success`, **1209 / 1210 / 1211** parents, 0 failed,
+  9 ignored, 45 result lines = 35 parents + 10 children, namesets **`+21 −0`**
+  against `0f9273b`. Twelve mutations: eleven caught, and **the twelfth survived
+  the whole workspace suite** — held by no test, because no test holds
+  `doctor::find_in`'s empty-`PATH` rule. **No spawn site was added.**
+- `6911e2a` + `12b81bc` **`P3-T009`** — `crates/sure-core/src/service.rs` (+411,
+  new), `crates/sure-core/tests/service_supervisor.rs` (+807, then +20 −3: 824
+  lines), the `AdmittedCommand` witness in `enforce.rs` (+76 −12),
+  `run_when_started` in `process/mod.rs` (+49 −9), a rewritten ceiling paragraph
+  in `support.rs` (+9 −5) and a third rule in `tests/spawn_sites.rs` (+153 −29).
+  **Two commits because the first run was red, and it was red for a reason that
+  was the test's fault rather than the product's**: `34952200942` is windows
+  `success`, ubuntu `success`, **macOS `failure`**, on one assertion that compared
+  a child's resolved `current_dir` against an unresolved temp path — `/var` is a
+  symlink to `/private/var` on macOS. `34952509429` is all five jobs `success`:
+  **1217 / 1218 / 1219** parents, 0 failed, 11 ignored, 46 result lines = 36
+  parents + 10 children, and the name-delta between the red run and the green one
+  is **`+0 −0` on all three platforms**, which is what a one-assertion fix
+  predicts. Seven mutations, seven caught, each by exactly one test. **There is no
+  `is_ready`, deliberately**: `start` returning `Ok` means the operating system
+  accepted the spawn, and *a process exists* is not *it is listening*.
+  **`Service::stop(self)` is the only way to be told what a service printed**, and
+  dropping one takes the outcome with it. **This commit is also the one that left
+  the header at the top of this file stale**, which the paragraph above records.
+- `43c4a61` + `9ad32e6` + `0eb1ac3` + `01fc2a7` **`P3-T010`** —
+  `crates/sure-core/src/probe.rs`
+  (+818, then +49, then +15 −8, then +86 −1: 959 lines, 3 module unit tests),
+  `crates/sure-core/tests/probe_local_service.rs` (+802, 20 tests),
+  `crates/sure-domain/src/status.rs` (+67: `CheckResult::unknown` and one test)
+  and `pub mod probe;`. **The first task since `P2-` to add a constructor to the
+  frozen vocabulary**, because `CheckStatus::Unknown` had none and this is the
+  first check that needs one — the only status whose evidence class is a
+  parameter, and the parameter is the whole of what separates it from `not_run`.
+  **The acceptance's second sentence is held by keeping the port question off the
+  verdict path rather than by having no port question**: `opened_a_connection` is
+  public, returns `bool`, and no verdict reads it — `status()` matches the variant
+  and `NoAnswer` is `CheckStatus::Unknown` however the caller asks. Run
+  `34955834313`, all five `success`, **1250 / 1251 / 1252** parents, 0 failed, 11
+  ignored, 47 result lines = 37 parents + 10 children, namesets **`+23 −0`**
+  against `34954317400` with the identical added set on all three. Eleven
+  mutations, ten caught — **and `m8` is the finding**: deleting the `WouldBlock` arm of
+  `is_a_timeout` passed all twenty integration tests, because **Windows reports an
+  expired socket read timeout as `TimedOut` and a Unix reports the same condition
+  as `WouldBlock`**, so no test reachable from a socket on this machine can
+  produce the Unix spelling. It is now held by one unit test, which is the only
+  thing in `sure-core` that catches it. **`0eb1ac3` is a third commit and it fixed
+  a sentence rather than code**: the module header, this section and `DECISIONS.md`
+  all said the module had no boolean asking whether the port is open, and it has
+  had one since `43c4a61` — the source file's false claim was already pushed and
+  the other two had not been written out yet. **`01fc2a7` is a fourth commit and
+  it fixed code rather than prose, found by a run that prose could not have
+  caused**: a free loopback port can connect to itself, the probe read its own
+  request line back, and the test that caught it failed **only on Windows**, on a
+  commit that changes one comment. Run `34956776646` is the red and `34957515713`
+  is the green — all five `success`, **1251 / 1252 / 1253**, 0 failed, 11 ignored,
+  47 result lines = 37 parents + 10 children, **+1 on every platform** and the one
+  failing test moved out of the failed column. **`m11` deletes that branch and
+  survives all 591 tests in `sure-core`**, so the fix's own line is held by
+  nothing; the predicate it calls is held by a unit test. **Not established:**
+  whether the feature works — a pass names the request it made, not the feature —
+  and nothing parses a body, a header or a `Content-Length`.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all
@@ -7748,9 +8378,85 @@ than the check**, so the check is what is written down here: the accepted set is
 that heading, and the count is not the test — two entries cover more than one task
 and one covers none.
 
-## Next concrete action
+**Then it recurred a third time, five entries at once, and the check that was
+written down two tasks earlier had never been executed even once.** Run for the
+first time while writing this paragraph, it returns **thirteen** ids: `P3-T006`
+through `P3-T010`, which accumulated over four acceptance commits, and **the
+eight `P0` ids, which have been absent since this list was first written.** The
+`P0` ones are not a false positive and the first draft of this paragraph called
+them one: `P0-T001` through `P0-T008` each have a commit on this branch
+(`82650ac`, `dc44ae0`, `06e64b2`, `69bde28`, `84f1dd0`, `f643187`, `fe7ad52`,
+`9d95e1a`) and none of them was ever named below this heading, so **the list has
+never been complete — not once, from the first task**. That is what the
+correction above records: the assumption that the eight were exempt was made from
+`state.json`'s empty `head_sha` fields rather than from `git log`, and `git log`
+is where the commits are.
 
-1. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
+**The check was right and it was not run, and those are different failures.** A
+check written in prose has no output, so nothing distinguishes *it passed* from
+*it was not run* — and this file has now spent three paragraphs on a check that
+cost one command. The command, run against the tree this commit is on:
+
+```
+$ python - <<'PY'
+import json,io
+tasks=json.load(io.open('progress/state.json',encoding='utf-8'))['tasks']
+acc=sorted(k for k,v in tasks.items() if v.get('status')=='accepted')
+lines=io.open('progress/HANDOFF.md',encoding='utf-8').read().split('\n')
+start=next(i for i,l in enumerate(lines) if l.startswith('## Accepted work on this branch'))
+end=next(i for i,l in enumerate(lines[start+1:],start+1) if l.startswith('## '))
+sec='\n'.join(lines[start:end])
+print('accepted:',len(acc),'missing:',[a for a in acc if a not in sec] or 'none')
+PY
+accepted: 42 missing: none
+```
+
+**`42` and `none` are the numbers this commit is entitled to print**, and they are
+printed rather than asserted. `P3-T010`'s acceptance is what makes the count 42,
+and the thirteen entries added above are what make the second field empty.
+
+## Next concrete action
+1. **`P3-T010` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it took four commits and three runs — one of them red.**
+   `43c4a61` is the probe, `9ad32e6` is the two module unit tests and the mutation
+   evidence, `0eb1ac3` corrects a claim that the module has no boolean asking
+   whether the port is open — **it has had one since `43c4a61`, and the false
+   sentence was in the module's rustdoc header, so it was on course to ship as
+   crate documentation** — and `01fc2a7` fixes a **TCP self-connect** that the
+   second commit's own run found on Windows. Run `34955834313` carries the first
+   two commits (`43c4a61` has no run of its own; they were pushed together): five
+   jobs `success`, Windows **1250** / macOS **1251** / Ubuntu **1252** parent
+   tests, 0 failed, 11 ignored, 47 result lines = 37 parents + 10 children,
+   namesets **`+23 −0`** against `34954317400` with the identical added set on all
+   three platforms. **`34956776646` is red on `rust (windows-latest)` and it is
+   the run of the doc-comment-only commit** — macOS and Ubuntu report the previous
+   run's 1251 and 1252 to the test, Windows reports **1249 passed and 1 failed**,
+   and **the reported first line is the probe's own request line**, which is a
+   fact no flake can produce. **`34957515713` is the green on the fix**: Windows
+   **1251** / macOS **1252** / Ubuntu **1253**, 0 failed, 11 ignored, **+1 on
+   every platform** and the failing test out of the failed column. **Eleven
+   mutations, ten caught, and `m8` is the finding**: deleting the `WouldBlock` arm
+   of `is_a_timeout` passed all twenty integration tests, because **Windows reports
+   an expired socket read timeout as `TimedOut` and a Unix reports the same
+   condition as `WouldBlock`** — so **the arm was held by nothing on the platform
+   it was written on**, and it is now held by a unit test that is the only thing in
+   `sure-core` that catches it. **The harness's own filter was the second half of
+   that finding**: `--test probe_local_service` does not run the lib, so the first
+   re-run after adding the unit test still reported a survivor, and a mutation
+   reported as surviving under a filter that could not have run its test measures
+   the filter rather than the mutation. **`m11` is the other survivor and it has no
+   such excuse**: it deletes the self-connect branch `01fc2a7` added and **all 591
+   tests in `sure-core` pass without it**, because a self-connect needs the kernel
+   to choose a particular port and it does not choose on request — **0 in 40
+   attempts** of dialling just-released ports, at about **2.04 seconds** per
+   refusal. The predicate is tested; the branch that calls it is not, and that is
+   the one line in this task whose coverage is a measurement rather than a claim.
+   **What it does not establish: whether the feature works.** A pass names the request it made — `local probe: GET /health
+   HTTP/1.1 answered` — and a test asserts the title says neither "works" nor
+   "ready"; no body, no header and no `Content-Length` is parsed, and the end of a
+   response is the end of the connection and nothing else. **It also repaired this
+   file's header and the list below**, which is recorded there rather than here.
+2. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it took two commits because the first run was red.** `6911e2a`
    is the supervisor and `12b81bc` is a one-assertion fix; the runs are
    `34952200942` and `34952509429`, read in full and attributed in "Reading runs
@@ -7781,7 +8487,7 @@ and one covers none.
    rather than lucky**: a batch file is never admitted, so no `Supervisor` can be
    handed one, and item 20 below carries the correction to the two predictions that
    said otherwise.
-2. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
+3. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either — for a reason it states rather
    than one that happened.** `6ea9f46` is the implementation, run `34946515895`,
    all five jobs `success`, **Windows 1209 / macOS 1210 / Ubuntu 1211** parent
@@ -7821,7 +8527,7 @@ and one covers none.
    no test, and removing it leaves the whole workspace green, measured — recorded
    in `DECISIONS.md` and in "What `P3-T008` added" above, and **this is the first
    recorded mutation on this branch that survived rather than being closed.**
-3. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
+4. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** Three commits rather than one,
    because the second and third were each found after the one before it had been
    pushed and read: `6353477` is the module, `18209d8` is the batch-file test,
@@ -7857,7 +8563,7 @@ and one covers none.
    `P3-T006`'s *"`authorise` still has no caller"* is still true and this task did
    not obtain a consent; it turned the decision into a refusal without asking
    anyone.
-4. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
+5. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** `d58532a` is the
    implementation, run `34941955270`, all five jobs `success`, **Windows 1172 /
    macOS 1173 / Ubuntu 1174** parent tests with 0 failed and 9 ignored over **44
@@ -7884,7 +8590,7 @@ and one covers none.
    and never reach a user — so a test that needs a consented command has to use a
    destructive one (`git push --force`), or it will panic on an empty list rather
    than fail.
-5. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
+6. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site.**
    `c940300` is the implementation, run `34938974624`, all five jobs `success`,
    **Windows 1142 / macOS 1143 / Ubuntu 1144** parent tests with 0 failed and 9
@@ -7907,7 +8613,7 @@ and one covers none.
    command SURE cannot bound needs its own approval naming its exact argument
    vector, **no sixth category was invented**, and the "writes inside the project"
    gap is still open.
-6. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
+7. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
    headlines a number that is not the one it means.**
    `967c5e6` is the implementation and `ea0fe6c` the acceptance; run
    `34935781639`, all five jobs `success`, **Windows 1116 / macOS 1117 / Ubuntu
@@ -7921,7 +8627,7 @@ and one covers none.
    mistake is in `c940300`'s own message in two smaller places. **This item exists
    because that acceptance did not prepend one**, which is why the list is two
    items short rather than one and why this acceptance renumbers both at once.
-7. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
+8. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
    carrying this file, and it changed no shipped code.** `b0dcc69` is the
    implementation and `ea2f826` is the fix CI asked for; run `34930744061` is the
    fix's run, all five jobs green, **Windows 1078 / macOS 1079 / Ubuntu 1080**
@@ -7935,7 +8641,7 @@ and one covers none.
    test and 19 of the 33 parent result lines came after it. **Its run is read in
    the session that took it rather than committed** — the stopping rule at the top
    of this file, so the `P3-T003` chain ends at the acceptance.
-8. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
+9. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it changed no shipped code.** `fd878e6` is the implementation,
    run `34927065374`, all five jobs green, **Windows 1077 / macOS 1076 / Ubuntu
    1077** with 0 failed and 9 ignored over 43 results = **33 parents + 10
@@ -7948,7 +8654,7 @@ and one covers none.
    children are identical **by name** on all three. **Its run is read in the
    session that took it rather than committed** — the stopping rule at the top of
    this file, so the `P3-T002` chain ends at the acceptance.
-9. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
+10. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
    `P3`.** `819d499` is the implementation, run `34924525793`, all five jobs
    green, **Windows 1082 / macOS 1081 / Ubuntu 1082** with 0 failed and 7 ignored
    over **43** result lines = **33 parents + 10 children** — read and attributed,
@@ -7959,7 +8665,7 @@ and one covers none.
    yet**: no product path calls it, and `tests/spawn_sites.rs` fails the day one
    does without being added to it. `P3-T002` has now used it — in tests only — and
    the first task that would run anything in the product is `P3-T004`.
-10. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+11. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -7971,12 +8677,12 @@ and one covers none.
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-11. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+12. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-12. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+13. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -7984,13 +8690,13 @@ and one covers none.
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-13. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+14. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-14. **The READY list is 13 long, and the next task is no longer a choice.**
+15. **The READY list is 13 long, and the next task is no longer a choice.**
    `P3-T009`, `P4-T001`, `P4-T005`, `P4-T006`, `P4-T007`, `P4-T008`,
    `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`,
    `P13-T004` — read off `node scripts/taskctl.mjs status` at this acceptance,
@@ -8016,7 +8722,7 @@ and one covers none.
    reading before that one said the opposite and had to be corrected. **Read the
    list off `taskctl status`, not off this paragraph** — this is the item where a
    stale copy is most obviously a lie.
-   **The `.cmd`/`.bat` decision is item 20 below**, and it is the one whoever
+   **The `.cmd`/`.bat` decision is item 21 below**, and it is the one whoever
    starts `P3-T009` walks into. `P3-T007` reached it and did not settle it, which
    is the third time that has happened and the third time it was the intended
    outcome: that task's acceptance is *"project-controlled executable code is not
@@ -8027,7 +8733,7 @@ and one covers none.
    closed**: an enforcement built from `enforce.rs` does not admit a batch file in
    any mode under any permission set, whatever a caller is allowed to name.
    **`P3-T008` did not reach that question, and this file predicted twice that it
-   would** — item 20 carries the correction, because it is the same fact and
+   would** — item 21 carries the correction, because it is the same fact and
    storing it in one item's prose did not make it available to the next.
    `P4-T007` and `P6-T005` remain **unread by any session**, and `P6-T007`
    and `P8-T001` have been on the list since before this file was written.
@@ -8037,7 +8743,7 @@ and one covers none.
    accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
    has its rule and its door and still no capture, and the task that supplies one
    is waiting on a task nobody has read.
-15. **`P2-T012` left an owner decision open, and it is the first one a reader
+16. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -8052,19 +8758,19 @@ and one covers none.
    ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-16. **`P2-T012` also left the classification with no consumer.** `classify` is
+17. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
-   shape as `ComponentGraph` in item 17, and it is recorded rather than implied —
+   shape as `ComponentGraph` in item 18, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-17. **`P2-T007` is accepted, its two commits are pushed and read.**
+18. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-18. **The store now holds six rows that no user wrote, and that is the first item
+19. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -8098,7 +8804,7 @@ and one covers none.
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-19. **`project_fingerprint` now has one caller, and it is not a check.**
+20. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -8108,7 +8814,7 @@ and one covers none.
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
-20. **`P3-T001` left a second owner decision open, and it is the one the next
+21. **`P3-T001` left a second owner decision open, and it is the one the next
    three `P3` tasks will each run into: may a caller name a batch file?** The
    facts, all measured and held as tests rather than asserted: a name with no
    extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P3",
-  "last_updated": "2026-09-15T09:31:53.593Z",
+  "last_updated": "2026-09-15T10:06:43.017Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -382,13 +382,13 @@
       "notes": "Implementation 6911e2a, one-assertion fix 12b81bc. Run 34952200942: windows success, ubuntu success, macOS FAILURE on one assertion (a_service_that_ends_by_itself... compared the child's resolved current_dir against an unresolved temp_dir path; /var is a symlink to /private/var on macOS) — a false red, the test was wrong and the service was right. Run 34952509429: all five jobs success. Windows 1217 / macOS 1218 / Ubuntu 1219 parent tests, 46 result lines = 36 parents + 10 children, 0 failed, 11 ignored on every job; name-delta between the red run and the green one is +0 -0 on all three platforms. 7 mutations, 7 caught, each by exactly one test. The .cmd/.bat question cannot arise here: a batch file is never admitted, so no Supervisor can be handed one."
     },
     "P3-T010": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
+      "finished_at": "2026-09-15T10:28:52.163Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Implementation 43c4a61, unit tests and mutation evidence 9ad32e6, doc-claim correction 0eb1ac3, self-connect fix 01fc2a7. Run 34955834313 carries the first two commits (43c4a61 has no run of its own; they were pushed together): five jobs all success, Windows 1250 / macOS 1251 / Ubuntu 1252 parent tests, 47 result lines = 37 parents + 10 children, 0 failed, 11 ignored on every job; name-delta against 34954317400 is +23 -0 on all three platforms with the identical added set, which is the 20 integration tests, the 2 probe unit tests and 1 domain test. Run 34956776646 (0eb1ac3) is RED on rust (windows-latest): a commit that changes one doc comment and no executable line, macOS and Ubuntu reporting 1251 and 1252 unchanged while Windows reports 1249 passed + 1 failed, the failing test being a_port_with_nothing_behind_it_is_refused_rather_than_unreachable and the reported first line being the probe's own request line. Cause: a TCP self-connect - the OS can hand the dialled port out as the connection's own source port, so the connection loops back on itself. Fixed by is_a_self_connect checked between connect and write, mapping to Refused. Run 34957515713 (01fc2a7): five jobs all success, Windows 1251 / macOS 1252 / Ubuntu 1253, 0 failed, 11 ignored, +1 on every platform - the one new unit test - with the failing integration test out of the failed column and no new binary. 11 mutations, 10 caught. m8 (WouldBlock dropped from is_a_timeout) SURVIVED all 20 integration tests because Windows reports an expired socket read timeout as TimedOut and Unix as WouldBlock, so no test reachable from a socket on this machine can produce the Unix spelling; it is now caught by exactly one unit test, and only when the lib is in the harness filter. m11 (the self-connect branch deleted) SURVIVED the entire sure-core suite, lib and integration targets, 591 tests, caught by 0: the predicate is covered by a unit test taking two addresses directly, the branch that calls it is covered by nothing, because a self-connect needs the kernel to choose a particular port (0 in 40 attempts dialling just-released ports, ~2.04 s per refused loopback connect). Seven of the ten caught are caught by one test each and two of those seven share a test. CheckResult::unknown is new in sure-domain: the frozen vocabulary exposed CheckStatus::Unknown with no constructor."
     },
     "P3-T011": {
       "status": "queued",

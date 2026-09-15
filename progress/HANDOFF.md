@@ -3467,9 +3467,20 @@ not**: the four `P3-T008` deltas were taken against a moving target, and this on
 is taken against a target that did not move.
 
 `read-run.py` prints `windows vs macos: -13 +14` and `windows vs ubuntu: -12 +14`
-— **the same two lines as at `664575b`, `6353477`, `18209d8`, `0f9273b`,
-`6ea9f46` and now here.** Seven consecutive readings of the same pair, across five
-tasks and three commits of one task, and not one of them moved. **A pairwise line
+— **the same two lines as at every commit this branch's record names before this
+one: `664575b`, `6353477`, `18209d8`, `719253e`, `0f9273b` and `6ea9f46`.** Six
+readings of the same pair ahead of this one, across two tasks and three commits of
+a third, and not one of them moved. Those six are the ones re-measured on this
+branch; **earlier readings of the pair exist further down this file and were not
+re-taken**, so the claim is about these six and this one rather than about every
+run in the record. **The names are written out because both drafts of this
+sentence were wrong, in the two ways a list of this kind can be.** The first named
+five commits and *"now here"* and then called the total seven — a count one longer
+than the list it was counting. The second replaced `719253e` with `1f403d8`, which
+is the commit **this section is about**, so the list of readings preceding this one
+contained the reading itself. Neither error is visible in the total, because a
+total is not checkable against anything in this file; the six are, and re-reading
+the sections at lines 3543 and 3633 is what produced this list. **A pairwise line
 that never changes is worth reading every time anyway**, because the failure it
 would catch — a new `#[cfg]`-gated test, or a platform-conditional one silently
 dropping out of the census — is invisible in the parent sum, which is the number
@@ -3484,6 +3495,17 @@ it checks the shape of the file rather than the truth of it** — which is exact
 why the note it accepted was the one a hand corrected afterwards, and why the
 148-escape rewrite inside it passed every job on this run. `shellcheck-secondary`
 is `success` and has no count to read.
+
+**This reading's own commit was pushed as `a2d08a6` and its run is `34949484506`,
+read the same way and with the same result**: all five jobs `success`, Windows
+**1209** / macOS **1210** / Ubuntu **1211**, 0 failed, 9 ignored, **45 result lines
+= 35 parents + 10 children**, and `windows vs macos: -13 +14` / `windows vs
+ubuntu: -12 +14` again — **the pair unchanged here as at the six the sentence
+above names**, which is what a commit touching no source file predicts. **It is
+recorded in the commit after it rather than in one of its own**, which is how this
+sequence terminates: a commit whose only content is a reading would produce another
+run needing another reading, and the numbers would be identical every time for the
+reason this section gives — it changes no source file.
 
 
 ### Reading run `34946515895`, `P3-T008`'s — and a delta that closes from four directions at once, one of which is a tool caveat

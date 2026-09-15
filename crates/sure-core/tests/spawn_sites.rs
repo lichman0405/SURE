@@ -18,30 +18,52 @@
 //! and the check for it has to be made of the source text, because the source
 //! text is the only place the fact lives.
 //!
-//! # The two rules, and what each is standing in for
+//! # The three rules, and what each is standing in for
 //!
 //! **One: every file in `crates/` that builds a `Command` is named here.** The
 //! census is not the interesting fact; the interesting fact is that the list
 //! *cannot grow quietly*. A fourth `Command::new` is a new way for SURE to run
 //! something, and adding one means editing this list, which means reading this
-//! paragraph.
+//! paragraph. **This rule did not move when the runner got a caller**: the
+//! caller builds no `Command` of its own — it builds a `ProcessRequest` and the
+//! request builds the command — so the count is still three, and the third
+//! rule below is what covers the new caller instead.
 //!
-//! **Two: nothing outside `crates/sure-core/src/process/` mentions
-//! [`ProcessRequest`].** This is the tighter of the two, and it holds the claim
-//! `process/mod.rs` makes in its own words — *"no product path calls `run`
-//! yet"* — because `run` takes a `&ProcessRequest` and there is no other way to
-//! call it. A file that never names the type cannot be a caller, whatever else
-//! it does, and that is a stronger statement than searching for `process::run`,
-//! which a `use` statement, an alias or a re-export would walk straight past.
+//! **Two: nothing outside [`MAY_NAME_A_PROCESS_REQUEST`] mentions
+//! [`ProcessRequest`].** This is the tightest of the three, and until `P3-T009`
+//! it was the whole of the claim `process/mod.rs` used to make in its own words
+//! — *"no product path calls `run` yet"* — because `run` takes a
+//! `&ProcessRequest` and there is no other way to call it. A file that never
+//! names the type cannot be a caller, whatever else it does, and that is a
+//! stronger statement than searching for `process::run`, which a `use`
+//! statement, an alias or a re-export would walk straight past. `P3-T009` made
+//! the list two entries long rather than one: `sure-core/src/service.rs` is a
+//! real caller, and the honest response to a rule breaking is to say why the
+//! exception is one rather than to widen the rule until it stops noticing.
+//!
+//! **Three: nothing outside `sure-core/src/service.rs` mentions `Supervisor`.**
+//! This is the rule that carries the claim the second one used to carry. The
+//! runner is no longer uncalled, so "nothing calls the runner" is now false and
+//! would have been a rule that had to be deleted; what is still true is one
+//! level up — **`service.rs` can start a process, and nothing in the product
+//! constructs a `Supervisor`**, so no ship path reaches it. That is the same
+//! kind of absence as the one rule two held, checked the same way, and it is
+//! checked one level higher up the call chain rather than being asserted in
+//! prose about the middle of it.
+//!
+//! Both of the `contains` rules have the same known hole and it is the same hole
+//! rule one's matcher was fixed for once: a `use crate::service::Supervisor as
+//! S;` would name the type without the word appearing. Neither rule forbids a
+//! *program* from being started, which no source check can do — they forbid the
+//! route being added quietly, which is what a reviewer can act on.
 //!
 //! # This test is meant to fail
 //!
-//! Not today — but the day `P3-T004` (classification), `P3-T005` (permission and
-//! consent) or `P3-T007` (`inspect_only` enforcement) wires the runner up, this
-//! fails, and it should. **Two things have to move together at that moment**: a
-//! caller exists, so this list and the paragraph above it are wrong; and
-//! `sure_core::support`'s ceiling of level C is justified by *no project code
-//! running*, so `CEILING` and
+//! Not today — but the day anything wires a `Supervisor` up to `sure check`,
+//! this fails, and it should. **Two things have to move together at that
+//! moment**: a product path exists, so this list and the paragraphs above it are
+//! wrong; and `sure_core::support`'s ceiling of level C is justified by *no
+//! project code running from a product path*, so `CEILING` and
 //! `the_ceiling_todays_build_claims_is_never_above_inspect_only` are in question
 //! in the same commit. A false green is more serious than a visible error, and
 //! this is the error that would rather be visible.
@@ -62,7 +84,7 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
     ),
     (
         "sure-core/src/process/request.rs",
-        "the general runner; nothing in the product calls it yet",
+        "the general runner, called only by `sure-core/src/service.rs`, which no product path builds yet",
     ),
     (
         "sure-core/src/process/terminate.rs",
@@ -73,6 +95,28 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
 /// The directory the runner lives in, which is the whole of what rule two
 /// exempts.
 const THE_RUNNER: &str = "sure-core/src/process/";
+
+/// The files that may name a [`ProcessRequest`], which is the whole of what rule
+/// two exempts.
+///
+/// Two entries, and the second is the one that has to be argued for. The runner
+/// builds requests; `service.rs` is the caller `P3-T009` added, and it is here
+/// because the rule is not "the runner is the only place a request is named" —
+/// that was never the point — but "**a file that names a request is a file that
+/// can run something, so every one of them is named here and a new one is a
+/// decision**". The entry is a path rather than a directory because it is one
+/// file, and a path rather than a predicate because a predicate is a rule that
+/// grows without anybody reading it.
+const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[THE_RUNNER, THE_SUPERVISOR];
+
+/// The one file that may name a [`Supervisor`], which is the whole of what rule
+/// three exempts.
+///
+/// It is the same file rule two's second entry names, and that is the point
+/// rather than a coincidence: the file that may build a request is the file that
+/// may build the thing that builds one. Split across two constants because they
+/// are two rules that happen to agree today, and the failure messages differ.
+const THE_SUPERVISOR: &str = "sure-core/src/service.rs";
 
 /// Every **shipped** `.rs` file under `crates/`, with its text.
 ///
@@ -243,35 +287,115 @@ fn every_place_sure_builds_a_command_is_named_here() {
     );
 }
 
-#[test]
-fn nothing_outside_the_runner_names_a_process_request() {
-    // `run` takes a `&ProcessRequest` and there is no other entry point, so a
-    // file that cannot name the type cannot run anything through it. This is
-    // the claim `process/mod.rs` makes — "no product path calls `run` yet" —
-    // and the day it stops being true is the day the check below fails.
-    let mut callers: Vec<String> = Vec::new();
+/// Every line of **code** in a shipped file outside `exempt` that names `token`,
+/// as `path:line: text`.
+///
+/// Shared by rules two and three because they are one check applied to two
+/// names, and writing it twice is how the two would drift apart — a fix to the
+/// prose filter reaching one of them and not the other is exactly the kind of
+/// difference that makes one rule weaker than it reads.
+///
+/// The exemption is a path **prefix** match, so an entry ending in `/` exempts a
+/// directory and an entry naming a file exempts that file. Nothing here checks
+/// that an exemption is needed: an entry for a file that does not exist, or that
+/// no longer names the token, would sit in the list looking like a decision.
+/// That is what the third test below is for.
+fn namers_of(token: &str, exempt: &[&str]) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
 
     for (path, text) in shipped_sources() {
-        if path.starts_with(THE_RUNNER) {
+        if exempt.iter().any(|allowed| path.starts_with(allowed)) {
             continue;
         }
         for (number, line) in text.lines().enumerate() {
             if is_prose(line) {
                 continue;
             }
-            if line.contains("ProcessRequest") {
-                callers.push(format!("{path}:{}: {}", number + 1, line.trim()));
+            if line.contains(token) {
+                found.push(format!("{path}:{}: {}", number + 1, line.trim()));
             }
         }
     }
+
+    found
+}
+
+#[test]
+fn nothing_outside_the_named_files_names_a_process_request() {
+    // `run` takes a `&ProcessRequest` and there is no other entry point, so a
+    // file that cannot name the type cannot run anything through it. This is
+    // what `process/mod.rs` said as "no product path calls `run` yet" until
+    // `P3-T009` gave the runner a caller; the caller is on the list above, and
+    // the claim that moved is rule three's.
+    let callers = namers_of("ProcessRequest", MAY_NAME_A_PROCESS_REQUEST);
 
     assert!(
         callers.is_empty(),
         "a shipped file has begun naming `ProcessRequest`, so it can call the \
          runner. That is a real change and not a test to update: it means SURE \
-         is able to execute code from a project, which is what \
-         `sure_core::support`'s level-C ceiling is justified by the absence of. \
-         Move the ceiling in the same commit, or take the name back out. Found:\n  {}",
+         is able to execute code from a project. Either name it in \
+         MAY_NAME_A_PROCESS_REQUEST and say why in the paragraph above, or take \
+         the name back out — and if the new caller is on a product path, \
+         `sure_core::support`'s level-C ceiling moves in the same commit. \
+         Found:\n  {}",
         callers.join("\n  ")
     );
+}
+
+#[test]
+fn nothing_outside_the_supervisor_names_a_supervisor() {
+    // The rule the second one used to be. `service.rs` is the only file that can
+    // build a `Supervisor`, and a `Supervisor` is the only thing that can start a
+    // service — so "nothing in the product starts a service" is this absence,
+    // one level above the runner rather than in the middle of it.
+    let namers = namers_of("Supervisor", &[THE_SUPERVISOR]);
+
+    assert!(
+        namers.is_empty(),
+        "a shipped file has begun naming `Supervisor`, so it can start a \
+         service. That is a real change and not a test to update: it means a \
+         path out of the product reaches the runner, which is what \
+         `sure_core::support`'s level-C ceiling is justified by the absence of. \
+         Move the ceiling in the same commit, or take the name back out. \
+         Found:\n  {}",
+        namers.join("\n  ")
+    );
+}
+
+#[test]
+fn every_exemption_is_one_a_file_actually_needs() {
+    // An exemption list rots in the direction nobody notices: a file gets
+    // renamed, or the name it was exempted for is taken back out, and the entry
+    // stays — exempting nothing, and reading to the next person as a decision
+    // somebody made. This is the check that makes an entry mean something, and
+    // it is the same shape as the census itself: the fact is not the list, it is
+    // that the list cannot be wrong quietly.
+    for (path, token) in [
+        (THE_RUNNER, "ProcessRequest"),
+        (THE_SUPERVISOR, "ProcessRequest"),
+        (THE_SUPERVISOR, "Supervisor"),
+    ] {
+        // Asked as "would the rule have flagged this file if it were not
+        // exempt?" — which is the only question that makes an exemption a
+        // decision rather than a hole.
+        let mut needed = false;
+        for (seen, text) in shipped_sources() {
+            if seen != path && !(path.ends_with('/') && seen.starts_with(path)) {
+                continue;
+            }
+            if text
+                .lines()
+                .any(|line| !is_prose(line) && line.contains(token))
+            {
+                needed = true;
+            }
+        }
+        assert!(
+            needed,
+            "{path} is exempt from the rule about `{token}` and no longer names \
+             it, so the exemption is covering nothing. Either the file moved and \
+             the entry did not, or the check is now the weaker for an entry \
+             nobody would think to question."
+        );
+    }
 }

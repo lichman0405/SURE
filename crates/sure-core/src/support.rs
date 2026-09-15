@@ -36,11 +36,15 @@
 //! of them is on a product path — [`crate::fingerprint`]'s, in
 //! `fingerprint/git/mod.rs`, which runs `git`, read-only, for the content
 //! fingerprint. The other two are [`crate::process`]'s runner and its
-//! `taskkill`, and **nothing in the product calls the runner yet**; the day
-//! something does, this ceiling moves and so does that call site.
-//! [`crate::doctor`] searches for and probes toolchains, which is SURE talking
-//! about its own prerequisites. `sure check` records a goal and says that
-//! nothing was checked.
+//! `taskkill`. **The runner is no longer uncalled** — [`crate::service`] is its
+//! one caller, and it can only start what [`crate::enforce`] admitted — but that
+//! caller is not itself on a product path, because nothing in the product builds
+//! a `Supervisor` yet. So the claim this paragraph used to rest on has moved up
+//! a level rather than become false, and it is still checked rather than
+//! asserted: `tests/spawn_sites.rs` holds the census of files that may name a
+//! `Supervisor`, and `sure check` still records a goal and says that nothing was
+//! checked. [`crate::doctor`] searches for and probes toolchains, which is SURE
+//! talking about its own prerequisites.
 //!
 //! So the honest answer for every project in this build is level C, and
 //! [`CEILING`] is what says so in one place. It is a constant rather than a

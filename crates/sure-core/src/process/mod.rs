@@ -28,15 +28,18 @@
 //!
 //! # What is not here
 //!
-//! **No product path calls [`run`] yet.** This module is a mechanism with
-//! nobody knocking on it, in this build. That is checkable rather than
-//! asserted: the only child process any product code path spawns is still
-//! `git`, read-only, for the content fingerprint, and `sure check` still
-//! records a goal and says that nothing was checked. What this adds is the
-//! second place in shipped code that *can* start a process, and the first that
-//! can be pointed at a project. `P3-T004` (classification), `P3-T005`
-//! (permission and consent) and `P3-T007` (`inspect_only` enforcement) are the
-//! tasks that decide when it is allowed to be.
+//! **This module is still a mechanism: it has exactly one caller, and that
+//! caller has no caller.** [`crate::service`] starts a service by running a
+//! [`ProcessRequest`] on a thread and stopping it through
+//! [`ProcessRequest::cancellation`], so the runner has a real dependant rather
+//! than none. Nothing in the product builds a `Supervisor` yet, though, so no
+//! *ship* path reaches [`run`] — and that is again checkable rather than
+//! asserted, because `tests/spawn_sites.rs` holds the census of files that may
+//! name a `Supervisor`, and `sure check` still records a goal and says that
+//! nothing was checked. The distinction it would be easy to lose: the runner is
+//! no longer uncalled, it is still unreached by the product — and those are two
+//! different facts about the same code. `P3-T010` (the port/HTTP probe) is the
+//! next task that will run something through this path.
 //!
 //! **Windows brings a command interpreter to a batch file.** Measured on
 //! Windows 11 with Rust 1.98, and held by tests in `tests/process_runner.rs`:
@@ -159,6 +162,38 @@ const DRAIN_GRACE: Duration = Duration::from_secs(5);
 /// started and was stopped" are different answers for a caller starting
 /// something with an effect.
 pub fn run(request: &ProcessRequest) -> Result<Outcome, ProcessError> {
+    run_when_started(request, || {})
+}
+
+/// [`run`], with a callback for the moment the process is under way.
+///
+/// `started` is called **once**, on the run's own thread, after the operating
+/// system has accepted the spawn *and* SURE has begun reading both streams —
+/// which is the first instant at which this module can honestly say the process
+/// is running. It is never called on any of the paths that return before a
+/// spawn: a working directory that is not a full path, one that is not there or
+/// is not a directory, and a stop already asked for. So a caller that hears
+/// nothing back knows the run never began, and a caller that hears back knows
+/// something is running that it must stop or outlive.
+///
+/// # What "started" does not mean
+///
+/// **Not that the program is ready for anything.** Nothing here knows whether
+/// the process has reached its first line of work, has bound a port, or has
+/// already exited. Readiness is a question about the program, and the answer to
+/// it is a probe rather than a moment in this module.
+///
+/// **Not that the callback cannot be slow, or that it cannot block the run.**
+/// It runs on the thread that drives the process, before the wait loop below
+/// starts, so a callback that blocks delays the deadline being noticed and
+/// delays both streams being drained — a `stdout` that fills its pipe during a
+/// blocking callback stops the child. The caller's obligation is therefore that
+/// this returns promptly; [`crate::service`]'s callback stores a flag and sends
+/// on a channel, and does neither blocking nor allocating work beyond that.
+pub fn run_when_started(
+    request: &ProcessRequest,
+    started: impl FnOnce(),
+) -> Result<Outcome, ProcessError> {
     let working_directory = request.working_directory();
     if !working_directory.is_absolute() {
         return Err(ProcessError::WorkingDirectoryNotAbsolute {
@@ -205,6 +240,11 @@ pub fn run(request: &ProcessRequest) -> Result<Outcome, ProcessError> {
     // deadlocks against itself.
     let stdout = reader_for(child.stdout.take(), stdout_bytes, "standard output");
     let stderr = reader_for(child.stderr.take(), stderr_bytes, "standard error");
+
+    // Everything that can fail has been done, and both streams are being read.
+    // This is the last point before the wait loop, and the only call: every
+    // `return` above it is a run that never began.
+    started();
 
     let deadline = clock + request.limits().timeout();
     let termination = loop {

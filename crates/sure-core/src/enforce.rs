@@ -61,12 +61,16 @@
 //! # What this does not do
 //!
 //! **It cannot stop code that does not ask it.** A caller that reaches the runner
-//! by some other route is not constrained by anything here, and the enforcement
-//! that matters is therefore a rule about the *caller*: the first check to run
-//! project code must take its command lines from [`Enforcement::admitted`] and
-//! from nowhere else, and the census in `tests/spawn_sites.rs` is where that
-//! becomes testable. Until then this module is a gate with no road through it,
-//! which is the same position [`crate::approval`] is in and for the same reason.
+//! by some other route is not constrained by anything here. What is constrained
+//! is the route the product uses: [`crate::service`] runs services, and the only
+//! argument it accepts is an [`AdmittedCommand`], which only
+//! [`Enforcement::admitted`] can build — so the first check to run project code
+//! cannot start something this module did not admit, and that is a fact about a
+//! type rather than a rule for a reader to remember. The census in
+//! `tests/spawn_sites.rs` holds the other half: the files that may name a
+//! `ProcessRequest` are named there, and nothing outside `crate::service` may
+//! name a `Supervisor`. **No *check* drives on that road yet** — that is the
+//! pipeline, and `support::CEILING` is justified by its absence.
 //!
 //! **It says nothing about what a command does when it runs.** The classification
 //! is `safety::classify`'s, and its own caveat — SURE reads command lines, not
@@ -240,10 +244,17 @@ impl Enforcement {
     /// is every command the plan considered — including the ones this decision
     /// stopped. A command that is not in this iterator has not been admitted, and
     /// the difference between the two lists is the whole of the enforcement.
-    pub fn admitted(&self) -> impl Iterator<Item = &PlannedCommand> {
-        self.admitted
-            .iter()
-            .filter_map(|index| self.permissions.commands().get(*index))
+    ///
+    /// Each item is an [`AdmittedCommand`] rather than a `&PlannedCommand`, and
+    /// that is what makes the sentence above more than a request: a caller that
+    /// takes an `AdmittedCommand` cannot be handed one by anything else.
+    pub fn admitted(&self) -> impl Iterator<Item = AdmittedCommand<'_>> {
+        self.admitted.iter().filter_map(|index| {
+            self.permissions
+                .commands()
+                .get(*index)
+                .map(AdmittedCommand::new)
+        })
     }
 
     /// Checks with a planned command that was not scheduled, if any.
@@ -270,7 +281,7 @@ impl Enforcement {
     #[must_use]
     pub fn runs_project_code(&self) -> bool {
         self.admitted()
-            .any(|command| consent::runs_project_code(command.effects()))
+            .any(|command| consent::runs_project_code(command.command().effects()))
     }
 
     /// What a report should say about this decision.
@@ -302,6 +313,58 @@ impl Enforcement {
             ));
         }
         lines
+    }
+}
+
+/// A command that came out of an admission decision, and cannot come from
+/// anywhere else.
+///
+/// [`Enforcement::admitted`] is the only thing that builds one, so a caller that
+/// takes this type has a **compile-time** guarantee that what it is about to run
+/// was allowed by the mode. That is the difference this type makes: the rule
+/// above — *a runner must take what it launches from `admitted`* — was a rule for
+/// a reader to follow, and it is now a rule the compiler applies. A caller
+/// holding a [`PlannedCommand`] from [`PermissionPlan::commands`], which is every
+/// command the plan considered, has nothing it can do with it here.
+///
+/// The one caller today is [`crate::service`], and the sharpest way to say what
+/// this buys is in its terms: **what a supervisor can start is what this type can
+/// hold.**
+///
+/// # What it is not
+///
+/// **Not a second decision, and not a copy.** It borrows the very command the
+/// plan holds, so [`Self::command`] reports the classification and the decision
+/// that were made about it and nothing can have changed them since. It is
+/// deliberately **not** a `Deref`, so a reader at a call site sees that something
+/// admitted is being run rather than meeting a bare `PlannedCommand`.
+///
+/// **Not a promise that the world holds still.** The borrow keeps the
+/// `Enforcement` alive past the run; it does not keep the file at the program's
+/// path the same, which is the same window `safety::classify` records about
+/// `PATH` and which nothing here closes.
+///
+/// **Not a verdict about `inspect_only`.** A command admitted in a mode that runs
+/// nothing is a command that reads, fetches, or does something the domain's own
+/// rules permit there — [`Enforcement::runs_project_code`] is the question, and
+/// it is asked of the whole list rather than of one command.
+#[derive(Debug, Clone, Copy)]
+pub struct AdmittedCommand<'a> {
+    command: &'a PlannedCommand,
+}
+
+impl<'a> AdmittedCommand<'a> {
+    /// Not `pub`, and that is the whole of this type's strength: a constructor
+    /// anyone could call would let a caller witness something nobody decided.
+    fn new(command: &'a PlannedCommand) -> Self {
+        Self { command }
+    }
+
+    /// The command, with the classification and the decision it was admitted
+    /// under.
+    #[must_use]
+    pub const fn command(self) -> &'a PlannedCommand {
+        self.command
     }
 }
 
@@ -518,7 +581,8 @@ mod tests {
         for mode in ExecutionMode::ALL {
             for (name, permissions) in permission_sets() {
                 let (enforcement, _) = enforcement_of(*mode, permissions, COMMANDS);
-                for command in enforcement.admitted() {
+                for admitted in enforcement.admitted() {
+                    let command = admitted.command();
                     assert!(
                         !consent::runs_project_code(command.effects()) || mode.runs_project_code(),
                         "{} / {name}: {} was admitted and runs the project's code",

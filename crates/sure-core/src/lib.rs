@@ -25,6 +25,7 @@ pub mod redact;
 pub mod references;
 pub mod safety;
 pub mod scan;
+pub mod service;
 pub mod store;
 pub mod support;
 

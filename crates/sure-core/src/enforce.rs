@@ -703,6 +703,47 @@ mod tests {
     }
 
     #[test]
+    fn a_check_is_dynamic_exactly_when_one_of_its_commands_runs_project_code() {
+        // `CheckPlan`'s two lists are the whole of what a report can say about
+        // *how* a check will be performed, so the rule that fills them is worth a
+        // test that reads it directly rather than through a consequence. **A
+        // mutation made this necessary**: replacing the branch that chooses
+        // between the two lists with an unconditional push to `static_checks`
+        // broke exactly one test in this module, and that test was asserting a
+        // length for an unrelated reason. A field whose contract one test away
+        // from an unrelated assertion is a field nothing is holding.
+        let mut saw_dynamic = false;
+        let mut saw_static = false;
+        for mode in ExecutionMode::ALL {
+            for (name, permissions) in permission_sets() {
+                let (enforcement, _) = enforcement_of(*mode, permissions, COMMANDS);
+                let plan = enforcement.check_plan();
+                for id in plan.all_checks() {
+                    let runs_code = enforcement
+                        .permission_plan()
+                        .commands()
+                        .iter()
+                        .filter(|command| command.check().id() == id)
+                        .any(|command| consent::runs_project_code(command.effects()));
+                    assert_eq!(
+                        plan.dynamic_checks.contains(id),
+                        runs_code,
+                        "{} / {name}: check {id} is in the wrong list",
+                        mode.as_str()
+                    );
+                    saw_dynamic |= runs_code;
+                    saw_static |= !runs_code;
+                }
+            }
+        }
+        assert!(
+            saw_dynamic && saw_static,
+            "a matrix that only ever saw one kind of check cannot tell the two lists apart \
+             (dynamic seen: {saw_dynamic}, static seen: {saw_static})"
+        );
+    }
+
+    #[test]
     fn the_stopped_results_and_the_excluded_reasons_are_in_step() {
         // `CheckPlan::excluded` is a list of reasons with no ids, so the only
         // thing tying a reason to a check is that the two lists were built in the

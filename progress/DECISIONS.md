@@ -2797,3 +2797,143 @@ shell text is not blindly run."*
   settle**, deliberately: the anchor would name the manifest SURE never read, and
   an anchor pointing at a file nobody opened reads to the next consumer as though
   somebody had.
+
+## P4-T006 — two guards that are one decision, and the mutation that could not be caught until its row was re-anchored
+
+**The acceptance is one sentence — *"Missing key/documentation mismatches are
+reported without requiring secret values"* — and both halves of it are structural
+rather than argued.** The first half is *reported*: a key only one side of the
+project knows about becomes a claim with a verdict, a severity, a reason naming
+the file and the line it was read at, and an anchor per place it was found. The
+second half is *without requiring secret values*, and the answer is not a
+redaction step but the absence of anything to redact: **no anchor this module
+builds sets an excerpt** — the source contains no call to `with_excerpt` at all —
+and the reason it can be zero is the reason it has to be. `EvidenceAnchor` offers
+one field that exists to hold the text a claim was read from, and **the line a key
+is read on is exactly the line a value is on**: `process.env.API_KEY = "…"` is one
+line. An excerpt here would be a credential, so the field is never filled, and
+`every_anchor_is_empty_of_excerpts` holds that against every claim a fixture can
+produce rather than against the arms somebody remembered.
+
+**One module reads and another settles, and the split is `P4-T005`'s arriving
+unchanged.** `crate::references` already answers the two-list question and already
+declines to draw a conclusion from it — its module documentation says the lists
+*"are not a claim about the project unless the reading was complete"* — so this
+task adds no reader. `crates/sure-core/src/env_completeness.rs` takes a
+`ReferenceReport` and returns claims. The reason it is a second file and not a
+second function: an anchor is only worth having if the hand that writes it is the
+hand that knows what was read, so the layer that issues verdicts is the layer that
+holds the `FingerprintId` — and a caller who wanted the key lists for a display
+that settles nothing still gets lists.
+
+- **A one-sided key is a claim only if the reading finished, and the gate is read
+  once for the whole report rather than once per key.** `assess` takes `complete`
+  and `unread` as parameters instead of looking them up, because both are facts
+  about the reading rather than about the key. When the reading finished the claim
+  is `Confirmed` *as worded* — that a source file asks for the key **and** that no
+  example file or document names it, both halves things SURE read. When it did not,
+  the claim is `CannotConfirm` **with an empty evidence vector**, and its reason
+  names what went unread: a file and its path, or — when there is no unread file
+  and the report is still incomplete — the walk, which is the only other thing
+  `is_complete` weighs. The two cases are told apart from `unread.is_empty()`
+  rather than guessed at, and `an_unfinished_walk_is_told_apart_from_an_unread_file`
+  is one test for the pair.
+
+- **Nothing here is ever `Contradicted`, and that is a property of the subject
+  rather than a gap in the pass.** A contradicted claim is one the *project* made
+  and SURE refuted — a README naming a file that is not there, which `crate::setup`
+  reaches because a document does claim its paths exist. An undeclared key refutes
+  nothing: no file in the project says the key is documented, so there is no
+  statement for the finding to be the opposite of.
+  `a_claim_never_reaches_contradicted` asserts that over every claim in a fixture
+  that produces both one-sided statuses.
+
+- **Severity follows the side that is missing, and the highest it goes is
+  `ShouldFixFirst`.** A key read but named nowhere is `ShouldFixFirst`; a key named
+  but read nowhere is `CanFixLater`, because *"no source file SURE read asks for
+  it"* is a statement about SURE's reading and a key can be read by a shell script,
+  a container file, a build configuration or a language SURE does not read — the
+  reason sentence says exactly that rather than concluding the key is unused.
+  **Neither reaches `MustFix`**, which `FROZEN_SEMANTICS.md` defines as blocking a
+  hand-off alone: neither finding is severe enough to stop a person, and
+  `the_severity_follows_the_side_that_is_missing` asserts over every claim in the
+  fixture that none of them blocks a hand-off — which is why `m11`, which switches
+  the undeclared branch to `MustFix`, is caught by that test and by the integration
+  test that reads severities off a whole project.
+
+- **`PROVIDED_BY_RUNTIME` is a public, exact, case-insensitive list of 53 names,
+  and a key on it still gets a claim.** `PATH`, `HOME`, `NODE_ENV`, the Windows
+  known-folder variables, `CARGO_HOME`, `VIRTUAL_ENV`, the `GITHUB_*` set a CI
+  machine sets — a process is given these before any project code runs, and no
+  project should document them. The list is deliberately **exact rather than a
+  prefix rule**: a reader asking why `GITHUB_SHA` is set aside and `GITHUB_TOKEN`
+  is not has no way to find that out from a name, and `PATH_TO_DATA` and
+  `NODE_ENVIRONMENT` are a project's own keys that a substring rule would swallow
+  — `m8` makes exactly that change and is caught by one test. Matching is
+  case-insensitive because Windows gives one environment to every process
+  regardless of the case a program asks in, so `Path` and `PATH` cannot be told
+  apart there; where the two rules could disagree the answer is *set aside*,
+  because the cost of setting aside a key a project did define is one finding not
+  made, and the cost of the other answer is every Windows run reporting `Path`.
+  **A runtime key is not dropped from the report** — it becomes a claim carrying
+  `Severity::Note`, reachable through `set_aside()`, so a reader sees the key and
+  SURE's judgement about it; `provided` is a count in `plain_description` rather
+  than a filter over the list.
+
+- **An evidence list has a bound, and the sentence says when it was reached.**
+  `MAX_ANCHORS` is 8. A key read on every line of a generated file would otherwise
+  produce an evidence list that grows with the project, so the anchors are cut and
+  `with_anchor_count` appends *"SURE found N places on this side of the comparison
+  and anchors the first 8"* — but **only when the list was actually cut**, which is
+  why `m7`, which removes that condition, is caught by three tests including the
+  integration one that reads a key 30 times.
+
+- **`plain_description` leads with both side counts, so a claim-free report cannot
+  read the same for two different facts.** The disagreement fixture's sentence is
+  *"SURE read 3 environment or configuration keys asked for in this project's
+  source files and 2 named in its examples or documents: 1 key asked for and named
+  nowhere, 1 key named and asked for nowhere, 1 key provided by the machine rather
+  than by the project."* — all five counts asserted individually rather than the
+  sentence as a whole, so a failure names which count moved. The project that
+  names nothing produces *"0 environment or configuration keys"* rather than the
+  same sentence with the other numbers zeroed, which is the difference between
+  *every key matches* and *there were no keys* — a reading the user would
+  otherwise have to infer from an absence.
+
+- **The module is deliberately not registered in `crate::checks`.** `P4-T005` set
+  that precedent for the same reason: `schedule.rs`'s `CheckProposal` and
+  `PlanBuilder` are how a pass becomes part of a plan, and registering one here
+  would be a decision about the plan rather than about this check. Nothing depends
+  on it either way, and the acceptance sentence is about what is reported rather
+  than about when.
+
+**The one thing the first mutation pass found, and it was not a missing test.**
+`m5` removed the early return in `assess` — the match that answers for a key both
+sides agree about — and **survived**: 41 result lines, 1202 passed, 0 failed.
+The cause is structural rather than a coverage gap. `assess` gives that answer in
+two places, because `KeyStatus` has three variants and the tail `match` must name
+all three whether or not the early return runs first: **either guard alone is
+sufficient**, so a mutation that removes one of a redundant pair is an equivalent
+mutant and cannot be caught by any test. Two things followed, and both are
+corrections to this task's own work rather than to its behaviour. The comment above
+the early return claimed *"there is one place where a key becomes a claim or does
+not"*, which the tail arm makes false; it now says what is true — the two are one
+decision written twice, and the alternative would be building a claim here and
+dropping it there — and it names the measurement rather than asserting a
+conclusion. And `m5` was re-anchored at the **answer** instead of at one of the
+guards: an agreed key sent into the declared side, which is a claim SURE must not
+make, is a single-site mutation the tests can see. **A row that survives because
+the code says the same thing twice is a row that measured nothing, and the honest
+repair is to ask it a question that has an answer.**
+
+**The set was then re-run in full against the tree this task commits: 20 rows over
+one file, 20 caught, 0 survivors, 0 inconclusive, every restore verified by blob
+hash.** The re-anchored `m5` is caught by five tests — `an_agreed_key_makes_no_claim`
+in the module and four in `tests/env_completeness.rs` — which is what the row was
+always meant to be asking. **One file, because this task adds one source file**:
+the other new file is a test, and a mutation that lands in a test asserts something
+about the harness rather than about the code, which is why `P4-T005`'s set spanned
+the two *reading* modules it added to and not its own test file. The empty filter is
+the other half of the same point — `cargo test --no-fail-fast -p sure-core` with no
+target selector, so a survivor would be a mutation the whole crate's suite missed
+rather than one a narrow filter never looked at.

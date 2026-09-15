@@ -2137,3 +2137,146 @@ is not feature completeness."*
   its timeout. **Nothing about a hostile peer**: every server in the tests is one
   this repository wrote, and what a peer that lies in its headers can make a
   reader do is out of scope for a reader that parses no header.
+
+## P3-T011 — the browser interface, a false green found in the type rather than the mapping, and a scope limit that was one word away
+
+Acceptance: *"Browser unavailable => skipped/unknown."* and *"Browser automation
+is isolated from core verdict semantics."*
+
+- **The first sentence is a value, not an error path.** `Report` is
+  `Absent(Absence) | Observed(Observation)`; `AbsenceReason` has five variants,
+  each maps to a `NotCheckedReason`, and **all five map to `CheckStatus::Skipped`
+  — asserted by looping over `AbsenceReason::ALL`** rather than over the
+  variants a test author thought of, so a sixth reason added later that landed on
+  a `pass` fails rather than ships. `Absence` is a struct with a reason and the
+  detail that produced it; there is no `Result` anywhere in the interface,
+  because "there is no browser" is not an error and the type should not make a
+  caller handle it as one.
+
+- **Four of the five reasons block green, and that is the reading of the
+  acceptance sentence.** A missing browser is not a scope limit: the domain's own
+  definition is *"that the user chose or that the project shape implies"*, and
+  **neither half holds for a machine with no browser on it** — so a critical
+  browser check that could not run keeps the run out of green instead of
+  disappearing politely. The fifth reason, the project switching the check off,
+  *is* a scope limit and stops the check blocking; **it does not make the run
+  green**, which is the correction to a first draft of this bullet that assumed
+  it did: `aggregate` keeps an out-of-scope critical check visible, so the run
+  lands on `NeedsAttention` (or `NotEnoughChecked` when nothing ran at all) and
+  the report still says the interface was not looked at.
+
+- **`UnsupportedPlatform` was written as `UnsupportedStack` and that was one word
+  away from a silent hole.** `UnsupportedStack` is a scope limit, so a critical
+  browser check on an operating system SURE cannot drive a browser on would have
+  **stopped blocking green** — the report would have carried a reassuring status
+  for the exact case where SURE knows least. The mapping is now
+  `ToolUnavailable` for `NoDriverInstalled`, `DriverWouldNotStart` *and*
+  `UnsupportedPlatform`: three names, one group (*no way to drive a browser
+  here*), and the difference survives in `plain_explanation`, which is the
+  sentence a reader actually sees. **A user who does not want the browser check
+  holding their run back has a way to say so**, and it is the one that says it out
+  loud: `checks.browser_probe: never`.
+
+- **The false green was in the interface, and no mapping could have fixed it.**
+  A page served a **404** renders, has a title, reports no console errors and
+  loads completely — every field of an `Observation` adds up to a pass about a
+  page that was never served. The mapping was not wrong; **a driver had no way to
+  say the status**, so the type was the defect. `document_status: Option<u16>` is
+  now part of `Observation`, and **`None` is `Unknown` rather than a pass** — the
+  same technique as `ProbeOutcome::NoAnswer`, where staying silent is not an
+  answer. A driver therefore cannot reach green by omitting the field and does
+  not have to lie to avoid it.
+
+- **The window is the local probe's window, and the tie is a sweep rather than a
+  shared function.** `a_page_could_be_shown` restates `ProbeOutcome::status`'s
+  200–399 guard, and
+  `the_page_status_window_is_the_local_probes_window` **sweeps every status from
+  100 to 599 asserting the two agree**. Two spellings and a test, rather than one
+  function, because the probe's is a guard on an enum variant inside a `const fn`
+  and this one is a question about a number a driver reported. **`m11` moved the
+  probe's own window to 200–500 and the sweep caught it** — which is the property
+  that makes two spellings acceptable here instead of a drift waiting to happen.
+  Writing it as one function was tried first and clippy rejected the shared
+  spelling for the non-`const` call site, which is what produced the pair in the
+  first place.
+
+- **The isolation is a source check, because an absence cannot be run.** A
+  driver's signature has no way to return a verdict: `BrowserDriver::observe`
+  returns `Report`, neither variant contains a `CheckStatus` or a `CheckResult`,
+  and `tests/browser_probe.rs` **parses the trait's own body and asserts it names
+  neither**. The stronger form is the count: `-> CheckResult` and `-> CheckStatus`
+  each appear **exactly once** in the shipped part of the module, so a second
+  door is a failing test rather than a second opinion. **`m5` added exactly such
+  a function and was caught only there** — the 611 tests in the library target
+  were silent, which is the measurement that justifies the source check existing.
+
+- **What the isolation does not claim, stated where the claim is.** The interface
+  keeps a driver from **spelling** a verdict; it does not keep a driver from being
+  **wrong**. A driver that reports `complete: true` and no problems about a page
+  that threw has lied, and nothing in the module can tell. The direction that is
+  enforced is the one that matters — *no driver can hand SURE a status, so no
+  driver can put a green in a report by asking for one* — and the observations
+  themselves are checked by a second driver, not by this file. Writing the limit
+  down next to the mechanism is the same discipline as `P3-T010`'s correction: a
+  claim a reader can check, and the code does not contradict.
+
+- **`Target` wraps `probe::Endpoint` rather than restating the loopback rule.**
+  One refusal rule in the codebase, not two that agree today. It matters more
+  here than in the probe: **a browser navigates to the internet happily**, so a
+  subject built from a `String` would make a browser check into an
+  `ExternalService` action under a permission SURE asked for on the understanding
+  that the target was local. The scheme is not a parameter and there is no
+  constructor that takes one.
+
+- **Nothing is implemented, and the rule that says so is meant to fail.**
+  `nothing_in_the_product_can_drive_a_browser_today` names the files that may name
+  `BrowserDriver`, and **`P5-T004` is where it will fail** — the adapter depends
+  on this task, and that commit is where somebody reads the paragraph. The second
+  half of the rule is behavioural rather than textual:
+  `decide(BrowserProbe, InspectOnly, inspect_only())` is `Denied`, so the mode
+  the product defaults to refuses the action before any question about a browser
+  is reached.
+
+- **Twelve mutations, twelve caught, eleven by exactly one test each.** `m2` and
+  `m2b` split the two `Unknown` guards apart one at a time, so that neither is
+  covered by the other's test — the first draft had them as one condition and one
+  mutation would have covered both halves. `m5` and `m11` are the two the
+  library target cannot see, and they are the two that justify the integration
+  file existing.
+
+- **"Ten by exactly one test each" was written here and in `be02100`'s own commit
+  message, and it is wrong — the number is eleven.** The count was right when it
+  was written: the set was `m1` through `m11`, `m1` was caught by two tests, and
+  the other **ten** were caught by one. Then `m2` was split into `m2` and `m2b`
+  and the set became twelve, and **the sentence describing the set was not in the
+  set** — nothing in the harness reads the prose that counts its mutations, so the
+  re-run that caught all twelve reported twelve and the words still said ten.
+  **This is the same defect this file has recorded four times from the other
+  direction**: not a parse that fails into a smaller plausible answer, but a
+  number that was true of a smaller set and outlived it. It was found by re-running
+  the mutations rather than by reading the sentence, which is the only way it
+  could have been found — **the prose and the evidence were both on disk and only
+  one of them could disagree with the harness.** `be02100` is pushed and its
+  message cannot be rewritten; the correction lives here, and the counts in
+  `HANDOFF.md` and in `progress/state.json` are measured from
+  `target/tmp/p3t011-mutations.log` rather than copied from the message.
+
+- **The same acceptance found the same defect a second time, one field over, and
+  it was a number belonging to a different task.** The first draft of the record
+  said `browser.rs` was *"959 lines of implementation plus 302 of its own tests"*.
+  Measured, it is **843 lines above its `#[cfg(test)]` and 418 below it, 1261 in
+  all**. **The 959 is `probe.rs`** — `P3-T010`'s file, whose accepted-work entry one
+  screen up reads *"+818, then +49, then +15 −8, then +86 −1: 959 lines"* — and it
+  was carried across and used as this module's size. **The 302 is then only the
+  remainder**, `1261 − 959`, and it never described anything at all: `probe.rs`'s
+  own test block is **69 lines**, so the borrowed figure was not even borrowed
+  whole. Nothing had computed a split for `browser.rs`; a shape that looked right
+  in the neighbouring paragraph was written down and read as this task's. **A count
+  copied from an adjacent entry is worse than a missing one**, because a missing
+  count is visibly missing and a copied one is a claim about a file the reader will
+  not open — and the arithmetic agreeing, `959 + 302 = 1261`, is exactly what made
+  it survive a reading. Both errors were caught the same way, by measuring at the
+  moment of writing rather than at the moment of reading, and **both belong to
+  `P3-T011`'s acceptance rather than to `P3-T011`**, which is where the interest
+  lies: the work was correct, and the ledger about the work was wrong twice, in two
+  different fields, and neither was wrong in a way the code could have caught.

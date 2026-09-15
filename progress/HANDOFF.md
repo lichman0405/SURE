@@ -2,12 +2,13 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 42 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 open (10/11).** `P3-T010` is
-implemented and pushed as four commits — `43c4a61`, `9ad32e6`, `0eb1ac3` and
-`01fc2a7` — its runs `34955834313`, `34956776646` (the red) and `34957515713`
-(the green) are read in full below, and **the commit carrying this file is its
-acceptance**. What the task added is described under "What `P3-T010` added".
+Progress: 43 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 complete (12/12), phase P3 complete (11/11).** `P3-T011` is
+implemented and pushed as one commit, `be02100`, its run `34959719084` is read in
+full below, and **the commit carrying this file is its acceptance**. What the
+task added is described under "What `P3-T011` added". **Phase P3 is now closed**,
+so the next concrete action is the lowest-numbered `P4` task and not another
+`P3` one.
 
 **This paragraph said `P3-T008`, `40 / 166` and `8 / 11` until this commit, and
 that is a defect this commit repairs rather than a difference of opinion.**
@@ -505,25 +506,26 @@ Autonomous branch: `claude/v0.1-autonomous`
 `node scripts/taskctl.mjs status` reports:
 
 ```
-Project: SURE | status: in_progress | phase: P3
-{ accepted: 42, queued: 124 }
-READY: P3-T011, P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
+Project: SURE | status: in_progress | phase: P4
+{ accepted: 43, queued: 123 }
+READY: P4-T001, P4-T005, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005,
        P6-T007, P8-T001, P12-T008, P13-T001, P13-T004
 ```
 
-**`P3-T001` through `P3-T010` are `accepted`**, on runs `34924525793`,
+**`P3-T001` through `P3-T011` are `accepted`**, on runs `34924525793`,
 `34927065374`, `34930744061`, `34935781639`, `34938974624`, `34941955270`,
 `34943445326` / `34943853809` / `34944133634` — the last three being `P3-T007`'s,
 which took three commits and therefore three runs — `34946515895`, which is
-`P3-T008`'s and whose five jobs all read `success`, and three for `P3-T009` —
+`P3-T008`'s and whose five jobs all read `success`, three for `P3-T009` —
 **`34952200942` and `34952509429`**, its implementation and the one-assertion fix
 that answered the first's macOS red, and **`34953593684`**, which carries the
-acceptance commit `a6bc8df` and reads identically to `34952509429` on all three
-platforms. **`in_progress` is 0**, so
+acceptance commit `a6bc8df` — and, for `P3-T011`, **`34959719084`**, which carries
+`be02100` and is read in full below. **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. **Phase `P3` is 10 of 11 and open**: the one remaining `P3`
-task — `P3-T011` — is `queued` and READY.
-`42 + 124 = 166`, which is every task in `tasks/tasks.json`.
+adopting an orphan. **Phase `P3` is 11 of 11 and closed**, so nothing in it is
+`queued` any more; the phase line above reads `P4` because that is the
+lowest-numbered READY task's phase and not because any `P4` work has begun.
+`43 + 123 = 166`, which is every task in `tasks/tasks.json`.
 
 **`P3-T010` took four commits, three runs, and one of those runs is red.**
 `34955834313` carries the first two commits — `43c4a61` has no run of its own
@@ -943,6 +945,159 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P3-T011` added
+
+One file, `crates/sure-core/src/browser.rs` — **843 lines of module above its
+`#[cfg(test)]` and 418 below it, 1261 in all**, nineteen `#[test]` functions in a `mod tests` inside the
+module — and one new integration test file,
+`crates/sure-core/tests/browser_probe.rs`, **seven `#[test]` functions**.
+`lib.rs` gains one line. **No file outside `sure-core` changes**, and no driver
+is implemented: that is `P5-T004`, which depends on this task.
+
+**The first draft of this paragraph said `browser.rs` was "959 lines of
+implementation plus 302 of its own tests", and the 959 is `probe.rs`** — the file
+one task over, whose accepted-work entry reads *"959 lines, 3 module unit tests"*.
+The 302 was then only the remainder, `1261 − 959`, and described nothing: this
+file's own test block is 418 lines and `probe.rs`'s is 69. **A number borrowed
+from the adjacent entry is worse than a missing one**, because it reads as a claim
+about a file the reader will not open and the arithmetic agreed. It is recorded in
+`DECISIONS.md` beside the mutation-count correction, which is the same failure in
+a different field: **the code was right and the ledger about the code was wrong
+twice, and neither error was one the build could have caught.**
+
+### The acceptance's first sentence is a value, and all five of its roads end in `skipped`
+
+*"Browser unavailable => skipped/unknown."* `Report` is `Absent(Absence)` or
+`Observed(Observation)`, and there is **no `Result` anywhere in the interface** —
+there is no browser is a fact about this machine, not an error, and a type that
+made a caller handle it as one would invite a caller to handle it wrongly.
+`AbsenceReason` has five variants, each maps to a `NotCheckedReason`, and
+**`every_absence_reason_is_skipped_and_none_of_them_produced_a_result` loops over
+`AbsenceReason::ALL`** — over the list the enum declares, not over the variants
+somebody wrote a case for — asserting `Skipped`, `is_green() == false` and
+`produced_a_result() == false`. A sixth reason added later that landed on a
+`pass` fails there.
+
+**Four of the five blocks green and the fifth is the user's own decision.**
+`NoDriverInstalled`, `DriverWouldNotStart`, `PermissionNotGranted` and
+`UnsupportedPlatform` all answer a `NotCheckedReason` whose `is_scope_limit()` is
+false, so a critical browser check that could not run keeps the run out of green.
+`DisabledByTheProject` is a scope limit and stops the check blocking — **and does
+not make the run green**, which is where a first draft of the test was wrong and
+the code was right: `aggregate` keeps an out-of-scope critical check visible, so
+the run lands on `NeedsAttention`, or on `NotEnoughChecked` when nothing ran at
+all. Both are measured in `a_critical_absence_that_is_not_a_scope_limit_blocks_green`.
+
+### `UnsupportedPlatform` was `UnsupportedStack` for one run, and that was a hole
+
+`UnsupportedStack` is a scope limit. A critical browser check on an operating
+system SURE cannot drive a browser on would therefore have **stopped blocking
+green** — a reassuring status for the case where SURE knows least. The
+definition is what settles it: the domain calls a scope limit one *"that the user
+chose or that the project shape implies"*, and neither half holds for the
+operating system SURE is running on. Three of the five reasons now answer
+`ToolUnavailable`, which is not a loss of detail — they are one group, *no way to
+drive a browser here*, and the difference between them survives in
+`plain_explanation`, which is the sentence a report prints.
+
+**The test found this, not a review.** The first version of the test asserted a
+four-reason blocking list and the mapping produced three; the mapping was the
+thing that was wrong.
+
+### The false green was in the interface, and no mapping could have fixed it
+
+**A page served a 404 renders, has a title, reports no console errors and loads
+completely.** Every field of the first draft's `Observation` added up to a pass
+about a page that was never served, and the mapping was not the defect — **a
+driver had no way to say the status**, so the type was. `document_status:
+Option<u16>` is now part of `Observation`.
+
+**`None` is `Unknown` and not a `pass`.** This is the same technique as
+`ProbeOutcome::NoAnswer` one module over, and the reason is the same: staying
+silent is not an answer. A driver cannot reach green by omitting the field, and
+does not have to invent a status code to avoid it. The check that holds it is
+`a_driver_that_did_not_say_what_came_back_cannot_reach_green_by_saying_nothing`.
+
+### The status window is the probe's, tied by a sweep rather than a shared function
+
+`a_page_could_be_shown` restates `ProbeOutcome::status`'s 200–399 guard, and
+`the_page_status_window_is_the_local_probes_window` **sweeps every status from
+100 to 599** asserting `Report::status` and `ProbeOutcome::status` agree on each
+and that green is true exactly on 200–399. Two spellings and a test, rather than
+one function, because the probe's is a guard on an enum variant inside a `const
+fn` and this one is a question about a number a driver reported — **the shared
+spelling was tried first and clippy rejected it at the non-`const` call site**,
+which is what produced the pair. That the pair is safe is measured rather than
+argued: **`m11` moved the probe's own window to 200–500 and the sweep caught
+it.**
+
+### The isolation is a source rule, because an absence cannot be run
+
+`crates/sure-core/tests/browser_probe.rs` carries five rules, written the way
+`spawn_sites.rs` and `fingerprint_git.rs` write theirs.
+
+**One: the verdict machinery does not know what a browser is.**
+`crates/sure-domain/src/status.rs` — which owns `CheckStatus`, `CriticalState`,
+`blocks_green` and `aggregate` — contains none of `browser`, `console`, `page` or
+`driver`, in code or in prose. It contains none of them today, which is what
+makes the rule a real constraint rather than a description, and the words are the
+four that a leak would arrive as.
+
+**Two: a driver cannot spell a verdict.** The test parses
+`pub trait BrowserDriver { … }` out of the source and asserts its body names
+neither `CheckStatus` nor `CheckResult` — and it refuses a parse that found
+nothing rather than treating an empty block as a block with nothing in it, which
+is the "a parse that fails into a smaller, plausible answer" defect this
+repository has hit before.
+
+**Three: there is one door.** `-> CheckResult` and `-> CheckStatus` each occur
+**exactly once** in the part of the module above its `#[cfg(test)]`. The split is
+needed because the module's own tests declare a helper that returns a
+`CheckResult`, and it refuses to run when there is no test module rather than
+silently counting test code as shipped code.
+
+**Four: the window sweep**, above.
+
+**Five: nothing in the product can drive a browser yet** — no shipped file
+outside `browser.rs` names `BrowserDriver`, and
+`decide(BrowserProbe, InspectOnly, inspect_only())` is `Denied`. **This rule is
+meant to fail**: `P5-T004` is the adapter, it depends on this task, and that
+commit is where somebody reads the paragraph.
+
+### What the isolation does not claim, written next to the mechanism
+
+**The interface keeps a driver from *spelling* a verdict; it does not keep a
+driver from being *wrong*.** A driver that reports `complete: true` and no
+problems about a page that threw has lied, and nothing in the module can tell.
+What is enforced is the direction that matters — **no driver can hand SURE a
+status, so no driver can put a green in a report by asking for one** — and the
+observations are checked by a second driver, not by this file. The paragraph is
+in the module header because the claim is one a reader can check, and `P3-T010`'s
+correction is the precedent for writing it down: a claim the code contradicts is
+worse than a missing claim, because it reads as a defence that was built.
+
+### `Target` wraps `Endpoint` rather than restating the loopback rule
+
+One refusal rule in the codebase, not two that agree today. It matters more here
+than in the probe: **a browser navigates to the internet happily.** A subject
+built from a `String` can name `https://example.com`, which would make a browser
+check an `ExternalService` action reaching a machine that is not this one, under
+a permission SURE asked for on the understanding that the target was local. So
+the subject is a type built from an address and a path, the scheme is not a
+parameter, and **there is no constructor that takes one**. The refusals are
+`Endpoint`'s own `EndpointError` values — `NotLoopback` and `UnsafePath` — and not
+a reworded twin.
+
+### What `P3-T011` did not do
+
+**No browser is started and no driver exists.** `browser.rs` builds no
+`std::process::Command`, so `tests/spawn_sites.rs`' census is unchanged by it —
+which the full suite confirms rather than this sentence. **No limits are enforced
+by this module**: `Limits` is what a caller hands a driver, and honouring it is
+the driver's job, stated in the trait's documentation rather than assumed.
+**Nothing here looks at a real page**, so every observation in both test files is
+one this repository constructed.
 
 ## What `P3-T010` added
 
@@ -3771,6 +3926,8 @@ Three of the five jobs were failing the whole time.
 | 34955834313 | `9ad32e6`, carrying `43c4a61` — **the `P3-T010` implementation and its tests** | **all five green.** Windows **1250** / macOS **1251** / Ubuntu **1252** passed, 0 failed, 11 ignored, **47** result lines = **37 parents + 10 children**. The parent count went 36 → 37 for the new `probe_local_service` binary and **+23 on every platform**. **`43c4a61` has no run of its own** — the two commits were pushed together, so this one run is both. Detail above, including the `+23 −0` whose `−0` was predicted from the commit before the run was read |
 | 34956776646 | `0eb1ac3` — **a doc-comment correction** | **failure: `rust (windows-latest)`.** The other four jobs green, macOS **1251** and Ubuntu **1252** passed with 0 failed. Windows **1249 passed, 1 failed** — `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable` — over the same **47** result lines = **37 parents + 10 children**. **A commit that changes one doc comment and no executable line, failing on the platform it was written on**, which is what made this a product defect rather than a test flake. Detail above |
 | 34957515713 | `01fc2a7` — **the self-connect fix** | **all five green, including `rust (windows-latest)`, the job that failed.** Windows **1251** / macOS **1252** / Ubuntu **1253** passed, 0 failed, 11 ignored, **47** result lines = **37 parents + 10 children**. **+1 on every platform and the one failing test now passes**: the total on Windows went 1250 → 1251, which is the new unit test and nothing else, while the integration test moved from the failed column to the passed one. **No new binary, so the parent count stands still** |
+| 34958280318 | `706d44f` — **the `P3-T010` acceptance** | **all five green**, and **1251 / 1252 / 1253** with 0 failed, 11 ignored, **47** result lines = **37 parents + 10 children** — **unchanged from the row above in every column**, which is what a progress-and-prose-only commit should produce. **This row was missing**: the acceptance was committed and its run read in the session that produced it, and no commit since had added the row, so `gh run list` showed a run the table did not |
+| 34959719084 | `be02100` — **the `P3-T011` implementation** | **all five green.** Windows **1277** / macOS **1278** / Ubuntu **1279** passed, 0 failed, 11 ignored, **48** result lines = **38 parents + 10 children**. The parent count went 37 → 38 for the new `browser_probe` binary and **+26 on every platform**, which is exactly the 19 `browser::tests::*` unit tests and 7 integration tests this commit adds. Namesets **`+26 −0`** against `34958280318` with the identical added set on all three platforms — **nothing was renamed and nothing was dropped**, which is the half a count cannot show. `bootstrap-validate-windows` prints `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. Detail above |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and
@@ -6820,6 +6977,84 @@ read as evidence.**
 
 Each was reverted after confirming the check fires.
 
+### `P3-T011`
+
+**Twelve mutations: twelve caught, eleven of them by exactly one test.**
+`target/tmp/mut/` holds the pairs and `target/tmp/mut/run.sh` drives them;
+`target/tmp/mutate3.py` is the harness, and it requires each old text to occur
+**exactly once** before it runs, so a mistyped pair fails before producing a
+result rather than after producing a wrong one.
+
+**The set was re-run while this acceptance was being written, and the re-run
+corrected a number that was about to be written down again.** `P3-T011`'s mutation
+evidence existed only in the context of the session that produced it, which then
+ended: **the run left no log on disk, and the twelve results were about to be
+entered here from memory.** They were re-run instead, the log is
+`target/tmp/p3t011-mutations.log`, and **the twelve caught-or-survived outcomes
+came back as remembered — but the count of tests per mutation did not.** The
+remembered sentence, which is also in `be02100`'s commit message and was in
+`DECISIONS.md`, read *"twelve mutations, twelve caught, ten by exactly one test
+each"*; **the measured answer is eleven.** Ten was right when it was written — the
+set was `m1` through `m11`, `m1` was caught by two, and the other ten by one — and
+then `m2` was split into `m2` and `m2b` to stop one mutation covering both halves
+of the `Unknown` guard, the set became twelve, and **the sentence describing the
+set was not in the set.** Nothing reads the prose that counts the mutations, so
+the re-run that caught all twelve reported twelve and the words went on saying
+ten. **This is the repository's recurring defect from the other side**: not a parse
+that fails into a smaller, plausible answer, but a number that was true of a
+smaller set and outlived it. `be02100` is pushed and its message cannot be
+rewritten, so the correction is carried in `DECISIONS.md` and here, and **every
+count in this section is read out of the log rather than out of the message.**
+
+| mutation | caught by |
+| --- | --- |
+| m1 an absence is reported as a pass | **two**: `every_absence_reason_is_skipped_and_none_of_them_produced_a_result` and `the_trait_is_a_seam_a_caller_can_hold` |
+| m2 the never-reached guard is dropped | `a_page_that_was_never_reached_is_unknown_even_with_nothing_reported` |
+| m2b the incomplete-look guard is dropped | `a_look_that_was_cut_short_is_unknown_rather_than_a_pass` |
+| m3 a driver that reported no status passes | `a_driver_that_did_not_say_what_came_back_cannot_reach_green_by_saying_nothing` |
+| m4 the page-status window opens to 200–599 | `a_page_request_answered_outside_the_window_fails_even_with_no_problems` |
+| m5 a second door from a browser to a verdict | `there_is_one_door_from_a_browser_to_a_verdict` — **and the lib is silent** |
+| m6 an unsupported platform becomes a scope limit | `a_critical_absence_that_is_not_a_scope_limit_blocks_green` |
+| m7 a problem is checked after completeness | `a_problem_seen_during_a_look_that_was_cut_short_is_still_a_failure` |
+| m8 the project's own switch-off is ignored | `a_check_the_project_switched_off_is_disabled_by_configuration_whatever_the_permissions_are` |
+| m9 a granted permission still reports an absence | `a_browser_probe_with_the_permission_granted_leaves_the_question_to_a_driver` |
+| m10 `NavigationFailed` leaves the reported kinds | `every_problem_kind_is_describable` |
+| m11 the local probe's own window moves | `the_page_status_window_is_the_local_probes_window` — **only the sweep** |
+
+**`m5` is the finding, and it is the one this task's second acceptance sentence
+would have failed without.** It inserts a `pub fn a_second_door() -> CheckStatus`
+immediately above the trait. The whole `sure-core` lib suite — **611 tests, 0
+failed** — passes without noticing, because **a function nothing calls is not a
+behaviour any test can observe**; the only thing that catches it is the source
+rule in `crates/sure-core/tests/browser_probe.rs` that counts `-> CheckStatus` in
+the shipped part of the module at exactly one. **An absence cannot be run**, which
+is why that rule is a parse of the source rather than an assertion about a value,
+and `m5` is what says the parse is doing work rather than decorating the file.
+
+**`m11` is the cross-check earning its place.** It moves the *local probe's* own
+success guard in `probe.rs` — a different file, a different task, written two
+commits earlier — from `200..400` to `200..500`, and the browser module's
+integration test catches it. Nothing in `probe.rs`'s own twenty integration tests
+notices, because the sweep is the only test in the repository that holds the two
+spellings of that window together. It is run with `--test browser_probe` rather
+than the whole suite, so it is also the one mutation here whose filter names its
+target.
+
+**`m2` and `m2b` are one guard split in two, deliberately.** The condition
+`!observation.complete || !observation.reached_a_page()` is a single `if` with two
+reasons, and a mutation that dropped the whole branch would be caught by whichever
+test covers either half — reporting one catch where there are two. So each half is
+removed on its own: `m2` drops the reached-a-page test, `m2b` drops the
+completeness test, and **each is caught by the test that names it and by nothing
+else.** That is the shape `P3-T010`'s `m8` argued for one platform over: a
+mutation caught by a test that could not distinguish its two halves measures the
+`||`, not the reasons.
+
+**The harness restored both files and the restoration was checked, not assumed**:
+`git status --porcelain` lists the three progress files this acceptance edits and
+nothing else, and `git hash-object` on `browser.rs` and `probe.rs` returns the
+same two blobs as `git rev-parse HEAD:` for each.
+
 ### `P3-T010`
 
 **Eleven mutations: ten caught, one survived, and the survivor is the more
@@ -8353,6 +8588,47 @@ it needs a Mac.
   nothing; the predicate it calls is held by a unit test. **Not established:**
   whether the feature works — a pass names the request it made, not the feature —
   and nothing parses a body, a header or a `Content-Length`.
+- `706d44f` **`P3-T010` acceptance** — `progress/state.json` and
+  `progress/HANDOFF.md` only. Run `34958280318`, all five jobs `success`, and
+  **1251 / 1252 / 1253** with 0 failed, 11 ignored, **47** result lines = **37
+  parents + 10 children** — **identical to `34957515713` in every column**, which
+  is the reading a progress-only commit is supposed to produce and the reading a
+  reader can use to tell one from a commit that changed something.
+- `be02100` **`P3-T011`** — `crates/sure-core/src/browser.rs` (+1261: **843 lines of
+  module above its `#[cfg(test)]` and 418 below it**, 19 `#[test]` functions),
+  `crates/sure-core/tests/browser_probe.rs` (+427, 7 tests) and one line of
+  `lib.rs`. **The acceptance's first sentence is a value rather than an error
+  path**: `Report` is `Absent(Absence)` or `Observed(Observation)`,
+  `AbsenceReason` has five variants, and
+  `every_absence_reason_is_skipped_and_none_of_them_produced_a_result` loops over
+  `AbsenceReason::ALL` asserting `Skipped` — so a sixth reason added later that
+  landed on a `pass` fails a test rather than shipping. **Four of the five answer
+  a `NotCheckedReason` whose `is_scope_limit()` is false**, so a critical browser
+  check that could not run **blocks** green; the fifth is the project switching
+  the check off, which is a scope limit and does **not** make the run green —
+  `aggregate` keeps it at `NeedsAttention`, or at `NotEnoughChecked` when nothing
+  ran at all. **The second sentence is an absence, so a source rule holds it**:
+  the trait's own body names neither `CheckStatus` nor `CheckResult`, the shipped
+  part of the module contains exactly one `-> CheckResult` and one `-> CheckStatus`,
+  and `sure-domain/src/status.rs` contains none of `browser`, `console`, `page` or
+  `driver`. **Two findings from the work.** `UnsupportedPlatform` was written as
+  `UnsupportedStack` first, and since `UnsupportedStack` *is* a scope limit a
+  critical browser check on an OS SURE cannot drive would have **stopped blocking
+  green** — the test caught it and the mapping was what was wrong. And **a false
+  green was found in the interface rather than in the mapping**: a page served a
+  404 renders, has a title, reports no console errors and loads completely, so
+  every field of the first draft's `Observation` added up to a pass about a page
+  that was never served — **no mapping could fix it, because a driver had no way
+  to *say* the status**, so `document_status: Option<u16>` is part of the interface
+  and `None` is `Unknown`. Run `34959719084`, all five `success`, **1277 / 1278 /
+  1279** parents, 0 failed, 11 ignored, **48** result lines = **38 parents + 10
+  children**, namesets **`+26 −0`** against `34958280318` **on all three
+  platforms**. Twelve mutations, twelve caught, eleven by exactly one test — and
+  **`m5` is the finding**: a second `CheckStatus`-returning function passes all
+  611 lib tests, because a function nothing calls is not a behaviour a test can
+  observe, and only the source rule sees it. **Not established:** whether any
+  driver is honest — the interface keeps a driver from *spelling* a verdict, not
+  from being *wrong* — and no browser is started, because that is `P5-T004`.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all
@@ -8415,8 +8691,63 @@ accepted: 42 missing: none
 printed rather than asserted. `P3-T010`'s acceptance is what makes the count 42,
 and the thirteen entries added above are what make the second field empty.
 
+**Run again by `P3-T011`'s acceptance, and it prints `accepted: 43 missing:
+none`.** The count moved because `P3-T011` is the task this commit accepts and the
+second field is empty because the entry above was added in the same edit —
+**which is the only thing that keeps them in step**: the check and the entry are
+one commit apart at best, and the four acceptance commits that accumulated the
+thirteen missing ids are what that costs. **A check whose subject the same commit
+edits has to be re-run after the edit**, and this paragraph exists because the
+temptation is to run it before.
+
 ## Next concrete action
-1. **`P3-T010` is implemented, pushed, read, and accepted by the commit carrying
+1. **`P3-T011` is implemented, pushed, read, and accepted by the commit carrying
+   this file, and it is one commit — which closes phase `P3`.** `be02100` adds
+   `crates/sure-core/src/browser.rs` (**843 lines of module and 418 of its own
+   tests**, nineteen `#[test]` functions), `crates/sure-core/tests/browser_probe.rs`
+   (427 lines, seven `#[test]` functions) and one line of `lib.rs`. **No file
+   outside `sure-core` changes and no driver is implemented**: that is `P5-T004`,
+   whose `depends_on` is `["P3-T011","P5-T002"]`, so the rule in
+   `tests/browser_probe.rs` that says *nothing in the product can drive a browser
+   yet* is **meant to fail there**, and that commit is where somebody reads the
+   paragraph above the rule. Run `34959719084`, all five jobs `success`, Windows
+   **1277** / macOS **1278** / Ubuntu **1279** passed, 0 failed, 11 ignored,
+   **48** result lines = **38 parents + 10 children**; **+26 on every platform**
+   against `34958280318`, the parent count going 37 → 38 for the new
+   `browser_probe` binary and the children standing still at 10. Namesets
+   **`+26 −0`** against the same run **on all three platforms**, with the added
+   set identical on all three: nineteen `browser::tests::*` and seven integration
+   tests. **The `−0` is the half a count cannot show** — a rename or a deletion
+   that kept the total would be invisible in `+26`.
+   **Three things in the task are worth a reader's time before `P5-T004`.**
+   The first is that **the false green was found in the interface and not in the
+   mapping**: a page served a 404 renders, has a title, reports no console errors
+   and loads completely, so every field of the first draft's `Observation` added
+   up to a pass about a page that was never served — and it could not be fixed by
+   changing the mapping, because **a driver had no way to *say* the status**.
+   `document_status: Option<u16>` is now part of the interface and `None` is
+   `Unknown`, which is `ProbeOutcome::NoAnswer`'s technique one module over:
+   staying silent is not an answer. The second is that **`UnsupportedPlatform`
+   was written as `UnsupportedStack` for one run and that was a hole** —
+   `UnsupportedStack` *is* a scope limit, so a critical browser check on an
+   operating system SURE cannot drive a browser on would have **stopped blocking
+   green**, and a reassuring status for the case where SURE knows least is the
+   worst place to have one. The test caught it; the mapping was what was wrong.
+   The third is that **the isolation is a source rule because an absence cannot be
+   run**: `m5` adds a second `CheckStatus`-returning function to the module and
+   **all 611 tests in the `sure-core` lib pass**, because a function nothing calls
+   is not a behaviour any test can observe — only the rule that counts `->
+   CheckStatus` in the shipped part of the file sees it. **What it does not
+   establish: whether any driver is honest.** The interface keeps a driver from
+   *spelling* a verdict, not from being *wrong*, and a driver that reports
+   `complete: true` and no problems about a page that threw has lied in a way
+   nothing in this file can detect. That paragraph is in the module header, next
+   to the mechanism, because a claim the code contradicts is worse than a missing
+   one. **This task also repaired two gaps in this file**, both recorded where
+   they are: the run-index row for `34958280318`, `P3-T010`'s acceptance, which
+   was read in the session that produced it and never written into the table, and
+   item 16 below, which was three acceptances stale and now says so.
+2. **`P3-T010` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it took four commits and three runs — one of them red.**
    `43c4a61` is the probe, `9ad32e6` is the two module unit tests and the mutation
    evidence, `0eb1ac3` corrects a claim that the module has no boolean asking
@@ -8456,7 +8787,7 @@ and the thirteen entries added above are what make the second field empty.
    "ready"; no body, no header and no `Content-Length` is parsed, and the end of a
    response is the end of the connection and nothing else. **It also repaired this
    file's header and the list below**, which is recorded there rather than here.
-2. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
+3. **`P3-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it took two commits because the first run was red.** `6911e2a`
    is the supervisor and `12b81bc` is a one-assertion fix; the runs are
    `34952200942` and `34952509429`, read in full and attributed in "Reading runs
@@ -8487,7 +8818,7 @@ and the thirteen entries added above are what make the second field empty.
    rather than lucky**: a batch file is never admitted, so no `Supervisor` can be
    handed one, and item 20 below carries the correction to the two predictions that
    said otherwise.
-3. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
+4. **`P3-T008` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either — for a reason it states rather
    than one that happened.** `6ea9f46` is the implementation, run `34946515895`,
    all five jobs `success`, **Windows 1209 / macOS 1210 / Ubuntu 1211** parent
@@ -8527,7 +8858,7 @@ and the thirteen entries added above are what make the second field empty.
    no test, and removing it leaves the whole workspace green, measured — recorded
    in `DECISIONS.md` and in "What `P3-T008` added" above, and **this is the first
    recorded mutation on this branch that survived rather than being closed.**
-4. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
+5. **`P3-T007` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** Three commits rather than one,
    because the second and third were each found after the one before it had been
    pushed and read: `6353477` is the module, `18209d8` is the batch-file test,
@@ -8563,7 +8894,7 @@ and the thirteen entries added above are what make the second field empty.
    `P3-T006`'s *"`authorise` still has no caller"* is still true and this task did
    not obtain a consent; it turned the decision into a refusal without asking
    anyone.
-5. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
+6. **`P3-T006` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site either.** `d58532a` is the
    implementation, run `34941955270`, all five jobs `success`, **Windows 1172 /
    macOS 1173 / Ubuntu 1174** parent tests with 0 failed and 9 ignored over **44
@@ -8590,7 +8921,7 @@ and the thirteen entries added above are what make the second field empty.
    and never reach a user — so a test that needs a consented command has to use a
    destructive one (`git push --force`), or it will panic on an empty list rather
    than fail.
-6. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
+7. **`P3-T005` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it added no spawn site.**
    `c940300` is the implementation, run `34938974624`, all five jobs `success`,
    **Windows 1142 / macOS 1143 / Ubuntu 1144** parent tests with 0 failed and 9
@@ -8613,7 +8944,7 @@ and the thirteen entries added above are what make the second field empty.
    command SURE cannot bound needs its own approval naming its exact argument
    vector, **no sixth category was invented**, and the "writes inside the project"
    gap is still open.
-7. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
+8. **`P3-T004` is implemented, pushed, read, and accepted, and its acceptance note
    headlines a number that is not the one it means.**
    `967c5e6` is the implementation and `ea0fe6c` the acceptance; run
    `34935781639`, all five jobs `success`, **Windows 1116 / macOS 1117 / Ubuntu
@@ -8627,7 +8958,7 @@ and the thirteen entries added above are what make the second field empty.
    mistake is in `c940300`'s own message in two smaller places. **This item exists
    because that acceptance did not prepend one**, which is why the list is two
    items short rather than one and why this acceptance renumbers both at once.
-8. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
+9. **`P3-T003` is implemented, fixed, pushed, read, and accepted by the commit
    carrying this file, and it changed no shipped code.** `b0dcc69` is the
    implementation and `ea2f826` is the fix CI asked for; run `34930744061` is the
    fix's run, all five jobs green, **Windows 1078 / macOS 1079 / Ubuntu 1080**
@@ -8641,7 +8972,7 @@ and the thirteen entries added above are what make the second field empty.
    test and 19 of the 33 parent result lines came after it. **Its run is read in
    the session that took it rather than committed** — the stopping rule at the top
    of this file, so the `P3-T003` chain ends at the acceptance.
-9. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
+10. **`P3-T002` is implemented, pushed, read, and accepted by the commit carrying
    this file, and it changed no shipped code.** `fd878e6` is the implementation,
    run `34927065374`, all five jobs green, **Windows 1077 / macOS 1076 / Ubuntu
    1077** with 0 failed and 9 ignored over 43 results = **33 parents + 10
@@ -8654,7 +8985,7 @@ and the thirteen entries added above are what make the second field empty.
    children are identical **by name** on all three. **Its run is read in the
    session that took it rather than committed** — the stopping rule at the top of
    this file, so the `P3-T002` chain ends at the acceptance.
-10. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
+11. **`P3-T001` is implemented, pushed, read, and accepted, and it opened phase
    `P3`.** `819d499` is the implementation, run `34924525793`, all five jobs
    green, **Windows 1082 / macOS 1081 / Ubuntu 1082** with 0 failed and 7 ignored
    over **43** result lines = **33 parents + 10 children** — read and attributed,
@@ -8665,7 +8996,7 @@ and the thirteen entries added above are what make the second field empty.
    yet**: no product path calls it, and `tests/spawn_sites.rs` fails the day one
    does without being added to it. `P3-T002` has now used it — in tests only — and
    the first task that would run anything in the product is `P3-T004`.
-11. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
+12. **`P2-T011` is implemented, pushed, read, and accepted by the commit carrying
    this file — and it closed phase `P2`.** `73da9a6` is the implementation, run
    `34919714838`, all five jobs green, **1040 / 1042 / 1043** with 0 failed and 1
    ignored over **41** result lines = **31 parents + 10 children** — read,
@@ -8677,12 +9008,12 @@ and the thirteen entries added above are what make the second field empty.
    evidence parser before the acceptance was taken**, which is the one place this
    acceptance did more than the ones before it; the verdicts are unchanged and the
    `P2-T009` re-run is recorded in its own section.
-12. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
+13. **`P2-T010` is accepted and its chain is complete.** `4746c48` is the
    implementation, run `34869888350`, all five jobs green, **907 / 909 / 910**
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-13. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+14. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
    this file.** `b644462` is the implementation, run `34917710402`, all five jobs
    green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
    lines = **30 parents + 10 children** — read, attributed by binary name, and
@@ -8690,13 +9021,19 @@ and the thirteen entries added above are what make the second field empty.
    found by name on all three jobs, in "Reading run `34917710402`". **Its run is
    read in the session that took it rather than committed** — the stopping rule at
    the top of this file, so the `P2-T009` chain ends at the acceptance.
-14. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+15. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
    implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
    with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
    children** — read, attributed by binary name, and with all 25 + 18 new test
    names found by name on all three jobs, in "Reading run `34877928915`". Its run
    is read in the session that took it, so its chain ends at the acceptance.
-15. **The READY list is 13 long, and the next task is no longer a choice.**
+16. **This item is a snapshot taken at `P3-T008`'s acceptance and it is now three
+   acceptances stale — the live figures are in `## Exact current state` at the top
+   of this file and behind `node scripts/taskctl.mjs status`.** It is kept rather
+   than rewritten because the paragraph below records *how the list moves*, which
+   does not go stale, and because rewriting it would put a number here that the
+   next acceptance makes stale in the same way. **At `P3-T008`'s acceptance the
+   READY list was 13 long, and the next task was no longer a choice.**
    `P3-T009`, `P4-T001`, `P4-T005`, `P4-T006`, `P4-T007`, `P4-T008`,
    `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`,
    `P13-T004` — read off `node scripts/taskctl.mjs status` at this acceptance,
@@ -8743,7 +9080,7 @@ and the thirteen entries added above are what make the second field empty.
    accepted, and it stays `queued` on `P8-T003`. So the observed-request channel
    has its rule and its door and still no capture, and the task that supplies one
    is waiting on a task nobody has read.
-16. **`P2-T012` left an owner decision open, and it is the first one a reader
+17. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which
    would make a readable manifest level B). The change is two lines plus the
@@ -8758,19 +9095,19 @@ and the thirteen entries added above are what make the second field empty.
    ceiling —
    a runner is not a check — but it is the step that makes running anything
    possible, so the two tasks are worth reading together.
-17. **`P2-T012` also left the classification with no consumer.** `classify` is
+18. **`P2-T012` also left the classification with no consumer.** `classify` is
    called by its tests and by nothing else: `Project::support` is filled by no
    product code path, so a report does not yet carry the level. That is the same
    shape as `ComponentGraph` in item 18, and it is recorded rather than implied —
    the task's acceptance is that a project/report *records* the level, and what
    exists is the rule and the record, not yet a caller.
-18. **`P2-T007` is accepted, its two commits are pushed and read.**
+19. **`P2-T007` is accepted, its two commits are pushed and read.**
    `586d3a3` the implementation in run `34864498113` — Windows **871** / macOS
    **873** / Ubuntu **874**; `435181f` the run record; `0907acf` the acceptance.
    `node scripts/taskctl.mjs status` now reads `{ accepted: 28, queued: 138 }`
    with **nothing `in_progress`**, so the next session may start any `READY` task
    without adopting an orphan.
-19. **The store now holds six rows that no user wrote, and that is the first item
+20. **The store now holds six rows that no user wrote, and that is the first item
    for whoever next touches `--goal` or the mutation harness.** They are listed in
    "The mutation run wrote six rows into the real store" above, with the reason
    they exist and the one-line statement that removes them. **They are left in
@@ -8804,7 +9141,7 @@ and the thirteen entries added above are what make the second field empty.
    multiset and ask whether the after multiset comes back exactly.
    `target/tmp/p2t012delta.py` does it and prints both, so the next session can
    see why the positional table is not the one to trust.
-20. **`project_fingerprint` now has one caller, and it is not a check.**
+21. **`project_fingerprint` now has one caller, and it is not a check.**
    `sure check --goal` fingerprints the project to bind a recorded goal to a
    state; nothing constructs an `Authority`, nothing runs the check pipeline, and
    nothing compares a goal against a project. So `FINGERPRINTING.md`'s coverage
@@ -8814,7 +9151,7 @@ and the thirteen entries added above are what make the second field empty.
    the kind and the digest rather than checking anything. The documentation says
    so in as many words; do not let a later summary of this branch imply
    otherwise.
-21. **`P3-T001` left a second owner decision open, and it is the one the next
+22. **`P3-T001` left a second owner decision open, and it is the one the next
    three `P3` tasks will each run into: may a caller name a batch file?** The
    facts, all measured and held as tests rather than asserted: a name with no
    extension is completed to `.exe` and nothing else, so a bare `npm`, `yarn`,

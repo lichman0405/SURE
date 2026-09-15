@@ -10,6 +10,7 @@ pub mod approval;
 pub mod components;
 pub mod config;
 pub mod consent;
+pub mod container;
 pub mod diagnostics;
 pub mod discover;
 pub mod doctor;

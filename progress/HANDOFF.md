@@ -3198,6 +3198,35 @@ the hole is now held by a test in all three compiled trees, and it is the same
 claim the commit message makes; **the two agree because both were written from
 this log, not because one was copied into the other.**
 
+**And the acceptance commit's own run is the fourth, read after the fact because
+this file's rule is that a push is not finished until its run has been read.** Run
+`34945070507`, commit `0f9273b946de4639eab8104e4b4bc5f0ce3d86e6`. All five jobs
+`success`, and the three platform logs read: **Windows 1188 / macOS 1189 / Ubuntu
+1190** parents, 0 failed, 9 ignored, over the same 44 result lines = 34 parents +
+10 children — every number the same as `719253e`'s.
+
+| pair | windows | macos | ubuntu |
+|---|---|---|---|
+| `719253e` → `0f9273b` | **+0 −0** | **+0 −0** | **+0 −0** |
+
+**`+0 −0` on all three platforms is the statement that this commit added no test
+in any compiled tree, and it is measured rather than argued from the diff.** That
+is what an acceptance commit should produce, and it is the only kind of commit on
+this branch where the delta is expected to be nothing: it touched
+`progress/DECISIONS.md`, `progress/HANDOFF.md` and `progress/state.json` and
+nothing else. **A `+1` here would have meant a test came in with the acceptance
+note**, which is exactly the failure this census exists to notice.
+
+**The two jobs that are not about Rust are the ones that actually examine this
+commit, and both were read rather than taken from the job colour.**
+`bootstrap-validate-windows` runs `node scripts/validate-bootstrap.mjs` — *"SURE
+bootstrap validation OK: 17 phases, 166 tasks"* — then `node
+scripts/taskctl.mjs validate` — *"state OK: 166 tasks"* — then the PowerShell
+validator, which is to say the job reads `tasks/tasks.json` **and
+`progress/state.json` as this commit wrote them**, so the acceptance's own claim
+about the state file is what that job checked. `shellcheck-secondary` is `success`
+and has no count to read.
+
 ### Reading run `34941955270`, `P3-T006`'s — and the by-name delta that closes from a third direction, on all three platforms at once
 
 Run `34941955270`, commit `d58532a69361cf083dfec801c702de6cfcfc5e27`. All five jobs

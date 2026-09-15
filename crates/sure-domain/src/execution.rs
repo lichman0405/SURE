@@ -278,10 +278,16 @@ pub enum ExecutionMode {
     InspectOnly,
     /// The user allowed a specific set of project commands to run on this machine.
     HostConfirmed,
-    /// Supported checks run inside an isolated container.
+    /// Supported checks run inside a container, under a plan SURE states first.
     ///
-    /// This is not a perfect security boundary: mounts, network and privileges
-    /// are evaluated and reported, not assumed safe.
+    /// **This is limited isolation and not a perfect security boundary**, and
+    /// the wording is the acceptance rather than a hedge: mounts, network and
+    /// privileges are evaluated and reported, not assumed safe, and the
+    /// container shares this computer's kernel. The word "isolated" used to be
+    /// here on its own, and `P3-T008` took it out — a reader deciding how much
+    /// to trust this mode reads this sentence and `plain_description` below, and
+    /// both of them have to say the same true thing. What the plan controls, and
+    /// what it leaves open, is `sure_core::container`.
     Container,
 }
 
@@ -330,8 +336,15 @@ impl ExecutionMode {
             Self::HostConfirmed => {
                 "SURE will run the project commands you approve, on this computer."
             }
+            // The prompt a user reads before agreeing to this mode, so it has to
+            // be plain and it has to be true. `mode_descriptions_are_plain_language`
+            // bans the word "sandbox" here as jargon, which leaves "not a separate
+            // computer" as the honest everyday way to say that the container shares
+            // this computer's kernel — and it says that in eight words instead of
+            // requiring the reader to know what a kernel is.
             Self::Container => {
-                "SURE will run supported checks inside an isolated container on this computer."
+                "SURE will run supported checks in a container on this computer. That is limited \
+                 isolation: it narrows what a check can reach, and it is not a separate computer."
             }
         }
     }

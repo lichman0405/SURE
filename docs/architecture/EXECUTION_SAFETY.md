@@ -46,9 +46,21 @@ Examples:
 SURE must show what it intends to run when approval is required.
 
 ### container
-When Docker/Podman or another supported container runtime is present, SURE may execute supported checks in an isolated container according to an explicit plan.
+When Docker/Podman or another supported container runtime is present, SURE may execute supported checks in a container according to an explicit plan.
 
-Container mode must not be marketed as a perfect security boundary without evaluating mount/network/privilege configuration.
+That is **limited isolation, not a perfect security boundary**, and the plan is
+what makes the sentence checkable rather than aspirational: the image, the
+project mount and its access, the network mode and the working directory are
+fields of `sure_core::container::ContainerPlan`, and the argument vector it
+produces is asserted in tests rather than described here. Two of those fields
+are the doors — whether the project is visible read-write, and whether the
+container has a route off this computer — and both default to closed.
+
+**A missing runtime is not an error.** Docker and Podman are optional, the
+absence of both is the state of most machines, and the answer then is that
+checks run on the host under whatever mode and permissions are in force.
+`sure_core::container::Availability` has no error variant for that reason: a
+machine without Docker is a machine without Docker, not a broken one.
 
 ## How a mode is enforced
 
@@ -67,6 +79,13 @@ before anything runs, and what comes out is a value:
 - A check is one unit. If any of its commands will not run, the check does not
   run — including the commands in it that would have been allowed. A verdict for
   half a check is a verdict for a check that did not happen.
+- `sure_core::container` says what the command line around an admitted command
+  would look like in `container` mode — the image, the mount and its access, the
+  network mode and the working directory — as a value, without starting anything.
+  It is listed last because it is downstream of the other two: enforcement
+  decides *whether* a command may run, and this decides *inside what*. A runtime
+  that is not installed changes the second and not the first, which is why its
+  absence is not an error.
 
 **The commands that may run are the ones `Enforcement::admitted()` yields, and
 that iterator is the only door.** Anything that launches a project process takes

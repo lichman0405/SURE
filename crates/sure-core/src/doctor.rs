@@ -435,7 +435,16 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 
 /// The same, against a given search path.
 ///
-/// Split out so it can be tested. Setting `PATH` for a test would need
+/// Split out so it can be tested — and now for a second caller, which is
+/// [`crate::container`] looking for a container runtime. Visibility is
+/// `pub(crate)` rather than `pub` because the rule this function implements is
+/// *what SURE would execute*, and a crate that found a program by a different
+/// rule would be able to disagree with `sure doctor` about what is installed.
+/// **A third caller is the point at which this moves into a module of its own**;
+/// two is a shared helper and the same move [`crate::consent::runs_project_code`]
+/// got when it reached its second.
+///
+/// Setting `PATH` for a test would need
 /// `std::env::set_var`, which is `unsafe` in edition 2024 and therefore
 /// unavailable in a workspace that forbids `unsafe` — so the variable is a
 /// parameter instead of ambient state.
@@ -459,7 +468,7 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 /// shadow a system program on the other. A quoted entry is unquoted, because
 /// Windows `PATH` entries are quoted when they contain spaces and the quotes are
 /// not part of the path.
-fn find_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
+pub(crate) fn find_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
     std::env::split_paths(search_path)
         .filter(|entry| !entry.as_os_str().is_empty())
         .find_map(|entry| candidate_in(&unquote(&entry), name))

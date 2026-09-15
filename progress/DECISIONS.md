@@ -1136,3 +1136,192 @@ shape can be checked.
   answer *and* a visible one. **And nothing in the product calls `classify` yet** —
   it is a module with tests and one line in `lib.rs`, and the first task that runs
   anything under it is `P3-T005`.
+
+## P3-T005 — the plan that says what each command needs and why, and the only result a refusal can produce
+
+- **A refused command cannot produce a passing result, and that is a property of
+  the shape rather than of a test.** `PlannedCommand::refusal` is the only place
+  `crates/sure-core/src/consent.rs` makes a `CheckResult` at all, and the passing
+  branch does not exist in it: a command that may run returns `None`, because what
+  to report about it depends on what happens when it does and nothing has happened
+  yet. A refused command returns `CheckResult::not_run` — `Skipped`, with its
+  reason **and its weight** kept. The weight is the half that is easy to lose and
+  the half that matters: a skipped `MustFix` critical check that forgot it was
+  `MustFix` is the shape of a green report assembled out of things that never
+  happened. Two mutations are aimed at this bullet — a `Pass` returned where a
+  `Skipped` belongs, and the same `Skipped` with `Severity::Note` and `false` —
+  and both are caught.
+
+- **The three rules are in `decide`'s order because the order is the rule, not a
+  reading order.** One: every category the command may fall into is checked
+  against the grants, and one missing permission is enough — first because it is
+  the only one of the three that is not a question. Two: **a category with no
+  permission is never covered by a grant**, so a `Destructive` command needs its
+  own approval naming its exact argument vector — checked *before* the mode,
+  because a cautious mode is a question to ask and a missing permission is not.
+  Three: the mode last, where a command that runs project code under a mode that
+  runs nothing comes back `NeedsConsent` rather than `Denied`.
+
+- **`Destructive` still answers `None`, and this task's contribution is that a
+  missing permission is not a gap in the permission set.** `P3-T004` recorded the
+  question — where does the "writes inside the project" category live — and left
+  it here. The answer is that it still does not live anywhere: **no sixth category
+  was invented**, because the acceptance for `P3-T004` names five and satisfying
+  it by adding a sixth would have made that sentence untrue. What is new is the
+  other half: a category the user *cannot* grant is not a missing grant, it is a
+  command that needs its own approval, and `ungrantable()`,
+  `awaiting_own_approval()` and the "No permission SURE can ask for covers this"
+  line in the explanation are that answer in the three places a caller needs it.
+  **`git commit` reading as `UnknownOperation` is still the visible consequence**
+  and is still open.
+
+- **The `Install` finding: my first version of rule three was too permissive, and
+  the test that found it is the reason the second decider could be written at
+  all.** `safety::classify` answers with a *set* of categories, and
+  `CommandEffects` can hold combinations no single `ActionKind` describes — so
+  `decide_for` cannot delegate to `decide`, it has to restate the rules. The first
+  draft's `runs_project_code` tested only for `DynamicHost`, so `npm install` under
+  `inspect_only` came back `Denied` where
+  `decide(ActionKind::InstallDependencies, …)` answers `NeedsConsent`: **a check
+  reported as impossible that was merely unasked**, which is the same error as a
+  false green wearing the other coat. Installing runs a package's own install
+  steps and builds source distributions with the backend it shipped — the same
+  fact `P3-T004` had to correct its command table for. The test that found it runs
+  both deciders over every category that has an `ActionKind`, in every mode, under
+  both a read-only and a fully granted permission set, and requires them to agree.
+  **A restated rule is only safe when something checks it against the original**,
+  and the mutation that re-breaks the finding is caught by that test *and* by the
+  one named for the finding — which is the property worth having, since a test
+  that only fails for the bug it was written for is a test nobody can refactor
+  around.
+
+- **A doc comment and its code disagreed, and the doc was right.** The first
+  version of `CheckPlan::exclude` recorded the reason unconditionally while its own
+  paragraph said a check the plan never held is not recorded at all. `excluded`
+  now means exactly *"checks this plan contained and then took out"*, and the
+  `false` it returns is the whole of what it can say about a check that was never
+  there. `PermissionPlan::exclude_refused_from` returns those ids to the caller
+  rather than absorbing them, because a command planned against a check the plan
+  does not contain means **two check sets were assembled into one plan**, and that
+  is a caller-visible anomaly rather than something to swallow. Two mutations hold
+  this — the bug itself restored, and the neighbouring mistake of leaving the
+  check in `dynamic_checks` while recording its reason — and the second is the one
+  the doc warns about: a plan that reads as "will run" to a caller iterating one
+  field and "will not run" to a reader looking at the other.
+
+- **A census that matched a name where its rule said "spawn", fixed in the check
+  rather than by renaming the type.** `tests/spawn_sites.rs` failed on
+  `consent.rs` because `PlannedCommand::new(` contains the substring
+  `Command::new(`. `consent.rs` builds nothing: no `std::process` import anywhere
+  in the file, and its single mention of `ProcessRequest` is inside a doc comment
+  explaining why `PlannedCommand::new` does not take one. **Renaming the type
+  would have made the test pass and left the matcher wrong** — every future type
+  whose name ends in `Command` would be a new false positive. The matcher now
+  requires the character before `Command` to be one that cannot be part of an
+  identifier, which is true of every spelling that really builds one. The rule is
+  unchanged and **neither hole a tripwire like this can have is widened**: a bare
+  alias (`use std::process::Command as C;`) was missed by the old substring search
+  too. A test states the spellings the matcher must tell apart, and states the pair
+  of behaviours around comments in one place, so that a reader changing one sees
+  the other.
+
+- **The mutation harness's first run found a real hole, and the fix was a test
+  rather than an argument.** `target/tmp/mutate21.py` — 24 mutations, **24 caught,
+  0 declared unobservable** — reported one MISSED: deleting the loop in
+  `PermissionPlan::explain` that appends each command's lines left the whole suite
+  green. `PlannedCommand::explain` is covered from several directions; **the
+  plan's — which is the one a report actually calls, and which is the first
+  acceptance sentence at the level it is printed — was covered from none.** A plan
+  that names the execution mode and stops is precisely the shape this product
+  exists to prevent, and no amount of reading the module would have found it. It
+  is now held by `a_plan_explains_every_command_it_holds`, which takes its
+  expected line count **from the commands rather than from a written-down
+  number**: exact without becoming a second copy of the layout. The driver below
+  `MUTATIONS` is byte-identical to `mutate20.py`'s, compared rather than copied
+  carefully, because each guard in it carries a doc comment naming the false
+  verdict it exists to prevent.
+
+- **A shell pipeline reported `tee`'s exit code, not the harness's, and that is a
+  false-green shape worth recording.** The first invocation was `python
+  target/tmp/mutate21.py | tee …`, so a run that printed `NOT CAUGHT (1)` still
+  exited 0. Nothing was concluded from it — the report is what was read, and the
+  report said `NOT CAUGHT (1)` in as many words — but **the number a person
+  glances at to decide whether a run passed was not the run's number**, and the
+  accepted run is `set -o pipefail` plus an explicit `${PIPESTATUS[0]}`. This is
+  recorded rather than quietly fixed because it is the same failure as a CI job
+  colour standing in for a log: the summary of a run is not the run.
+
+- **The test-count figures: `sum_all` and `sum_parents` are different numbers and
+  the difference is a re-run, not a test.** `store_concurrency.rs` re-runs itself
+  ten times with a filter, so a `cargo test` log has 44 `test result:` lines where
+  34 are parents and 10 are those re-runs, and the sum over all 44 counts the ten
+  re-run tests twice. **The parent sum is the number of unique tests.** By that
+  measure: `P3-T003` accepted `1078`, `P3-T004` `1116`, and this task `1142` — and
+  the deltas are **+38** (the 38 tests `P3-T004` added) and **+26** (the 26 this
+  task added: 22 in `consent.rs`, 2 in `vocabulary.rs`, 1 in `execution.rs`, 1 in
+  `tests/spawn_sites.rs`). The same 26 falls out of the source-level `#[test]`
+  count, `1112 → 1138`, measured per file out of git. **For a third check, the
+  per-binary invariant was verified on the Windows job: every test binary's count
+  of `... ok` lines equals its own reported `passed`**, so no result line in this
+  run is unaccounted for.
+
+- **That third check does not hold, and it does not hold because the quantity it
+  measures is not well-defined — corrected here because the sentence above and
+  the same sentence in `P3-T005`'s acceptance note cannot be rewritten.** A test
+  binary that **spawns nested runs of itself** writes those runs' output to the
+  same inherited stdout, so their `test <name> ... ok` lines and their
+  `test result:` lines arrive inside the parent binary's block with no `Running`
+  header of their own. The Windows log of run `34938974624` shows it directly:
+  under `Running tests\store_concurrency.rs (…)` there is `running 7 tests`, then
+  `test child_writer ... ignored, spawned by the parent tests, not run on its
+  own`, then **six** `running 1 test` banners followed by four `... ok` lines at
+  once — the nested runs are concurrent, and their results land in the parent's
+  block. `store_concurrency.rs` is the deliberate case; `tests/process_runner.rs`
+  is the same shape for a different reason, reported `37` with 29 `... ok` lines
+  attributable to it, because spawning processes is what that file tests. So
+  "count the `... ok` lines under this binary's `Running` header and compare with
+  its reported `passed`" has **no single value** for those binaries, and a check
+  built on it reports agreement without having compared anything. **What is sound
+  is the aggregate form, and it is established: `(binary, name)` pairs equal the
+  reported parent sum exactly on all three platforms** — 1142 / 1143 / 1144 —
+  which is what the per-binary invariant would have to sum to if it existed.
+  Recorded at this length rather than deleted, because the failure was *silence*:
+  a comparison of a quantity that cannot be computed, reporting no mismatch, in a
+  file whose whole method is to refuse exactly that.
+
+- **`P3-T004`'s acceptance note headlines `1126` for Windows where the parent sum
+  is `1116`, and that note cannot be rewritten.** Re-reading run `34935781639`
+  this session: Windows `lines=44 parents=34 children=10 sum_all=1126
+  sum_parents=1116`, macOS `1117`, Ubuntu `1118`. The note's "+38, matching
+  `P3-T003`'s `1078` exactly" is right about the arithmetic and wrong about which
+  of the two numbers it was quoting — **`1078 + 38 = 1116`**, and `1126` is that
+  plus the ten re-run lines. No force push and no history rewrite are available or
+  wanted, so the correction lives here and in the `P3-T005` acceptance note.
+  **And the same mistake was in `c940300`'s own message, in two smaller places**:
+  "(`execution.rs`, +24)" and "(`vocabulary.rs`, +27)" are the sizes of the
+  *methods* while the files are `+54` and `+67`, and "names no `ProcessRequest`"
+  is wrong as written — `consent.rs` names it once, at line 234, in a doc comment
+  on `PlannedCommand::new` saying why it does not take one. The `numstat` is the
+  anchor for the first two and `grep -n` for the third.
+
+- **What is not established, stated in the module rather than left to be
+  inferred.** **Nothing about a command that has its own approval**: `NeedsConsent`
+  is a decision, and there is no consent record, no prompt and no host-execution
+  authorisation in this file — `HostConsent` exists in the domain and nothing
+  constructs one. **Nothing about what a command actually does when it runs**,
+  which is the classifier's own caveat and stays true here. **Nothing about the
+  TOCTOU window** between planning a command line and running it: the file it
+  names can be replaced in between. **Not a check that any check plan is
+  complete**: `exclude_refused_from` moves what was refused, and a plan that never
+  held a check is a caller's bug reported back rather than a defect found here.
+  **Nothing about `WriteProject`**: a command that merely writes inside the
+  project is still outside this vocabulary.
+
+- **No spawn site was added, and that is the load-bearing fact for the support
+  ceiling.** `consent.rs` plans commands and builds none, so `THE_SPAWN_SITES` is
+  still three entries and `nothing_outside_the_runner_names_a_process_request`
+  passes. `sure_core::support`'s level-C ceiling is justified by *no project code
+  running*, and the module that decides what is allowed to run still cannot run
+  anything. `spawn_sites.rs`'s own module doc says it is meant to fail the day
+  `P3-T005` wires the runner up; that it did not is a fact the check established
+  rather than a claim this note makes.

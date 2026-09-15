@@ -596,10 +596,27 @@ fn a_service_that_ends_by_itself_reports_the_code_it_ended_with_and_where_it_ran
     );
     let report = consequences(&report);
     assert_eq!(value(&report, "number").as_deref(), Some("7"));
+
+    // Compared as **resolved paths rather than as strings**, which is the idiom
+    // `process_runner.rs` already uses for the same claim, and which this
+    // assertion was first written without. **That made it red on macOS and green
+    // everywhere else, for a reason that had nothing to do with the service**: the
+    // child reports `std::env::current_dir()`, which is the directory with every
+    // symlink resolved, and this test built the expected path from
+    // `std::env::temp_dir()`, which is not. On macOS the two spell the same
+    // directory as `/private/var/…` and `/var/…`, because `/var` is a symlink —
+    // measured, in run `34952200942`, where the failure was this assertion and the
+    // five other tests in this file passed. The sibling file's comment names the
+    // Windows version of the same trap (a drive letter's case) and was **not
+    // enough**: the reason it gives is one platform's, and the rule it holds is
+    // every platform's.
+    let reported = value(&report, "cwd").expect("the child reported its directory");
     assert_eq!(
-        value(&report, "cwd").as_deref(),
-        Some(directory.to_string_lossy().as_ref()),
-        "a service runs in the directory its supervisor was given"
+        fs::canonicalize(Path::new(&reported)).expect("the child's directory exists"),
+        fs::canonicalize(&directory).expect("the directory we asked for exists"),
+        "a service runs in the directory its supervisor was given — the child \
+         reported {reported}, not {}",
+        directory.display()
     );
 }
 

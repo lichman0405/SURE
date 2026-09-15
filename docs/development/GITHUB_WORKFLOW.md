@@ -51,7 +51,7 @@ requests. Three jobs, and each is the only check of something:
 
 | Job | What nothing else checks |
 | --- | --- |
-| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
+| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast` |
 | `shellcheck-secondary` | the POSIX shell scripts, on a machine that has `shellcheck` |
 | `bootstrap-validate-windows` | the Windows bootstrap scripts, `validate-bootstrap.mjs` and the task state |
 
@@ -102,9 +102,14 @@ platforms as a check that something ran; compare names.
 
 Two consequences worth knowing when reading a run:
 
-- **`cargo test --workspace` in CI has no `--no-fail-fast`**, so the first
-  failing target aborts the rest. A failure in `sure-core --lib` hides every
-  integration target after it, which can make a run look like it tested one thing
-  when it stopped early.
+- **`cargo test` stops at the first failing target unless it is given
+  `--no-fail-fast`**, and a failure in `sure-core --lib` then hides every
+  integration target after it, so a run can look like it tested one thing when
+  it stopped early. **CI passed no such flag until `P3-T003`, and now does**;
+  the local gate set had it all along, so the two command sets differed in the
+  one direction that costs a reading. The targets are where the
+  platform-specific tests live, which is what made the difference matter: the
+  run whose whole job is to say what *this* platform does could return before
+  saying it.
 - **A green `windows-latest` job says nothing about the other two.** The
   platform that is easiest to satisfy is the one this repository is developed on.

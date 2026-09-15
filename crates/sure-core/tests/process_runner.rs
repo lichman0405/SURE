@@ -19,9 +19,32 @@
 //!
 //! **Nothing about process trees on a platform that cannot reach them.**
 //! [`Stop`] says which of the two stops happened, and the test asserts what the
-//! platform can actually do rather than what would be nicest. `P3-T003` owns
-//! the Windows/Linux comparison; what is here is the runner's own contract, and
-//! — added by `P3-T002` — the platform's answer to it.
+//! platform can actually do rather than what would be nicest. The Windows/Linux
+//! comparison is the table below, which every one of these tests is a row of;
+//! what is here is the runner's own contract, and the platform's answer to it.
+//!
+//! # The platform matrix
+//!
+//! The runner's platform-specific behaviour is a short table, and every row of
+//! it is held by a test that runs **on the platform it is about**. That is the
+//! only form in which "CI covers platform-specific runner behaviour" is a fact
+//! rather than an intention: each of the three jobs compiles different code, so
+//! a row whose test is absent from a job's log is a row nothing checked there.
+//! **Read a run by test name, never by total** — a green job says nothing about
+//! the other two, and the three run different sets.
+//!
+//! | What differs | Windows | Linux and macOS |
+//! | --- | --- | --- |
+//! | what a stop reaches | the whole tree, through `taskkill /T /F` | the process itself; nothing below it |
+//! | what a name may be | no extension is completed with `.exe` and nothing else | the name is the path, and the executable bit decides |
+//! | a file that is not an image | `.cmd` and `.bat` start, with an interpreter Windows supplies; `.ps1` does not start at all | a file whose first line names an interpreter starts; without the executable bit nothing starts |
+//! | a path that is not text | cannot be spelled at all — an unpaired surrogate is not a path | bytes are bytes: the name, the working directory and every argument arrive unchanged |
+//!
+//! The first row is `P3-T002`'s; the other three are the ones `P3-T002` said
+//! nothing about and `P3-T003` added. Each is a pair — a positive and a
+//! negative where the negative is the interesting half — because "it did not
+//! run" and "it was not asked to run" are different facts and only the second
+//! is a contract.
 //!
 //! **The lifecycle claims are about a process, not about a report.** A stop is
 //! asked to prove itself against a grandchild that is given a way to say
@@ -1723,6 +1746,293 @@ fn a_power_shell_script_cannot_be_started_as_a_program() {
     assert!(
         !directory.join("ran.txt").exists(),
         "the script was reported as not started and ran anyway"
+    );
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+// ---------------------------------------------------------------------------
+// The same request, on the two families. `P3-T003`.
+//
+// The claim these hold is one sentence: SURE hands the operating system a name
+// and a vector of bytes, the platform decides what a name may be and how a file
+// is run, and SURE does not decide for either of them. What it must not do is
+// refuse a name the platform would have accepted, repair one the platform would
+// have refused, or turn any of it into text on the way through.
+//
+// Each test runs on the platform it is about, which is what makes the coverage
+// a fact about a CI run rather than a sentence in a document. The table in the
+// module documentation is the index; read a run against it by test name.
+// ---------------------------------------------------------------------------
+
+/// The smallest program a Unix test can put in front of the runner.
+///
+/// A file whose first line names an interpreter and whose body does nothing but
+/// copy its first argument to the path in its second. `printf '%s'` rather than
+/// `echo`, because an argument under test may be bytes that are not text and
+/// `echo` is free to do what it likes with them.
+#[cfg(unix)]
+const A_SCRIPT: &[u8] = b"#!/bin/sh\nprintf '%s' \"$1\" > \"$2\"\n";
+
+/// Write [`A_SCRIPT`] at `program` and give it `mode`.
+///
+/// The mode is set rather than left to the umask, because these tests are
+/// *about* the executable bit and a premise the environment picks is not a
+/// premise. The failure messages are written out rather than kept short: this
+/// is the one thing here that cannot be measured on the machine this branch is
+/// developed on, so a platform that refuses the file has to say which platform
+/// and why rather than leaving a reader with a bare `unwrap`.
+#[cfg(unix)]
+fn write_a_script(program: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(program, A_SCRIPT).unwrap_or_else(|error| {
+        panic!(
+            "no file could be created at {}, so this platform cannot be asked the question this \
+             test asks: {error:?}",
+            program.display()
+        )
+    });
+    fs::set_permissions(program, fs::Permissions::from_mode(mode)).unwrap_or_else(|error| {
+        panic!(
+            "the file was created and its mode could not be set to {mode:o}, so this test cannot \
+             state its own premise: {error:?}"
+        )
+    });
+}
+
+#[test]
+#[cfg(unix)]
+fn a_script_with_an_interpreter_line_runs_when_it_has_the_executable_bit() {
+    // The Unix half of the `.cmd` tests above, and a different mechanism with
+    // the same consequence: SURE names a file and assembles no command line,
+    // and the operating system decides how a named file runs. On Windows that
+    // decision is the extension, plus the interpreter Windows supplies for a
+    // batch file; here it is the interpreter line inside the file, which SURE
+    // never reads.
+    //
+    // The name has no extension on purpose. On this platform a name is a path
+    // and nothing else, and a runner that had learned a rule about extensions
+    // would be a runner that had learned Windows'.
+    let directory = scratch("unix-executable-script");
+    let report = directory.join("report.txt");
+    let program = directory.join("says-something");
+    write_a_script(&program, 0o755);
+
+    let request = ProcessRequest::new(
+        program,
+        directory.clone(),
+        Limits::new(PATIENT, 4096, 4096),
+        Cancellation::new(),
+    )
+    .with_arguments([OsString::from("it ran"), report.clone().into_os_string()]);
+
+    // This is the one place in the file where the test can fail for a reason
+    // that belongs to the machine rather than to the runner: a filesystem that
+    // lets the file be written and its mode set and will not let anything be
+    // executed on it — which is how some container images mount `/tmp` — makes
+    // the premise above true on disk and the run fail anyway. Naming that here
+    // is the difference between a reader who knows which of the two happened
+    // and one who reads a bare `expect` as the runner being broken.
+    let outcome = sure_core::process::run(&request).expect(
+        "the script runs, or this platform will not execute a file in the directory this test was \
+         able to write one to, which is a fact about the mount and not about the runner",
+    );
+
+    assert_eq!(
+        outcome.termination(),
+        Termination::Exited { code: Some(0) },
+        "a script that ran to the end reports the code it ended with"
+    );
+    let written = fs::read_to_string(&report).unwrap_or_else(|error| {
+        panic!(
+            "nothing was written by the script, so it did not run: {error}. The script writes to \
+             the path in its second argument, so an absent report would also mean the arguments \
+             did not arrive."
+        )
+    });
+    assert_eq!(written, "it ran", "the report is the script's own output");
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+#[cfg(unix)]
+fn the_same_script_without_the_executable_bit_is_not_a_program() {
+    // The negative half, and the half that is about SURE rather than about the
+    // operating system: the runner does not make a file runnable so that a
+    // request can succeed. No `sh script`, no `chmod`, no interpreter of SURE's
+    // own choosing — "the platform will not run this" is reported as what it
+    // is, and a caller that meant to run it has to hear about it.
+    //
+    // The file is otherwise perfect: same bytes as the test above, same
+    // interpreter line, same arguments. The mode is the only difference, which
+    // is what makes this test about the mode.
+    let directory = scratch("unix-not-executable");
+    let report = directory.join("report.txt");
+    let program = directory.join("says-something");
+    write_a_script(&program, 0o644);
+
+    let request = ProcessRequest::new(
+        program.clone(),
+        directory.clone(),
+        Limits::new(PATIENT, 4096, 4096),
+        Cancellation::new(),
+    )
+    .with_arguments([OsString::from("it ran"), report.clone().into_os_string()]);
+
+    match sure_core::process::run(&request) {
+        Err(ProcessError::NotStarted {
+            program: reported, ..
+        }) => assert_eq!(
+            reported,
+            program.into_os_string(),
+            "the error must name the program it was given"
+        ),
+        other => panic!(
+            "a file with no executable bit was expected not to start, and this was {other:?}"
+        ),
+    }
+    assert!(
+        !report.exists(),
+        "the run was reported as not started and the script ran anyway, which would mean the \
+         report was wrong about the thing the product most needs it to be right about"
+    );
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs() {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    // The sharpest difference between the two families, and the question
+    // `P3-T002` left open. A Windows path is UTF-16, so a name that is not
+    // valid Unicode cannot exist on that side at all and the test below pins
+    // the refusal. A Unix path is bytes, and the bytes are the name: the file
+    // is created with a name that is not valid UTF-8, named to the runner, and
+    // run.
+    //
+    // What is being checked is that nothing on the way turned any of it into
+    // text. A `String` anywhere in the path — a `to_str`, a `to_string_lossy`,
+    // a `display()` reused to build something — replaces those bytes, and the
+    // replacement is either a refusal or, worse, a *different* file. Both are
+    // visible here: the report has to hold the argument back byte for byte, and
+    // the outcome has to name the program it was given.
+    let directory = scratch("unix-not-text");
+    let report = directory.join("report.bin");
+    let program = directory.join(OsString::from_vec(b"says-\xff\xfe-something".to_vec()));
+    write_a_script(&program, 0o755);
+
+    let payload = OsString::from_vec(b"an argument \xff\xfe outside UTF-8".to_vec());
+
+    let request = ProcessRequest::new(
+        program.clone(),
+        directory.clone(),
+        Limits::new(PATIENT, 4096, 4096),
+        Cancellation::new(),
+    )
+    .with_arguments([payload.clone(), report.clone().into_os_string()]);
+
+    let outcome = sure_core::process::run(&request).expect("the program runs");
+
+    assert_eq!(
+        outcome.termination(),
+        Termination::Exited { code: Some(0) },
+        "the program that ran has to be the one that was named"
+    );
+    assert_eq!(
+        outcome.program().as_bytes(),
+        program.as_os_str().as_bytes(),
+        "the outcome must carry the program back as the bytes it was given"
+    );
+    let written = fs::read(&report).unwrap_or_else(|error| {
+        panic!(
+            "nothing was written by the program, so it did not run: {error}. The program writes \
+             to the path in its second argument, so an absent report would also mean the \
+             arguments did not arrive."
+        )
+    });
+    assert_eq!(
+        written,
+        payload.as_bytes(),
+        "the argument has to arrive as the bytes it is; anything else is a conversion"
+    );
+
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[test]
+#[cfg(windows)]
+fn a_program_name_that_is_not_a_windows_path_is_refused_rather_than_mangled() {
+    use std::os::windows::ffi::OsStringExt;
+
+    // The other side of the Unix test above. A Windows path is UTF-16, so a
+    // name that is not valid Unicode is not a name this platform has: there is
+    // no file to find and no search that could find one. `0xD800` is a high
+    // surrogate with nothing after it, so it is not half of a pair.
+    //
+    // **What Windows says about that name was measured rather than predicted,
+    // and the prediction was wrong.** The guess was `ERROR_INVALID_NAME` (123),
+    // the error a path parser gives a path it cannot read. The measurement is
+    // `ERROR_FILE_NOT_FOUND` (2) — the answer a name with nothing at it gets —
+    // because the name reaches the file system as a name rather than being
+    // rejected as syntax. That is asserted here as a *comparison* rather than
+    // as a number: the same request with an ordinary name that is not there has
+    // to come back with the same answer. The number is not written into the
+    // test because the operating system's sentence is localized — this machine
+    // answers in Chinese, and only the `(os error N)` suffix is stable — and
+    // because the claim is the comparison, not the constant.
+    let directory = scratch("not-a-windows-path");
+    let limits = Limits::new(PATIENT, 4096, 4096);
+
+    let program = directory.join(OsString::from_wide(&[0xD800, 0x0041]));
+    let expected = program.clone().into_os_string();
+    let unspellable = sure_core::process::run(&ProcessRequest::new(
+        program,
+        directory.clone(),
+        limits,
+        Cancellation::new(),
+    ));
+
+    let ordinary = directory.join("no-such-program-here");
+    let missing = sure_core::process::run(&ProcessRequest::new(
+        ordinary,
+        directory.clone(),
+        limits,
+        Cancellation::new(),
+    ));
+
+    // Two things are asserted, and they are the two ways a runner could be
+    // wrong about it. It must refuse, and the refusal must carry the name back
+    // **as it was given**: a `to_string_lossy` on the way to the message would
+    // replace the surrogate with U+FFFD, and a caller comparing the name it
+    // sent with the name in the error would be reading a different path.
+    let (program, message) = match unspellable {
+        Err(ProcessError::NotStarted {
+            program, message, ..
+        }) => (program, message),
+        other => panic!(
+            "a name that is not a Windows path was expected not to start, and this was {other:?}"
+        ),
+    };
+    assert_eq!(
+        program, expected,
+        "the error must carry the name back as it was given rather than as text"
+    );
+
+    let control = match missing {
+        Err(ProcessError::NotStarted { message, .. }) => message,
+        other => panic!(
+            "the control — an ordinary name with nothing at it — was expected not to start, and \
+             this was {other:?}"
+        ),
+    };
+    assert_eq!(
+        message, control,
+        "a name that is not valid Unicode and a name with nothing at it have to be the same \
+         answer, or the difference is something the operating system did not make"
     );
 
     let _ = fs::remove_dir_all(&directory);

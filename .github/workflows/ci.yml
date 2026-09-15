@@ -33,7 +33,11 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # `--no-fail-fast` because the first failing target otherwise aborts the
+      # rest, and the targets are where the platform-specific tests live: a
+      # failure in `sure-core --lib` would hide every integration target after
+      # it, on the run whose whole job is to say what this platform does.
+      - run: cargo test --workspace --no-fail-fast
 
   shellcheck-secondary:
     runs-on: ubuntu-latest

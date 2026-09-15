@@ -1110,15 +1110,51 @@ fn link_target(raw: &str) -> Option<String> {
 /// `https://` is: the markup for a link and the markup for a path are the same
 /// and the author's meaning is not.
 ///
+/// **A drive letter is decided from the text rather than from the platform, and
+/// that is the whole reason [`names_a_drive`] exists.** `C:/Windows/win.ini` is
+/// an absolute path on Windows and an ordinary relative name on the other two,
+/// so asking [`std::path::Path`] gives two different answers to one question —
+/// and the answer a Unix machine gives turns a Windows-only instruction in a
+/// correct README into a `Contradicted` finding about a file that was never
+/// meant to be in the project. **A false finding is the failure this product
+/// treats as worse than a visible error**, so the reading is taken here, from
+/// the characters, where it is the same on every platform. The cost is a project
+/// that really does hold a file named `C:notes.md`: its claim is not made. That
+/// is coverage given up in the open, which the module documentation asks for,
+/// rather than a verdict that is wrong on two platforms out of three.
+///
 /// Asked of a link target and of a code span alike, because the ambiguity is in
 /// the text and not in the markup around it.
 fn is_absolute_reference(target: &str) -> bool {
-    target.contains("://")
+    names_a_drive(target)
+        || target.contains("://")
         || target.starts_with("//")
         || target.starts_with('/')
         || target.starts_with("mailto:")
         || target.starts_with("tel:")
         || target.starts_with("data:")
+}
+
+/// Whether a reference opens with a Windows drive letter, read as text.
+///
+/// One ASCII letter and a colon is the only spelling [`std::path::Component`]
+/// recognises as a [`std::path::Component::Prefix`] on Windows — `\\?\C:` and
+/// `\\server\share` are the other two, and both open with a separator that
+/// [`is_absolute_reference`] refuses before this is ever asked. Matching on the
+/// characters rather than on a `Prefix` is what makes one document read the same
+/// way on all three platforms, which is the point rather than an implementation
+/// detail.
+///
+/// A single letter is deliberate: `mailto:` and `tel:` are longer words and are
+/// refused by name, so nothing that reads as a scheme is caught here by accident,
+/// and a Unix file whose name merely contains a colon — `docs/guide:v2/x.md` —
+/// is untouched.
+fn names_a_drive(target: &str) -> bool {
+    let mut characters = target.chars();
+    matches!(
+        (characters.next(), characters.next()),
+        (Some(letter), Some(':')) if letter.is_ascii_alphabetic()
+    )
 }
 
 /// Whether a target is plain enough to be a path this crate will compare.
@@ -1803,6 +1839,47 @@ mod tests {
         ] {
             assert!(paths(document).is_empty(), "{document:?}");
         }
+    }
+
+    #[test]
+    fn a_location_on_one_platform_is_read_the_same_way_on_all_three() {
+        // `C:/Windows/Fonts/arial.ttf` is an absolute path to `Path` on Windows
+        // and one ordinary component to `Path` anywhere else. Read through
+        // `Path`, a README telling a Windows user where the toolchain lives
+        // would be checked on Linux and macOS, not found, and reported as a
+        // project missing a file it was never asked about — a false finding
+        // produced by the machine rather than by the document.
+        //
+        // This test asserts the same thing on all three platforms, which is the
+        // point: it cannot pass by running somewhere the `Prefix` happens to
+        // exist.
+        for document in [
+            // A code span needs a separator to be read at all, and this has one.
+            "Windows keeps its font in `C:/Windows/Fonts/arial.ttf`.\n",
+            // A link target is read whole, so the backslash spelling reaches
+            // the drive rule without the separator rule deciding it first.
+            "[toolchain](C:\\Rust\\bin)\n",
+            "[sdk](C:/sdk/tool.exe)\n",
+        ] {
+            assert!(paths(document).is_empty(), "{document:?}");
+        }
+
+        // **The control.** The same two shapes with the drive letter taken off,
+        // so that a reader can see the refusal above is the drive rule and not
+        // the separator rule or a character filter refusing everything in
+        // sight. Without these three lines the test would still pass if
+        // `path_candidates` returned nothing at all.
+        assert_eq!(
+            paths("See `C/Windows/Fonts/arial.ttf`.\n"),
+            ["C/Windows/Fonts/arial.ttf"]
+        );
+        assert_eq!(paths("[toolchain](Rust/bin)\n"), ["Rust/bin"]);
+        assert_eq!(paths("[sdk](sdk/tool.exe)\n"), ["sdk/tool.exe"]);
+
+        // A colon is not enough on its own — a single letter is what makes the
+        // difference — and these are names a Unix project may really have.
+        assert_eq!(paths("See `docs/guide:v2/x.md`.\n"), ["docs/guide:v2/x.md"]);
+        assert_eq!(paths("See `src/main.rs`.\n"), ["src/main.rs"]);
     }
 
     #[test]

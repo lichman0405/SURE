@@ -808,3 +808,179 @@ shape can be checked.
   platform — `AWKWARD` and `NOT_ASCII` are both well-formed text, and a path
   that is not valid UTF-8 is a question `P3-T003`'s comparison is the right
   place to meet, not this one.
+
+## P3-T003 — the platform matrix, and the flag that made the acceptance sentence false
+
+- **The acceptance is about CI, and what made it false was a flag rather than a
+  missing test.** "CI covers platform-specific runner behavior" needs two things
+  to be true: the tests have to exist, and the CI run has to actually execute
+  them. The second was false in a way no local gate could show. CI ran
+  `cargo test --workspace` with no `--no-fail-fast`, so **the first failing
+  target aborts every target after it** — and the targets are exactly where the
+  platform-specific tests live. A failure in `sure-core --lib` would hide every
+  integration target behind it, on the one run whose whole job is to say what
+  *this* platform does. The local gate set had the flag all along, so the two
+  command sets differed in the direction that costs a reading: the local one
+  could tell you more than CI could. `.github/workflows/ci.yml` now passes it,
+  and the bullet in `GITHUB_WORKFLOW.md` that read "CI has no `--no-fail-fast`"
+  was rewritten rather than left — it was true when written and would have gone
+  on reading as true. **The next run is the flag's own evidence, and it is
+  counted rather than asserted**: `macos-latest` failed with **14 more binaries
+  still to start after the failing test and 19 of the 33 parent result lines still
+  to come**. Under the old command the run would have stopped there and a reader
+  would have seen one target.
+
+- **The flag's justification was a claim about cargo, and it was measured rather
+  than quoted.** The sentence "the first failing target aborts the rest" had been
+  in `GITHUB_WORKFLOW.md` as a known fact. It is now a measurement on this
+  machine: with one deliberately failing test added to `sure-core --lib` — the
+  earliest target with real content — `cargo test --workspace` **launched three
+  targets** (563 passed, 1 failed) and stopped, while
+  `cargo test --workspace --no-fail-fast` **launched 29** and reported all 43
+  results. **Twenty-six targets, the whole of every integration test in the
+  workspace, were invisible under the old command and nothing in the output said
+  so.** The failing test was removed and `lib.rs` verified byte-identical to its
+  committed state before anything else ran.
+
+- **`#[cfg(unix)]` is a set of platforms, not a statement about the code — and
+  this task is the second time this branch has paid for it.** The first is
+  recorded in `GITHUB_WORKFLOW.md` against the four red runs before `c735a2f`,
+  where a test under a bare `unix` asserted **Linux's** case rule and macOS
+  disagreed. This time the row was *a path that is not text*, and the cell said
+  "Linux and macOS: bytes are bytes". **That sentence is true of Linux and false
+  of macOS**, and no amount of local reasoning could have found it: the machine
+  this branch is developed on never compiles `#[cfg(unix)]` at all. CI said so on
+  the first run — `rust (macos-latest)` in run `34929385200`, `Os { code: 92,
+  kind: Uncategorized, message: "Illegal byte sequence" }`, thrown by the
+  `fs::write` that was supposed to create the program. The fix is three columns
+  in the table instead of two, and a test for each cell.
+
+- **What macOS actually does is refuse the name, and the distinction from Linux
+  is narrower than "Unix" suggests.** macOS holds those bytes in an `OsString` as
+  happily as Linux does — `std::os::unix::ffi::OsStrExt` is available there, and
+  the repository already relies on it, which is why
+  `fingerprint::git::status::tests::a_path_that_is_not_valid_unicode_is_the_path_on_unix`
+  passes on both. What macOS will not do is **have a file by that name**: APFS
+  answers `EILSEQ`. So the two halves are a memory question and a filesystem
+  question, and only the second differs. The Linux test is therefore gated
+  `#[cfg(target_os = "linux")]` and not `#[cfg(unix)]`, and the macOS answer got
+  a test of its own rather than being left as a comment.
+
+- **The macOS test asserts a premise, and that is stated rather than dressed up.**
+  `a_program_whose_name_is_not_valid_utf8_cannot_be_created_on_macos` comes down
+  to `fs::write` failing with `EILSEQ` (92 on Darwin), plus a **control** — the
+  same bytes written in the same directory under a name the filesystem will take
+  — so that a permission problem or a scratch path that was never created cannot
+  satisfy it instead. It checks nothing SURE wrote, because SURE is never asked
+  anything: there is no request to make. It is here so the premise cannot rot
+  quietly — if a later macOS or a later filesystem accepts the name, this fails
+  and the row has to be rewritten **on purpose**, which is the same reason
+  `assert_what_the_platform_could_reach` states the platform's answer instead of
+  skipping itself.
+
+- **Four rows, and the table is the index rather than a document.** The matrix
+  lives in `process_runner.rs`'s module documentation with one column per
+  platform, and **each cell is held by a test that runs on the platform it is
+  about**. That is the only form in which the acceptance sentence is a fact
+  instead of an intention: the three jobs compile different code, so a cell whose
+  test is absent from a job's log is a cell nothing checked there. The table says
+  so next to itself, with the instruction to read a run **by test name and never
+  by total**.
+
+- **Five tests, three rows, and the paired shape is the point: only the negative
+  half is a contract.** "It did not run" and "it was not asked to run" are
+  different facts, and a test that shows only the first is satisfied by a runner
+  that refused everything. On the Unix side the two halves of *what a name may
+  be* and *a file that is not an image* are one pair of tests — the same bytes
+  written twice, same interpreter line, same arguments, differing in nothing but
+  the mode — so the positive half holds both rows at once and the negative half
+  says what a refusal looks like. The row *a path that is not text* gets an
+  answer on each of the three platforms instead, because all three answer it
+  differently: Linux carries the bytes through, macOS will not hold the name, and
+  Windows cannot spell it.
+
+- **The Unix pair shares one fixture and differs in one respect, which is what
+  makes it about that respect.** `write_a_script` writes a two-line `/bin/sh`
+  script — the smallest program a Unix test can put in front of the runner —
+  and sets the mode explicitly to `0o755` or `0o644`, because **a premise the
+  umask picks is not a premise**. `printf '%s'` rather than `echo`, because an
+  argument under test may be bytes that are not text and `echo` is free to do
+  what it likes with them. The name deliberately has no extension: on these
+  platforms a name is a path and nothing else, so a runner that had learned a
+  rule about extensions would have learned Windows'.
+
+- **The negative half is about SURE, not about the operating system.** The
+  without-the-bit test holds the same bytes, the same interpreter line and the
+  same arguments as the positive one, so the mode is the only difference — and
+  what it asserts is that the runner does not `chmod`, does not run `sh script`,
+  and does not choose an interpreter of its own so that a request can succeed.
+  A runner that "helpfully" made the file runnable would pass the positive test
+  and fail this one.
+
+- **A name that is not valid UTF-8 is the one case that can see a lossy
+  conversion, which is why the Linux test is worth its platform gate.**
+  `a_program_whose_name_is_not_valid_utf8_is_the_program_that_runs` builds the
+  program with `OsString::from_vec(b"says-\xff\xfe-something")` and the argument
+  with `b"an argument \xff\xfe outside UTF-8"`; the outcome carries the name back
+  `as_bytes`-equal and the report the program wrote is the argument's own bytes.
+  A lossy step anywhere on the way in is a different program or a different
+  argument, and this is the only case where that is visible — which is also why
+  the mutation the Windows test catches (below) can only be caught by a name that
+  is not valid Unicode.
+
+- **The Windows test's expected error was wrong, and the measurement corrected
+  the test rather than the reverse.** The first version asserted `os error 123`,
+  `ERROR_INVALID_NAME`, for a program name carrying an unpaired surrogate. **This
+  machine answers `os error 2`, `ERROR_FILE_NOT_FOUND`.** The assertion was
+  rewritten around what was measured, and it now holds three things:
+  `NotStarted`, the name carried back byte-for-byte, and — as a **control** —
+  that the message equals the one an ordinary missing name in the same directory
+  produces. A control rather than a literal, because the sentence the operating
+  system supplies is localized (this machine answers in Chinese) and only the
+  `(os error N)` suffix is stable, and a test that hard-coded the English
+  sentence would pass here and fail on the runners.
+
+- **The mutation added this time is the mistake that is actually available in
+  this code**: *"the program in the error is turned into text on the way out"*,
+  `OsString::from(request.program().to_string_lossy().into_owned())` at the
+  `NotStarted` site. It is caught, alone, by
+  `a_program_name_that_is_not_a_windows_path_is_refused_rather_than_mangled`.
+  This is the difference between this task's mutation and `P3-T002`'s: the four
+  matrix tests `P3-T002` added are characterisation tests that no mutation of the
+  runner as written can fail, and this one is not — the code already has the
+  round trip in it, and the mutation removes it.
+
+- **The harness is a new file rather than an edit, and the anchor is two lines
+  rather than one.** `mutate19.py` is `mutate18.py` plus one mutation, written
+  out because the suite changed and a harness is evidence about a specific tree.
+  The new mutation's anchor includes
+  `working_directory: working_directory.to_path_buf(),` as well as the `program:`
+  line, because `mutate18.py` already anchors on
+  `program: request.program().to_os_string(),` for a *different* replacement —
+  and a one-line anchor would have made the two indistinguishable to the
+  harness's own "already mutated?" preflight, which is the check that turns an
+  interrupted run into a refusal instead of a table of false verdicts.
+
+- **One `expect` message was written out because it is the one line in the file
+  that can fail for a reason belonging to the machine — and the next CI run is
+  where it earned that.** `the script runs` alone would have left the macOS
+  failure as a bare panic with no name for its cause. The message as written said
+  *"or this platform will not execute a file in the directory this test was able
+  to write one to, which is a fact about the mount and not about the runner"*,
+  and the failure that actually arrived was the neighbouring case: the file could
+  not be **created**. Both of `write_a_script`'s failure messages are written the
+  same way, and the one that fired named its own platform, path and errno in the
+  log — which is how the fix was written from the log rather than from a guess.
+
+- **What is not established.** The Unix-side tests **cannot be compiled or run on
+  this machine** — `#[cfg(unix)]` code is never compiled here — so CI is their
+  compiler and their only runner, and every statement about Linux and macOS in
+  this entry comes from a CI log rather than from a local measurement. The macOS
+  answer is measured on one filesystem (the runner's own temp directory on APFS);
+  nothing here claims what a macOS machine with a differently-formatted volume
+  would do, and the test that pins `EILSEQ` would be the thing that found out.
+  Nothing here claims a caller may name a `.cmd`/`.bat` — the owner's decision,
+  still open — and the two mutations declared unobservable, the grace for a
+  stream that is still open being made an hour and `taskkill`'s own failure being
+  read as the tree having been stopped, are still declared unobservable rather
+  than newly covered.

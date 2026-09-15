@@ -314,3 +314,99 @@ reverse-engineer from the code. The first is the acceptance itself.
   recurses inline. The sort is what keeps this module's read order — and so which
   file runs out of budget — from depending on a traversal order this module does
   not own.
+
+## P2-T009 — documented commands
+
+The acceptance is one sentence with two halves, and the second half is about
+something that did not happen, which is the kind of claim that is easy to write
+and hard to hold. The decisions below are the ones a later reader would otherwise
+have to reverse-engineer from the code.
+
+- **"Never auto-executed" is a property of the shape rather than a promise, and
+  the module says so in as many words.** No field on `DocumentedCommand` can hold
+  a program and its arguments — `text` is one string, and nothing in `sure-core`
+  ever splits it; `DocumentReport::of` is the only door a report can come through;
+  the provenance is *derived* from `Config::goal_source()` rather than restated,
+  so there is still one decision point; and `sure-cli` builds no `DocumentReport`
+  at all. The module comment declines the stronger claim: *there is no function
+  anywhere that turns a `DocumentedCommand` into an `ApprovedCommand`, so today
+  the path does not exist rather than being blocked.* A blocked path is a
+  promise; a missing one is a fact about the code.
+- **The half of the acceptance that is about what did not happen is held by
+  three assertions and a control.** `the_documented_command_left_no_trace_and_the_document_was_read`
+  asserts the command was found, that the document was read, **and** that a
+  recursive snapshot of the project is byte-identical before and after.
+  `the_helper_that_looks_for_new_files_can_see_a_new_file` exists because a
+  snapshot helper that never notices anything would satisfy the first test
+  perfectly — the false green in miniature, and the same reason the mutation
+  harness runs its baseline unmutated. The fixture's command is
+  `npm install && echo SURE-RAN-THIS > SURE-RAN-THIS.txt`, so the evidence of a
+  leak is a file whose absence is checkable rather than an inference.
+- **A `DocumentedCommand` *is* the claim, so there is one list here and not
+  two.** The module doc argues it: a fenced block carrying a language is the only
+  claim a document makes that SURE can read off by rule, and pulling requirements
+  out of a sentence would be the T17 hallucination. `lying-readme`'s description
+  ("README setup command does not work on fixture") and `P4-T005`'s acceptance
+  (claims/paths/scripts) both read it that way. Written down because it is a
+  decision and not an omission.
+- **Indentation is ignored when looking for a fence — the one deliberate
+  CommonMark departure.** A fence inside a list item is indented by the marker
+  width, so following the spec exactly reports *no commands* and a complete
+  reading: a silent loss dressed as a clean result, which `CLAUDE.md`'s ordering
+  puts below a visible error. `unindent` (at most three spaces) is kept for
+  headings, and the asymmetry is deliberate — a heading read wrongly costs a
+  section label, a fence read wrongly costs every command inside it.
+- **An untagged fence is a gap; a fence in another language is a decision.**
+  `FenceLanguage::Unstated` becomes `UnreadReason::UntaggedFence` and turns
+  `is_complete()` false; `FenceLanguage::Other` yields nothing and is not a loss.
+  There is no arm in `UnreadReason` for a block whose tag is known and is not a
+  shell, and its absence is the type saying so.
+- **The two budgets stop when they are already spent, and they mean the same
+  thing here as in `references.rs`.** `OutOfBytes` says *"the pass had already
+  read as many bytes as it will in one run"* and `OutOfBudget` the same for
+  documents, matching the accepted `references.rs` predicate, field names and
+  sentence. A pass therefore overshoots by at most one document. **The
+  alternative — refusing a document whose size would take the total over — is a
+  real reading of "budget", and it is the one this module's first test encoded,
+  which made that test impossible to pass.** The pre-flight baseline check in the
+  mutation harness is what caught it, and the fix went to the test rather than
+  the code, because `references.rs` is accepted with the already-spent reading
+  pinned by `the_byte_budget_stops_the_pass_before_the_file_budget_does`. Two
+  passes that both say "had already read" must not come to mean two things.
+- **Which files are documents is one function, asked from two places.**
+  `references.rs::declaration_candidate` now calls
+  `documents::is_document` rather than repeating the two name shapes, so the day
+  one of them learns about `.markdown` the other follows. The harness carries a
+  mutation that removes the shared call's `Document` arm, because the change has
+  to be visible from both sides.
+- **`commands.sort_by` is kept although it currently changes nothing**, and the
+  mutation that removes it is declared unobservable **with the reason and the
+  condition that would falsify it** — the same shape as `found.sort()` in
+  `P2-T008`, and for the same reason: the order is a guarantee this module does
+  not own, and the sort is what stops the report's order from depending on a
+  traversal it does not own.
+- **The reading machinery is self-contained rather than shared with
+  `references.rs`, and that is a cost rather than a benefit.** Both passes have a
+  `Reader`, an options struct and an unread reason; extracting one would have
+  meant editing accepted code that `mutate14.py`'s anchors sit on, and the two
+  passes have genuinely different budgets and different gap kinds. Recorded as a
+  deliberate duplication so a later reader can decide to pay for the extraction
+  rather than discover the duplication.
+- **`command_from` has no check that a command's text is non-empty, and there
+  was one until the mutation run found it.** The guard read as a safety net and
+  could never fire: `trimmed` comes from `raw.trim()`, so a line that is only `$`
+  has already lost the space before `strip_prefix("$ ")` is asked, and every line
+  that does match keeps a non-whitespace character after the space or `trim`
+  would have removed it. The test written to pin that guard
+  (`a_prompt_with_nothing_after_it_is_not_a_command`) passed for a different
+  reason than its name said — the failure mode `CLAUDE.md` ranks below a visible
+  error, and one the harness found by deletion rather than by inspection. The
+  guard was **removed rather than declared unobservable**, following `P2-T008`'s
+  precedent for the `symlink_metadata` guard that was not added for the same
+  reason: an unreachable guard implies protection that is not there. The
+  invariant moved to a comment stating why it holds and to the test that fails
+  if the `trim` is ever weakened, and the mutation that aimed at the guard now
+  aims at the `trim` instead.
+- **Nothing in the product reads a `DocumentReport` yet.** `sure-cli` builds
+  none, so this is a produced-and-read-by-nothing module in the same family as
+  `ComponentGraph`, recorded rather than presented as wired up.

@@ -2,14 +2,42 @@
 
 Last updated: 2026-09-15
 Branch: `claude/v0.1-autonomous`
-Progress: 29 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 in progress (9/12, `P2-T008` started and not yet accepted).**
-`P2-T012` is `accepted`, on a read run. `P2-T008`'s implementation is committed
-and pushed as `ec8456d`, its run `34877928915` is read in full below, and **the
-commit carrying this file is its acceptance** — so once it lands, phase `P2` is
-10 of 12. What the task added is described under "What `P2-T008` added" below.
+Progress: 31 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+(11/11), phase P2 in progress (11/12, `P2-T011` the one that remains).**
+`P2-T009`'s implementation is committed and pushed as `b644462`, its run
+`34917710402` is read in full below, and **the commit carrying this file is its
+acceptance**. What the task added is described under "What `P2-T009` added".
 
-**The one thing about `P2-T008` a reader should know before the detail: the
+**A correction, because the paragraph here said the opposite.** It read *"Phase
+`P2` is **10 of 12**; `P2-T009` is the one that would finish it."* Both halves
+were wrong. `P2` was **11 of 12** with `P2-T009` outstanding, and the task that
+finishes the phase is **`P2-T011`** — which this acceptance has just made READY,
+because its `depends_on` names `P2-T009`. The counts and the membership in this
+file are quoted from `taskctl status` rather than predicted, and this is the
+reason that rule exists: a prediction that is wrong reads exactly like a fact.
+
+**The one thing about `P2-T009` a reader should know before the detail: a
+documented command is read and never run, and that is a property of the shape
+rather than a promise.** No field on `DocumentedCommand` can hold a program and
+its arguments — `text` is one string and nothing in `sure-core` ever splits it —
+`DocumentReport::of` is the only door a report can come through, and `sure-cli`
+builds no such report at all. The module declines the stronger claim: there is
+no function that turns a `DocumentedCommand` into an `ApprovedCommand`, so the
+path **does not exist** rather than being blocked, and a blocked path would be a
+weaker thing to have said. The corollary a reader should carry: nothing in the
+product builds a `DocumentReport` yet, so the reading is a property of the module
+and its tests and not yet of a `sure` invocation — the same family as
+`ComponentGraph` in `P2-T007`. See "What `P2-T009` added".
+
+**Two things the `P2-T009` work found in its own code, both recorded because
+neither was visible by reading it.** The mutation harness's unmutated baseline
+was **not green** — which is the only reason the first of these was caught — and
+the survivor of the first mutation run was a `command_from` guard that could
+never fire, with a test that passed for a different reason than its name said.
+The guard was removed rather than declared unobservable and the test was fixed;
+the account is in "What `P2-T009` added" and in `progress/DECISIONS.md`.
+
+**The thing about `P2-T008` a reader should still know: the
 `.env` file is never opened, and that is a decision rather than a failure.** The
 acceptance asks for the keys a project requires without collecting values, and
 the module enforces that in the type — no field on `Reference` or `Declaration`
@@ -41,7 +69,8 @@ that run showed it does not always do.
 `P2-T007`; `3be88f1` records the run of the fix that `0907acf` follows; `4746c48`
 is `P2-T010`'s implementation; `63278c0` is the `P2-T010` acceptance; `d5261a6`
 is `P2-T012`'s implementation; `481066f` is the `P2-T012` acceptance; `ec8456d`
-is `P2-T008`'s implementation; the commit carrying this file is the `P2-T008`
+is `P2-T008`'s implementation; `cd530f6` is the `P2-T008` acceptance; `b644462`
+is `P2-T009`'s implementation; the commit carrying this file is the `P2-T009`
 acceptance. The acceptance of `P2-T007` is therefore **not** at the tip and never
 was, so the check for it is `git show --stat 0907acf` rather than
 `git log -1 --stat` — the sentence here used to name the wrong command, and a
@@ -98,24 +127,30 @@ Autonomous branch: `claude/v0.1-autonomous`
 
 ```
 Project: SURE | status: in_progress | phase: P2
-{ accepted: 30, queued: 136 }
-READY: P2-T009, P3-T001, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
+{ accepted: 31, queued: 135 }
+READY: P2-T011, P3-T001, P4-T006, P4-T007, P4-T008, P6-T001, P6-T005, P6-T007,
        P8-T001, P12-T008, P13-T001
 ```
 
-**`P2-T008` is `accepted`**, on run `34877928915`, and **`in_progress` is 0**, so
+**`P2-T009` is `accepted`**, on run `34917710402`, and **`in_progress` is 0**, so
 nothing is half-finished and the next session may start any READY task without
-adopting an orphan. Phase `P2` is **10 of 12**; `P2-T009` is the one that would
-finish it.
+adopting an orphan. Phase `P2` is **11 of 12**; **`P2-T011`** is the one that
+finishes it, and it entered the READY list by this acceptance.
 
-**The READY list went 11 → 11, and the membership changed.** `P2-T008` left the
-list by being accepted and `P4-T006` entered it in the same step, so the count is
-unchanged while the list is not — which is exactly why the list is quoted from
-the command rather than compared by length. `P4-T006` was blocked on `P2-T008`,
-so the dependency edge is now visible as this task's own effect rather than as
-P2-T008's. The list is quoted from the command rather than from a prediction,
-which is why a step that changes nothing is visible as nothing rather than as an
-omission.
+**The READY list went 11 → 11 again, and the membership changed again.** The
+previous acceptance recorded the same shape — a task leaving by being accepted
+and a dependent entering in the same step — and this one repeats it: `P2-T009`
+left and `P2-T011` entered, because `P2-T011`'s `depends_on` names `P2-T009`. The
+count is unchanged while the list is not, which is why the list is quoted from
+the command rather than compared by length, and why a step that changes nothing
+is visible as nothing rather than as an omission.
+
+**The phase arithmetic in this file was wrong until this acceptance, and the
+correction is in the header rather than only here.** `P2` was described as 10 of
+12 with `P2-T009` finishing it; it was 11 of 12, and `P2-T011` finishes it. The
+tally is now read out of `tasks/tasks.json` joined with `progress/state.json` —
+12 required tasks in `P2`, 11 accepted, 1 queued — rather than counted forward
+from the previous session's sentence.
 
 **What the acceptance tool fills and what it does not, read out of the file
 rather than assumed.** On `P2-T010`, `base_sha` and `head_sha` are both `null`
@@ -268,6 +303,97 @@ came out of getting these wrong in turn — 485, 482, 137, 0, 0.
 `store_concurrency` takes about a second and its children show up in the output
 as lines of nine characters each. `tests/store_concurrency.rs` and
 `tests/cli_contract.rs` are the only two files that spawn processes.
+
+## What `P2-T009` added
+
+`crates/sure-core/src/documents.rs`, and `crates/sure-core/tests/document_commands.rs`
+beside it. The acceptance is one sentence with two halves:
+
+> Extracted commands are untrusted documentation and never auto-executed merely
+> because documented.
+
+**The first half is a label, and the label is derived rather than restated.**
+`DocumentedCommand::source()` answers `Config::goal_source()`, so a project file
+is documentation here for the same reason it is documentation in
+`support::classify` — one decision point instead of two that happen to agree
+today. `as_requirement()` turns a command into a `Requirement` marked
+`with_raw_retained(true)`, because the text recorded is the document's own
+wording and not a paraphrase of it.
+
+**A `DocumentedCommand` *is* the claim, so there is one list here and not two.**
+A fenced block carrying a language is the only claim a document makes that SURE
+can read off by rule; prose is not, and pulling a requirement out of a sentence
+would be the T17 hallucination. `lying-readme`'s description ("README setup
+command does not work on fixture") and `P4-T005`'s acceptance both read it that
+way. It is written down as a decision because it is one.
+
+**The second half is about something that did not happen**, which is the kind of
+claim that is easy to write and hard to hold. It is held by asserting three
+things together — the command was found, the document was read, and a recursive
+snapshot of the project is byte-identical before and after — plus a control
+proving the snapshot helper can see a new file, because a helper that never
+notices anything would satisfy the first assertion perfectly. The fixture's
+command is `npm install && echo SURE-RAN-THIS > SURE-RAN-THIS.txt`, so the
+evidence of a leak is a file whose absence is checkable rather than an inference.
+`the_helper_that_looks_for_new_files_can_see_a_new_file` is that control and it
+is the reason the canary is evidence rather than decoration.
+
+**"Never auto-executed" is a property of the shape rather than a promise.** No
+field on `DocumentedCommand` can hold a program and its arguments; no
+shell-splitting exists anywhere in `sure-core`'s shipped code; `DocumentReport::of`
+is the only door a report can come through; and `sure-cli` builds no
+`DocumentReport` at all — `DocumentReport` and `DocumentedCommand` appear in
+exactly two files, the module and its test. The module declines the stronger
+claim in as many words: *there is no function anywhere that turns a
+`DocumentedCommand` into an `ApprovedCommand`, so today the path does not exist
+rather than being blocked.* A blocked path is a promise; a missing one is a fact
+about the code.
+
+**Indentation is ignored when looking for a fence, and that is the one deliberate
+departure from CommonMark.** A fence inside a list item is indented by the marker
+width, so following the spec exactly reports *no commands* and a complete reading
+— a silent loss dressed as a clean result. `unindent` (at most three spaces) is
+kept for headings, and the asymmetry is deliberate: a heading read wrongly costs
+a section label, a fence read wrongly costs every command inside it.
+
+**What the mutation run found, because neither finding was visible by reading
+the code.** `target/tmp/mutate15.py`, 37 mutations. The **unmutated baseline was
+not green** — `a_pass_that_has_read_its_byte_budget_refuses_the_rest` failed
+before any mutation was applied, because it encoded a *predictive* budget while
+this module and the accepted `references.rs` both check whether the budget is
+**already spent**, as `UnreadReason::OutOfBytes`'s own documentation says. With a
+30-byte budget and a 21-byte first document nothing could refuse the second, so
+the test could never pass; the fix went to the test and not the code, because
+`references.rs` is accepted with the already-spent reading pinned. **The 1017
+carried into this session as "all gates green" had been measured before those two
+budget tests were written and was never re-measured**, which is the whole reason
+that check exists. Then one observable mutation survived: it aimed at
+`command_from`'s `if text.is_empty()` guard, which **can never fire**, because
+`trimmed` comes from `raw.trim()` and a line that is only `$` has already lost
+the space before `strip_prefix("$ ")` is asked. The test written to pin that
+guard passed for a different reason than its name said. The guard was **removed
+rather than declared unobservable**, following `P2-T008`'s precedent for the
+`symlink_metadata` guard that was not added, and the mutation now aims at the
+`trim` instead.
+
+**One seam was changed outside the new module.** `references.rs`'s
+`declaration_candidate` now calls `documents::is_document` rather than repeating
+the two name shapes, so "which files are documents" has one answer, and the
+harness carries a mutation that removes the shared call's `Document` arm because
+the change is visible from both sides. `mutate14.py`, which is `P2-T008`'s
+harness, has no anchor on that function, so `P2-T008`'s accepted evidence is not
+disturbed by the change.
+
+**Not established.** Nothing in `sure-cli` builds a `DocumentReport`, so the
+reading is a property of the module and its tests and not yet of a `sure`
+invocation — the same family as `ComponentGraph`. The module does not parse
+Markdown beyond fence markers and ATX headings, and it does not decide whether a
+command is dangerous. A block whose tag is known and is not a shell yields
+nothing and is **not** a gap, which is a decision and has no arm in
+`UnreadReason`. And SURE does not know whether a documented command *works*:
+this module reproduces what the document says, and whether it is true is
+`lying-readme`'s question, which needs execution authorization this build does
+not have.
 
 ## What `P2-T008` added
 
@@ -1403,6 +1529,51 @@ pins it.** Recorded at this length because the tempting sentence — "the multis
 says the same thing on all three platforms" — is the one this file is supposed to
 be able to refuse, and it very nearly went in.
 
+### Reading run `34917710402`, `P2-T009`'s — and a log that needed its escape codes stripped
+
+Five jobs, five `success`: `bootstrap-validate-windows`, `rust (windows-latest)`,
+`rust (macos-latest)`, `rust (ubuntu-latest)`, `shellcheck-secondary`. Read out
+of the three rust logs rather than off the colours:
+
+| job | result lines | parents | children | passed | failed | ignored |
+|---|---|---|---|---|---|---|
+| `rust (windows-latest)` | 40 | 30 | 10 | 1019 | 0 | 1 |
+| `rust (macos-latest)` | 40 | 30 | 10 | 1021 | 0 | 1 |
+| `rust (ubuntu-latest)` | 40 | 30 | 10 | 1022 | 0 | 1 |
+
+**Windows CI equals the local Windows run exactly, value for value** —
+`[0, 0, 0, 0, 4, 4, 4, 6, 6, 7, 7, 8, 8, 9, 12, 14, 15, 18, 20, 23, 24, 30, 30,
+31, 33, 43, 46, 48, 88, 481]` — which is the comparison that means something.
+macOS and Ubuntu report 478 in the `sure-core` lib against 481 on Windows (−3,
+the pre-existing platform-gated tests) and differ elsewhere only in the same
+platform-conditional binaries that differed in `P2-T008`'s run.
+
+All 36 `documents::tests::*` names and all 20 `document_commands` names were read
+out of all three logs **by name**, with 0 `FAILED` lines in any of them. The
+by-name count needed one correction: a pattern anchored only on
+`documents::tests::` matches **41** distinct names, not 36, because another
+module's path also ends in `documents` — so the 36 is 41 minus the 5 that belong
+to it, and a prefix-anchored pattern would have quietly merged them. That is the
+same class of error as the by-name target counter in `P2-T008`'s run, one layer
+down.
+
+**One mechanical thing worth recording, because it silently produced a wrong
+answer first.** `gh run view --log` prefixes every line with
+`<job>\t<step>\t<timestamp> ` **and leaves cargo's ANSI colour codes in place**,
+so `^\s*Running ...` never matches and every result line is attributed to the
+unknown target `?`. The section-per-binary mapping is only recoverable after
+stripping `\x1b\[[0-9;]*m`. The counts above are unaffected — they come from the
+`test result:` lines — but the by-name attribution is not, and it was wrong until
+the escapes came out.
+
+**And the thing this run did not have to catch, because the harness caught it
+first.** The number carried into this session as "all gates green — 1017 passed"
+had been measured before the two byte-budget tests were written. Running the
+harness's unmutated baseline is what exposed it: the suite was red before a
+single mutation was applied. A push whose run is read is the rule; a *local*
+green that is quoted from an earlier measurement is the same failure one step
+earlier, and it is the reason the baseline check exists.
+
 ### Reading run `34877928915`, `P2-T008`'s — and a by-name counter that was quietly 22 long
 
 Run `34877928915`, commit `ec8456d`. All five jobs green. The three rust jobs
@@ -2121,6 +2292,66 @@ The fix also ran `sure-core --test store_concurrency` **8 times** with no failur
 Recorded here so the number is not mistaken for evidence: a test that fails about
 one run in five passing eight times is a smoke check, and the deterministic unit
 test is what justifies the fix.
+
+## Gate set, as run on `P2-T009`'s implementation commit
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all --check` | `FMT CLEAN` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **1019 passed, 0 failed, 1 ignored, across 40 result lines = 30 parent sections + 10 children** |
+| `node scripts/taskctl.mjs validate` | `state OK: 166 tasks` |
+| `pwsh -NoProfile -File scripts/Preflight-Windows.ps1` | `SURE Windows preflight passed.` |
+| `python target/tmp/mutate15.py` | **35 of 35 observable mutations caught, 2 declared unobservable and both missed as declared, 0 SKIP, 0 BUILD**, and `BASELINE IS NOT GREEN` fired on the first run rather than on this one |
+
+**1019 is `cd530f6`'s 963 + 56, and the 56 is attributed by binary name rather
+than only by total.** Locally the multiset moved two positions: `unittests
+src\lib.rs` for `sure-core` 445 → 481 (+36, the `documents` unit tests), and a
+**new** binary `tests\document_commands.rs` at 20. The local Windows multiset is
+the CI Windows multiset for this commit value for value —
+`0 0 0 0 4 4 4 6 6 7 7 8 8 9 12 14 15 18 20 23 24 30 30 31 33 43 46 48 88 481`.
+
+The result-line count went 39 → 40 and the parent count 29 → 30, **by exactly
+one**, which is the check that the +20 is one new test binary and not twenty
+functions scattered into existing ones. The 40 lines are 30 parents + 10 children;
+the children are the self-re-executing single-test runs, and the field that
+identifies a parent is `filtered out` — the **last** number on the `test result:`
+line — not `failed`. Grouping on `failed` was tried once in this session and made
+every row look like a parent.
+
+**This harness's first run was not clean, and it failed in the one way the
+baseline check exists to catch: the suite was red before a single mutation was
+applied.** `a_pass_that_has_read_its_byte_budget_refuses_the_rest` failed
+unmutated, so no verdict below it would have meant anything. The test encoded a
+*predictive* byte budget while this module and the accepted `references.rs` both
+check whether the budget is **already spent**. With a 30-byte budget and a
+21-byte first document, nothing can refuse the second, so the test could never
+pass — the arithmetic, not the assertion, was wrong. The fix went to the test and
+not to the code, because `references.rs` is accepted with the already-spent
+reading pinned by `the_byte_budget_stops_the_pass_before_the_file_budget_does`
+and by the same sentence in `UnreadReason::OutOfBytes`; **two passes that both
+say "had already read" must not come to mean two things.** The test now computes
+its budget from the document instead of using a round number and asserts that
+the *third* of three documents is the one refused.
+
+That failure also falsified a claim made earlier in the same session — "all gates
+green, 1017 passed / 0 failed" — which had been measured **before** those two
+budget tests were written and was then carried forward unmeasured. The number
+was not wrong when it was taken; it was stale when it was repeated, which is a
+distinction that does not help a reader who acts on it.
+
+The second finding was a survivor rather than a failure: one observable mutation
+was not caught, and it aimed at `command_from`'s `if text.is_empty()` guard. The
+guard **can never fire**, because `trimmed` comes from `raw.trim()` and a line
+that is only `$` has already lost the space before `strip_prefix("$ ")` is
+asked, and every line that does match keeps a non-whitespace character after the
+space or `trim` would have removed it. The test written to pin that guard —
+`a_prompt_with_nothing_after_it_is_not_a_command` — passed for a different reason
+than its name said, which is the failure mode `CLAUDE.md` ranks below a visible
+error. The guard was **removed rather than declared unobservable**, following
+`P2-T008`'s precedent for the `symlink_metadata` guard that was not added for the
+same reason, and the mutation now aims at the `trim` instead so that the
+invariant has something pointing at it.
 
 ## Gate set, as run on `P2-T008`'s implementation commit
 
@@ -3673,27 +3904,34 @@ it needs a Mac.
    with 0 failed and 1 ignored over **37** result lines = **27 parents + 10
    children** — read, and attributed by binary name, in "Reading run
    `34869888350`".
-2. **`P2-T008` is implemented, pushed, read, and accepted by the commit carrying
-   this file.** `ec8456d` is the implementation, run `34877928915`, all five jobs
-   green, **963 / 965 / 966** with 0 failed and 1 ignored over **39** result
-   lines = **29 parents + 10 children** — read, attributed by binary name, and
-   with all 25 + 18 new test names found by name on all three jobs, in "Reading
-   run `34877928915`". **Its run is read in the session that took it rather than
-   committed** — the stopping rule at the top of this file, so the `P2-T008`
-   chain ends at the acceptance.
-3. **The next task is a real choice, and the list is 11 long.**
-   `P2-T009`, `P3-T001`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`,
-   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **10 of 12**;
-   `P2-T009` alone would finish it. **`P4-T006` is new on this list and it is
-   this task's doing** — its `depends_on` names `["P2-T008"]`, so accepting
-   `P2-T008` is what made it ready. `P2-T009` extends the same family as this
-   task and the component graph that is **still read by nothing** —
-   `ComponentGraph` is produced by `P2-T007` and consumed by no binary — so the
-   argument for finishing phase `P2` is coherence of a phase rather than a pull
-   from anything downstream. `P4-T007` and `P6-T005` remain **unread by any
-   session**, and `P6-T007` and `P8-T001` have been on the list since before this
-   file was written. **Read the task entry before choosing**; do not choose from
-   this paragraph.
+2. **`P2-T009` is implemented, pushed, read, and accepted by the commit carrying
+   this file.** `b644462` is the implementation, run `34917710402`, all five jobs
+   green, **1019 / 1021 / 1022** with 0 failed and 1 ignored over **40** result
+   lines = **30 parents + 10 children** — read, attributed by binary name, and
+   with all 36 `documents::tests::*` names and all 20 `document_commands` names
+   found by name on all three jobs, in "Reading run `34917710402`". **Its run is
+   read in the session that took it rather than committed** — the stopping rule at
+   the top of this file, so the `P2-T009` chain ends at the acceptance.
+3. **`P2-T008` is accepted and its chain is complete.** `ec8456d` is the
+   implementation, run `34877928915`, all five jobs green, **963 / 965 / 966**
+   with 0 failed and 1 ignored over **39** result lines = **29 parents + 10
+   children** — read, attributed by binary name, and with all 25 + 18 new test
+   names found by name on all three jobs, in "Reading run `34877928915`". Its run
+   is read in the session that took it, so its chain ends at the acceptance.
+4. **The next task is a real choice, and the list is 11 long.**
+   `P2-T011`, `P3-T001`, `P4-T006`, `P4-T007`, `P4-T008`, `P6-T001`, `P6-T005`,
+   `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`. Phase `P2` is **11 of 12**;
+   **`P2-T011` alone would finish it.** **`P2-T011` is new on this list and it is
+   this task's doing** — its `depends_on` names `["P2-T009"]`, so accepting
+   `P2-T009` is what made it ready, and it is the natural next task: it is
+   "Implement observed/documented/inferred intent model", it consumes what
+   `P2-T009` produces, and it would close the phase. `P2-T009`'s own deliverable
+   still has **no consumer** — `sure-cli` builds no `DocumentReport`, the same
+   shape as `ComponentGraph` — so the argument for `P2-T011` next is that it is
+   the task most likely to read one. `P4-T007` and `P6-T005` remain **unread by
+   any session**, and `P6-T007` and `P8-T001` have been on the list since before
+   this file was written. **Read the task entry before choosing**; do not choose
+   from this paragraph.
 4. **`P2-T012` left an owner decision open, and it is the first one a reader
    should look at.** Whether a project's support level states what SURE *can do*
    (today's answer: every project is level C) or what SURE *understands* (which

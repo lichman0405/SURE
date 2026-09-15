@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P4",
-  "last_updated": "2026-09-15T12:38:02.997Z",
+  "last_updated": "2026-09-15T13:27:35.000Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -445,13 +445,21 @@
       "notes": "Implementation 0bf09c2 (the four checks a Node project declares, and the gaps where it declares none): crates/sure-core/src/checks/mod.rs new (651 lines, 5 unit tests: check_id and its digest domain, MissingKind, MissingCommand), crates/sure-core/src/checks/node.rs new (1022 lines, the proposer: the role table over ScriptRole, Runner::of, NodeChecks::of/proposed/missing/is_empty/not_checked), crates/sure-core/tests/node_checks.rs new (731 lines, 9 integration tests), crates/sure-core/src/lib.rs +1 line (pub mod checks;), crates/sure-core/src/schedule.rs 3 edits (CheckReason::DeclaredCommand's variant doc, its plain_description, and the paragraph that said no shipped code proposes a check), crates/sure-core/src/discover/node.rs MANIFEST made pub, crates/sure-core/src/fingerprint/mod.rs mod digest made pub(crate), crates/sure-core/tests/check_schedule.rs the MAY_PROPOSE list and a test that every exemption is still a proposer. 8 files, +2556 -25. Run 34969139607 carries 0bf09c2: all five jobs success (bootstrap-validate-windows, rust on windows/macos/ubuntu, shellcheck-secondary). Windows 1334 / macOS 1335 / Ubuntu 1336 passed, 0 failed, 11 ignored, 50 result lines = 40 parents + 10 children; +28 on every platform against 34964462368 (the P4-T001 acceptance, 1306/1307/1308, 49 result lines), the extra result line being the new node_checks binary. The per-platform offsets (windows = ubuntu - 2, macOS = ubuntu - 1) are identical in both runs, so they predate this task; crates/sure-core/src/paths/compare.rs carries the same shape of platform-gated tests (#[cfg(windows)] / #[cfg(unix)] / #[cfg(target_os = \"macos\")]). The per-target pairing in the captured macOS job log is NOT trustworthy -- a result line carries its predecessor's target name -- so the per-platform totals are quoted from the result-line sum, which is label-independent and reproduces on all three platforms, and no per-test attribution is claimed. Gates on 0bf09c2: fmt clean, clippy clean, cargo test --workspace --no-fail-fast = 50 result lines / 1334 passed / 0 failed / 11 ignored locally, which is exactly the CI Windows figures; taskctl validate = state OK: 166 tasks; validate-bootstrap.mjs = SURE bootstrap validation OK: 17 phases, 166 tasks. Adversarial: 23 mutations, 23 caught, 8 by exactly one test, 0 survivors, 0 INCONCLUSIVE, 0 NOT RESTORED, 37 binaries run for every mutation (mutate3.py now passes --no-fail-fast, without which cargo test stops at the first failing target and every catch list is a floor). The first run of the set left 4 survivors, all of them the same finding -- a claim with prose and no test -- and the test written to kill the fourth survived its own mutation until its fixture was changed to a project that declares nothing. started_at is backfilled: `taskctl start` was not run before the implementation was committed, so the real start time was not recorded. It is set to 0bf09c2's author date (2026-09-15T20:29:16+08:00) rather than to the acceptance moment, which would assert the task started after it finished."
     },
     "P4-T003": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-15T13:05:10.020Z",
+      "finished_at": "2026-09-15T13:27:35.000Z",
+      "base_sha": "424b213",
+      "head_sha": "4fd5663",
+      "evidence": [
+        "run 34974577185: all five jobs success (bootstrap-validate-windows, shellcheck-secondary, rust on windows/macos/ubuntu)",
+        "cargo test --workspace --no-fail-fast: windows 1363 / macos 1364 / ubuntu 1365 passed, 0 failed, 11 ignored, 51 result lines each; +29 on every platform against run 34970543344",
+        "cargo fmt --all -- --check clean; cargo clippy --workspace --all-targets --all-features -- -D warnings clean",
+        "node scripts/taskctl.mjs validate: state OK, 166 tasks; node scripts/validate-bootstrap.mjs: 17 phases, 166 tasks",
+        "mutation set target/tmp/p4t003-mutations.py: 17 mutations over 3 files, 17 caught, 0 survived, 0 inconclusive",
+        "run index: target/tmp/runindex.py sets progress/HANDOFF.md's run table against gh run list --branch claude/v0.1-autonomous; before this acceptance it read 75 runs / 66 rows / 9 missing / one out-of-order pair, and after the nine rows and the swap it reads 75 / 75 / 0 / 0",
+        "row sweep: target/tmp/rowsweep.py re-measured every row against its own downloaded log; 29 rows from e10f620 to ea2f826 state parent_passed where the label says passed and all 29 match that column exactly, so it is one convention that changed rather than 29 drifting figures, and 0 rows state a triple belonging to neither column"
+      ],
+      "notes": "Declared test/lint/type/build tools become checks; the install is an InstallStep and never a CheckProposal. Runner::Unknown refuses a project that names two installers rather than running a third interpreter. MissingKind::NotReadable added for a declaration in a shape SURE cannot read. install_step's anchor and sentence are carried from the finding that decided them (new Managers::agreed_finding), so the unreachable constant fallback the first version had is gone. started_at is the real timestamp taskctl recorded, run after the implementation was written but before it was committed. base_sha is the accepted P4-T002 head and head_sha is the commit the run carries; the accept commit that follows it changes progress files only. The acceptance also ran the two mechanical checks the handoff's own run-table section prescribes, and both found real gaps: nine runs had no row (five of them named nowhere in the file at all), two rows were in the wrong order, and 29 rows report parent_passed under the label passed. The nine rows and the swap are corrected; the 29 figures are left as read and labelled instead, because rewriting them into the other definition would replace a labelled inconsistency with an unlabelled one. The check scripts are target/tmp/runindex.py and target/tmp/rowsweep.py."
     },
     "P4-T004": {
       "status": "queued",

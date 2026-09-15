@@ -279,8 +279,20 @@ fn abandoned_path(report: &Path) -> PathBuf {
 }
 
 /// The file a waiting child rewrites on every poll, with the count so far.
+///
+/// **This name only ever holds a finished heartbeat.** The child writes each one
+/// beside it and renames it into place; see [`child_serves_until_released`] for
+/// the kill that makes the difference matter.
 fn heartbeat_path(report: &Path) -> PathBuf {
     report.with_extension("beating")
+}
+
+/// Where the next heartbeat is written before it is renamed into place.
+///
+/// A file a reader never looks at, which is the point: what it holds may be half
+/// of a write, and nothing depends on that.
+fn heartbeat_in_progress_path(report: &Path) -> PathBuf {
+    report.with_extension("beating-part")
 }
 
 /// Wait until `condition` holds, or `limit` passes, and say which it was.
@@ -394,7 +406,18 @@ fn child_serves_until_released() {
             return;
         }
         polls += 1;
-        fs::write(heartbeat_path(&report), polls.to_string()).expect("the heartbeat");
+        // **Written aside and renamed into place, so that no reader ever sees a
+        // heartbeat that was cut in half.** `fs::write` truncates before it
+        // writes, and the test that reads this file reads it *after* stopping
+        // this process: a kill landing between the truncate and the write would
+        // leave a heartbeat that is empty, and empty is the one reading that
+        // means "this child never got going" — a false sentence about a child
+        // that had been polling. A rename is atomic on both platforms, so the
+        // file under [`heartbeat_path`] is either the previous heartbeat or the
+        // next one and never a state in between.
+        let in_progress = heartbeat_in_progress_path(&report);
+        fs::write(&in_progress, polls.to_string()).expect("the heartbeat");
+        fs::rename(&in_progress, heartbeat_path(&report)).expect("the heartbeat in place");
         std::thread::sleep(Duration::from_millis(POLL_INTERVAL));
     }
 }
@@ -719,6 +742,22 @@ fn a_service_that_is_dropped_is_stopped_anyway() {
         wait_until(PATIENT, || started_path(&report).exists()),
         "the service never came up, so this test would prove nothing about \
          dropping one"
+    );
+
+    // **And wait for the child to be in its loop, because a heartbeat that was
+    // never written is not an instrument.** `started` is written one statement
+    // before the first heartbeat, which on an idle machine is the same instant —
+    // and on a loaded one the child can be descheduled between the two and killed
+    // before it ever polls, which is what happened on macOS in run `34982674189`:
+    // `wait_until_quiet` read a file that had never been created, saw two equal
+    // empty readings and answered "quiet". The guard below caught it and said so,
+    // which is that guard working — so this establishes the premise instead of
+    // assuming it, and what the drop is then measured against is a child that was
+    // demonstrably running and demonstrably waiting.
+    assert!(
+        wait_until(PATIENT, || heartbeat_path(&report).exists()),
+        "the child never wrote a heartbeat, so it never reached its wait and \
+         dropping the service here would measure something other than a stop"
     );
 
     drop(service);

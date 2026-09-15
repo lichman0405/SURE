@@ -78,11 +78,16 @@
 //! # What this does not do
 //!
 //! **It does not decide which checks exist.** There is no catalogue here and no
-//! rule that derives a check from a project. Proposals arrive from a caller, and
-//! **no shipped code proposes one yet** — that is `P4-T002`, `P4-T003` and
-//! `P4-T004`, the three tasks that turn a discovered component into checks for a
-//! stack. The source rule in `tests/check_schedule.rs` names the files that may
-//! construct a [`CheckProposal`] and says it is written to fail on that day.
+//! rule that derives a check from a project: proposals arrive from a caller, and
+//! this module orders and gates them. Since `P4-T002` there *is* a caller —
+//! [`crate::checks`] turns a discovered project's own declarations into
+//! proposals — and this module still knows nothing about it. `P4-T003` (Python)
+//! and `P4-T004` (Rust) add siblings there, and none of them changes anything
+//! here, which is the property the seam was built for.
+//!
+//! The source rule in `tests/check_schedule.rs` names the files that may
+//! construct a [`CheckProposal`]; it was written to fail on the day the first
+//! proposer landed, it did, and the list is where that arrival was recorded.
 //!
 //! **It does not run anything.** Nothing here builds a
 //! [`Command`](std::process::Command), and the checks a schedule admits are
@@ -120,16 +125,25 @@ use crate::consent::PlannedCheck;
 /// the scan did not find.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckReason {
-    /// The project declares the command this check would run, and where.
+    /// The project declares a command this check would run, and where.
     ///
     /// `declared_in` is the path of the file the command was read from, so a
-    /// reader can go and look. `command` is the declared line as the project wrote
-    /// it, not a rendering of it: a check whose reason shows `npm run build` is
-    /// showing the thing that was declared.
+    /// reader can go and look.
+    ///
+    /// **`command` is the line SURE would run, and it is a rendering of what the
+    /// project declared rather than a copy of it.** A `package.json` with
+    /// `"build": "tsc -b"` is a project whose build check runs `npm run build` —
+    /// the manifest declares a script, and what a person is asked to allow is the
+    /// command that starts it. The two are different strings and this field holds
+    /// the second; the first draft of this variant's documentation said it held
+    /// the first, which would have had SURE print a sentence about a command line
+    /// that is nowhere in the project. `P4-T002`'s proposer is what fills it, and
+    /// `the_reason_names_the_command_sure_would_run_and_not_the_script_text` in
+    /// `tests/node_checks.rs` is what holds the two apart.
     DeclaredCommand {
-        /// The manifest or task file the command was declared in.
+        /// The manifest or task file the declared command was read from.
         declared_in: String,
-        /// The declared command, as the project wrote it.
+        /// The command SURE would run, as the project's package manager spells it.
         command: String,
     },
     /// A component is on the stack this check is for.
@@ -163,7 +177,7 @@ impl CheckReason {
             Self::DeclaredCommand {
                 declared_in,
                 command,
-            } => format!("Your project declares `{command}` in {declared_in}."),
+            } => format!("SURE would run `{command}`, from {declared_in}."),
             Self::StackPresent { component, stack } => {
                 format!("{component} is a {stack} project.")
             }

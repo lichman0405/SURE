@@ -25,12 +25,18 @@
 //! lands on the same sequence — and that sequence is asserted to be the one the
 //! three rules describe, so a stably wrong plan fails too.
 //!
-//! **Three: nothing in the product proposes a check yet.** No shipped file
-//! outside `schedule.rs` names [`CheckProposal`], [`CheckReason`],
-//! [`ExecutionRequirements`] or [`PlanBuilder`]. **This rule is meant to fail** —
-//! `P4-T002`, `P4-T003` and `P4-T004` are the tasks that will write the first
-//! proposer, and the day one lands this test must fail and that commit edits the
-//! list below, which is the moment somebody reads this paragraph.
+//! **Three: nothing in the product proposes a check except where it is allowed
+//! to.** No shipped file outside [`MAY_PROPOSE`] names [`CheckProposal`],
+//! [`CheckReason`], [`ExecutionRequirements`] or [`PlanBuilder`]. **This rule was
+//! meant to fail, and it did**: it was written before any proposer existed, it
+//! fired on `P4-T002`, and that commit named `src/checks/node.rs` in the
+//! exemption with its reason — which is the moment this paragraph said somebody
+//! would read it. The rule survives the failure rather than being deleted,
+//! because what it now holds is the thing that is still true: a file that begins
+//! proposing checks is a decision, and the list is where the decision is written
+//! down. `every_exemption_from_the_proposer_rule_is_still_a_proposer` is the
+//! other half — an exemption whose file has stopped naming any of the four words
+//! is a hole in the rule rather than an exception to it, and it fails too.
 //!
 //! **Four: the schedule cannot spell a verdict.** The shipped part of
 //! `schedule.rs` names `CheckStatus` zero times, and `CheckResult` four times in
@@ -97,6 +103,35 @@ const PROPOSER_WORDS: &[&str] = &[
     "CheckReason",
     "ExecutionRequirements",
     "PlanBuilder",
+];
+
+/// The shipped files allowed to name a proposal type, each with its reason.
+///
+/// **The reason is part of the entry rather than a comment beside it.** The
+/// failure message rule three prints asks for exactly two things — the file and
+/// why — and a `(path, reason)` pair makes those one act instead of two, so a
+/// file cannot arrive on this list without a sentence explaining it.
+///
+/// Paths are as the `crates/` walk spells them, which is what
+/// `the_two_spellings_of_the_builders_path_agree` exists to keep honest: a path
+/// from the repository root used here would match nothing, and a rule that
+/// exempts nothing while appearing to exempt something is a false green with a
+/// comment on it.
+const MAY_PROPOSE: &[(&str, &str)] = &[
+    (
+        THE_BUILDER_IN_THE_WALK,
+        "the four types are defined here, so this file names all of them by \
+         definition and always will",
+    ),
+    (
+        "src/checks/node.rs",
+        "`P4-T002`, the first proposer: it turns a JavaScript or TypeScript \
+         project's declared scripts into checks. `schedule.rs`'s own \
+         documentation named this task as the one that would arrive, and the \
+         rule below is what made its arrival a deliberate edit rather than a \
+         quiet one. `P4-T003` (Python) and `P4-T004` (Rust) belong here too when \
+         they land, and each of them is a diff to this list",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could
@@ -597,11 +632,14 @@ fn the_schedule_hands_enforcement_its_checks_in_the_same_order() {
 }
 
 #[test]
-fn nothing_in_the_product_proposes_a_check_yet() {
+fn nothing_in_the_product_proposes_a_check_that_is_not_meant_to() {
     // Rule three, and it is an absence, so it is the source text that is checked.
     let mut found = Vec::new();
     for (path, text) in shipped_sources() {
-        if path.ends_with(THE_BUILDER_IN_THE_WALK) {
+        if MAY_PROPOSE
+            .iter()
+            .any(|&(exempt, _)| path.ends_with(exempt))
+        {
             continue;
         }
         for (number, line) in text.lines().enumerate() {
@@ -617,9 +655,8 @@ fn nothing_in_the_product_proposes_a_check_yet() {
         found.is_empty(),
         "a shipped file has begun proposing checks. That is a real change and not a \
          test to update: it means something in the product decides which checks \
-         exist, which is `P4-T002`/`P4-T003`/`P4-T004`'s work and not this task's. \
-         Add the file to this rule's exemption and say why, in the same commit. \
-         Found:\n  {}",
+         exist, which is `P4-T002`/`P4-T003`/`P4-T004`'s work. Add the file to \
+         `MAY_PROPOSE` and say why, in the same commit. Found:\n  {}",
         found.join("\n  ")
     );
 
@@ -634,6 +671,69 @@ fn nothing_in_the_product_proposes_a_check_yet() {
     assert!(empty.is_empty());
     assert!(empty.planned_checks().is_empty());
     assert_eq!(empty.mode(), ExecutionMode::InspectOnly);
+}
+
+#[test]
+fn every_exemption_from_the_proposer_rule_is_still_a_proposer() {
+    // **An exemption has two ways to be wrong and the rule above can only see
+    // one.** It fails when a file that should be on the list is not; it says
+    // nothing at all about a file that is on the list and no longer names any of
+    // the four words. That second one is the worse failure, because it is a hole
+    // in the rule that reads exactly like a deliberate exception: the next file
+    // to begin proposing checks could be moved into the same directory, or the
+    // exemption widened by a character, and every test here would still pass.
+    let sources = shipped_sources();
+
+    for &(exempt, why) in MAY_PROPOSE {
+        assert!(
+            !why.trim().is_empty(),
+            "{exempt} is exempted with no reason, and the reason is the whole of \
+             what makes this list a decision rather than a loophole"
+        );
+        assert!(
+            exempt.starts_with("src/"),
+            "{exempt} is not spelled the way the `crates/` walk spells a path, so \
+             it matches no file and exempts nothing"
+        );
+
+        let (path, text) = sources
+            .iter()
+            .find(|(path, _)| path.ends_with(exempt))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{exempt} is exempted from the proposer rule and is not a \
+                     shipped source file, so the exemption names nothing"
+                )
+            });
+
+        let named: Vec<&str> = PROPOSER_WORDS
+            .iter()
+            .copied()
+            .filter(|word| {
+                text.lines()
+                    .any(|line| !is_prose(line) && line.contains(word))
+            })
+            .collect();
+        assert!(
+            !named.is_empty(),
+            "{path} is exempted from the proposer rule and no longer names any of \
+             {:?} in code, so the exemption has outlived what it was written for \
+             and the rule is now weaker than it reads. Remove the entry.",
+            PROPOSER_WORDS
+        );
+    }
+
+    // And the list is not empty, which is the vacuity guard for the whole test:
+    // an empty `MAY_PROPOSE` would satisfy every assertion above and would mean
+    // rule three had quietly become "nothing in the product proposes a check".
+    assert!(!MAY_PROPOSE.is_empty());
+    assert!(
+        MAY_PROPOSE
+            .iter()
+            .any(|&(exempt, _)| exempt == THE_BUILDER_IN_THE_WALK),
+        "the builder is not on the list, so the rule above is checking a file \
+         that defines the four words it looks for"
+    );
 }
 
 #[test]

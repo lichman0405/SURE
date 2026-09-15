@@ -69,7 +69,14 @@ pub use super::MemberManifest;
 pub use super::pattern::{Unresolved, UnresolvedReason};
 
 /// The manifest every Node project has, relative to the project root.
-const MANIFEST: &str = "package.json";
+///
+/// Public since `P4-T002`, which is the first layer above discovery that has to
+/// spell this path itself: a check is about a manifest, and a check layer that
+/// wrote `"package.json"` a second time could name a file this module does not
+/// read. One spelling, and `the_manifest_path_is_the_one_discovery_reads` in
+/// `tests/node_checks.rs` is what holds the two together rather than this
+/// sentence.
+pub const MANIFEST: &str = "package.json";
 
 /// The lockfiles recognised, each naming the manager that writes it.
 ///

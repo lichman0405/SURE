@@ -8,6 +8,7 @@
 
 pub mod approval;
 pub mod browser;
+pub mod checks;
 pub mod components;
 pub mod config;
 pub mod consent;

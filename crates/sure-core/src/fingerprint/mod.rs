@@ -112,7 +112,12 @@
 
 pub mod choose;
 pub mod content;
-mod digest;
+// `pub(crate)` since `P4-T002`. It was private, and the module that needed it
+// was already here — a check's identity is a digest, and the alternative was a
+// second hashing recipe in `checks/` that could drift from this one without
+// either changing. Widening it to the crate rather than to the world: a digest
+// is not a promise SURE makes to a caller, and making it `pub` would be one.
+pub(crate) mod digest;
 pub mod error;
 pub mod git;
 mod read;

@@ -39,7 +39,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::discover::{DiscoverOptions, Discovery, discover};
-use sure_core::documents::{DocumentOptions, DocumentReport, ShellLanguage, UnreadReason};
+use sure_core::documents::{
+    DocumentOptions, DocumentReport, PathForm, ShellLanguage, UnreadReason,
+};
 use sure_core::intent::{
     IntentSource, ProjectIntent, RequirementAuthority, may_claim_full_fulfilment,
 };
@@ -145,6 +147,15 @@ fn texts(report: &DocumentReport) -> Vec<String> {
         .commands()
         .iter()
         .map(|command| command.text.clone())
+        .collect()
+}
+
+/// The text of every path a report's documents name, in order.
+fn paths(report: &DocumentReport) -> Vec<String> {
+    report
+        .paths()
+        .iter()
+        .map(|path| path.text.clone())
         .collect()
 }
 
@@ -662,6 +673,98 @@ fn a_document_full_of_prose_yields_no_commands_and_no_gap() {
     assert_eq!(
         report.plain_description(),
         "SURE read 1 document and found 0 commands."
+    );
+}
+
+#[test]
+fn a_document_that_names_paths_reports_them_beside_its_commands() {
+    let fixture = Fixture::new("documented paths");
+    fixture.write(
+        "README.md",
+        "# Setup\n\
+         \n\
+         Put your key in `config/local.toml`, following\n\
+         [`docs/keys.md`](docs/keys.md#rotation).\n\
+         \n\
+         ## Build\n\
+         \n\
+         ```bash\n\
+         cp .env.example .env\n\
+         ```\n",
+    );
+
+    let report = fixture.report();
+
+    // The fence is a command and the prose is not; the prose names two paths and
+    // the fence names none, and that separation is the one walk doing both.
+    assert_eq!(texts(&report), ["cp .env.example .env"]);
+    assert_eq!(paths(&report), ["config/local.toml", "docs/keys.md"]);
+
+    let span = &report.paths()[0];
+    assert_eq!(span.line, 3);
+    assert_eq!(span.section.as_deref(), Some("Setup"));
+    assert_eq!(span.form, PathForm::CodeSpan);
+    assert_eq!(span.display_path(), "README.md");
+
+    let link = &report.paths()[1];
+    assert_eq!(link.line, 4);
+    assert_eq!(link.form, PathForm::LinkTarget);
+    assert_eq!(link.text, "docs/keys.md", "the fragment is not a file");
+    assert_eq!(link.section.as_deref(), Some("Setup"));
+}
+
+#[test]
+fn the_paths_of_two_documents_come_back_in_document_and_line_order() {
+    let fixture = Fixture::new("path order");
+    fixture.write("README.md", "See [a](docs/a.md).\n");
+    fixture.write("docs/notes.md", "Then `src/b.ts`.\n");
+
+    let report = fixture.report();
+    assert_eq!(
+        paths(&report),
+        ["docs/a.md", "src/b.ts"],
+        "README.md sorts before docs/notes.md and its path is on the earlier line"
+    );
+    assert_eq!(report.paths()[1].display_path(), "docs/notes.md");
+}
+
+#[test]
+fn a_document_the_pass_never_opened_contributes_no_paths() {
+    let fixture = Fixture::new("paths out of budget");
+    fixture.write("README.md", "See [a](docs/a.md).\n");
+    fixture.write("docs/notes.md", "See [b](docs/b.md).\n");
+
+    let report = fixture.report_with(&DocumentOptions::default().with_max_files(1));
+    assert_eq!(paths(&report), ["docs/a.md"]);
+    assert_eq!(
+        report.unread().len(),
+        1,
+        "and the file it did not open is said"
+    );
+    assert!(!report.is_complete());
+}
+
+#[test]
+fn the_paths_are_what_the_document_said_and_not_what_is_on_disk() {
+    // The boundary this module is, written as a test so that a later reader does
+    // not have to take it from a comment: `docs/gone.md` does not exist and
+    // `docs/here.md` does, and the report says the same thing about both. Whether
+    // a documented path is there is `P4-T005`'s question; this pass answers only
+    // what the document named.
+    let fixture = Fixture::new("paths unchecked");
+    fixture.write("docs/here.md", "nothing in particular\n");
+    fixture.write(
+        "README.md",
+        "See [gone](docs/gone.md) and [here](docs/here.md).\n",
+    );
+
+    let report = fixture.report();
+    assert_eq!(paths(&report), ["docs/gone.md", "docs/here.md"]);
+    assert!(report.is_complete());
+    let printed = everything(&report);
+    assert!(
+        !printed.contains("missing"),
+        "the pass that reads documents does not decide that a path is absent: {printed}"
     );
 }
 

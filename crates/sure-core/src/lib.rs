@@ -30,6 +30,7 @@ pub mod safety;
 pub mod scan;
 pub mod schedule;
 pub mod service;
+pub mod setup;
 pub mod store;
 pub mod support;
 

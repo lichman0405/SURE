@@ -110,6 +110,42 @@
 //! the author stated something — so it does not make
 //! [`DocumentReport::is_complete`] false.
 //!
+//! # The second list, and why a path in prose is the same kind of thing as a
+//! command in a fence
+//!
+//! A document also names **paths** — *"put your key in `src/config.ts`"*, *"see
+//! [`docs/setup.md`](docs/setup.md)"* — and `P4-T005` checks those. They are read
+//! here rather than in a second pass over the same files for the reason the
+//! module has one reader: the byte budget, the unread accounting and the walk
+//! are the same, and two passes over one file are how two readings of one
+//! document come to disagree.
+//!
+//! **A command and a path are both markup, and that is what makes them one
+//! decision rather than two.** The fence is the author saying *this is something
+//! you run*; the backtick and the link are the author saying *this is something
+//! in the project*. A path written in prose — "the config file is in the
+//! `config` directory" — is not read at all, because there is no markup saying
+//! which noun in that sentence is a path and SURE does not pick.
+//!
+//! **The two lists never overlap, and that is arranged rather than hoped for.**
+//! Paths are read from the lines *outside* every fence, so the same line cannot
+//! be both. A fence's own text is a command — `cp .env.example .env` names two
+//! paths and is one thing to run — and pulling paths out of it would report the
+//! two halves of a command as two claims about the project.
+//!
+//! **A one-word span is not read as a path, and this is the rule's whole cost.**
+//! `` `Cargo.toml` `` names a file, and SURE does not check it. The reason is
+//! `` `process.env.NAME` ``: no whitespace, a dot, letters — the same shape, and
+//! a document full of them would produce a page of claims about files that do
+//! not exist, which is the false finding this product treats as worse than a
+//! visible error. So a span is a path candidate only when it has a `/` in it,
+//! and the coverage that costs is stated here rather than paid for by guessing.
+//! A link target is different: `[setup](setup.md)` is a target with no separator
+//! in it and is still unambiguously a pointer, so link targets are read whole.
+//!
+//! Nothing here checks a path either. Whether `src/config.ts` is there is
+//! `P4-T005`'s question, and this module answers only what the document said.
+//!
 //! # What it does not do
 //!
 //! **It does not run anything.** That is the whole point; see above.
@@ -135,7 +171,8 @@
 //!
 //! **It does not check the claims.** Whether a documented command works, or
 //! names a script the manifest declares, is `P4-T005`. [`Self::as_requirements`]
-//! is where this module hands them on with their label attached.
+//! is where this module hands them on with their label attached, and
+//! [`Self::paths`] is where the second list is handed on beside it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -213,6 +250,101 @@ impl DocumentedCommand {
             self.source(),
         )
         .with_raw_retained(true)
+    }
+}
+
+/// A path a document in the project names in its markup.
+///
+/// [`Self::text`] is what was between the markup, with a link target's fragment
+/// removed and nothing else changed: no `..` is folded away, no trailing `/` is
+/// added or dropped, and no separators are rewritten. **It is a `String` and not
+/// a [`PathBuf`] for that reason** — the document named something, and SURE has
+/// not resolved it against anything. [`Self::display_target`] is the string with
+/// its separators normalised for printing, and [`Self::as_path`] is the only
+/// place the text becomes a path at all.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DocumentedPath {
+    /// The path, as the document wrote it, minus a link's `#fragment`.
+    pub text: String,
+    /// Which piece of markup named it.
+    pub form: PathForm,
+    /// The nearest heading above it, as the document wrote it.
+    ///
+    /// Recorded for the reason [`DocumentedCommand::section`] is: the heading is
+    /// the markup that says what a path is *for*, and it is kept rather than
+    /// interpreted.
+    pub section: Option<String>,
+    /// The document, relative to the project root.
+    pub path: PathBuf,
+    /// The 1-based line the path is on.
+    pub line: usize,
+}
+
+impl DocumentedPath {
+    /// The document as text, with `/` on every platform.
+    #[must_use]
+    pub fn display_path(&self) -> String {
+        display_path(&self.path)
+    }
+
+    /// The path as text, with `/` on every platform.
+    ///
+    /// The components are joined here rather than by printing the string as
+    /// written, because a document may write `docs\setup.md` on a machine that
+    /// runs on Windows and a report has to name one path one way wherever SURE
+    /// runs. Nothing else is changed: this is not a normalisation, and a path
+    /// that was written wrong is displayed wrong.
+    #[must_use]
+    pub fn display_target(&self) -> String {
+        display_path(self.as_path())
+    }
+
+    /// The text as a path, for comparing against what SURE saw.
+    ///
+    /// The one conversion, kept in one place so that a reader can find every
+    /// point at which a document's text becomes something the filesystem could
+    /// be asked about. It resolves nothing: the separators are whatever the
+    /// document wrote, and `..` is left where it is.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        Path::new(&self.text)
+    }
+}
+
+/// The markup a documented path was written in.
+///
+/// Kept because the two forms fail differently. A link target is a pointer the
+/// author meant a reader to follow; a code span is a name inside a sentence, and
+/// the sentence around it can change what the name means. A report that showed
+/// only the path would let a reader treat one as the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PathForm {
+    /// A markdown link or image target: `[text](target)`.
+    LinkTarget,
+    /// An inline code span: `` `target` ``.
+    CodeSpan,
+}
+
+impl PathForm {
+    /// Every form, in a fixed order.
+    pub const ALL: &'static [Self] = &[Self::LinkTarget, Self::CodeSpan];
+
+    /// The form as a stable word.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LinkTarget => "link_target",
+            Self::CodeSpan => "code_span",
+        }
+    }
+
+    /// The sentence a person reads.
+    #[must_use]
+    pub const fn plain_description(self) -> &'static str {
+        match self {
+            Self::LinkTarget => "in a link",
+            Self::CodeSpan => "in backticks",
+        }
     }
 }
 
@@ -481,6 +613,8 @@ pub struct DocumentReport {
     pub documents: Vec<PathBuf>,
     /// Every command found, in document-and-line order.
     pub commands: Vec<DocumentedCommand>,
+    /// Every path named in a document's markup, in document-and-line order.
+    pub paths: Vec<DocumentedPath>,
     /// Every document or block this pass meant to read and did not.
     pub unread: Vec<Unread>,
     /// The limits this pass ran under.
@@ -509,6 +643,7 @@ impl DocumentReport {
     pub fn with_options(discovery: &Discovery, options: &DocumentOptions) -> Self {
         let mut documents = Vec::new();
         let mut commands = Vec::new();
+        let mut paths = Vec::new();
         let mut unread = Vec::new();
 
         let mut reader = Reader::new(options);
@@ -520,10 +655,11 @@ impl DocumentReport {
                     continue;
                 }
             };
-            let (found, missed) = commands_in(&text, &path);
+            let found = mentions_in(&text, &path);
             documents.push(path);
-            commands.extend(found);
-            unread.extend(missed);
+            commands.extend(found.commands);
+            paths.extend(found.paths);
+            unread.extend(found.unread);
         }
 
         // By document and line rather than by the derived order, which would put
@@ -535,6 +671,7 @@ impl DocumentReport {
             root: discovery.root.clone(),
             documents,
             commands,
+            paths,
             unread,
             options: *options,
             scan_was_complete: discovery.scan.is_complete(),
@@ -545,6 +682,18 @@ impl DocumentReport {
     #[must_use]
     pub fn commands(&self) -> &[DocumentedCommand] {
         &self.commands
+    }
+
+    /// Every path named in a document's markup, in document-and-line order.
+    ///
+    /// **A path here is what a document said, and whether it is there is a
+    /// different question.** [`Self::is_complete`] is what makes *"the documents
+    /// do not name it"* a sentence SURE may say, and a caller that checks these
+    /// without asking it is reporting on however much of the project it happened
+    /// to read.
+    #[must_use]
+    pub fn paths(&self) -> &[DocumentedPath] {
+        &self.paths
     }
 
     /// Every document this pass opened, in path order.
@@ -719,9 +868,22 @@ struct OpenFence {
     language: FenceLanguage,
 }
 
-/// Every command in one document, and every block SURE could not classify.
-fn commands_in(text: &str, path: &Path) -> (Vec<DocumentedCommand>, Vec<Unread>) {
+/// Everything one document gives, read in one walk over its lines.
+///
+/// One function rather than two passes for the reason the module gives: the two
+/// lists are the same kind of thing, and a second walk is a second chance for
+/// them to disagree about where a fence opens.
+struct Mentioned {
+    commands: Vec<DocumentedCommand>,
+    paths: Vec<DocumentedPath>,
+    unread: Vec<Unread>,
+}
+
+/// Every command and every path in one document, and every block SURE could not
+/// classify.
+fn mentions_in(text: &str, path: &Path) -> Mentioned {
     let mut commands = Vec::new();
+    let mut paths = Vec::new();
     let mut unread = Vec::new();
     let mut open: Option<OpenFence> = None;
     let mut section: Option<String> = None;
@@ -747,14 +909,240 @@ fn commands_in(text: &str, path: &Path) -> (Vec<DocumentedCommand>, Vec<Unread>)
                         });
                     }
                     open = Some(fence);
-                } else if let Some(heading) = heading_of(raw) {
-                    section = Some(heading);
+                } else {
+                    if let Some(heading) = heading_of(raw) {
+                        section = Some(heading);
+                    }
+                    // **Inside the `else`, so a fence's own opening line is not
+                    // read for paths.** A fence line is markup about what
+                    // follows it, and the tags it may carry are not prose.
+                    for (text, form) in path_candidates(raw) {
+                        paths.push(DocumentedPath {
+                            text,
+                            form,
+                            section: section.clone(),
+                            path: path.to_path_buf(),
+                            line,
+                        });
+                    }
                 }
             }
         }
     }
 
-    (commands, unread)
+    // By document and line, then by where in the line they start, which is the
+    // order `scan` sorts by and the order a person reading the document finds
+    // them in. The markdown forms are found left to right in one pass, so the
+    // tie between two on one line is already the document's order.
+    paths.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    paths.dedup();
+
+    Mentioned {
+        commands,
+        paths,
+        unread,
+    }
+}
+
+/// Every path candidate on one line, in the order it appears.
+///
+/// One left-to-right walk over the bytes, so a line holding both forms reports
+/// them in the order the document wrote them. **The walk advances past markup it
+/// has read**, which is what keeps a `](` inside a code span from being read as
+/// a link and a backtick inside a link's text from being read as a span: the
+/// outer form is decided first and the inner one is part of it.
+///
+/// A backtick or a `[` that opens nothing recognisable costs one byte and the
+/// walk continues, so an apostrophe-free line with a lone backtick still has its
+/// links read. Only ASCII bytes are stepped over one at a time, and no ASCII byte
+/// can appear inside a multi-byte character, so every slice below is on a
+/// character boundary.
+fn path_candidates(line: &str) -> Vec<(String, PathForm)> {
+    let mut found = Vec::new();
+    let bytes = line.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'`' => match code_span(&line[index..]) {
+                Some((inner, consumed)) => {
+                    if let Some(candidate) = span_candidate(inner) {
+                        found.push((candidate, PathForm::CodeSpan));
+                    }
+                    index += consumed;
+                }
+                None => index += 1,
+            },
+            b'[' => match link_at(&line[index..]) {
+                Some((target, consumed)) => {
+                    if let Some(target) = link_target(target) {
+                        found.push((target, PathForm::LinkTarget));
+                    }
+                    index += consumed;
+                }
+                None => index += 1,
+            },
+            _ => index += 1,
+        }
+    }
+
+    found
+}
+
+/// The target of one markdown link starting at the front of `rest`, and how many
+/// bytes of `rest` it took.
+///
+/// The shape is `[text](target)`, and the text may hold anything — including a
+/// code span, which is how a document writes
+/// `` [`docs/setup.md`](docs/setup.md) `` and means one pointer rather than two.
+/// The text is skipped rather than read, because what the author wrote in the
+/// brackets is what a reader sees and what is in the parentheses is where it
+/// goes.
+///
+/// The first `](` is taken, and nothing is matched inside it, so a link whose
+/// text contains a `]` is read as a link with a longer target rather than as no
+/// link at all. The cost is a target that then fails [`is_plain_target`] and is
+/// dropped, which is the direction this refuses in.
+fn link_at(rest: &str) -> Option<(&str, usize)> {
+    let open = rest.find("](")?;
+    let after = &rest[open + 2..];
+    let close = after.find(')')?;
+    Some((&after[..close], open + 2 + close + 1))
+}
+
+/// The inside of one inline code span starting at the front of `rest`, and how
+/// many bytes of `rest` it took.
+///
+/// A span is a run of backticks, the text, and a run of the same length — the
+/// CommonMark rule, which is what lets a document write `` ``a `b` c`` `` and
+/// mean one span rather than three. The text may not begin or end with a space
+/// and be padded, which is the rule that makes `` `` `x` `` `` mean `x` with a
+/// backtick in it rather than a span of `x`.
+fn code_span(rest: &str) -> Option<(&str, usize)> {
+    let opener = rest.bytes().take_while(|byte| *byte == b'`').count();
+    if opener == 0 {
+        return None;
+    }
+    let after_open = &rest[opener..];
+    let closer = find_run(after_open, opener)?;
+    let inner = &after_open[..closer];
+    Some((inner, opener + closer + opener))
+}
+
+/// Where a run of exactly `length` backticks starts, if one does.
+///
+/// A longer run is not the closer — `` ``a```b`` `` holds a run of three that
+/// belongs to the text — so the scan steps over runs rather than stopping at the
+/// first backtick it sees.
+fn find_run(text: &str, length: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'`' {
+            index += 1;
+            continue;
+        }
+        let run = bytes[index..]
+            .iter()
+            .take_while(|byte| **byte == b'`')
+            .count();
+        if run == length {
+            return Some(index);
+        }
+        index += run;
+    }
+    None
+}
+
+/// The path a code span names, if it names one.
+///
+/// See the module documentation for the rule and its cost: a span with no `/` in
+/// it is not read, because `` `Cargo.toml` `` and `` `process.env.NAME` `` have
+/// the same shape and only one of them is a file.
+///
+/// The separator rule is what makes the second refusal necessary: a URL has a
+/// separator in it, so `` `https://example.com/app` `` would clear the first gate
+/// and be read as a path in the project — a finding about SURE's reading rather
+/// than about the project. A span is refused on the same grounds as a link
+/// target, and [`is_absolute_reference`] is the one rule for both.
+fn span_candidate(inner: &str) -> Option<String> {
+    if !inner.contains('/') {
+        return None;
+    }
+    if is_absolute_reference(inner) || !is_plain_target(inner) {
+        return None;
+    }
+    Some(inner.to_owned())
+}
+
+/// The path a link target names, if it names one.
+///
+/// A target that is a URL, an anchor into this page, or a `mailto:` is not a
+/// path in the project and is dropped rather than reported. Anything else is
+/// taken whole — a link is a pointer, so `[setup](setup.md)` names a file even
+/// though the text has no separator in it.
+fn link_target(raw: &str) -> Option<String> {
+    let target = raw.trim();
+    // A title — `[a](b "Title")` — is not part of the target.
+    let target = match target.find(['"', '\'']) {
+        Some(quote) => target[..quote].trim_end(),
+        None => target,
+    };
+    // A fragment — `[a](docs/setup.md#install)` — is a place inside the file,
+    // and the file is what a scan can have an entry for.
+    let target = match target.find('#') {
+        Some(hash) => &target[..hash],
+        None => target,
+    };
+    let target = target.trim();
+    if target.is_empty() || is_absolute_reference(target) {
+        return None;
+    }
+    if !is_plain_target(target) {
+        return None;
+    }
+    Some(target.to_owned())
+}
+
+/// Whether a reference points somewhere that is not a path in this project.
+///
+/// `//host/path` is a protocol-relative URL and is here for the same reason
+/// `https://` is: the markup for a link and the markup for a path are the same
+/// and the author's meaning is not.
+///
+/// Asked of a link target and of a code span alike, because the ambiguity is in
+/// the text and not in the markup around it.
+fn is_absolute_reference(target: &str) -> bool {
+    target.contains("://")
+        || target.starts_with("//")
+        || target.starts_with('/')
+        || target.starts_with("mailto:")
+        || target.starts_with("tel:")
+        || target.starts_with("data:")
+}
+
+/// Whether a target is plain enough to be a path this crate will compare.
+///
+/// The characters refused here are the ones that mean a target is a *pattern*, a
+/// *template* or *several things at once*: `*?` are globs, `{}` and `<…>` are
+/// placeholders, `$` is a variable, `;&|` and a backtick are shell, `%` is a
+/// URL escape, and a space is a separator between two names. None of them is a
+/// path a scan could have an entry for, and reporting one as missing would be a
+/// finding about SURE's reading rather than about the project.
+///
+/// A backslash is **not** refused: `docs\setup.md` is how a Windows author
+/// writes a path, and [`DocumentedPath::display_target`] is where the two
+/// separators become one.
+fn is_plain_target(target: &str) -> bool {
+    const REFUSED: &[char] = &[
+        ' ', '\t', '*', '?', '{', '}', '<', '>', '$', ';', '&', '|', '`', '%', '"', '\'',
+    ];
+    if target.chars().any(|c| REFUSED.contains(&c)) {
+        return false;
+    }
+    // A Windows separator is accepted and normalised by `display_target`, but a
+    // target that is only separators names nothing.
+    !target.chars().all(|c| c == '/' || c == '\\')
 }
 
 /// The one line a document gives as a command, or `None` if it gives none.
@@ -922,9 +1310,29 @@ fn unindent(line: &str) -> &str {
 mod tests {
     use super::*;
 
+    /// The two lists one document gives, for a test that wants both.
+    ///
+    /// The pair is the shape the tests written before paths existed ask for, and
+    /// it is one view of [`Mentioned`] rather than a second reading: a helper
+    /// that called the extractor twice could disagree with itself.
+    fn commands_in(text: &str, path: &Path) -> (Vec<DocumentedCommand>, Vec<Unread>) {
+        let mentioned = mentions_in(text, path);
+        (mentioned.commands, mentioned.unread)
+    }
+
     /// Every command in one document, with nothing else in the way.
     fn commands(text: &str) -> Vec<DocumentedCommand> {
         commands_in(text, Path::new("README.md")).0
+    }
+
+    /// Everything one document mentions, read as a project's `README.md`.
+    fn read(text: &str) -> Mentioned {
+        mentions_in(text, Path::new("README.md"))
+    }
+
+    /// The text of every path one document names, in the order it was read.
+    fn paths(text: &str) -> Vec<String> {
+        read(text).paths.into_iter().map(|path| path.text).collect()
     }
 
     /// The text of every command in one document.
@@ -1327,5 +1735,219 @@ mod tests {
         let note = DocumentReport::execution_note();
         assert!(note.contains("has not run"), "{note}");
         assert!(note.contains("will not run"), "{note}");
+    }
+
+    // The second list. Every test below is about what a document *said*, and none
+    // of them resolves a path or asks the filesystem anything: that is `P4-T005`.
+
+    #[test]
+    fn a_link_target_is_read_whole_and_needs_no_separator_in_it() {
+        // The coverage rule that costs something applies to a code span, not to
+        // a link. Brackets and parentheses are markup saying *this is a pointer*,
+        // and a pointer to `setup.md` names a file whatever is inside it.
+        assert_eq!(paths("See [the setup notes](setup.md).\n"), ["setup.md"]);
+        assert_eq!(paths("![diagram](docs/flow.png)\n"), ["docs/flow.png"]);
+    }
+
+    #[test]
+    fn a_code_span_without_a_separator_is_not_read_as_a_path() {
+        // The cost of that rule, written down as a test so a later change to it
+        // is a decision rather than a regression: `Cargo.toml` names a file and
+        // `process.env.NAME` names a variable, and the two have one shape.
+        assert!(paths("Edit `Cargo.toml`.\n").is_empty());
+        assert!(paths("Read `process.env.NAME`.\n").is_empty());
+        assert_eq!(paths("Edit `src/config.ts`.\n"), ["src/config.ts"]);
+    }
+
+    #[test]
+    fn a_path_written_in_both_forms_is_one_pointer() {
+        // `` [`docs/setup.md`](docs/setup.md) `` is how a document points at a
+        // file it also names, and it is one claim about the project rather than
+        // two. The link is read first and the span in its text is part of it.
+        let mentioned = read("See [`docs/setup.md`](docs/setup.md).\n");
+        assert_eq!(mentioned.paths.len(), 1);
+        assert_eq!(mentioned.paths[0].text, "docs/setup.md");
+        assert_eq!(mentioned.paths[0].form, PathForm::LinkTarget);
+    }
+
+    #[test]
+    fn a_reference_that_points_out_of_the_project_is_not_a_path() {
+        // The markup for a link and the markup for a path in the project are the
+        // same, and the author's meaning is not. Each of these is a real link and
+        // none of them is a file SURE could look for.
+        for document in [
+            "[site](https://example.com)\n",
+            "[cdn](//cdn.example.com/app.js)\n",
+            "[host](/etc/hosts)\n",
+            "[mail](mailto:someone@example.com)\n",
+            "[phone](tel:+15550100)\n",
+            "[inline](data:text/plain,hello)\n",
+            "[top](#top)\n",
+            "[empty]()\n",
+        ] {
+            assert!(paths(document).is_empty(), "{document:?}");
+        }
+    }
+
+    #[test]
+    fn a_code_span_that_names_a_url_is_not_a_path_either() {
+        // A span has to contain a separator to be read at all, and a URL
+        // contains two, so the separator rule alone lets these through. The
+        // author meant a place on the network and not a file in the project,
+        // and SURE reporting the project as missing it would be a finding about
+        // SURE's reading rather than about the project.
+        for document in [
+            "Deploy to `https://example.com/app`.\n",
+            "Fetch `//cdn.example.com/app.js`.\n",
+            "The route is `/api/health`.\n",
+        ] {
+            assert!(paths(document).is_empty(), "{document:?}");
+        }
+    }
+
+    #[test]
+    fn a_fragment_is_dropped_and_the_file_it_points_into_is_kept() {
+        assert_eq!(
+            paths("[install](docs/setup.md#install)\n"),
+            ["docs/setup.md"]
+        );
+        assert_eq!(paths("[b](docs/setup.md#a-b)\n"), ["docs/setup.md"]);
+        // A bare fragment names a place in this document, not a file.
+        assert!(paths("[top](#top)\n").is_empty());
+    }
+
+    #[test]
+    fn a_title_after_a_target_is_not_part_of_it() {
+        assert_eq!(paths("[a](docs/setup.md \"Setup\")\n"), ["docs/setup.md"]);
+        assert_eq!(paths("[a](docs/setup.md 'Setup')\n"), ["docs/setup.md"]);
+    }
+
+    #[test]
+    fn a_pattern_or_a_template_is_not_a_path() {
+        // Each of these is a name SURE would have to *decide* before it could
+        // compare it against anything, and a missing-path finding built on a
+        // guess is the false positive this product treats as worse than a
+        // visible error. `is_plain_target` is the whole of the refusal.
+        for document in [
+            "[all](src/*.rs)\n",
+            "[any](src/?.ts)\n",
+            "[name](<name>.md)\n",
+            "[home]($HOME/notes.md)\n",
+            "[escaped](a%20b.md)\n",
+            "[two](a.md b.md)\n",
+            "[shell](a;b.md)\n",
+            "[piped](a.md|b.md)\n",
+            "[only](//)\n",
+        ] {
+            assert!(paths(document).is_empty(), "{document:?}");
+        }
+        assert!(paths("Write `src/${NAME}.ts`.\n").is_empty());
+    }
+
+    #[test]
+    fn a_windows_separator_is_a_path_and_not_a_reason_to_refuse_one() {
+        // A Windows author writes `docs\setup.md`, and refusing it would report a
+        // path the document clearly named as unreadable markup. How the two
+        // separators are *displayed* is `display_target`'s business and is
+        // platform-dependent, so this checks the reading and not the display.
+        assert_eq!(paths("[setup](docs\\setup.md)\n"), ["docs\\setup.md"]);
+        assert_eq!(
+            read("[setup](docs\\setup.md)\n").paths[0].as_path(),
+            Path::new("docs\\setup.md")
+        );
+    }
+
+    #[test]
+    fn a_path_records_the_document_the_line_the_section_and_the_form() {
+        let mentioned = read("# Setup\n\nSee [a](docs/a.md) and `src/b.ts`.\n");
+        assert_eq!(mentioned.paths.len(), 2);
+        assert_eq!(mentioned.paths[0].display_path(), "README.md");
+        assert_eq!(mentioned.paths[0].line, 3);
+        assert_eq!(mentioned.paths[0].section.as_deref(), Some("Setup"));
+        assert_eq!(mentioned.paths[1].form, PathForm::CodeSpan);
+        assert_eq!(mentioned.paths[1].line, 3);
+    }
+
+    #[test]
+    fn the_order_is_the_order_the_document_wrote_them_in() {
+        // Two on one line come back left to right. That is the walk's order and
+        // not the sort's: the sort orders by document and line, and both of these
+        // are on the same one.
+        assert_eq!(
+            paths("First `docs/a.md`, then [b](docs/b.md).\n"),
+            ["docs/a.md", "docs/b.md"]
+        );
+    }
+
+    #[test]
+    fn a_path_a_document_names_twice_on_one_line_is_one_claim() {
+        assert_eq!(
+            paths("See [a](docs/a.md), and [again](docs/a.md).\n"),
+            ["docs/a.md"]
+        );
+    }
+
+    #[test]
+    fn a_fence_is_read_for_commands_and_not_for_paths() {
+        // `cp .env.example .env` names two paths and is one thing to run. Pulling
+        // paths out of it would report the two halves of a command as two claims
+        // about the project, which is why the two lists cannot overlap.
+        let mentioned = read("```bash\ncp .env.example .env\n```\n\nThen edit `src/config.ts`.\n");
+        assert_eq!(mentioned.commands.len(), 1);
+        assert_eq!(mentioned.paths.len(), 1);
+        assert_eq!(mentioned.paths[0].text, "src/config.ts");
+        assert_eq!(mentioned.paths[0].line, 5);
+    }
+
+    #[test]
+    fn a_fence_line_is_not_prose_and_its_tag_is_not_a_path() {
+        // The opening line of a fence is markup about what follows it. Reading a
+        // path out of the tag would report `docs/x.md` as a file the document
+        // names, from a line that only says what language the block is in.
+        let mentioned = read("```bash title=\"docs/x.md\"\nnpm test\n```\n");
+        assert!(mentioned.paths.is_empty());
+        assert_eq!(mentioned.commands.len(), 1);
+    }
+
+    #[test]
+    fn a_backtick_that_opens_nothing_does_not_hide_the_rest_of_the_line() {
+        // A backtick or a `[` that opens no recognisable form costs one byte and
+        // the walk continues. Without that, one stray backtick would hide every
+        // link after it on the line.
+        assert_eq!(paths("A lone ` and [a](docs/a.md).\n"), ["docs/a.md"]);
+        assert_eq!(paths("An unclosed [ and [b](docs/b.md).\n"), ["docs/b.md"]);
+    }
+
+    #[test]
+    fn a_two_backtick_span_is_one_span() {
+        // ``docs/a.md`` is a span whose text is a path, written with two
+        // backticks so that a single one could appear inside it. A reader that
+        // stopped at the first backtick would see an empty span and then a
+        // dangling one, and would report nothing.
+        assert_eq!(paths("See ``docs/a.md`` now.\n"), ["docs/a.md"]);
+    }
+
+    #[test]
+    fn prose_is_not_a_command_and_may_still_name_a_path() {
+        // A backticked word in a sentence is not a command even when it holds a
+        // command line: only a fence says *run this*. It is not a gap either,
+        // and the same sentence may name a path, which is why there is a second
+        // list at all.
+        let mentioned = read("Run `npm run build` in `src/app/`.\n");
+        assert!(mentioned.commands.is_empty(), "prose is not a shell block");
+        assert!(mentioned.unread.is_empty(), "and it is not a gap either");
+        assert_eq!(paths("Run `npm run build` in `src/app/`.\n"), ["src/app/"]);
+    }
+
+    #[test]
+    fn every_path_form_has_a_stable_word_and_a_sentence() {
+        assert_eq!(PathForm::ALL.len(), 2);
+        let words: Vec<&str> = PathForm::ALL.iter().map(|form| form.as_str()).collect();
+        let sentences: Vec<&str> = PathForm::ALL
+            .iter()
+            .map(|form| form.plain_description())
+            .collect();
+        assert_eq!(words, ["link_target", "code_span"]);
+        assert_eq!(sentences, ["in a link", "in backticks"]);
     }
 }

@@ -26,6 +26,15 @@
 //! `the_table_covers_the_four_roles_the_acceptance_names` is what says so
 //! rather than this paragraph.
 //!
+//! **`P5-T001` kept the half of that second bullet this module could only
+//! promise.** [`crate::runtime_probes`] reads `start` and `dev` — through
+//! [`command_for`] below, which is why that function and [`Runner`] stopped
+//! being private to this file — and turns the command into a check that starts
+//! the project and looks at it. **Neither role becomes a check here**, and the
+//! distinction that keeps that true is the acceptance's rather than a style
+//! choice: what a check *is* has not changed, and what changed is that the thing
+//! which starts a server is now a plan entry rather than an absence.
+//!
 //! # Why every check here is gated without this module deciding anything
 //!
 //! The four [`ActionKind`]s the table below names — `Build`, `RunTests`, `Lint`
@@ -185,8 +194,14 @@ const CHECKS: &[(ScriptRole, RoleCheck)] = &[
 /// belong together because they are two answers to one question, and because
 /// [`Managers::agreed`] answers `None` for two different reasons that its own
 /// documentation says a caller must not render the same way.
+///
+/// **`pub(crate)` since `P5-T001`**, which is the second caller: a runtime probe
+/// runs the project's own start command, so it asks the same question of the
+/// same value. Widening this rather than copying it is the point — *which
+/// package manager runs this project's scripts* has one answer per project, and
+/// two modules that each computed it could give two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Runner {
+pub(crate) enum Runner {
     /// The project names a package manager, and SURE will use it.
     Agreed(PackageManager),
     /// The project names none, and this is the sentence saying which way it
@@ -200,7 +215,7 @@ enum Runner {
 
 impl Runner {
     /// What runs this project's scripts.
-    fn of(managers: &Managers) -> Self {
+    pub(crate) fn of(managers: &Managers) -> Self {
         match managers.agreed() {
             Some(manager) => Self::Agreed(manager),
             None => Self::Unknown {
@@ -377,7 +392,12 @@ impl NodeChecks {
 /// The root first, then the members in the order the discovery resolved them —
 /// an order nothing downstream depends on, which is stated here because the
 /// temptation to read a meaning into it is real.
-fn components(project: &NodeProject) -> Vec<(String, &Package)> {
+///
+/// **`pub(crate)` since `P5-T001`**, so that a runtime probe walks the same list
+/// for the same reason: *which manifests SURE read* is one answer, and a second
+/// walk over `readable_members` would be a second place to get the root, the
+/// spelling of a member's path, or the unread-manifest rule wrong.
+pub(crate) fn components(project: &NodeProject) -> Vec<(String, &Package)> {
     let mut found: Vec<(String, &Package)> = Vec::new();
 
     if let Some(package) = project.package() {
@@ -399,7 +419,18 @@ fn components(project: &NodeProject) -> Vec<(String, &Package)> {
 /// asked before *is there a runner*, because a project with neither a `test`
 /// script nor a lockfile has one problem a person acts on and one they do not:
 /// the sentence should be about the missing script.
-fn command_for(package: &Package, role: ScriptRole, runner: Runner) -> Result<String, MissingKind> {
+///
+/// **`pub(crate)` since `P5-T001`**, which asks it about roles this module does
+/// not check — `start` and `dev`, for the reason the module documentation gives
+/// for their absence here. The ordering above is the reason it is reused rather
+/// than re-derived: a probe's gap has to be the same value, about the same
+/// manifest, in the same order of questions, or one project would be described
+/// two ways by one report.
+pub(crate) fn command_for(
+    package: &Package,
+    role: ScriptRole,
+    runner: Runner,
+) -> Result<String, MissingKind> {
     if package.script(role).is_none() {
         return Err(if is_not_a_command(package, role) {
             MissingKind::NotACommand

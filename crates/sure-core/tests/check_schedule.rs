@@ -156,6 +156,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          accordingly, because evidence from a command that changed the tree \
          cannot be bound to the state the change was made to",
     ),
+    (
+        "src/runtime_probes.rs",
+        "`P5-T001`, and the first entry on this list that is not a submodule of \
+         `checks/`: it is a level above the three proposers rather than beside \
+         them, because it does not read a manifest format — it asks `checks`'s \
+         own `node` proposer for a component's start command and turns it into a \
+         check that starts the project and looks at it. It is here for the same \
+         reason as the three above, and the reason is worth restating for a file \
+         that could be mistaken for a consumer: **a check that starts a server is \
+         a check**, so the plan entry, the reason and the execution requirements \
+         are built here and nothing downstream decides them again",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

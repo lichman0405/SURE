@@ -30,6 +30,7 @@ pub mod process;
 pub mod project_intent;
 pub mod redact;
 pub mod references;
+pub mod runtime_probes;
 pub mod safety;
 pub mod scan;
 pub mod schedule;

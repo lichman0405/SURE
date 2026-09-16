@@ -636,6 +636,22 @@ fn spoken(duration: Duration) -> String {
 /// rather than its last five. That is stated rather than hidden: the count of
 /// bytes not kept is in the sentence, and a reader who needs the tail of a
 /// stream this large is being told that SURE does not have it.
+///
+/// **The service's own words are escaped before they are placed in a sentence
+/// SURE writes**, which is [`crate::setup`]'s `in_a_sentence` treatment applied
+/// to the one input in this workspace that is not a name a project chose but
+/// whatever a project's process decided to write. `\n` cannot reach here — it is
+/// what the lines were split on — but every other control character can, because
+/// [`CapturedOutput::text_lossy`] replaces only what is not valid UTF-8: a lone
+/// `\r` returns a terminal's cursor to column 0, and an escape sequence such as
+/// `\x1b[2K` erases the line it is printed on, so a service that writes them can
+/// make SURE's report of the service's own failure **unsay itself**. That is a
+/// false green in the terminal rather than in the verdict, and no function of
+/// the quote's is worth it. The escaping happens **before** the character bound
+/// rather than after it, so that [`QUOTED_CHARS`] keeps bounding what a reader
+/// actually sees: an escape sequence the service wrote is six characters of
+/// SURE's report, and a bound applied to the raw bytes would let a service hold
+/// a reason line open six times longer than the constant says it can be.
 fn last_words(outcome: &Outcome) -> Option<(&'static str, String, usize)> {
     for (stream, captured) in [
         ("standard error", outcome.stderr()),
@@ -651,7 +667,7 @@ fn last_words(outcome: &Outcome) -> Option<(&'static str, String, usize)> {
         if kept.is_empty() {
             continue;
         }
-        let mut quoted = kept.join(" / ");
+        let mut quoted = crate::redact::escape_control_characters(&kept.join(" / "));
         if quoted.chars().count() > QUOTED_CHARS {
             quoted = quoted.chars().take(QUOTED_CHARS).collect::<String>();
             quoted.push('…');
@@ -784,6 +800,46 @@ mod tests {
         // A service that said nothing at all has nothing to quote, which is not
         // an empty sentence in the reason.
         assert!(last_words(&an_outcome("", "   \n\n")).is_none());
+    }
+
+    #[test]
+    fn a_service_cannot_write_an_escape_into_the_line_sure_prints() {
+        // The service is a project's own process, so its output is whatever the
+        // project decided to write. `\n` cannot survive — it is what the lines
+        // were split on — but the rest of the control characters can, and two of
+        // them are worth naming: `\r` sends a terminal's carriage back to column
+        // 0, and `\x1b[2K` erases the line it is printed on. Quoted unescaped
+        // they let a failing service erase SURE's report of the failure as the
+        // reader is looking at it, which is a false green in the terminal rather
+        // than in the verdict.
+        let hostile = "ok\x1b[2K\rSURE: 0 problems, all checks passed\u{7}";
+        let outcome = an_outcome("", hostile);
+        let (_, quoted, _) = last_words(&outcome).unwrap();
+        assert!(
+            !quoted.chars().any(char::is_control),
+            "a control character survived into the line SURE prints: {quoted:?}"
+        );
+
+        // The service's words are still quoted — escaping is the fix, not a
+        // reason to stop saying what it wrote — and each control character is
+        // shown as the escape it is, so a reader can see that the service wrote
+        // it rather than SURE.
+        assert!(
+            quoted.contains("SURE: 0 problems, all checks passed"),
+            "the service's words are not quoted at all: {quoted}"
+        );
+        assert!(
+            quoted.contains(r"\u{001b}"),
+            "the escape is not shown: {quoted}"
+        );
+        assert!(
+            quoted.contains(r"\r"),
+            "the carriage return is not shown: {quoted}"
+        );
+        assert!(
+            quoted.contains(r"\u{0007}"),
+            "the bell is not shown: {quoted}"
+        );
     }
 
     #[test]

@@ -168,6 +168,21 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          a check**, so the plan entry, the reason and the execution requirements \
          are built here and nothing downstream decides them again",
     ),
+    (
+        "src/http_routes.rs",
+        "`P5-T003`, and the entry `P5-T001` named in advance: that task's module \
+         documentation recorded that a route check could not be proposed because \
+         *nothing in the discovery holds a route*, and that routes were \
+         `P5-T003`'s work arriving *with the reading that can point at them*. \
+         This is that reading, so the file proposes for exactly the reason the \
+         entry above does — it reads a project's source rather than a manifest \
+         format, and what it finds is a check. **The reason it builds is \
+         `CheckReason::RouteDeclared`, the variant added to `schedule.rs` with \
+         it**, which is the part that could not be written before: a reason for a \
+         route check has to name the file *and the line* SURE read the route on, \
+         and a `FilePresent` naming a `package.json` would have been a claim \
+         about a file that says no such thing",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

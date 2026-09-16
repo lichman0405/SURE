@@ -161,6 +161,32 @@ pub enum CheckReason {
         /// The path, relative to the project root, as the scan reports it.
         path: String,
     },
+    /// The project declares an HTTP route, and this is where.
+    ///
+    /// **This is the variant [`crate::runtime_probes`] said would arrive with
+    /// `P5-T003`'s reading**, and the reason it could not be written before is
+    /// the reason it is a variant here rather than a `FilePresent`: a route check
+    /// has to name *where SURE read that a route exists*, and before
+    /// [`crate::http_routes`] nothing in the product held one. A `FilePresent`
+    /// naming a `package.json` would have been a claim about a file that says no
+    /// such thing, which is exactly what [`Self::names_something`] and
+    /// [`Self::anchor`] exist to refuse.
+    ///
+    /// **`line` is carried because a file is not an anchor for a route.** A
+    /// project's `app.py` holds many routes and the one this check is about is on
+    /// one line of it; a reason that named the file alone would satisfy
+    /// [`Self::names_something`] and still leave a reader to search. The line is
+    /// `http_routes::Route::line` — the same number the route's own anchor
+    /// carries, so the check's sentence and its evidence point at one place
+    /// rather than at two that agree today.
+    RouteDeclared {
+        /// The file the route was read from, relative to the project root.
+        declared_in: String,
+        /// The route as the declaring line spells it: `GET /health`.
+        route: String,
+        /// The line it was read from, counting from one.
+        line: usize,
+    },
     /// The check applies to the project as a whole.
     ProjectWide,
 }
@@ -182,6 +208,13 @@ impl CheckReason {
                 format!("{component} is a {stack} project.")
             }
             Self::FilePresent { path } => format!("Your project has {path}."),
+            Self::RouteDeclared {
+                declared_in,
+                route,
+                line,
+            } => format!(
+                "Your project declares the route `{route}`, in {declared_in} on line {line}."
+            ),
             Self::ProjectWide => "This is about the project as a whole.".to_owned(),
         }
     }
@@ -204,6 +237,16 @@ impl CheckReason {
                 !component.trim().is_empty() && !stack.trim().is_empty()
             }
             Self::FilePresent { path } => !path.trim().is_empty(),
+            // `line` is a number and cannot be empty, so the one way it can fail
+            // to name something is by naming the line before the first one. A
+            // reason carrying `0` would print *declared on line 0* and point a
+            // reader at a file's opening brace, which is a claim about a place
+            // that does not hold a route.
+            Self::RouteDeclared {
+                declared_in,
+                route,
+                line,
+            } => !declared_in.trim().is_empty() && !route.trim().is_empty() && *line != 0,
             Self::ProjectWide => true,
         }
     }
@@ -249,6 +292,23 @@ impl CheckReason {
                 AnchorSubject::File,
                 path.clone(),
                 "the file this check is about",
+            )),
+            // The same subject and the same two arguments
+            // `http_routes::Route::anchor` uses, deliberately and not by
+            // coincidence: the two are the same claim told twice — once as the
+            // reason a check exists and once as the evidence it produces — and
+            // they must be the same anchor, because a reader following the
+            // report and a reader following the schedule have to arrive at one
+            // line. `the_two_anchors_for_one_route_agree` is what holds them
+            // together rather than this sentence.
+            Self::RouteDeclared {
+                declared_in,
+                route,
+                line,
+            } => Some(EvidenceAnchor::new(
+                AnchorSubject::LineRange,
+                declared_in.clone(),
+                format!("the route `{route}` declared on line {line}"),
             )),
             Self::ProjectWide => None,
         }

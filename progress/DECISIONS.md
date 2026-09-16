@@ -2937,3 +2937,145 @@ the two *reading* modules it added to and not its own test file. The empty filte
 the other half of the same point — `cargo test --no-fail-fast -p sure-core` with no
 target selector, so a survivor would be a mutation the whole crate's suite missed
 rather than one a narrow filter never looked at.
+
+
+## P4-T007 — the record that is there and empty, and the mutation that could not be caught until its anchor spanned both evidence values
+
+**The acceptance has two sentences — *"Framework-specific detectors are
+pluggable."* and *"Mandatory missing-migration fixture can be detected."* — and
+the first is the one that shaped the module rather than the one that describes
+it.** A `Detector` is a row of four constants: the file that says a framework is
+in use, the path it keeps its record at, the predicate that decides what counts as
+a migration, and the framework's name. Adding a framework is writing a row —
+`look`, `count_under` and `assess` name no framework anywhere —
+`a_detector_sure_does_not_ship_is_used_without_touching_any_shipped_code` holds
+that by detecting one from the test's own table, and
+`a_framework_sure_does_not_ship_is_detected_over_real_files` holds it again
+against a real walk of a real directory. `Detector` deliberately does **not**
+derive `PartialEq`: one field is a function pointer, and
+`unpredictable_function_pointer_comparisons` is a warning under this workspace's
+`-D warnings`, so a caller that wants to know whether two rows are the same
+framework compares `framework`.
+
+- **One sentence decides every verdict in the module: a gap is a claim only where
+  the shape is and the record is not.** A framework is in play when the file that
+  says so is in the walk; its record is the directory, or the files, under the path
+  the convention names. `Record::Holds(n)` for `n > 0` produces **no claim at all**
+  — `Looked::gap()` returns `None` and the report is silent about that framework,
+  because a project with migrations is not a finding. `Record::Empty` and
+  `Record::Absent` do produce one, and they are never the same claim. That
+  asymmetry is what makes the module a check rather than a directory listing: the
+  interesting answer is absence, and everything else exists to establish that
+  absence is real.
+
+- **Two severities, and the distance between them is the whole argument.** An empty
+  record is `MustFix`; an absent one is `ShouldFixFirst`. The reason is in the
+  module's own sentence rather than in a comment: **a project that has never
+  written its first migration and a project whose record was lost or never made
+  look the same from here**, and `prisma init` writes exactly the first of those —
+  a schema and no `prisma/migrations`. `FROZEN_SEMANTICS.md` defines `MustFix` as
+  blocking a hand-off *alone*, and a finding whose own sentence hedges cannot do
+  that. `m5` and `m6` move one severity each; they are the pair this task's
+  argument turns on, and a set holding only one of them would leave the claim
+  untested in the other direction.
+
+- **The one thing a later task has to know: `evaluation/acceptance-manifest.json`
+  expects `must_fix` for `missing-migration`, and this check reaches it through the
+  *present-and-empty* shape.** The fixture app and the check therefore have to
+  agree on which shape `must_fix` names, and this is where that agreement is
+  recorded rather than left to be discovered. `fixtures/adversarial/
+  missing-migration/` and the conformance test that pins the fixture-expectation
+  type are **`P14`'s** — `P14-T001`–`P14-T011` own the fixture apps — so this task
+  demonstrates detection with fixtures of its own and does not reach into them.
+  Both shapes are held here by integration tests,
+  `the_missing_migration_scenario_is_reported_as_a_must_fix` and
+  `a_schema_with_no_record_directory_at_all_is_reported_without_stopping_a_hand_off`,
+  so whichever way `P14` resolves the correspondence, the behaviour it is
+  resolving *about* is pinned. **The cost of changing the choice:** moving
+  `Absent` to `MustFix` would make every freshly-initialised project block a
+  hand-off, which is why it is not there, and moving `Empty` down would make the
+  acceptance fixture unreachable.
+
+- **The detectors are paths, and the table has no column for a declared
+  dependency.** Prisma, Drizzle and Diesel are not in the discovery tool tables at
+  all, so such a column would never fire for them. Alembic **is** — `python.rs`'s
+  `TOOLS` table names it as an ORM — and reading the file is still the rule for it,
+  because a table that named some frameworks and not others would be one rule for
+  the projects SURE already knows and another rule for the rest. It is also the
+  stronger rule for the case this product exists for: a project an AI assembled
+  from a snippet has the config file and never added the package to its manifest,
+  so a manifest-driven detector would answer *no framework here* about exactly the
+  project most likely to have the problem.
+
+- **The module reads nothing, and one of the tests says so about the source rather
+  than about the behaviour.** Every rule takes `&[Entry]` — the walk's own list —
+  rather than a `Scan`, and that is affordable only because a scan already holds
+  every path under a directory it entered. `the_module_opens_no_file` reads
+  `db_migrations.rs`, cuts at `#[cfg(test)]`, and fails if `std::fs`, `fs::read`,
+  `read_to_string`, `File::open`, `OpenOptions` or `BufReader` appears on any line
+  that is not prose. **It is written that way because "this stage does not open
+  files" is a claim about the source, and a behavioural test can only sample it.**
+  The `&[Entry]` signature is what makes the claim affordable — and it is also what
+  makes the unit tests possible at all, because `Scan`'s fields are private and
+  there is no `Scan::for_test`: the first draft of this module took `&Scan` and
+  could not have been tested below the integration level.
+
+- **The case a path is looked up by is `CaseSensitivity::platform()`, not the case
+  the caller chose for the walk.** `lookup_key` moves from `pub(super)` to
+  `pub(crate)` for this, with the note in `discover/read.rs` updated to say who
+  else uses it, so the folding rule stays written once. The reason the platform's
+  answer is the right one rather than the caller's: the question the comparison
+  answers is whether two names are the same **file**, which is a fact about the
+  filesystem and not about the ignore-table rule a caller handed `ScanOptions`.
+  **And the gate on the test is `#[cfg(not(any(windows, target_os = "macos")))]`,
+  not `#[cfg(not(windows))]`** — `CaseSensitivity::platform()` folds macOS with
+  Windows, so a `not(windows)` gate would have run the case-*sensitive* assertion
+  on a platform that answers case-*insensitively* and failed the macOS job. That
+  trap is why the pair is written as one test per platform class with the
+  assertion each one can actually hold.
+
+**The mutation set is 21 rows over the one source file this task adds, 21 caught,
+0 survivors, 0 inconclusive, every restore verified by blob hash — and every row
+ran the same 1236-test suite.** The filter is empty for every row, so a survivor
+would be a mutation the whole crate's suite missed rather than one a narrow filter
+never looked at, and the internal check is exact rather than approximate: **42
+result lines in every row, and `passed + caught = 1236` in every row**, so the only
+number that moved across the 21 runs is the catch count. The set's decision list is
+in the script's own header; the rows worth naming here are the two that needed a
+different anchor and the two that carry the argument.
+
+- **`m3` could not be written the obvious way, and the reason is worth recording
+  because it is a property of the harness rather than of the code.** The mutation
+  "a claim SURE could not settle is anchored anyway" wants `evidence:
+  evidence_of(&claim, …)` where `evidence: Vec::new()` is, but the struct literal
+  moves `claim` into its own field before that field is evaluated, so the borrow is
+  a use-after-move and the row **would not have compiled** — and a row that does
+  not compile is reported `INCONCLUSIVE`, which says nothing either way rather than
+  saying "caught". The row re-derives the gap from `looked` instead, which is what
+  puts a value in the reader's hand and compiles.
+
+- **`m16` had to span both evidence values, and that is `P4-T006`'s equivalent-pair
+  finding in a different costume.** Flipping one of the two `ObservedFact` classes
+  to `ModelAssessment` is an **equivalent mutant**: `Finding::is_grounded` asks
+  whether *any* evidence can alone support a `must_fix`, so a claim carrying one
+  observed fact and one model assessment is still grounded and no test in the suite
+  can see the difference. The repair is the same one `P4-T006` recorded — re-anchor
+  at the answer rather than contort the code — and here the answer is *neither of
+  these is a model assessment*, so the row moves both. **A one-line anchor was
+  available and would have produced a survivor that measured nothing.**
+
+- **`m5` and `m6` are the pair the task's argument turns on, and `m8` is the one
+  that shows a check can be undone by one character.** `m5` sends an empty record
+  to `ShouldFixFirst` and is caught by 9 tests; `m6` sends an absent one to
+  `MustFix` and is caught by 3. `m8` drops the trailing `/` from the prefix a
+  count is taken under — `prisma/migrations-old/2020_x` starts with
+  `prisma/migrations` as a string and is not inside it as a path — and is caught by
+  11, which is the largest catch list in the set.
+
+**What this task does not do, stated where the module states it.** It does not run
+a migration, a schema tool or a database; it does not read a manifest to find out
+whether the framework's package is a declared dependency; and it does not decide
+whether a project's migrations are *correct* — only whether a project that has a
+schema has a record of how the database reached it. `P4-T007` is the first use of
+`AnchorSubject::Database` in the crate, which until now was a variant with no
+caller.

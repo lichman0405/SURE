@@ -2,43 +2,126 @@
 
 Last updated: 2026-09-16
 Branch: `claude/v0.1-autonomous`
-Progress: 49 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 50 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 open
-(6/9).** `P4-T006` is implemented as **two** commits — `585d634`, the
+(7/9).** `P4-T007` is implemented as **two** commits — `576d2b0`, the
 implementation and its tests, and the commit carrying this file, which is its
-acceptance. **The run of `585d634` is read in full below**, in the run table and
-in this section. What the task added is described under "What `P4-T006` added",
-which is this section; `P4-T005`'s is the next one down.
+acceptance. **The run of `576d2b0` is read in full below**, in the run table and
+in this section. What the task added is described under "What `P4-T007` added",
+which is this section; `P4-T006`'s is the next one down.
 
-**Accepting `P4-T006` unblocks nothing, for the second acceptance running.** No
-task in the catalogue names `P4-T006` in its `depends_on`, so the READY list holds
-the same **eleven** entries before and after — `P4-T007`, `P4-T008`, `P4-T009`,
-`P5-T001`, `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`,
-`P13-T004` — computed by replaying `taskctl`'s own dependency rule against a copy
-of `progress/state.json` with that one status changed, and confirmed afterwards by
+**Accepting `P4-T007` unblocks nothing, for the third acceptance running.** No
+task in the catalogue names `P4-T007` in its `depends_on`, so the READY list holds
+the same **ten** entries before and after — `P4-T008`, `P4-T009`, `P5-T001`,
+`P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`, `P13-T004` —
+computed by replaying `taskctl`'s own dependency rule against a copy of
+`progress/state.json` with that one status changed, and confirmed afterwards by
 `taskctl status` itself rather than by a second reading of the same replay. So the
-next concrete action is the lowest-numbered READY entry, **`P4-T007`**, and nothing
+next concrete action is the lowest-numbered READY entry, **`P4-T008`**, and nothing
 about this acceptance chose it.
 
-**One commit for the code rather than three, and the run says why.** `585d634`'s
-own run came back **all five green on the first push**, so there was no fix to make
-and no third commit — the shape `P4-T004` and `P4-T005` both needed, and did not
-need here. **What the difference is worth: this task's correction arrived before
-the push rather than after it**, because the mutation set found it. `m5` survived
-its first pass — the early return in `assess` turned out to be one of two
-equivalent guards, so removing it alone could not be caught by any test — and the
-repair was to re-anchor the row at an answer the tests can see and to fix a comment
-that claimed there was *"one place where a key becomes a claim or does not"* when
-the tail arm made that false. **A green first push is not evidence that the task
-was easy; it is evidence that the measurement happened before the push.**
+**One commit for the code rather than three, and this time it was not the mutation
+set that made the difference — it was four anchors read before the set ran.**
+`576d2b0`'s own run came back **all five green on the first push**, so there was no
+fix to make and no third commit. **Two of the twenty-one rows were rewritten before
+the first of them ran**, because both would have measured the wrong thing rather
+than failed to measure: `m3`'s replacement did not compile, and a row that does not
+compile is reported `INCONCLUSIVE`, which reads as *no answer* rather than as
+*caught*; and `m16`'s anchor matched **two** places in the file, which the harness's
+exactly-once guard refuses — and the reason it matched twice is a finding about the
+domain rather than about the harness, since flipping only one of the two evidence
+classes is an equivalent mutant no test can see. **Reading a row before running it
+is cheaper than reading a run that cannot answer. A green first push is not
+evidence that the task was easy; it is evidence that the measurement happened
+before the push.**
 
-**The mutation set was re-run in full against the tree this task commits: 20 rows
-over the single source file it adds, 20 caught, 0 survivors, 0 inconclusive, every
-restore verified by blob hash.** The first pass's tally was 19 caught and 1
-survivor, and the survivor is the finding: a row that removes one guard of a
-redundant pair measures nothing, and the honest repair is to ask it a question with
-an answer. Both passes are described under "What `P4-T006` added" and in
-`progress/DECISIONS.md`.
+**The mutation set was run in full against the tree this task commits: 21 rows over
+the single source file it adds, 21 caught, 0 survivors, 0 inconclusive, every
+restore verified by blob hash — and every row ran the same 1236-test suite.** The
+internal check is exact rather than approximate: 42 result lines in every row, and
+`passed + caught = 1236` in every row, so the only number that moved across the 21
+runs is the catch count. Both the set and the two rows that needed a different
+anchor are described under "What `P4-T007` added" and in `progress/DECISIONS.md`.
+
+## What `P4-T007` added
+
+**The one thing about `P4-T007` a reader should know before the detail: its
+acceptance has two sentences and the first is the one that shaped the module.**
+*"Framework-specific detectors are pluggable. Mandatory missing-migration fixture
+can be detected."* A `Detector` is a row of four constants — the file that says a
+framework is in use, the path it keeps its record at, the predicate that decides
+what counts as a migration, and the framework's name — and `look`, `count_under`
+and `assess` name no framework anywhere, so adding one is writing a row rather than
+editing a rule. **Both halves are held by tests that use a framework SURE does not
+ship**: `a_detector_sure_does_not_ship_is_used_without_touching_any_shipped_code`
+detects one from a table the test declares, and
+`a_framework_sure_does_not_ship_is_detected_over_real_files` does it again against
+a real walk of a real directory.
+
+**The rule that decides every verdict: a gap is a claim only where the shape is
+and the record is not.** A framework is in play when the file that says so is in
+the walk; its record is what is under the path the convention names.
+`Record::Holds(n)` for `n > 0` produces **no claim at all** — the report is silent
+about that framework, because a project with migrations is not a finding — while
+`Record::Empty` and `Record::Absent` each produce one and are never the same claim.
+An empty record is `MustFix`; an absent one is `ShouldFixFirst`, and the reason is
+the module's own sentence rather than a comment: **a project that has never written
+its first migration and a project whose record was lost or never made look the same
+from here**, and `prisma init` writes exactly the first of those.
+`FROZEN_SEMANTICS.md` reserves `MustFix` for a finding that blocks a hand-off
+*alone*, and a finding whose own sentence hedges cannot do that. `m5` and `m6` move
+one severity each — that pair is the argument this task makes, and a set holding
+only one of them would leave it untested in the other direction.
+
+**The one thing a later task has to know, recorded rather than left to be
+discovered: `evaluation/acceptance-manifest.json` expects `must_fix` for
+`missing-migration`, and this check reaches it through the *present-and-empty*
+shape.** The fixture app and the check therefore have to agree on which shape
+`must_fix` names. `fixtures/adversarial/missing-migration/` and the conformance
+test that pins the fixture-expectation type are **`P14`'s**, so this task
+demonstrates detection with fixtures of its own and does not reach into them; both
+shapes are held here by integration tests, so whichever way `P14` resolves the
+correspondence, the behaviour it is resolving *about* is pinned. **The cost of
+changing the choice:** moving `Absent` up to `MustFix` would make every
+freshly-initialised project block a hand-off, and moving `Empty` down would make
+the acceptance fixture unreachable.
+
+**The detectors are paths, and the table has no column for a declared
+dependency.** Prisma, Drizzle and Diesel are not in the discovery tool tables at
+all, so such a column would never fire for them; Alembic **is**, and reading the
+file is still the rule for it, because a table that named some frameworks and not
+others would be one rule for the projects SURE already knows and another for the
+rest. It is also the stronger rule for the case this product exists for: a project
+an AI assembled from a snippet has the config file and never added the package to
+its manifest, so a manifest-driven detector would answer *no framework here* about
+exactly the project most likely to have the problem.
+
+**The module reads nothing, and one of the tests says so about the source rather
+than about the behaviour.** Every rule takes `&[Entry]` — the walk's own list —
+rather than a `Scan`, which is affordable only because a scan already holds every
+path under a directory it entered. `the_module_opens_no_file` reads
+`db_migrations.rs`, cuts at `#[cfg(test)]`, and fails if `std::fs`, `fs::read`,
+`read_to_string`, `File::open`, `OpenOptions` or `BufReader` appears on a line that
+is not prose. **It is written that way because "this stage does not open files" is
+a claim about the source, and a behavioural test can only sample it.** The
+`&[Entry]` signature is also what makes the unit tests possible at all: `Scan`'s
+fields are private and there is no `Scan::for_test`, so the first draft — which
+took `&Scan` — could not have been tested below the integration level. The case a
+path is looked up by is `CaseSensitivity::platform()` rather than the case the
+caller chose for the walk, because the question is whether two names are the same
+**file**; `lookup_key` moves from `pub(super)` to `pub(crate)` so the folding rule
+stays written once, and the test that holds it is gated
+`#[cfg(not(any(windows, target_os = "macos")))]` rather than `not(windows)` —
+`CaseSensitivity::platform()` folds macOS with Windows, so the narrower gate would
+have run the case-*sensitive* assertion on a platform that answers
+case-*insensitively*.
+
+**What this task does not do, stated where the module states it.** It does not run
+a migration, a schema tool or a database; it does not read a manifest to find out
+whether the framework's package is a declared dependency; and it does not decide
+whether a project's migrations are *correct*, only whether a project that has a
+schema has a record of how the database reached its shape. `P4-T007` is the first
+use of `AnchorSubject::Database` in the crate.
 
 ## What `P4-T006` added
 
@@ -4490,6 +4573,8 @@ Three of the five jobs were failing the whole time.
 | 34995107384 | `fa35ed7` — **the cross-platform reading fix the row above forced** | **all five green.** **1462 / 1463 / 1464** passed, **0 failed**, 11 ignored, **53** result lines = **43 parents + 10 children** on each — the row above's figures with **+2 on every platform**, and both of the row above's failures back in the passed column rather than a total that moved for some other reason. **43 + 10 unchanged**, so no test binary was added, and the **nameset** delta against `34991517761` reads **+2 −0**, naming exactly the two tests the fix adds (`documents::tests::a_location_on_one_platform_is_read_the_same_way_on_all_three` and `a_windows_location_is_not_a_path_in_the_project`) — **a nameset delta that equals the passed delta**, which neither of the two rows above could produce. Windows **1462** is the same figure the local `cargo test --workspace --no-fail-fast` gives, which is a coincidence worth having rather than a check. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`. **Nothing in this run is evidence about the single local failure this task's mutation run saw in `a_service_that_is_dropped_is_stopped_anyway`** — that test is `P3-T009`'s, it is not reproducible in 90 runs, and it is recorded below as an open observation rather than resolved. Detail below |
 
 | 34999750331 | `585d634` — **the `P4-T006` implementation** | **all five green.** Windows **1489** / macOS **1490** / Ubuntu **1491** passed, **0 failed**, 11 ignored, **54** result lines = **44 parents + 10 children** on each, and **Windows 1489 is the same figure the local `cargo test --workspace --no-fail-fast` gives** — a coincidence worth having rather than a check. Against `34995657368`, the run of `ee59d78` and this task's `base_sha`: **+27 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `env_completeness` is a new test binary and the child count not moving because it is a new *parent*. **The nameset delta against that run reads +27 −0, which equals the passed delta**, and the 27 names are exactly this task's 17 unit tests and 10 integration tests — `a_claim_is_bound_to_the_state_it_was_read_against` is defined in both files, and the collision does **not** undercount here, because the module's copy is printed qualified (`env_completeness::tests::…`) and the integration copy is not, so the set holds two spellings where the earlier undercount held one. **A nameset delta that equals the passed delta is what makes this green checkable rather than merely green.** `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green over its five steps. Detail below |
+
+| 35004072122 | `576d2b0` — **the `P4-T007` implementation** | **all five green.** Windows **1523** / macOS **1524** / Ubuntu **1525** passed, **0 failed**, 11 ignored, **55** result lines = **45 parents + 10 children** on each, and **Windows 1523 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. Against `35000344864`, the run of `0151ff4` and this task's `base_sha`: **+34 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `db_migrations` is a new test binary and the child count not moving because it is a new *parent*. **The nameset delta against that run reads +34 −0 on all three platforms, which equals the passed delta**, and the 34 names are exactly this task's 24 unit tests and 10 integration tests — the two `this_platform_reads_a_differently_cased_…` tests differ between the module and the integration file (`…name_as_the_same_name` against `…schema_as_the_same_file`), so no name is defined twice and the delta is not undercounted. **A nameset delta that equals the passed delta is what makes this green checkable rather than merely green.** `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. Detail below |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and

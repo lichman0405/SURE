@@ -3449,3 +3449,235 @@ now would be a decision record reconstructed from an accepted task's later prose
 rather than one taken while the work was done. **The gap is the finding and the
 choice not to fill it is the decision**: the same call `P4-T008`'s acceptance made
 about five missing items in `## Next concrete action`, for the same reason.
+
+## P5-T001 — the checks that need a project running, and the sentence `checks/node.rs` had been keeping for them
+
+**The acceptance is one sentence and it is three claims.** *"Runtime probes
+specify execution/network requirements and target component."* **Execution and
+network requirements** are the `ActionKind` a probe declares — one per probe,
+derived by `CheckProposal::new` and read back through `ExecutionRequirements`,
+which is where `can_touch_network` lives. **The target component** is a
+`Component`'s own path looked up in the `ComponentGraph`, so a probe cannot name
+a place the scan did not find. And a probe *is* a `CheckProposal` rather than a
+second vocabulary beside one, which is what makes it droppable into a
+`CheckSchedule` with nothing anywhere deciding twice what a check is.
+
+- **`start` and `dev` finally have a consumer, and the promise they were waiting
+  on was written down before it could be kept.** `checks/node.rs` says why four
+  of `ScriptRole`'s eight variants produce checks and four do not — *"`dev` and
+  `start` **do not finish**. They are servers, and a check is something that
+  ends. Starting one is what `service` and `checks.browser_probe` are for, with
+  their own permissions and their own timeouts."* That sentence was written when
+  those two roles had **no consumer at all**, and `runtime_probes` is it:
+  `ScriptRole::Start` and `ScriptRole::Dev` are read here and nowhere else in
+  the shipped source. Reuse over restatement, and four `pub(crate)` widenings —
+  `Runner`, `Runner::of`, `components`, `command_for` — each carrying a doc
+  paragraph that names `P5-T001` as the second caller. A widening whose doc does
+  not say who else is calling it is indistinguishable from a visibility change
+  nobody needed.
+
+- **Two kinds, and three actions deliberately absent from them.** `Serve` is
+  `ActionKind::StartService`, `MustFix` and critical; `Interface` is
+  `ActionKind::BrowserProbe`, `ShouldFixFirst` and not critical. The absences
+  are the decisions. A **route check** is absent because `CheckReason`'s own rule
+  refuses it: a probe that asked whether `/api/health` answers would have to name
+  where SURE read that a route exists, and nothing in the discovery holds one — a
+  `package.json` declares scripts and dependencies, not routes — so a reason
+  built for it would name a file that says no such thing. Routes are `P5-T003`'s
+  work and they arrive with the reading that can point at them.
+  `ActionKind::ExternalService` is absent as **a boundary rather than a gap**:
+  reaching a payment provider or a mail relay is `P5-T006`'s subject, and
+  planning a local check here would be this module inventing a local substitute
+  for a check that is not local. `ActionKind::ArbitraryCommand` is absent as
+  **forbidden**: `P5-T005` says a project may describe safe local acceptance
+  flows *without arbitrary free-form shell*, and the way to hold that is for the
+  only actions a probe can declare to be actions with a meaning. There is no
+  field here a caller could put a command line in — the string a probe carries is
+  the project's own declared script, rendered by the package manager that runs
+  it, and `ProbePlan::of` is the only constructor.
+
+- **`auto` and `always` are not decorative, and they answer *differently* for the
+  two kinds** — which is why each row of `PROBES` carries its own answer rather
+  than the module deciding once and applying it twice. A `start` script in a
+  `package.json` **is** the shape that suggests a service. There is no manifest
+  field anywhere that says a project has an interface — not in the discovery, not
+  in this crate — so under `auto` an interface probe would be SURE deciding from
+  nothing that a project has a browser-visible surface. `auto` therefore plans a
+  serve probe, plans **no** interface probe, and **says so** in
+  `ProbePlan::not_planned` rather than leaving a reader to assume an interface was
+  checked and was fine. `always` is the way to ask for one, and the authority for
+  it is `CheckPreference`'s own documentation rather than anything this module
+  adds: *"`Always` is a preference about effort, never a grant of authority"* — so
+  a probe planned under `always` still needs `Permission::ConnectService` and is
+  still refused under `InspectOnly`. `never` produces the two `ScopeReduction`s
+  and **no per-component gap**, because the reduction is already the project-wide
+  record of a whole class of check being switched off and a per-component gap
+  beside it would be a second, longer way of saying one thing the user did on
+  purpose.
+
+- **A component with no way to start is a value and not a silence.** `NotPlanned`
+  is `MissingCommand`'s shape one level up, for that type's own reason: a check
+  that cannot be proposed produces no plan entry, so a report built from the plan
+  would say **nothing at all** about a project SURE could not start — and a reader
+  takes the absence of a row for the absence of a problem. Every component with a
+  readable manifest that was not planned appears with its reason, and the reason
+  is `MissingKind` rather than a second vocabulary invented here. `NotACommand`
+  is the one worth spelling out: a `package.json` with `"start": {}` is a manifest
+  that declared something, and a report that called it *"no start script"* would
+  be describing a broken manifest as a project that never wrote one. **This
+  paragraph is the one the mutation set proved was prose and nothing more** —
+  `m25` below is exactly that substitution, and it survived the whole suite.
+
+- **One action per probe, and capability and cost are two questions the domain
+  answers separately.** `ActionKind::StartService` requires
+  `Permission::RunProjectCode` **and** answers `can_touch_network() == true`. The
+  temptation to add a second `NetworkAccess` action is refused in both
+  directions: it would add no capability, because the first action already answers
+  yes — but it *would* add `Permission::Network` to the check's requirements, and
+  that permission is about reaching **beyond this machine**. Requiring it to talk
+  to `127.0.0.1` would ask a user to grant something the check does not need,
+  which is the shape `ExecutionRequirements::blocked_by`'s own documentation warns
+  about from the other end — *a prompt that named something the user had already
+  granted is a sentence asking them to do something they have done*.
+  No convenience accessor here renames either half: a caller asking *can this
+  reach the network* reads the domain's answer, and the module says so where it
+  could have smoothed the two together.
+
+- **The module's own weight table is a fourth vocabulary and it was checked as
+  one.** Each row of `PROBES` carries severity, criticality, evidence class and
+  whether `auto` plans it, and `every_probe_declares_the_action_its_kind_names`
+  fails if a row declares an action its kind does not name. But the weights are
+  arguments about **consequence** rather than about numbers, and a consequence can
+  only be read where a consequence is used:
+  `a_probe_carries_the_weight_it_argues_for_and_nothing_louder` builds an
+  inspect-only schedule and asserts, per kind, that
+  `CheckResult::blocks_green()` answers `true` for a stopped serve probe and
+  `false` for a stopped interface probe — one terminator, so a machine without a
+  browser can say so without refusing a hand-off.
+
+- **THE MUTATION SET FOUND TWO REAL GAPS ON ITS FIRST RUN, AND ONE OF THEM IS THE
+  PARAGRAPH ABOVE ABOUT `NotACommand`.** Twenty-five rows over the one source file
+  this task adds, empty filter on every row so a survivor is a mutation the whole
+  crate's suite missed: **run 1 was 23 caught, 2 survivors, 0 inconclusive**, and
+  every one of the 25 restores was verified by blob hash. **`m20`** reverses the
+  plan's own line order — `plain_description` returning gaps before probes — and
+  survived because *nothing asserted the order of the plan's own report*; the
+  integration file asserted membership and the module asserted membership, and
+  **a claim about membership is not a claim about order**. **`m25`** makes
+  `NotPlannedBecause::NoCommand` always use `MissingKind::NotDeclared`'s sentence
+  and survived because nothing held the four explanations apart — the module's own
+  prose argues at length that a broken manifest must not be described as a project
+  that never wrote one, and the prose was the only thing saying so. Both were
+  closed by tests written **for them** —
+  `the_plan_reads_what_it_would_do_before_what_it_would_not` and
+  `the_ways_a_manifest_can_leave_sure_without_a_command_read_differently`. The
+  reading that matters is not "no survivors" but *which test* is doing the work; a
+  survivor closed by a test that also catches six other rows has been covered
+  rather than understood.
+
+- **THE SET WAS RUN THREE TIMES, AND ONLY THE THIRD RUN'S TREE IS THE ONE THAT
+  SHIPPED.** That is a process finding rather than a code one, and it is recorded
+  because it cost two extra runs and would otherwise have gone unnoticed. Run 1
+  measured a tree that hashed to `d51684a7`; the two closing tests landed after
+  it, so rows `m20`–`m25` were re-run and each former survivor was caught by
+  **exactly one** test — the one written for it — against a tree that hashed to
+  `997295ab`. The committed tree hashes to
+  `15d1dad186d8117116f784fd33a297002a688942`. **So run 1 and run 2 were both
+  measured against trees that no longer exist and cannot be reconstructed**: the
+  intermediate content was never staged, so neither blob is in the object
+  database, and a later reader cannot diff them to see whether the difference
+  mattered. The whole set was therefore run a third time against the committed
+  blob, and **that log is the record** — one vintage, twenty-five rows, the same
+  file the commit holds. It is not ceremony: **`m3` is caught by two tests in run
+  1 and by three in the committed run**, the third being one of the two closing
+  tests, which is exactly the kind of difference a two-vintage log cannot
+  represent and a reader cannot check.
+
+- **`m22` reads five catchers in two of its three runs and six in the middle one,
+  and the sixth is not a catcher.** The odd run's extra name is
+  `a_service_that_is_dropped_is_stopped_anyway`, which lives in
+  `crates/sure-core/tests/service_supervisor.rs` — a file that does not mention
+  `runtime_probes` at all, in a workspace where the only references to the module
+  outside its own two files are `lib.rs` declaring it, one doc comment in
+  `checks/node.rs` and a string literal in `check_schedule.rs`'s proposer rule.
+  `m22` removes the action from a probe handed to a `PlanBuilder`, and
+  `ProbePlan::of` **has no caller in the shipped source yet**, so nothing that
+  test does can reach it. `mutate3.py` counts every `test … FAILED` line in the
+  run without asking why it failed, so a test that fails for its own reason inside
+  a loaded mutation run is counted as a catcher. That test is a timing test — it
+  spawns a Python child and waits on a deadline with `wait_until(PATIENT, …)` —
+  and the mutation run is twenty-five consecutive full-suite runs on one machine.
+  It passes 5 of 5 when run alone afterwards and the full suite on the committed
+  tree is 0 failed, and the run that measures the committed blob gives `m22`
+  **five** again. **The number to read for `m22` is five**, and the sixth name is
+  recorded here rather than dropped, because a harness that counts failures is
+  only as good as the failures being about the mutation — and a catch list is a
+  count of failures, not a count of *caused* failures.
+
+- **Every row ran the same suite, and that is checked rather than assumed.** Twenty-four
+  of the twenty-five rows hold **45 well-formed `test result:` lines** and a `passed +
+  failed` total that does not move from row to row — **1308** — so the only number that
+  varies across the runs is the catch count, and a row whose suite half-ran cannot be
+  mistaken for a row that survived. **The twenty-fifth row is `m18`, and it holds 44 and
+  1307, because one one-test binary's summary line arrived byte-scrambled as
+  `    test result: .ok`** — the redirect merging the run's two output streams interleaved
+  two writes inside one line. It is recorded rather than rounded away, and what closes it
+  is an identity rather than a reassurance: **in all twenty-five rows the catch count
+  equals the row's own number of failed tests**, and a catch list is read from
+  `test … FAILED` lines rather than from summaries, so a scrambled summary can neither
+  hide a catcher nor fake one. `mutate3.py` passes `--no-fail-fast` for the same reason
+  and says so in its own comment: with fail-fast the catch list is whatever the first
+  failing target happened to hold, which makes every *catching* row a floor rather than a
+  count. **A survivor is the only answer fail-fast cannot fake**, because a survivor is a
+  run where every target ran and passed — which is what makes a survivor worth reading as
+  a finding at all, and why the first run's two survivors are the most trustworthy rows in
+  it.
+
+- **Ten of the twenty-five rows are caught by exactly one test, and the widest list is
+  sixteen.** `m18` at 16, then `m16` at 8 and `m22` at 5, then `m1` at 4; there are
+  **23 distinct catcher names, 19 of which catch more than one row**, and the most widely
+  used is `a_probe_carries_the_weight_it_argues_for_and_nothing_louder` at 9 rows. **That
+  test is also the sole catcher of four rows — `m11` through `m14` — and it was written
+  before the set was run**, on the observation that nothing asserted a probe's severity,
+  its criticality or its evidence class at all. That is the useful reading: a test written
+  for a reason the mutation set had not yet stated turned out to be the only thing standing
+  between four rows and survival, and four rows closing on one test is the same risk
+  `P4-T009` recorded from the other side — a one-test row survives a reworded or deleted
+  test. The ten single-catcher rows are `m8`, `m11`–`m14`, `m19`, `m20`, `m21`, `m24` and
+  `m25`, and each of the **two** closing tests written after run 1 is the sole catcher of
+  the row it was written for.
+
+- **The survivor-marker trap bit again and it is the same shape as the `gh --log`
+  ANSI trap.** `mutate3.py` runs as a subprocess without `PYTHONIOENCODING`, so
+  its stdout is encoded in this machine's locale and the em-dash in
+  `(NONE — this mutation survived)` reaches the log as two replacement bytes. A
+  search for the marker **as written** finds nothing, and a search that finds
+  nothing reads exactly like a session with no survivors. Searching the ASCII word
+  `NONE` found both. This is the second time on this branch that a matcher
+  matching nothing produced a well-formed table of zeros.
+
+- **A pre-existing drift in a file this task edits is recorded rather than
+  repaired.** `crates/sure-core/src/checks/node.rs` cites two test names that do
+  not exist — `a_manifest_sure_could_not_read_is_not_a_manifest_that_declares_
+  nothing` at line 339 and `nothing_this_module_builds_is_refused` at line 355,
+  where the real name is
+  `nothing_this_module_builds_is_refused_and_every_identifier_is_distinct`. Both
+  are in `node.rs`, which is `P4-T002`'s file and an accepted task's wording; this
+  task's edits to that file are the four widenings and their doc paragraphs, and
+  repairing another task's citations inside them would put an unrelated change in
+  a task-scoped commit. `P5-T001`'s own five stale test-name references **were**
+  found and fixed before the commit — by scanning the module's bare-backticked
+  long identifiers against the `fn` names that exist — which is how the same
+  defect was found in `node.rs` and left alone on purpose.
+
+- **What this module does not do.** It runs nothing, starts nothing and opens
+  nothing: there is no `Command`, no port, no timeout and no browser here, and the
+  running is `P5-T002`'s, `P5-T003`'s and `P5-T004`'s work. It reads nothing
+  either — every fact is a field of a discovery result. It does not decide whether
+  a probe is allowed to run, which is `PlanBuilder`'s and through it the domain's
+  `decide`. **It has no caller in this crate yet**, which is `NodeChecks`' own
+  state one phase earlier. And it does not witness that a service is *good*: a
+  project whose start script is `"start": "sleep 600"` gets a serve probe and so
+  does a project whose start script exits immediately. Whether the thing that came
+  up is the thing the project means is not a question a table of roles can answer,
+  and saying so is the same limit `crate::browser` states about its drivers.

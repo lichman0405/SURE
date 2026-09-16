@@ -2,49 +2,288 @@
 
 Last updated: 2026-09-16
 Branch: `claude/v0.1-autonomous`
-Progress: 52 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 53 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9).** `P4-T009` is implemented as **two** commits — `d379103`, the implementation
-and its tests, and the commit carrying this file, which is its acceptance. **The run
-of `d379103` is read in full below**, in the run table and in this section. What the
-task added is described under "What `P4-T009` added", which is this section;
-`P4-T008`'s is the next one down.
+(9/9), phase P5 open at 1/7.** `P5-T001` is implemented as **two** commits —
+`c9057d7`, the implementation and its tests, and the commit carrying this file,
+which is its acceptance. **The run of `c9057d7` is read in full below**, in the run
+table and in this section. What the task added is described under "What
+`P5-T001` added", which is this section; `P4-T009`'s is the next one down.
 
-**Accepting `P4-T009` does not change the READY list, and for the first time in
-five acceptances that is not the whole answer.** Three tasks name `P4-T009` in
-`depends_on` — `P7-T004`, `P8-T007` and `P14-T007` — and all three now hold it
-`accepted`, so this acceptance *does* unblock work. None of the three becomes READY,
-because each is still waiting on one other task: `P5-T006` for `P7-T004`, `P8-T006`
-for `P8-T007` and `P7-T005` for `P14-T007`. So the READY list holds the same
-**eight** entries before and after — `P5-T001`, `P6-T001`, `P6-T005`, `P6-T007`,
-`P8-T001`, `P12-T008`, `P13-T001`, `P13-T004` — confirmed by `taskctl status` itself
-after the accept rather than by a second reading of a replay. **The previous four
-acceptances wrote "unblocks nothing" and this one cannot**: a dependency edge and a
-READY entry are two different facts, and only the first of them changed here. So the
-next concrete action is the lowest-numbered READY entry, **`P5-T001`**, and nothing
-about this acceptance chose it.
+**Accepting `P5-T001` adds a READY entry rather than only removing one, which is
+the first time in this stretch of acceptances that the list grows.** `P5-T002` —
+*"Implement web/service start smoke check"* — names `P5-T001` in `depends_on` and
+**nothing else**, so this acceptance makes it READY. The list goes from seven
+entries to **eight**: `P5-T002`, `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`,
+`P12-T008`, `P13-T001`, `P13-T004` — computed by resolving every queued task whose
+dependencies are all accepted, before and after the accept, rather than by reading
+a replay. The lowest-numbered is `P5-T002`, which is also the entry this task's
+own module is the input to; that is convenient rather than decisive, because the
+rule is the lowest number and not the tidiest story.
 
-**This task's mutation set is the first on this branch to find a real gap on its
-first run, and it found two.** Of the twenty-four rows, **`m14` and `m24` survived
-with 0 tests catching each** — 22 caught, 2 survivors, 0 inconclusive. Neither was
-an equivalent mutant: `m14` deletes the early return that reads a check's sentence
-from its `NotCheckedReason`, and it *looks* equivalent because
-`CheckResult::not_run` fills `reason` from the same explanation — it is not,
-because `CheckResult::with_reason` overwrites `reason` and leaves
-`not_checked_reason` alone, and `browser::Probe::verdict` plus three callers in
-`probe.rs` are shipped callers that do exactly that. `m24` rewrites one refusal's
-message into the other's and survived because nothing asserted what either refusal
-*says*. Both were closed by tests written for them, and **the set was then re-run in
-full** rather than in part, so the log is one vintage against the tree that was
-committed: **24 rows, 24 caught, 0 survivors, 0 inconclusive**, 44 result lines in
-every row and `passed + caught = 1279` in every row. The row-level detail is under
-"What `P4-T009` added" and in `progress/DECISIONS.md`, including the reading of that
-first log that was wrong before it was right.
+**This task's mutation set found its two gaps on the first run, and the set was run a
+third time before the numbers were written down.** Twenty-five rows over the one source
+file this task adds, empty filter on every row so that a survivor is a mutation the whole
+crate's suite missed: **run 1 was 23 caught, 2 survivors, 0 inconclusive** — `m20`
+reverses the plan's own line order and `m25` reports every missing command as one that
+was never declared, and each survived because *nothing asserted the order of the plan's
+report* and *nothing held the four missing-command sentences apart where a gap renders
+them*. Both were closed by tests written for them, and **the whole set was then re-run
+against the tree that was committed** rather than in part — because the two earlier runs
+measured trees that were never staged and are no longer in the object database, and
+`m3`'s catch count moving from two to three between them is the proof that the difference
+matters. That third log is the record: **25 rows, 25 caught, 0 survivors, 0
+inconclusive**, every row's catch count equal to its own number of failed tests, and all
+25 restores verified against `15d1dad1…`. The row-level detail, including the one
+scrambled line in that log and what it does and does not cost, is under "What `P5-T001`
+added" and in `progress/DECISIONS.md`.
 
-**Two commits, and the run of the first was green on the first push.** `d379103` is
-2012 insertions across three files: the new `crates/sure-core/src/aggregation.rs`,
-the new `crates/sure-core/tests/aggregation.rs`, and one line of `lib.rs`. **This
-acceptance closes `P4`** — 9 of 9, the fourth phase complete.
+**Two commits, and the run of the first was green on the first push.** `c9057d7`
+is **2271 insertions and 4 deletions across five files**: the new
+`crates/sure-core/src/runtime_probes.rs` at **1152** lines, the new
+`crates/sure-core/tests/runtime_probes.rs` at **1071**, four `pub(crate)`
+widenings and three doc paragraphs in `checks/node.rs` (+39 −4), one line of
+`lib.rs`, and the fifth entry on `check_schedule.rs`'s proposer rule — **the first
+entry on that list that is not a submodule of `checks/`**. This acceptance opens
+`P5` at 1 of 7.
+
+## What `P5-T001` added
+
+## What `P5-T001` added
+
+**The one thing about `P5-T001` a reader should know before the detail: its
+acceptance is a single sentence and it is three claims, and the interesting part
+of the task is that two of the three were already answered somewhere else.**
+*"Runtime probes specify execution/network requirements and target component."*
+**Execution and network requirements** are the `ActionKind` a probe declares —
+one per probe — and the requirements are derived from it by
+`CheckProposal::new` and read back through `ExecutionRequirements`, which is
+where `can_touch_network` lives. **The target component** is a `Component`'s own
+path looked up in the `ComponentGraph`. Neither of those is a sentence this
+module invented; both are the domain's and the schedule's own vocabulary, and
+the module's job was to be the *first* thing to put a probe into it. The third
+claim is the one with no prior owner: that a probe is a **`CheckProposal`**, not
+a description of one, so it drops into a `CheckSchedule` with nothing anywhere
+deciding twice what a check is.
+
+**`start` and `dev` finally have a consumer, and the promise they were waiting on
+was written down a phase before it could be kept.** `checks/node.rs` explains why
+four of `ScriptRole`'s eight variants produce checks and four do not:
+
+> *`dev` and `start` **do not finish**. They are servers, and a check is
+> something that ends. Starting one is what `service` and `checks.browser_probe`
+> are for, with their own permissions and their own timeouts.*
+
+That sentence was written when those two roles had **no consumer at all**.
+`runtime_probes` is it: `ScriptRole::Start` and `ScriptRole::Dev` are read here
+and nowhere else in the shipped source, and the command they yield is the command
+a probe would run. The task's second contribution to `node.rs` is a doc paragraph
+that says so, and the first is four `pub(crate)` widenings — `Runner`,
+`Runner::of`, `components`, `command_for` — each carrying its own paragraph
+naming `P5-T001` as the second caller. **A widening whose documentation does not
+say who else is calling it is indistinguishable from a visibility change nobody
+needed**, and the two modules agree about *which package manager runs this
+project's scripts*, *which manifests SURE read* and *which of the three
+missing-command facts applies* because there is one answer to each rather than
+two that happen to match today.
+
+**Two kinds, and the absences are the decisions.** `Serve` is
+`ActionKind::StartService`, `MustFix` and critical; `Interface` is
+`ActionKind::BrowserProbe`, `ShouldFixFirst` and not critical. A **route check**
+is absent because `CheckReason`'s own rule refuses it: a probe asking whether
+`/api/health` answers would have to name where SURE read that a route exists, and
+nothing in the discovery holds one — a `package.json` declares scripts and
+dependencies, not routes — so the reason would name a file that says no such
+thing. Routes are `P5-T003`'s and they arrive with the reading that can point at
+them. `ActionKind::ExternalService` is absent as **a boundary rather than a
+gap**: reaching a real payment or mail system is `P5-T006`'s subject, and a local
+check planned here would be this module inventing a local substitute for a check
+that is not local. `ActionKind::ArbitraryCommand` is absent as **forbidden**:
+`P5-T005` says a project may describe safe local acceptance flows *without
+arbitrary free-form shell*, and the way to hold that is for the only actions a
+probe can declare to be actions with a meaning. **There is no field here a caller
+could put a command line in** — the string a probe carries is the project's own
+declared script, rendered by the package manager that runs it, and `ProbePlan::of`
+is the only constructor.
+
+**`auto` and `always` are not decorative, and they answer differently for the two
+kinds — which is why each row carries its own answer rather than the module
+deciding once.** `Auto` is documented as *"run it when the discovered project
+shape suggests it is worth running"*, and the two kinds can see different amounts
+of that shape. A `start` script in a `package.json` **is** the shape that
+suggests a service. There is no manifest field anywhere that says a project has
+an interface — not in the discovery, not in this crate — so under `auto` an
+interface probe would be SURE deciding from nothing that a project has a
+browser-visible surface. `auto` therefore plans a serve probe, plans **no**
+interface probe, and **says so** in `ProbePlan::not_planned` rather than leaving a
+reader to assume an interface was checked and was fine. `always` is how to ask for
+one, and the authority for that is `CheckPreference`'s own documentation rather
+than anything this module adds — *"`Always` is a preference about effort, never a
+grant of authority"* — so an interface probe still needs
+`Permission::ConnectService` and is still refused under `InspectOnly`. `never`
+produces the two `ScopeReduction`s and **no per-component gap**, because the
+reduction is already the project-wide record of a whole class of check being
+switched off and a per-component gap beside it would be a second, longer way of
+saying one thing the user did on purpose.
+
+**A component with no way to start is a value and not a silence, and the
+vocabulary is `checks`' rather than a new one.** `NotPlanned` is
+`MissingCommand`'s shape one level up, for that type's own reason: a check that
+cannot be proposed produces no plan entry, so a report built from the plan would
+say **nothing at all** about a project SURE could not start, and a reader takes
+the absence of a row for the absence of a problem. `NotACommand` is the variant
+worth spelling out — a `package.json` with `"start": {}` is a manifest that
+declared something, and a report that called it *"no start script"* would be
+describing a broken manifest as a project that never wrote one. **That sentence is
+the one the mutation set proved was prose and nothing more**, and it is `m25`
+below.
+
+**One action per probe, and capability and cost are two questions the domain
+answers separately.** `ActionKind::StartService` requires
+`Permission::RunProjectCode` **and** answers `can_touch_network() == true`. The
+temptation to add a second `NetworkAccess` action is refused in both directions:
+it would add no capability, because the first action already answers yes — but it
+*would* add `Permission::Network` to the check's requirements, and that
+permission is about reaching **beyond this machine**. Requiring it to talk to
+`127.0.0.1` would ask a user to grant something the check does not need, which is
+the shape `ExecutionRequirements::blocked_by`'s own documentation warns about
+from the other end: *a prompt that named something the user had already granted
+is a sentence asking them to do something they have done.* No convenience
+accessor renames either half — a caller asking *can this reach the network* reads
+the domain's answer — and the module says so where it could have smoothed the two
+together.
+
+**The weights are a fourth vocabulary and they were checked as one.** Each row of
+`PROBES` carries severity, criticality, evidence class and whether `auto` plans
+it. The first two and the last are arguments about **consequence** rather than
+about numbers, and a consequence can only be read where a consequence is used: a
+result built from a schedule. `a_probe_carries_the_weight_it_argues_for_and_nothing_louder`
+builds an inspect-only schedule and asserts, per kind, that
+`CheckResult::blocks_green()` answers `true` for a stopped serve probe and
+`false` for a stopped interface probe. **That test was written before the
+mutation set was run**, on the observation that nothing asserted a probe's
+severity, its criticality or its evidence class at all — and it is the sole
+catcher of four of the twenty-five rows below, which would otherwise have
+survived.
+
+**The module has no caller in this crate yet, and that is a state rather than a
+gap.** The seam is public and a later task wires it; `NodeChecks` was in the same
+state one phase earlier. It runs nothing, starts nothing and opens nothing —
+there is no `Command`, no port, no timeout and no browser here, and the running
+is `P5-T002`'s, `P5-T003`'s and `P5-T004`'s work. It reads nothing: every fact is
+a field of a discovery result. It does not decide whether a probe is allowed to
+run, which is `PlanBuilder`'s and through it the domain's `decide`. And it does
+not witness that a service is *good* — a project whose start script is
+`"start": "sleep 600"` gets a serve probe and so does one whose start script
+exits immediately, because whether the thing that came up is the thing the
+project means is not a question a table of roles can answer.
+
+**The mutation set found two real gaps on its first run, and one of them is the
+paragraph above about `NotACommand`.** Twenty-five rows over the single source file this
+task adds, empty test filter on every row so that a survivor is a mutation the whole
+crate's suite missed rather than one a narrow filter never looked at. Run 1 — against the
+tree as first written — left **`m20` and `m25` surviving with 0 tests catching each**:
+23 caught, 2 survivors, 0 inconclusive, and all 25 restores verified by blob hash.
+
+- **`m20` reverses the plan's own line order** — `plain_description` returning the gaps
+  before the probes — and survived because **nothing asserted the order of the plan's own
+  report**. The integration file asserted membership, the module asserted membership, and
+  **a claim about membership is not a claim about order**; a plan whose two halves swap
+  places reads to a user as a report that leads with what SURE could not do. Closed by
+  `the_plan_reads_what_it_would_do_before_what_it_would_not`, which is now the only test
+  that catches it.
+- **`m25` makes every missing command read as one that was never declared** — the precise
+  substitution the paragraph above argues against, where a `package.json` with
+  `"start": {}` is described as a project that never wrote a start script. It survived
+  because **nothing held the four explanations apart in the place they are actually
+  rendered**: `checks/mod.rs` does assert that `MissingKind`'s four sentences are pairwise
+  distinct, but over `MissingKind::plain_explanation()` rather than over the sentence a
+  gap shows through `NotPlannedBecause`, so an assertion about the same four strings sat
+  in the suite while the row that swaps them survived it. Closed by
+  `runtime_probes::tests::the_ways_a_manifest_can_leave_sure_without_a_command_read_differently`,
+  which is likewise its only catcher.
+
+**The set was then run a third time, against the tree that was committed, and that third
+log is the record.** Run 1 measured a tree hashing to `d51684a7`; the two closing tests
+landed after it, so rows `m20`–`m25` were re-run in run 2 against a tree hashing to
+`997295ab`, and each former survivor was caught by exactly one test. **Neither blob is in
+the object database** — `git cat-file -t` answers *could not get object info* for both,
+because the intermediate content was never staged — so a later reader cannot diff them to
+see whether the difference mattered, and the whole twenty-five row set was run again
+against the committed blob `15d1dad186d8117116f784fd33a297002a688942`. That is not
+ceremony: **`m3` is caught by two tests in run 1 and by three in the committed run**, the
+third being one of the two closing tests, which is exactly the kind of difference a
+two-vintage log cannot represent and a reader cannot check.
+
+**Run 3 is 25 rows, 25 caught, 0 survivors, 0 inconclusive, and its invariants are
+checked rather than assumed.** 24 of the 25 rows hold **45 well-formed `test result:`
+lines** and `passed + failed = 1308`; **in all 25 rows the catch count equals the row's
+own number of failed tests**, which is the identity that closes the one row that is not
+pristine. All 25 rows print *restored to the pre-run blob*, and `git hash-object` on the
+worktree file afterwards answers `15d1dad1…` — the committed blob — so the tree the set
+measured is the tree the commit holds.
+
+**One row's log is not pristine, and it costs the reading nothing.** `m18` holds 44
+well-formed result lines and a total of 1307, because one one-test binary's summary line
+arrived byte-scrambled as `    test result: .ok` — the redirect that merged the run's two
+output streams interleaved two writes inside one line. The catch count is read from
+`test … FAILED` lines rather than from summaries, so a scramble cannot hide a catcher; and
+that m18's 16 failures equal its 16 catchers is what says so for that row.
+
+**`m22` reads five catchers in the committed run and six in run 2, and the sixth name is
+not a catcher.** The extra name was `a_service_that_is_dropped_is_stopped_anyway`, which
+lives in `crates/sure-core/tests/service_supervisor.rs` — a file that does not mention
+`runtime_probes` at all, in a workspace where the module's only references outside its own
+two files are `lib.rs` declaring it, one doc comment in `checks/node.rs` and a string
+literal in `check_schedule.rs`'s proposer rule. `m22` removes the action from a probe
+handed to a `PlanBuilder`, and `ProbePlan::of` has no caller in the shipped source yet, so
+nothing that test does can reach it. `mutate3.py` counts every `test … FAILED` line in a
+run without asking why it failed, so a test failing for its own reason inside a loaded
+mutation run is counted as a catcher; that test is a timing test that spawns a Python
+child and waits on a deadline, and this run is twenty-five consecutive full-suite runs on
+one machine. It passes 5 of 5 when run alone afterwards, the committed tree's suite is
+0 failed, and the run that measures the committed blob gives `m22` **five** again. The
+number to read for `m22` is five, and the sixth name is recorded rather than dropped,
+because a catch list is a count of failures and not a count of *caused* failures.
+
+**The shape of the catch lists is worth a line of its own.** The widest is `m18` at 16,
+then `m16` at 8 and `m22` at 5, then `m1` at 4; **ten of the twenty-five rows are caught
+by exactly one test**, and there are **23 distinct catchers, 19 of which catch more than
+one row**. The most widely used is
+`a_probe_carries_the_weight_it_argues_for_and_nothing_louder` at 9 rows, and it is the
+**sole** catcher of four of them — `m11` through `m14` — which is why the section above
+says that test was written *before* the set was run: a test that closes four rows it was
+not written for is doing work nothing else in the suite was doing.
+
+**The survivor-marker trap bit again, and it is the same shape as the `gh --log` ANSI
+trap.** `mutate3.py` runs as a subprocess without `PYTHONIOENCODING`, so its stdout is
+encoded in this machine's locale and the em-dash in `(NONE — this mutation survived)`
+reaches the log as two replacement bytes. A search for the marker **as written** finds
+nothing, and a search that finds nothing reads exactly like a session with no survivors —
+which is what it read as here until the ASCII word `NONE` was searched for instead, and
+that is how `m20` and `m25` were found. **A matcher that matches nothing prints a
+well-formed table of zeros**, and this is the second time on this branch that it has.
+
+**Two commits, and the run of the first was green on the first push.** `c9057d7`
+is 2271 insertions and 4 deletions across five files: the new
+`crates/sure-core/src/runtime_probes.rs` at 1152 lines, the new
+`crates/sure-core/tests/runtime_probes.rs` at 1071, four `pub(crate)` widenings
+and three doc paragraphs in `checks/node.rs`, one line of `lib.rs`, and the
+`check_schedule.rs` proposer rule's fifth entry — **the first entry on that list
+that is not a submodule of `checks/`**. The module is a **composition layer above
+the three proposers rather than a fourth one beside them**: it does not read a
+manifest format, it asks `checks`'s own `node` proposer for a component's start
+command and turns it into a check.
+
+**Accepting `P5-T001` adds a READY entry rather than only removing one.**
+`P5-T002` — *"Implement web/service start smoke check"* — names `P5-T001` and
+nothing else, so this acceptance makes it READY. The READY list goes from seven
+entries to eight, confirmed by `taskctl status` itself after the accept rather
+than by a second reading of a replay: `P5-T002`, `P6-T001`, `P6-T005`,
+`P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`, `P13-T004`. The lowest-numbered is
+`P5-T002`, and it is also the entry this task's own module is the input to —
+which is convenient rather than decisive, because the rule is the lowest number
+and not the tidiest story.
 
 ## What `P4-T009` added
 
@@ -4949,6 +5188,10 @@ Three of the five jobs were failing the whole time.
 | 35047367329 | `a931cb7` — **the `P4-T008` acceptance** | **all five green.** Windows **1540** / macOS **1541** / Ubuntu **1542** passed, **0 failed**, 11 ignored, **56** result lines = **46 parents + 10 children** on each — **identical to `35046550608` in every one of those figures**, which is the right reading for a commit that touches only `progress/`, and it is read out of the log rather than assumed from the commit's file list. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row was added at `P4-T009`'s acceptance because it was recorded nowhere**: the run of a commit that *records* runs cannot be written into the commit that records them, and `P4-T008`'s acceptance section described the implementation's run instead. It is the same shape of gap as the six `P2` runs above, arriving the same way, and it was found this time by listing the runs on this branch rather than by someone noticing. Detail under *What `P4-T008` added* |
 
 | 35050752542 | `d379103` — **the `P4-T009` implementation** | **all five green.** Windows **1566** / macOS **1567** / Ubuntu **1568** passed, **0 failed**, 11 ignored, **57** result lines = **47 parents + 10 children** on each, and **Windows 1566 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. Against `35046550608`, the run of `23d7ae8` and this task's `base_sha`: **+26 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `aggregation` is a new test binary and the child count not moving because it is a new *parent*. **The nameset delta against that run reads +26 −0 on all three platforms, which equals the passed delta**, and the 26 names are exactly this task's **11** unit tests and **15** integration tests — the module's eleven are printed qualified (`aggregation::tests::…`), so no name is defined twice and the delta is not undercounted. **A nameset delta that equals the passed delta is what makes this green checkable rather than merely green.** `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The implementation commit is green on its first push, and the only failures this task produced were the two mutation survivors** — `m14` and `m24`, both closed by tests written for them, with the set then re-run in full. Detail in *What `P4-T009` added*, above |
+
+| 35051377226 | `fc1b862` — **the `P4-T009` acceptance** | **all five green.** Windows **1566** / macOS **1567** / Ubuntu **1568** passed, **0 failed**, 11 ignored, **57** result lines = **47 parents + 10 children** on each — **identical to `35050752542` in every one of those figures**, which is the right reading for a commit that touches only `progress/`, and it is read out of the log rather than assumed from the commit's file list. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row was added at `P5-T001`'s acceptance because the run was recorded nowhere**: the run of a commit that *records* runs cannot be written into the commit that records them, and `P4-T009`'s acceptance section described the implementation's run instead — the same shape of gap as the six `P2` runs above, arriving the same way |
+
+| 35054249354 | `c9057d7` — **the `P5-T001` implementation** | **all five green.** Windows **1595** / macOS **1596** / Ubuntu **1597** passed, **0 failed**, 11 ignored, **58** result lines = **48 parents + 10 children** on each, and **Windows 1595 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. Against `35051377226`, the run of `fc1b862` and this task's `base_sha`: **+29 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `runtime_probes` is a new test binary and the child count not moving because it is a new *parent*. **The nameset delta against that run reads +29 −0 on all three platforms, which equals the passed delta**, and the 29 names are exactly this task's **14** unit tests and **15** integration tests — the module's fourteen are printed qualified (`runtime_probes::tests::…`), so no name is defined twice and the delta is not undercounted. **A nameset delta that equals the passed delta is what makes this green checkable rather than merely green.** `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The implementation commit is green on its first push, and the two mutation survivors the first run found are `m20` and `m25`** — the plan's own line order, and the four sentences a gap can show — both closed by tests written for them. Detail in *What `P5-T001` added*, above |
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and

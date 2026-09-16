@@ -3254,3 +3254,198 @@ a dependency tree it finds — a `node_modules` that exists is the end of the
 question rather than the beginning of one. The reading it produces is for a caller
 holding a failing check, and the module's job ends at handing that caller
 `Reading::TheDependencies` and a sentence that says what SURE did not do.
+
+## P4-T009 — a check the run never heard back from, and the two states one list had been keeping together
+
+**The acceptance has two sentences and the second is about this module's own
+tests rather than about its behaviour.** *"Critical skipped/error/unknown is
+visible."* is a claim about what a report built from a run can say. *"False-green
+unit tests exist."* is a claim about what the tests have to prove, and it is
+answered by naming **which** false greens — there are four, and each has a test
+that would go green if the rule protecting it were removed. `P4-T009` is the
+composition layer `docs/adr/0010-frozen-domain-semantics-in-code.md` implies and
+`docs/architecture/FROZEN_SEMANTICS.md` does not contain: the frozen rule decides
+what a set of results *means*, and nothing in the domain decides **which results
+are in the set**.
+
+- **The rule was frozen before this module existed and not one part of it is
+  restated.** `aggregate` is the only aggregation entry point and this module
+  calls it. There is no question about a failure, a skip or a warning asked
+  anywhere in the shipped source: the severity, the blocking list and the
+  coverage counts are the frozen function's own answers, carried out unchanged.
+  Two rules hold that over the source rather than over this paragraph.
+  `the_aggregation_does_not_restate_the_frozen_rule` fails if `aggregation.rs`
+  contains `AggregateSeverity`, `match result.status` or `match check.status`,
+  and `nothing_but_the_frozen_rule_builds_a_verdict` walks **every shipped source
+  file in the workspace** and fails if anything other than
+  `crates/sure-domain/src/status.rs` builds a verdict — the second is there
+  because the first is only as good as there being nowhere else for a verdict to
+  come from. Both are needed: a source rule over one file says nothing about the
+  next file.
+
+- **Two things the frozen rule cannot see, and both of them are false greens.**
+  `aggregate` answers one question about the slice it is handed — given these
+  results, what may be claimed — and what it cannot see is anything about **the
+  set** rather than about a member of it. **A check the plan named for which no
+  result came back**: the frozen function sees a shorter list and has no way to
+  know a row is missing, and the same list without its failing check is not an
+  incomplete run but a different and greener one. That cannot be closed inside a
+  function whose input *is* the results, which is why a composition layer exists
+  rather than a wider `aggregate`. **Which kind of not-checked**:
+  `CoverageSummary::critical_not_checked` is one list holding two states a reader
+  acts on differently — `Skipped`, *"I was not allowed to look"*, and `Unknown`,
+  *"I looked and could not tell"* — and a report built from that list cannot tell
+  them apart. The vocabulary for the distinction already existed and **had no
+  consumer in this crate at all** until this module: `CriticalState` is a
+  five-way classification the domain froze on the wire, and `from_status`
+  classifies every row here, so the three states the acceptance names are the
+  domain's own three and not a second set invented beside them.
+
+- **The plan decides the run, and the schedule is what says so.** `CheckSchedule`
+  is the authority on what the run consists of: it decides the order rows appear
+  in — the order `P4-T001` built the plan in, which is the order every other
+  report in this crate shows — and it is where the entry for a check that did not
+  run comes from, `ScheduledCheck::not_run`, whose own documentation says it can
+  produce a skipped result for a check and **cannot** produce any other status
+  for one. `P4-T001` wrote that function for exactly this caller and until now it
+  had none. Two rules follow and they are the whole of what this module decides.
+  **The aggregate is over the plan's checks and nothing else**: one entry per
+  scheduled check in plan order, and a result for a check the plan never proposed
+  is reported by `RunReport::unscheduled` and is **not** aggregated, so it can
+  neither help nor hurt the verdict. That is `Enforcement`'s own rule one level
+  up — a command for a check that is not in the plan is reported by
+  `Enforcement::unscheduled` and is not admitted — and it is also what stops an
+  empty plan plus one stray passing result from reading green.
+  `a_stray_result_cannot_make_an_empty_plan_green` is that case by itself.
+  **The plan's decision is what happened**: a check the plan stopped that came
+  back with a result claiming it ran is aggregated as the plan's stopped entry —
+  a skipped result, which cannot be green — and its id is recorded by
+  `RunReport::overruled`. Nothing is repaired and nothing is believed, because
+  the plan is what SURE was allowed to do and a claim to the contrary is a fact
+  about the caller rather than about the project. `m4` makes the claim win and
+  `m5` records the ordinary case as though it were a claim; each is caught by
+  exactly one test, which is the two rules being one rule apart.
+
+- **Deterministic is a property here rather than an adjective.** The report is a
+  function of the plan, the *set* of results and the project state, and the order
+  a caller collected the results in cannot reach the verdict — which is why the
+  two places it could, the order of the aggregated rows and the order of the
+  reported extras, are both decided here rather than left to a caller's loop.
+  `every_order_of_the_same_results_gives_the_same_report` feeds six results in
+  **all 720 orders** and compares the reports; the extras are deliberately two
+  rows rather than one, because with one row the assertion would hold whatever
+  order they came back in and `m17` would survive. **Nothing here reads a file, a
+  clock, an environment variable or a process**, and
+  `the_aggregation_reads_nothing_but_its_arguments` is the source rule — there
+  because "deterministic" is easy to write in a doc comment and hard to keep.
+
+- **Two ways a caller is refused and neither is repaired, because repairing
+  either would be the false green the rest of the module exists to prevent.**
+  Two results for one check: there is no honest rule for choosing between them,
+  and inventing one — first wins, or the least green wins — would be **new
+  aggregation semantics living in a composition layer**, which is the second
+  place for a rule this repository keeps in one. The check is named and no
+  verdict is produced. A result established against a different project state:
+  every `CheckResult` names the state it applies to, and a verdict that mixed two
+  states would read a pass from an older tree as a pass about this one, which is
+  the stale pass `CheckResult`'s own documentation says both of its required
+  fields exist to prevent. **A refusal is not a green**, and `m20` makes
+  `is_green` answer `true` for one; `m1` and `m2` disable the two refusals; `m3`
+  makes the state refusal name the run's state rather than the result's, which
+  would leave the message unable to say what it found.
+
+- **The mutation set found two real gaps on its first run, and both are the kind
+  of thing the set exists for.** Twenty-four rows over the single source file
+  this task adds, one row per decision rather than per syntactic accident, and the
+  first run left **`m14` and `m24` surviving with 0 tests catching each** — 22
+  caught, 2 survivors, 0 inconclusive. `m14` deletes the early return that reads a
+  check's sentence from its `NotCheckedReason`, and it looked like an equivalent
+  mutant: `CheckResult::not_run` sets `reason` from the explanation
+  (`crates/sure-domain/src/status.rs:364`), so for every result built through that
+  door the two agree. **It is not equivalent** — `CheckResult::with_reason`
+  (`:405`) overwrites `reason` and leaves `not_checked_reason` alone, so the two
+  are set independently and nothing keeps them equal, and `browser::Probe::verdict`
+  (`crates/sure-core/src/browser.rs:672`) is a **shipped caller that does exactly
+  that**, with `probe.rs:805-813` three more. Without the early return a user
+  reading why a check did not run is shown whatever text the caller attached to
+  the result instead of the sentence the product froze. `m24` rewrites one
+  refusal's message into the other's, and it survived because **nothing asserted
+  what either refusal says** — both integration tests match the variant and
+  neither reads the sentence. It is real for the same reason `m14` is:
+  `RunRefused` reaches a caller as a `Display` and nothing else carries the
+  difference, so a state refusal that reads as a duplicate sends a caller looking
+  for a second result that does not exist. Both are closed by tests written for
+  them — `the_reason_a_result_carries_does_not_replace_the_sentence_for_a_check_
+  that_did_not_run` and `each_refusal_says_which_refusal_it_is` — and **the set was
+  then re-run in full** so the log is one vintage against the tree that was
+  committed: **24 rows, 24 caught, 0 survivors, 0 inconclusive**, every restore
+  verified by blob hash, 44 result lines in every row and `passed + caught = 1279`
+  in every row. The two rows that were one test away from surviving are each
+  caught by exactly that one test on the re-run, which is the reading that says
+  the closing test is the one doing the work. The widest catch list is `m13` at
+  10, then `m2` at 9 and `m23` at 7; **ten of the twenty-four are caught by
+  exactly one test**, and the risk that carries is recorded rather than left
+  implicit: a one-test row survives a reworded or deleted test, and the guard
+  against that is the row being re-run rather than trusted.
+
+- **Two rows were deliberately not written, and both are genuinely equivalent
+  mutants — which is a different thing from the two above.**
+  `EvidenceClass::Unknown` in `nothing_came_back` could be `DeterministicCheck`
+  and no test could see it: `CriticalCheck` carries no evidence class and
+  `RunReport` does not re-export the aggregate's counts by class, so the value is
+  unobservable through everything this task exposes. It is still the honest one —
+  SURE has established nothing about a check it never heard about — and the
+  sentence for it lives in `NOTHING_CAME_BACK`, which `m21` moves and one test
+  catches. And the `reported` map could be a `HashMap` rather than a `BTreeMap`:
+  the claim it holds, that the extras' order is a function of the ids, is asserted
+  by `m17`'s row, which is the *observable* half. The container swap is not,
+  because with the two strays in the permutation fixture a `HashMap` would
+  *usually* answer in the other order and occasionally answer in the same one —
+  `RandomState` is seeded per process, so **the mutation would survive sometimes,
+  and a mutation that survives sometimes is worse than one that was never
+  written**. The assertion is mutated instead of the container.
+
+- **The mutation log is written in this machine's locale encoding, and that cost
+  a wrong reading before it was noticed.** The driver captures `mutate3.py`'s
+  stdout as UTF-8 and that script is not run with `PYTHONIOENCODING`, so the
+  em-dash in `(NONE — this mutation survived)` reaches the log as two replacement
+  bytes and a search for the survivor marker as written finds **nothing**. A
+  search that finds nothing reads exactly like a session with no survivors, and
+  that is what it read as here until the ASCII word `NONE` was searched for
+  instead — which is how `m14` and `m24` were found. The same shape as the
+  `gh --log` ANSI trap `cicheck.py` was written for: **a matcher that matches
+  nothing prints a well-formed table of zeros.** Both survivors were found by
+  re-reading the log with a pattern that could not silently match nothing, not by
+  re-running the set.
+
+- **One thing this module found in a file it does not own, and deliberately did
+  not change.** `ScheduledCheck::not_run` records
+  `NotCheckedReason::ExecutionNotAuthorized` for every check the plan stopped,
+  including one stopped because a **network** permission was denied — and that
+  reason's own sentence is about running the project's code, so it is inaccurate
+  for a network check. Changing it means changing `schedule.rs`, which is
+  `P4-T001`'s file and an accepted task's wording, and this task's acceptance does
+  not reach it. So the fixture was chosen so the sentence is **accurate** — a
+  `RunTests` check under inspect-only permissions — and the observation is
+  recorded here instead of being fixed quietly. It is a real inaccuracy in a
+  user-facing sentence and it is now written down rather than lost.
+
+- **What this module does not do.** It does not run a check, choose a severity,
+  build a plan, or repair a disagreement. It has **no caller in this crate yet**,
+  which is `ProjectVerdict`'s own state one phase earlier — the seam is public and
+  a later phase wires it. It does not read the store, follow `P4-T008`'s lead and
+  look at installed state, or decide whether a result is *true*: it decides which
+  results are in the set and what the frozen rule says about them. And it does not
+  turn a missing row into a finding — `nothing_came_back` produces an `unknown`
+  result with the module's own sentence, which is enough to stop a green and is
+  not a claim about the project.
+
+**`P4-T003` has no entry in this file, and it is noted rather than back-filled.**
+This list holds `P4-T001`, `P4-T002`, `P4-T004`, `P4-T005`, `P4-T006`, `P4-T007`,
+`P4-T008` and now `P4-T009`; the task between the second and the third was accepted
+without one. Its decisions are written down — `What \`P4-T003\` added` in
+`progress/HANDOFF.md` carries them — so nothing is lost, and writing a new entry
+now would be a decision record reconstructed from an accepted task's later prose
+rather than one taken while the work was done. **The gap is the finding and the
+choice not to fill it is the decision**: the same call `P4-T008`'s acceptance made
+about five missing items in `## Next concrete action`, for the same reason.

@@ -3079,3 +3079,178 @@ whether a project's migrations are *correct* — only whether a project that has
 schema has a record of how the database reached it. `P4-T007` is the first use of
 `AnchorSubject::Database` in the crate, which until now was a variant with no
 caller.
+
+## P4-T008 — the packages a project declares and did not install, and the reading that stops a failure being about the code
+
+**The acceptance has two sentences and they pull in opposite directions, which is
+what shaped the module rather than what describes it.** *"Missing dependencies are
+distinguishable from failing project code."* asks SURE to say something about
+installed state. *"Install remains separate approved action."* forbids SURE from
+doing anything about it. Three places in the repository forbid looking at installed
+state at all — `docs/architecture/ECOSYSTEM_DISCOVERY.md:641-645` argues that
+installed-ness must not influence what a project **is**, `checks/mod.rs` says the
+same, and `checks/rust.rs` declines to carry an install step — so the first
+sentence could only be answered by giving the reading a **different subject**.
+
+- **Not *what is this project* but *what can SURE do with it right now*.** That is
+  the whole resolution. The question this module answers is a property of the
+  **run**: it changes between two runs over one unchanged commit, and it differs
+  between two people on one branch. That is exactly why it does not belong in a
+  discovery result — where it would make a stale `node_modules` change the
+  project's identity and a fresh clone a project SURE cannot classify — and exactly
+  why it belongs beside the check results it is used to read. Nothing is added to
+  `Discovery`; the module reads one and produces claims of its own.
+
+- **One sentence decides every verdict: a sentinel SURE met means nothing, and a
+  sentinel it did not meet over a walk that finished means one thing.** `met()`
+  asks the walk's **two** lists — `skipped()` and `entries()` — because
+  `node_modules` arrives as a `Skipped` and `.pnp.cjs` arrives as an ordinary
+  `Entry`, and a rule that consulted only one of them would be silent about one
+  kind of project. `InstallState::of` is three-valued rather than two: `InPlace`,
+  `NotInPlace`, and `CannotTell` for a walk that did not finish, and only
+  `NotInPlace` reads as `Reading::TheDependencies`. `m7` makes the two lists agree
+  instead of either one counting and is caught by 5 tests; `m5` removes the
+  completeness gate and `m6` removes the early return that keeps a met sentinel
+  from producing a claim.
+
+- **The module never says the packages are installed, not even when it finds the
+  directory an install fills.** What is installed is the package manager's answer:
+  the directory can be stale, partial, or for a different lockfile than the one in
+  the tree, and SURE reading a name cannot tell any of that apart from the good
+  case. **Every way of being wrong in the presence direction is silent** — a false
+  sentinel suppresses a finding, and only a true absence can produce one — so the
+  direction of the error is chosen rather than hoped for. `a_sentinel_being_present
+  _is_not_a_statement_that_the_packages_are_right` holds that with a stale tree.
+
+- **The severity is argued from the frozen text rather than chosen: the claim is
+  `Severity::Note`.** `MustFix` is *"Do not recommend publishing or handing this
+  off."*, and a fresh clone of a healthy project is in exactly this state — so
+  `MustFix` would make SURE refuse to pass judgement on a project it has not been
+  able to check yet. `ShouldFixFirst` is *"A material reliability or quality
+  risk."*, which is the wrong **subject** as well as the wrong weight: the risk is
+  to SURE's ability to *measure* the project's quality, not to the project's
+  quality, and calling an environment fact a quality risk of the code is the exact
+  confusion this task exists to prevent. Two properties follow and neither is
+  bolted on: a `Note` cannot `blocks_hand_off`, and `can_alone_support_must_fix` is
+  about an evidence **class** rather than a level, so no missing package can become
+  a `must_fix` about somebody's code. `m17` and `m18` move the severity each way,
+  `m19` moves the severity the evidence carries, and `m20` unbinds the evidence
+  from the fingerprint the walk was taken over.
+
+- **The table has one row, and both omissions are argued rather than left as an
+  unfinished table.** Rust is out because there is no gap to find — `cargo test`
+  fetches what it needs when it runs, so an absent `target` is where the next
+  command is going to write rather than a state to fix first — and `checks/rust.rs`
+  argues this at length and declines to carry an install step for the same reason.
+  Python is out because absence settles nothing, and that is the more interesting
+  omission: where a Python check runs is composed by `discover::python::command_for`,
+  and a project without an installer gets `python -m pytest`, which the discovery
+  itself calls *"a command that depends on which interpreter is first on the
+  path"* (`discover/python.rs:1596`). An interpreter first on the path is not in
+  the project, so a walk of the project cannot see it, and a project with no
+  `.venv` may have every one of its packages importable. **The honest reason there
+  is no Python row is that SURE cannot tell — not that Python projects do not need
+  installing**, and `the_table_holds_only_the_ecosystems_absence_settles_for` is
+  the test that holds the table to that answer.
+
+- **The sentinel list is generous on purpose, and the generosity is the safety
+  argument.** This module's one productive finding is an absence, so a sentinel
+  missing from `resolved_into` is a project SURE wrongly tells to install packages
+  it already has, while a sentinel that should not have been there costs a
+  **suppressed** finding — the quiet direction. So the row names `node_modules`
+  **and** Yarn's `.pnp.cjs`/`.pnp.js`, because a plug'n'play project resolves
+  packages with no `node_modules` at all and leaving them out would produce a
+  finding on every PnP project in existence.
+  `a_yarn_plug_n_play_project_has_no_node_modules_and_is_not_a_finding` holds that,
+  and it is also the half that exercises the walk's **entries** rather than its
+  **skips**. What is deliberately absent is a cache: `SkipReason` already separates
+  `Vendored` from `Cache`, and a download a package manager is holding for later
+  resolves nothing on its own. `m11` drops the PnP sentinels, `m12` drops
+  `node_modules` — the widest catch list in the set at 7 — and `m13` points the
+  claim at the wrong manifest.
+
+- **Only the root is read.** npm, yarn and pnpm hoist a workspace's packages into
+  the **root** `node_modules`, so a member with none of its own is the normal shape
+  of a correctly-installed monorepo, and reading members would produce a finding on
+  every one of them. The rule is equality with the root rather than a search under
+  it — `packages/web/node_modules` folds to a longer path and does not equal
+  `node_modules` without a second rule saying so —
+  `a_member_directory_is_not_the_root_and_does_not_answer_for_it` holds that, and
+  `m9` turns the equality into an `ends_with` and is caught only by it.
+
+- **Nothing here installs and nothing here can be made to.** `Assessed::action` is
+  `ActionKind::InstallDependencies` — a **function** rather than a field, because
+  there is exactly one answer and a field would be a second place for it to be
+  written down wrong — and it is the value `ExecutionRequirements::of` turns into a
+  decision and `consent` turns into a question, so a caller goes through the same
+  door every other action goes through. What this module does **not** do is compose
+  the command: that is `crate::checks`' business and lives there, from the same
+  `ConventionalCommand` the checks are built from. **The table has no column for a
+  command at all**, which is what makes that a structural fact rather than a
+  promise, and `the_module_opens_no_file_and_runs_nothing` makes the reading half
+  of it a source rule in the shape `db_migrations` uses for its own.
+
+**One unit test was deleted rather than the guard widened to admit it, and that is
+the decision this task most nearly got wrong.** `check_schedule`'s proposer rule
+scans every shipped source file and fails when one names `CheckProposal`,
+`CheckReason`, `ExecutionRequirements` or `PlanBuilder` outside prose — and **it
+does not cut at `#[cfg(test)]`**, so a unit test in a shipped file is a proposer
+for this rule. The first draft's unit test
+(`the_action_an_install_needs_is_the_one_permission_that_never_comes_free`) named
+`ExecutionRequirements` to measure that inspect-only refuses an install. Adding
+`dependency_state.rs` to `MAY_PROPOSE` would have weakened a real guard **and**
+asserted something false about a module that proposes nothing; the test was also
+redundant, because the integration test already makes the same claim over a real
+`Assessed`. Its one missing assertion —
+`permissions_needed() == vec![Permission::InstallDependencies]` — moved into
+`an_install_is_a_separate_action_that_needs_its_own_permission`, where it sits
+beside the `blocked_by(&ExecutionPermissions::inspect_only())` assertion that is
+the second sentence of the acceptance.
+
+**The mutation set is 26 rows over the one source file this task adds, 26 caught,
+0 survivors, 0 inconclusive, every restore verified by blob hash — and every row
+ran the same 1253-test suite.** The filter is empty for every row, so a survivor
+would be a mutation the whole crate's suite missed rather than one a narrow filter
+never looked at, and the internal check is exact rather than approximate: **43
+result lines in every row, and `passed + caught = 1253` in every row**, so the only
+number that moved across the 26 runs is the catch count. The tree measured is the
+tree committed, checked by hash rather than assumed: every row reports the same
+pre-run blob `f67a0937…`, which is what `git hash-object` gave for the committed
+file.
+
+- **Two mutations were considered and deliberately not written, because both are
+  equivalent mutants no test in this suite could see.** The
+  `.unwrap_or(row.declared_in)` fallback in `evidence_of` is unreachable from a
+  table whose `resolved_into` is non-empty — and
+  `the_first_sentinel_is_the_directory_a_check_for_node_reads_from` asserts that
+  for every row — so any replacement of it changes nothing. Reversing the
+  `resolved_into` traversal in `Dependencies::met` changes nothing either, because
+  no fixture in the suite has two sentinels present at once, so first-found and
+  last-found are the same sentinel in every run. **A survivor that means nothing is
+  worse than a row that was never written**, and the *answers* both rows would have
+  moved are held by name elsewhere — the first sentinel by the unit test, and the
+  anchor by `declared_packages_and_no_installed_tree_is_the_one_claim_this_module
+  _makes`. This is `P4-T006`'s and `P4-T007`'s equivalent-mutant finding arriving a
+  third time, and the third time the answer was to not write the row at all.
+
+- **One row is platform-dependent, and it says so rather than being left to read as
+  a survivor.** `m10` removes the case fold from the sentinel lookup
+  (`CaseSensitivity::platform()` → `Sensitive`). It is observable on this
+  machine's case-insensitive filesystem and exercised on the other by CI, where the
+  same code path answers the opposite way — the same shape `P4-T007` recorded for
+  its own `m13`. `the_case_a_sentinel_is_looked_up_by_is_the_platforms_rule`
+  asserts whichever answer the platform gives, so it is caught here **and** would
+  be caught there; a mutation whose effect depends on the platform is not the same
+  thing as one nothing can see, and the difference is that this one can name the
+  test that sees it. The lookup goes through `discover::lookup_key` rather than a
+  second folding rule written here, for the reason `P4-T007` recorded.
+
+**What this task does not do, stated where the module states it.** It does not
+install anything, and it never composes the command that would; it does not read a
+manifest to find out what the packages *are*, only whether the walk met the place
+an install would have put them; it does not decide whether a project's declared
+packages are the right ones, or current, or resolvable; and it does not look inside
+a dependency tree it finds — a `node_modules` that exists is the end of the
+question rather than the beginning of one. The reading it produces is for a caller
+holding a failing check, and the module's job ends at handing that caller
+`Reading::TheDependencies` and a sentence that says what SURE did not do.

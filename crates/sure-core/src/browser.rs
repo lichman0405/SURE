@@ -91,10 +91,13 @@
 //! # What is missing
 //!
 //! **No driver is implemented here, and no browser is started.** Finding one,
-//! launching it and driving it is the adapter, which is `P5-T004`; this module
-//! is the interface that adapter implements and the mapping its answers go
-//! through. Nothing here builds a [`std::process::Command`], so the spawn census
-//! in `tests/spawn_sites.rs` is unchanged by this file.
+//! launching it and driving it is the adapter, which is
+//! [`crate::browser_driver`]; this module is the interface that adapter
+//! implements and the mapping its answers go through. Nothing here builds a
+//! [`std::process::Command`], so the file this one names in the spawn census is
+//! the adapter's launcher and not this one — and the adapter is reachable from
+//! nothing, which is the rule `tests/browser_probe.rs` holds and the reason
+//! `support::CEILING` has not moved.
 //!
 //! **The loopback rule is [`Endpoint`]'s**, and it is reused rather than
 //! restated — see [`Target`]. A browser will navigate to the internet happily,

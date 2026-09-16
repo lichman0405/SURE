@@ -77,11 +77,14 @@
 //! # What this does not establish
 //!
 //! **Nothing has been run.** This module builds the gate and the record; it does not
-//! open it. There is still no caller of `sure_core::process::run`, so
-//! `tests/spawn_sites.rs`'s list is unchanged and `sure_core::support`'s ceiling of
-//! *inspect only* is still true. The day something runs a command, both of those
-//! change in the same commit, and that is deliberate: they are the two places that
-//! would otherwise go on claiming nothing executes.
+//! open it. There is still no caller of `sure_core::process::run`, and
+//! `sure_core::support`'s ceiling of *inspect only* is still true. The census that
+//! ceiling rests on gained a site in `P5-T004` — the browser launcher — and gained
+//! nothing that reaches it: the list is a list of ways SURE *could* run something,
+//! and what keeps the ceiling true is that no product path takes any of them. The
+//! day something runs a command, that changes, and it changes in the same commit as
+//! this paragraph: they are the two places that would otherwise go on claiming
+//! nothing executes.
 //!
 //! **Nothing about what an approved command will do.** Approving `cargo test`
 //! approves a command line, not the code behind it. [`crate::safety`] says the same

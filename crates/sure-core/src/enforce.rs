@@ -4,12 +4,13 @@
 //!
 //! `inspect_only` has been true of SURE so far for a reason that will not last:
 //! **nothing in this repository launches a project process.** The census in
-//! `tests/spawn_sites.rs` counts three places that build a
-//! [`Command`](std::process::Command), all of them inside the runner's own
-//! machinery, and `support::CEILING` is justified by *no project code running*.
-//! That is a fact about this build, not a property of the mode, and the day the
-//! first check is wired to the runner the fact stops being true. The census test
-//! says in its own documentation that it is written to fail on that day.
+//! `tests/spawn_sites.rs` counts four places that build a
+//! [`Command`](std::process::Command) — the runner's own machinery, `taskkill`,
+//! and the browser launcher — and `support::CEILING` is justified by *no project
+//! code running*. That is a fact about this build, not a property of the mode —
+//! and the day the first check is wired to the runner the fact stops being true.
+//! The census test says in its own documentation that it is written to fail on
+//! that day.
 //!
 //! This module is what has to be in place before that day. It turns "nothing
 //! runs, because there is nothing to run it" into **"nothing runs, because the

@@ -22,13 +22,25 @@
 //!
 //! **One: every file in `crates/` that builds a `Command` is named here.** The
 //! census is not the interesting fact; the interesting fact is that the list
-//! *cannot grow quietly*. A fourth `Command::new` is a new way for SURE to run
+//! *cannot grow quietly*. A fifth `Command::new` is a new way for SURE to run
 //! something, and adding one means editing this list, which means reading this
 //! paragraph. **This rule has not moved for two callers now**: neither
 //! `service.rs` nor `runtime_start.rs` builds a `Command` of its own — the first
 //! builds a `ProcessRequest` and the request builds the command, and the second
-//! builds neither — so the count is still three, and the rules below are what
-//! cover the callers instead.
+//! builds neither — so those two are covered by the rules below rather than
+//! here.
+//!
+//! **The count is four since `P5-T004`, and the fourth entry is the one to
+//! argue for.** `browser_driver/launch.rs` starts a browser, which is a program
+//! that is not part of this repository and is not a project's either — and it is
+//! here because *every* way SURE runs something belongs in one list, not because
+//! starting a browser is safe by nature. What keeps it from moving
+//! `support::CEILING` is that **nothing in the product builds the type that
+//! starts it**: a `browser_driver::Browser` is a driver, and the only one
+//! constructed anywhere is inside `browser_probe.rs`-style test code. That
+//! absence is checked where the claim lives, by
+//! `tests/browser_probe.rs`'s rule five, which was written to fail on the day an
+//! adapter landed and is what had to move when this one did.
 //!
 //! **Two: nothing outside [`MAY_NAME_A_PROCESS_REQUEST`] mentions
 //! [`ProcessRequest`].** This is the tightest of the three, and until `P3-T009`
@@ -97,6 +109,11 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
     (
         "sure-core/src/process/terminate.rs",
         "`taskkill`, to stop a process tree that did not stop",
+    ),
+    (
+        "sure-core/src/browser_driver/launch.rs",
+        "a browser this machine has, headless and sandboxed, for the page check — \
+         reachable only from a `browser_driver::Browser`, which no product path builds",
     ),
 ];
 

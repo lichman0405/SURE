@@ -103,7 +103,7 @@
 pub mod error;
 pub mod outcome;
 pub mod request;
-mod terminate;
+pub(crate) mod terminate;
 
 use std::fs;
 use std::io::{self, Read};

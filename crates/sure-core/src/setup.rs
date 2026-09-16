@@ -36,8 +36,8 @@
 //! is no code in this module that *could* run it:
 //!
 //! - **Nothing here builds a [`Command`](std::process::Command).** This crate's
-//!   shipped code has three `Command::new` sites and this module is not one of
-//!   them; `tests/spawn_sites.rs` counts them, so a fourth is a failing test
+//!   shipped code has four `Command::new` sites and this module is not one of
+//!   them; `tests/spawn_sites.rs` counts them, so a fifth is a failing test
 //!   rather than a review comment.
 //! - **Nothing here reaches [`crate::process`].** That module is where a program
 //!   and an argument vector are handed to the operating system, and this file

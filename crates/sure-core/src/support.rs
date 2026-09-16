@@ -32,21 +32,27 @@
 //! deterministic checks", "approved generic checks" — and **this build runs no
 //! project code.** That is not an impression, it is checkable, and it is a claim
 //! about which programs are reached rather than about how many places *could*
-//! reach one: `sure-core` holds three `Command::new` sites, and exactly one of
+//! reach one: `sure-core` holds four `Command::new` sites, and exactly one of
 //! them is on a product path — [`crate::fingerprint`]'s, in
 //! `fingerprint/git/mod.rs`, which runs `git`, read-only, for the content
-//! fingerprint. The other two are [`crate::process`]'s runner and its
-//! `taskkill`. **The runner is no longer uncalled** — [`crate::service`] is its
+//! fingerprint. The other three are [`crate::process`]'s runner and its
+//! `taskkill`, and `browser_driver/launch.rs`, which starts a browser. **The
+//! runner is no longer uncalled** — [`crate::service`] is its
 //! one caller, and it can only start what [`crate::enforce`] admitted — and
 //! **[`crate::runtime_start`] now names a `Supervisor`**, so there is a file one
-//! step closer to the product that can start a service. That caller is not
-//! itself on a product path either: nothing in the product builds a
-//! `StartSmoke`, so the chain from any command a person can run ends one link
-//! short of a process. So the claim this paragraph used to rest on has moved up
-//! **twice** rather than become false, and it is still checked rather than
-//! asserted: `tests/spawn_sites.rs` holds the census of files that may name a
-//! `Supervisor` and the rule that only one file may name a `StartSmoke`, and
-//! `sure check` still records a goal and says that nothing was checked.
+//! step closer to the product that can start a service. **The browser launcher is
+//! not on a product path either, and for the plainest reason of the three**:
+//! nothing in the product builds a [`crate::browser_driver::Browser`], so there
+//! is no value anywhere that could ask for a page to be opened. Neither caller is
+//! itself on a product path: nothing in the product builds a
+//! `StartSmoke`, and nothing constructs a driver, so the chain from any command a
+//! person can run ends one link short of a process. So the claim this paragraph
+//! used to rest on has moved up **three times** rather than become false, and it
+//! is still checked rather than asserted: `tests/spawn_sites.rs` holds the census
+//! of files that may name a `Supervisor` and the rule that only one file may name
+//! a `StartSmoke`, `tests/browser_probe.rs` holds the rule that nothing outside
+//! the adapter may name it, and `sure check` still records a goal and says that
+//! nothing was checked.
 //! [`crate::doctor`] searches for and probes toolchains, which is SURE talking
 //! about its own prerequisites.
 //!

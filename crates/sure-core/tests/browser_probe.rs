@@ -37,11 +37,25 @@
 //! thing that keeps them together is this test; a change to either fails here
 //! with the code that differs.
 //!
-//! **Five: nothing in the product can drive a browser yet.** No shipped file
-//! outside `browser.rs` names `BrowserDriver`, and the product's default
-//! execution mode denies the action a browser probe needs. **This rule is meant
-//! to fail** — the day an adapter lands it must, and that commit edits the list
-//! below, which is the moment somebody reads this paragraph.
+//! **Five: nothing in the product can drive a browser yet** — and this rule has
+//! now moved once, which is what it was written to do. It used to read *no
+//! shipped file outside `browser.rs` names [`BrowserDriver`]*, with a note
+//! saying that the day an adapter landed it must fail and the commit that lands
+//! the adapter edits it. `P5-T004` landed one, it failed, and it is two rules
+//! now:
+//!
+//! * **Only the interface and the adapter may name [`BrowserDriver`].** A third
+//!   file naming the trait is a file that has an opinion about how a browser is
+//!   driven, and that opinion belongs in the adapter.
+//! * **Nothing outside the adapter may name the adapter.** This is the rule the
+//!   old one became: an adapter that cannot be constructed from anywhere in the
+//!   product is a browser that cannot be started from anywhere in the product,
+//!   and it is checked against `browser_driver` rather than against the name of
+//!   the type for the reason rule three gives — a `use` of a module has to spell
+//!   the module, and `Browser` is a word this crate could grow elsewhere.
+//!
+//! Both are backed by the behavioural half, which has not moved: the product's
+//! default execution mode denies the action a browser probe needs.
 //!
 //! # What is not claimed here
 //!
@@ -75,6 +89,29 @@ const THE_DOOR: &str = "crates/sure-core/src/browser.rs";
 /// it by different routes — and `the_two_spellings_of_the_browser_modules_path_agree`
 /// is what stops them drifting into two files.
 const THE_DOOR_IN_THE_WALK: &str = "src/browser.rs";
+
+/// The adapter, as the walk reports it: the directory, so that a new file inside
+/// it is covered the day it is created rather than the day somebody remembers to
+/// add it to a list.
+const THE_ADAPTER_IN_THE_WALK: &str = "src/browser_driver/";
+
+/// The one file outside the adapter that may name it, which is the file that
+/// declares the module.
+///
+/// **A declaration is not a caller**, and the distinction is the whole of why
+/// this exemption is not a hole: `pub mod browser_driver;` makes the module
+/// reachable and reaches nothing itself. Only a file that can name the module
+/// can name a type inside it — which is what the rule below is stated against,
+/// and what makes this exemption cost the rule nothing.
+const THE_MODULE_DECLARATION: &str = "src/lib.rs";
+
+/// The files that may name [`BrowserDriver`]: the interface that defines it and
+/// the adapter that implements it.
+///
+/// Two entries rather than a predicate, for the reason `spawn_sites.rs` gives
+/// about its own lists: a predicate is a rule that grows without anybody reading
+/// it, and a third entry is a decision somebody has to write down.
+const MAY_NAME_THE_INTERFACE: &[&str] = &[THE_DOOR_IN_THE_WALK, THE_ADAPTER_IN_THE_WALK];
 
 /// Words that mean a browser rule has reached the core verdict machinery.
 ///
@@ -313,38 +350,97 @@ fn the_page_status_window_is_the_local_probes_window() {
     }
 }
 
-#[test]
-fn nothing_in_the_product_can_drive_a_browser_today() {
-    // Rule five, in two halves: no shipped file can build a driver, and the
-    // default execution mode would refuse the action even if one existed.
+/// Every line of **code** in a shipped file that names `token`, except in
+/// `exempt`, as `path:line: text`.
+///
+/// The same shape as `spawn_sites.rs`'s `namers_of`, and `is_prose` is the same
+/// filter for the same reason: the paragraphs that explain a rule have to be
+/// able to name the thing the rule is about, and this file's own subject is
+/// named in dozens of them.
+fn namers_of(token: &str, exempt: &[&str]) -> Vec<String> {
     let mut found = Vec::new();
     for (path, text) in shipped_core_sources() {
-        if path.ends_with(THE_DOOR_IN_THE_WALK) {
+        if exempt.iter().any(|allowed| path.starts_with(allowed)) {
             continue;
         }
         for (number, line) in text.lines().enumerate() {
             if is_prose(line) {
                 continue;
             }
-            if line.contains("BrowserDriver") || line.contains("dyn BrowserDriver") {
+            if line.contains(token) {
                 found.push(format!("{path}:{}: {}", number + 1, line.trim()));
             }
         }
     }
+    found
+}
+
+#[test]
+fn only_the_interface_and_the_adapter_know_how_a_browser_is_driven() {
+    // The first half of rule five, as it stands after the adapter landed. Before
+    // `P5-T004` this was "no shipped file outside `browser.rs` names the trait",
+    // and the adapter is the file that was always going to break it.
+    let found = namers_of("BrowserDriver", MAY_NAME_THE_INTERFACE);
+
     assert!(
         found.is_empty(),
-        "a shipped file has begun naming `BrowserDriver`, so something in the \
-         product can drive a browser. That is a real change and not a test to \
-         update: it means a path out of the product opens a page, which is what \
-         `browser.rs`'s absence of a driver is currently justified by. Add the \
-         file to this rule's exemption and say why, in the same commit. \
-         Found:\n  {}",
+        "a shipped file outside the interface and its adapter has begun naming \
+         `BrowserDriver`, so it has an opinion about how a browser is driven. \
+         That opinion belongs in the adapter: add the file to \
+         MAY_NAME_THE_INTERFACE and say in the paragraph above what it does \
+         there. Found:\n  {}",
+        found.join("\n  ")
+    );
+}
+
+#[test]
+fn nothing_outside_the_adapter_can_start_a_browser() {
+    // The second half, and the one that carries the claim the first half used to:
+    // a `Browser` that nothing constructs is a browser that nothing starts.
+    //
+    // Stated against the module rather than against the type name, because a
+    // file that names a type inside a module has to spell the module to reach it
+    // — and because `Browser` is an ordinary English word that a crate this size
+    // could grow in an unrelated place, which would make the rule fail for a
+    // reason that is not about browsers at all.
+    let found = namers_of(
+        "browser_driver",
+        &[THE_ADAPTER_IN_THE_WALK, THE_MODULE_DECLARATION],
+    );
+
+    assert!(
+        found.is_empty(),
+        "a shipped file outside the adapter has begun naming it, so something in \
+         the product can construct a driver and start a browser. That is a real \
+         change and not a test to update: it means a path out of the product \
+         opens a page, which is what `sure_core::support`'s ceiling of *inspect \
+         only* is justified by the absence of. Move that ceiling in the same \
+         commit, or take the name back out. Found:\n  {}",
         found.join("\n  ")
     );
 
-    // The second half, and it is the behavioural one: the mode the product
-    // documents as its default grants no `ConnectService`, so a browser probe is
-    // denied before any question about a browser is reached.
+    // The exemption for the module declaration is only worth having if the
+    // declaration is still there — an entry that exempts a file nobody needs
+    // exempted reads to the next person as a decision somebody made.
+    let declared = shipped_core_sources()
+        .into_iter()
+        .filter(|(path, _)| path == THE_MODULE_DECLARATION)
+        .any(|(_, text)| {
+            text.lines()
+                .any(|line| !is_prose(line) && line.contains("browser_driver"))
+        });
+    assert!(
+        declared,
+        "{THE_MODULE_DECLARATION} is exempted from the rule about `browser_driver` \
+         and no longer declares the module, so the exemption is covering nothing"
+    );
+}
+
+#[test]
+fn nothing_in_the_product_can_drive_a_browser_today() {
+    // Rule five's behavioural half: the mode the product documents as its
+    // default grants no `ConnectService`, so a browser probe is denied before
+    // any question about a browser is reached.
     assert_eq!(
         decide(
             ActionKind::BrowserProbe,

@@ -301,22 +301,67 @@ struct Fixture {
 }
 
 impl Fixture {
+    /// How many names to try before giving up.
+    ///
+    /// One is the ordinary case: the name is either fresh or holds nothing but
+    /// an earlier run's leftovers, which are cleared. A name that **cannot** be
+    /// cleared is one something is still sitting in — the process that outlives
+    /// the test, most likely — and the next counter value is another name.
+    const NAMES: u32 = 16;
+
+    /// A directory of this run's own, under a name **no earlier run can have
+    /// left anything in**.
+    ///
+    /// The name is `<test>-<pid>-<counter>`, and Windows recycles process ids —
+    /// measured on this machine, where two fixtures from processes twenty-eight
+    /// minutes apart were handed the same id. Every assertion in this file reads
+    /// [`bound_path`], [`asked_path`], [`died_path`] and [`abandoned_path`] out
+    /// of this directory, so a run that landed on an earlier run's directory
+    /// would read that run's markers as its own: the three it overwrites look
+    /// right and the fourth — a give-up file, written about thirty seconds after
+    /// the run that made it had already ended — fails an assertion whose message
+    /// then describes something that never happened. That is not hypothetical:
+    /// a failing run under load was observed to create no directory at all,
+    /// which is what landing on an earlier run's looks like from outside.
+    ///
+    /// Clearing happens **here** rather than only in [`Drop`], because `Drop`
+    /// runs while the process that outlives the test is sitting in the tree and
+    /// cannot remove it (see there). A name that cannot be cleared is skipped
+    /// rather than taken: a run that cannot have a directory of its own is a run
+    /// about to assert on another one's.
     fn new(test: &str) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let unique = format!(
-            "{test}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let scratch = sure_testkit::repository_root()
+        let root = sure_testkit::repository_root()
             .join("target")
             .join("tmp")
-            .join(AWKWARD)
-            .join(unique);
-        let project = scratch.join("project");
-        fs::create_dir_all(&project)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", project.display()));
-        Self { scratch, project }
+            .join(AWKWARD);
+        for _ in 0..Self::NAMES {
+            let unique = format!(
+                "{test}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+            let scratch = root.join(unique);
+            match fs::remove_dir_all(&scratch) {
+                // Cleared, or never there: either way nothing of an earlier
+                // run's is left in it.
+                Ok(()) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                // Somebody is still in it. Take another name rather than
+                // adopt this one.
+                Err(_) => continue,
+            }
+            let project = scratch.join("project");
+            fs::create_dir_all(&project)
+                .unwrap_or_else(|error| panic!("cannot create {}: {error}", project.display()));
+            return Self { scratch, project };
+        }
+        panic!(
+            "{} names in a row under {} were all taken by earlier runs and could \
+             not be cleared, so this run cannot have a directory of its own",
+            Self::NAMES,
+            root.display()
+        );
     }
 
     /// Write a file inside the project, creating the directories above it.
@@ -407,8 +452,23 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // Failing to clean up must not turn a passing test into a failing one.
-        drop(fs::remove_dir_all(&self.scratch));
+        // **This fails on the ordinary path, and the failure is reported rather
+        // than discarded.** The service is started in this tree and the process
+        // that outlives the test inherits that working directory, so the removal
+        // happens while a live process is sitting in it — which Windows refuses:
+        // measured on this platform, removing a tree a running process has its
+        // working directory in fails with `WinError 32`, and the same removal
+        // succeeds once that process has ended. 404 of 404 of these directories
+        // survived while this error was dropped, which is how "the fixture cleans
+        // up after itself" stopped being true without anybody noticing; what it
+        // left behind is what [`Fixture::new`] now refuses to take.
+        //
+        // On standard error rather than a panic, because it still must not turn a
+        // passing test into a failing one — and libtest shows a test's output only
+        // when that test fails, so a green run stays quiet.
+        if let Err(error) = fs::remove_dir_all(&self.scratch) {
+            eprintln!("left {} behind: {error}", self.scratch.display());
+        }
     }
 }
 
@@ -773,18 +833,29 @@ fn serve(report: &Path, port: u16, behavior: &str) -> ! {
     println!("{SAID_ON_STDOUT}");
     eprintln!("{SAID_ON_STDERR}");
 
+    // **Whether anything ever connected**, which is the whole of what the give-up
+    // file is about: a child that was asked has no business writing *nothing ever
+    // connected*. The [`ANCHOR`] returns to this loop once it has answered, so
+    // without this line it wrote that file about thirty seconds into every run
+    // that worked — into the directory the test asserts about, where it outlives
+    // the run that made it and becomes evidence about whichever run is handed
+    // that name next.
+    let mut connected = false;
     let deadline = Instant::now() + ABANDONED;
     loop {
         if Instant::now() >= deadline {
-            fs::write(
-                abandoned_path(report),
-                b"nothing ever connected, and nothing stopped this",
-            )
-            .expect("the give-up file");
+            if !connected {
+                fs::write(
+                    abandoned_path(report),
+                    b"nothing ever connected, and nothing stopped this",
+                )
+                .expect("the give-up file");
+            }
             std::process::exit(GAVE_UP_WITH);
         }
         match listener.accept() {
             Ok((stream, _peer)) => {
+                connected = true;
                 // **A socket accepted from a non-blocking listener is
                 // non-blocking on Windows and blocking on Unix**, and this line
                 // is what stops the difference being observable. It was found by

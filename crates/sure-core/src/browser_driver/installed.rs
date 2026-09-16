@@ -259,14 +259,41 @@ fn names_for(name: &str) -> Vec<String> {
 ///
 /// What it lets a test say is *the search found this one* rather than *this one
 /// exists*, which are different claims and only the first is about this module.
+///
+/// # Both name lists, and the macOS runner is why
+///
+/// **A candidate read out of a root is not always spelled the way a `PATH`
+/// search spells it**, and the first version of this predicate only knew
+/// [`NAMES`] — so on macOS, where the table names the binary *inside* the
+/// application bundle, it answered **no** about the browser a Mac actually has.
+/// The macOS runner said so: `find` returned
+/// `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, a browser
+/// this build drives and one the integration tests on that same machine drove,
+/// and two tests failed reporting it as a browser this build does not drive.
+/// The predicate now reads both lists the search itself reads — the `PATH` names
+/// and the file names of [`table`]'s candidates — because *one of ours* means
+/// *a name this module's own search can produce on this platform*, and there are
+/// two places it produces names from.
 #[cfg(test)]
 #[must_use]
 pub fn is_one_of_ours(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+    let Some(bare) = bare_name(path) else {
         return false;
     };
-    let bare = name.strip_suffix(".exe").unwrap_or(name);
     NAMES.contains(&bare)
+        || table()
+            .iter()
+            .any(|candidate| bare_name(candidate) == Some(bare))
+}
+
+/// A path's file name without the extension Windows spells executables with.
+///
+/// `None` for a path with no file name at all, which is what makes
+/// `is_one_of_ours(&Path::new(""))` false rather than a question about `""`.
+#[cfg(test)]
+fn bare_name(path: &Path) -> Option<&str> {
+    let name = path.file_name()?.to_str()?;
+    Some(name.strip_suffix(".exe").unwrap_or(name))
 }
 
 #[cfg(test)]
@@ -290,6 +317,32 @@ mod tests {
     /// See the Windows spelling above.
     #[cfg(not(windows))]
     const AN_ABSOLUTE_DIRECTORY: &str = "/a/directory";
+
+    /// **Everything the table produces is one of ours, on the platform the table
+    /// is for.**
+    ///
+    /// This is the test the predicate's macOS defect needed and did not have.
+    /// [`table`] names the binary *inside* an application bundle on macOS —
+    /// `Google Chrome`, `Microsoft Edge`, `Chromium`, `Brave Browser` — and
+    /// [`NAMES`] holds the command names a `PATH` search uses, which are
+    /// different words. A predicate that read only `NAMES` therefore answered
+    /// **no** about every candidate the macOS table produces, and nothing on
+    /// Windows or Linux could say so: this test is green there for the reason the
+    /// defect was invisible there, and on macOS it is the assertion that fails
+    /// first. It is written over [`table`] rather than over a hand-written list of
+    /// macOS spellings so that it cannot drift from the thing it is about.
+    #[test]
+    fn every_candidate_the_table_produces_is_one_of_ours() {
+        for candidate in table() {
+            assert!(
+                is_one_of_ours(&candidate),
+                "{} came out of this module's own table and is not one of ours, \
+                 so a search that found it would be reported as having found \
+                 something this build does not drive",
+                candidate.display()
+            );
+        }
+    }
 
     /// **The search is not empty on the machine it runs on, or it is, and both
     /// are reported rather than asserted.**

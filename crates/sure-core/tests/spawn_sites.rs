@@ -18,16 +18,17 @@
 //! and the check for it has to be made of the source text, because the source
 //! text is the only place the fact lives.
 //!
-//! # The three rules, and what each is standing in for
+//! # The four rules, and what each is standing in for
 //!
 //! **One: every file in `crates/` that builds a `Command` is named here.** The
 //! census is not the interesting fact; the interesting fact is that the list
 //! *cannot grow quietly*. A fourth `Command::new` is a new way for SURE to run
 //! something, and adding one means editing this list, which means reading this
-//! paragraph. **This rule did not move when the runner got a caller**: the
-//! caller builds no `Command` of its own — it builds a `ProcessRequest` and the
-//! request builds the command — so the count is still three, and the third
-//! rule below is what covers the new caller instead.
+//! paragraph. **This rule has not moved for two callers now**: neither
+//! `service.rs` nor `runtime_start.rs` builds a `Command` of its own — the first
+//! builds a `ProcessRequest` and the request builds the command, and the second
+//! builds neither — so the count is still three, and the rules below are what
+//! cover the callers instead.
 //!
 //! **Two: nothing outside [`MAY_NAME_A_PROCESS_REQUEST`] mentions
 //! [`ProcessRequest`].** This is the tightest of the three, and until `P3-T009`
@@ -41,25 +42,32 @@
 //! real caller, and the honest response to a rule breaking is to say why the
 //! exception is one rather than to widen the rule until it stops noticing.
 //!
-//! **Three: nothing outside `sure-core/src/service.rs` mentions `Supervisor`.**
+//! **Three: nothing outside [`MAY_NAME_A_SUPERVISOR`] mentions `Supervisor`.**
 //! This is the rule that carries the claim the second one used to carry. The
 //! runner is no longer uncalled, so "nothing calls the runner" is now false and
 //! would have been a rule that had to be deleted; what is still true is one
-//! level up — **`service.rs` can start a process, and nothing in the product
-//! constructs a `Supervisor`**, so no ship path reaches it. That is the same
-//! kind of absence as the one rule two held, checked the same way, and it is
-//! checked one level higher up the call chain rather than being asserted in
-//! prose about the middle of it.
+//! level up — **`service.rs` can start a process, and the one file that reaches
+//! it is `runtime_start.rs`** — so the route out of the product is what this
+//! rule is about, and it moved from "one file may name it" to "two files may,
+//! and here is what each is for".
 //!
-//! Both of the `contains` rules have the same known hole and it is the same hole
+//! **Four: nothing outside `sure-core/src/runtime_start.rs` mentions
+//! `StartSmoke`.** This is rule three's own technique applied one level higher
+//! again, and for rule three's own reason: `runtime_start.rs` *can* start a
+//! service, and **nothing in the product constructs a `StartSmoke`**, so no ship
+//! path reaches it. That is the same kind of absence as the one rule two held
+//! and the one rule three held before it, checked the same way — a file that
+//! never names the type cannot be the thing that builds one.
+//!
+//! All three `contains` rules have the same known hole and it is the same hole
 //! rule one's matcher was fixed for once: a `use crate::service::Supervisor as
-//! S;` would name the type without the word appearing. Neither rule forbids a
+//! S;` would name the type without the word appearing. None of them forbids a
 //! *program* from being started, which no source check can do — they forbid the
 //! route being added quietly, which is what a reviewer can act on.
 //!
 //! # This test is meant to fail
 //!
-//! Not today — but the day anything wires a `Supervisor` up to `sure check`,
+//! Not today — but the day anything wires a `StartSmoke` up to `sure check`,
 //! this fails, and it should. **Two things have to move together at that
 //! moment**: a product path exists, so this list and the paragraphs above it are
 //! wrong; and `sure_core::support`'s ceiling of level C is justified by *no
@@ -84,7 +92,7 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
     ),
     (
         "sure-core/src/process/request.rs",
-        "the general runner, called only by `sure-core/src/service.rs`, which no product path builds yet",
+        "the general runner, called by `sure-core/src/service.rs` and by nothing that starts one",
     ),
     (
         "sure-core/src/process/terminate.rs",
@@ -109,13 +117,27 @@ const THE_RUNNER: &str = "sure-core/src/process/";
 /// grows without anybody reading it.
 const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[THE_RUNNER, THE_SUPERVISOR];
 
-/// The one file that may name a [`Supervisor`], which is the whole of what rule
+/// The two files that may name a [`Supervisor`], which is the whole of what rule
 /// three exempts.
 ///
-/// It is the same file rule two's second entry names, and that is the point
-/// rather than a coincidence: the file that may build a request is the file that
-/// may build the thing that builds one. Split across two constants because they
-/// are two rules that happen to agree today, and the failure messages differ.
+/// **`service.rs` builds one and `runtime_start.rs` uses one**, and the two are
+/// here for the same reason with different arguments: the file that may build a
+/// request is the file that may build the thing that builds one, and a file that
+/// starts a service is a file that has decided *when* one should be started —
+/// which is a decision `P5-T002` made and which is named here rather than left
+/// to be discovered.
+///
+/// Split from [`MAY_NAME_A_PROCESS_REQUEST`] even though the first entry is the
+/// same file, because they are two rules that today share an entry and the
+/// failure messages differ. Rule four is what carries the claim this one can no
+/// longer carry on its own.
+const MAY_NAME_A_SUPERVISOR: &[&str] = &[THE_SUPERVISOR, THE_START_SMOKE];
+
+/// The one file that may name a [`StartSmoke`], which is the whole of what rule
+/// four exempts.
+const THE_START_SMOKE: &str = "sure-core/src/runtime_start.rs";
+
+/// The file that builds a [`Supervisor`] and admits what it starts.
 const THE_SUPERVISOR: &str = "sure-core/src/service.rs";
 
 /// Every **shipped** `.rs` file under `crates/`, with its text.
@@ -343,17 +365,39 @@ fn nothing_outside_the_named_files_names_a_process_request() {
 }
 
 #[test]
-fn nothing_outside_the_supervisor_names_a_supervisor() {
-    // The rule the second one used to be. `service.rs` is the only file that can
-    // build a `Supervisor`, and a `Supervisor` is the only thing that can start a
-    // service — so "nothing in the product starts a service" is this absence,
+fn nothing_outside_the_named_files_names_a_supervisor() {
+    // The rule the second one used to be. A `Supervisor` is the only thing that
+    // can start a service, and the files that may name one are the files that
+    // can start one: so "nothing in the product starts a service" is this list,
     // one level above the runner rather than in the middle of it.
-    let namers = namers_of("Supervisor", &[THE_SUPERVISOR]);
+    let namers = namers_of("Supervisor", MAY_NAME_A_SUPERVISOR);
 
     assert!(
         namers.is_empty(),
         "a shipped file has begun naming `Supervisor`, so it can start a \
-         service. That is a real change and not a test to update: it means a \
+         service. That is a real change and not a test to update: it means SURE \
+         is able to start a project's service. Either name it in \
+         MAY_NAME_A_SUPERVISOR and say why in the paragraph above, or take the \
+         name back out — and if the new caller is on a product path, \
+         `sure_core::support`'s level-C ceiling moves in the same commit. \
+         Found:\n  {}",
+        namers.join("\n  ")
+    );
+}
+
+#[test]
+fn nothing_outside_the_start_smoke_names_a_start_smoke() {
+    // The rule the third one used to be, one level higher up again. The file
+    // that may name a `Supervisor` is the file that *can* start a service; the
+    // file that may name a `StartSmoke` is the file that *decides when one
+    // should be started*, and that decision is the one a product path would
+    // have to reach before any project code ran.
+    let namers = namers_of("StartSmoke", &[THE_START_SMOKE]);
+
+    assert!(
+        namers.is_empty(),
+        "a shipped file has begun naming `StartSmoke`, so it can start and stop \
+         a service. That is a real change and not a test to update: it means a \
          path out of the product reaches the runner, which is what \
          `sure_core::support`'s level-C ceiling is justified by the absence of. \
          Move the ceiling in the same commit, or take the name back out. \
@@ -374,6 +418,8 @@ fn every_exemption_is_one_a_file_actually_needs() {
         (THE_RUNNER, "ProcessRequest"),
         (THE_SUPERVISOR, "ProcessRequest"),
         (THE_SUPERVISOR, "Supervisor"),
+        (THE_START_SMOKE, "Supervisor"),
+        (THE_START_SMOKE, "StartSmoke"),
     ] {
         // Asked as "would the rule have flagged this file if it were not
         // exempt?" — which is the only question that makes an exemption a

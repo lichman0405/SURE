@@ -32,19 +32,23 @@
 //! deterministic checks", "approved generic checks" — and **this build runs no
 //! project code.** That is not an impression, it is checkable, and it is a claim
 //! about which programs are reached rather than about how many places *could*
-//! reach one: `sure-core` now holds three `Command::new` sites, and exactly one
-//! of them is on a product path — [`crate::fingerprint`]'s, in
+//! reach one: `sure-core` holds three `Command::new` sites, and exactly one of
+//! them is on a product path — [`crate::fingerprint`]'s, in
 //! `fingerprint/git/mod.rs`, which runs `git`, read-only, for the content
 //! fingerprint. The other two are [`crate::process`]'s runner and its
 //! `taskkill`. **The runner is no longer uncalled** — [`crate::service`] is its
-//! one caller, and it can only start what [`crate::enforce`] admitted — but that
-//! caller is not itself on a product path, because nothing in the product builds
-//! a `Supervisor` yet. So the claim this paragraph used to rest on has moved up
-//! a level rather than become false, and it is still checked rather than
+//! one caller, and it can only start what [`crate::enforce`] admitted — and
+//! **[`crate::runtime_start`] now names a `Supervisor`**, so there is a file one
+//! step closer to the product that can start a service. That caller is not
+//! itself on a product path either: nothing in the product builds a
+//! `StartSmoke`, so the chain from any command a person can run ends one link
+//! short of a process. So the claim this paragraph used to rest on has moved up
+//! **twice** rather than become false, and it is still checked rather than
 //! asserted: `tests/spawn_sites.rs` holds the census of files that may name a
-//! `Supervisor`, and `sure check` still records a goal and says that nothing was
-//! checked. [`crate::doctor`] searches for and probes toolchains, which is SURE
-//! talking about its own prerequisites.
+//! `Supervisor` and the rule that only one file may name a `StartSmoke`, and
+//! `sure check` still records a goal and says that nothing was checked.
+//! [`crate::doctor`] searches for and probes toolchains, which is SURE talking
+//! about its own prerequisites.
 //!
 //! So the honest answer for every project in this build is level C, and
 //! [`CEILING`] is what says so in one place. It is a constant rather than a

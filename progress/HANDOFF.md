@@ -2,145 +2,482 @@
 
 Last updated: 2026-09-16
 Branch: `claude/v0.1-autonomous`
-Progress: 54 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 55 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 2/7.** `P5-T002` is implemented as **three** commits —
-`ee050da`, the implementation and its tests; `0b72dce`, the escaping fix below;
-and the commit carrying this file, which is its acceptance. **The run of
-`0b72dce` is read in full below**, in the run table and in this section, and so
-is `ee050da`'s, because the task was green on its first push and then changed.
-What the task added is described under "What `P5-T002` added", which is this
-section; `P5-T001`'s is the next one down.
+(9/9), phase P5 open at 3/7.** `P5-T003` is implemented as **two** commits —
+`e5d5b06`, the implementation and its tests, and the commit carrying this file,
+which is its acceptance. **The run of `e5d5b06` is read in full below**, in the
+run table and in this section. What the task added is described under "What
+`P5-T003` added", which is this section; `P5-T002`'s is the next one down.
 
-**A push review named this module and the reading it prompted found the one
-security-relevant thing in it, which is the reason there are three commits.** The
-review's notification named `crates/sure-core/src/runtime_start.rs` and carried
-no finding text, so the file's security surface was read directly: what a service
-writes is quoted into a sentence SURE prints, and nothing escaped it. `\n` cannot
-arrive — it is what the lines were split on — but a lone `\r` and an escape
-sequence such as `\x1b[2K` can, and an escape sequence that reaches the line a
-person is reading can erase SURE's own report of the failure. **That is a false
-green in the terminal rather than in the verdict** — the JSON would have been
-right and the thing a person looked at would have said the service was fine —
-which is the class of defect this product treats as the most serious one. The
-workspace already had the treatment (`setup.rs`'s `in_a_sentence`, and
-`diagnostics::Field`, both built on `redact::escape_control_characters`); this
-module was simply the first place where the text entering that sentence is not a
-name a project chose but **whatever a project's process decided to write**. The
-fix is one call, placed before the character bound so the bound keeps bounding
-what a reader sees, and the test asserts the invariant — no control character
-survives — rather than the two characters that happened to prompt it.
+**The one thing about `P5-T003` a reader should know before the detail: the module
+is the second half of a sentence another module had already written, and the
+missing half was an anchor rather than a probe.** The acceptance is *"Known local
+routes can be probed safely"* and *"Response evidence is bound to
+run/fingerprint"*, and the first was not a gap in the product's plans — it was a
+gap `runtime_probes.rs` had **named and refused to paper over** one task earlier:
+*a probe that asked whether `/api/health` answers would have to name where SURE
+read that a route exists, and nothing in the discovery holds one*. So
+`crates/sure-core/src/http_routes.rs` is a **reading** first and a probe second,
+and `Route::declared_in` with `Route::line` is the whole answer to that
+paragraph: `a_route_read_from_a_file_is_anchored_at_the_line_that_states_it`
+reads the file back off disk and asserts that the line the anchor names contains
+the route the anchor names. A `line` off by one would leave every other test in
+that file green and the product's central claim false.
 
-**Accepting `P5-T002` adds two READY entries and removes none, so the list goes from
-seven to nine — and the third task that names this one does *not* become reachable,
-because it is waiting on one of the two.** `P5-T003` — *"Implement HTTP route smoke
-framework"* — names `P5-T002` and nothing else, so it becomes READY; `P5-T004` —
-*"Implement optional browser smoke adapter"* — names `P3-T011` and `P5-T002`, both
-now accepted, so it does too. `P5-T007` — *"Implement runtime evidence cleanup and
-cancellation"* — also names `P5-T002`, **and `P5-T004`, which this acceptance makes
-READY and not accepted**, so it stays queued. An acceptance unblocks what depends on
-it and not what depends on that, which makes this the first acceptance on the branch
-where the answer to *what does this unblock* is not the same as *what names it*. The
-list goes from **seven** entries to **nine** — `P5-T003`, `P5-T004`, `P6-T001`,
-`P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`, `P13-T004` — resolved from
-`tasks/tasks.json` and `progress/state.json` before and after the accept rather than
-read off a replay, and confirmed by `taskctl status` itself afterwards. The
-lowest-numbered is `P5-T003`, which is also the entry this task's module is the input
-to.
+**Accepting `P5-T003` adds nothing to the READY list, and that is the first
+acceptance on this branch where the list shrinks rather than being rearranged.**
+One task names `P5-T003` — `P5-T005`, *"Implement core-flow probe contract"* — and
+it names `P5-T004` as well, which this acceptance leaves **READY and not
+accepted**, so `P5-T005` stays queued for the same reason `P5-T007` stayed queued
+when `P5-T002` was accepted. The list goes from **nine** entries to **eight** —
+`P5-T003` out, nothing in — where the eight are `P5-T004`, `P6-T001`, `P6-T005`,
+`P6-T007`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`, resolved from
+`tasks/tasks.json` and `progress/state.json` before and after the accept rather
+than read off a replay, and confirmed by `taskctl status` itself afterwards. The
+lowest-numbered is `P5-T004`, which is the other half of what `P5-T005` is waiting
+on.
 
-**The mutation set is 34 rows over the one source file this task adds, and what makes
-this record different from every earlier one is that the *source* moved after the set
-had run.** Earlier tasks re-ran their sets because a test had been added to close a
-survivor; here the shipped file itself changed, so the first log is not evidence about
-the tree that ships and the set had to be re-derived for it. The first run measured 33
-rows against the tree that became `ee050da` and read **30 caught, 1 declared
-unobservable, 2 survivors, 0 inconclusive** — and neither survivor was explained away.
-*The character bound counts bytes rather than characters* was closed by strengthening
-the test that was supposed to hold it, which was passing for the wrong reason: at twice
-the bound **both** counts are over it, so a bound measured in bytes cuts to the same
-place by accident and answers the same assertion. The test now quotes a line of 200
-characters — 600 bytes, so **under the bound in characters and over it in bytes** —
-asserts that the two counts disagree before it asserts anything about the quote, and
-fails if a line SURE kept whole comes back with an ellipsis on it. *A service that has
-already finished is noticed only after the window* is **declared unobservable**, with
-its derivation in the harness rather than in this file: the row moves `wait_out`'s
-`has_finished()` check below its deadline check, and the two orders diverge only when
-the process has finished **and** the deadline has passed — a band the loop's own last
-sleep truncates onto the deadline, so it is at most one `POLL`, 20 milliseconds, wide.
-That is a tie-break at a boundary rather than a behaviour, and the declaration carries
-its falsifier: a test that fails while it stands makes the row reachable and the
-derivation wrong. The escaping fix then **added** row 34 and the test that catches it,
-which is why the accepted log is a run over the committed tree rather than over the
-tree that was being edited.
+**`## Next concrete action` further down this file was not extended by `P5-T001`, `P5-T002` or this acceptance, and its item 1 therefore names an entry that has been taken.** Its newest item is `P4-T009`'s and it says the next entry is `P5-T001`, which three acceptances have since accepted; it is a numbered list whose items cross-reference each other by number, so extending it is an insert-and-renumber rather than an append. **The live statement of what comes next is the READY list in the paragraph above and not that list's item 1**, and this sentence is here so that a reader who scrolls to it is not misled by it.
 
-**That run is the third one, and it reads `all 32 observable mutations caught by a
-failing test, and 2 declared unobservable as expected` — 34 rows, 0 survivors, 0 that
-failed to build, 0 skipped — against blob `5972d6a01ae1`**, the file `0b72dce`
-commits, re-hashed in the worktree afterwards rather than trusted. That check is not
-ceremony and this task is the reason: **a harness killed mid-flight leaves its
-mutation on disk**, which has already happened once on this branch, and this harness
-prints no *restored* line for a reader to lean on — so the hash is the whole of the
-evidence that the tree the set measured is the tree the commit holds. Every row's
-catch list is read from `test ... FAILED` lines rather than from a summary, and the
-run passes `--no-fail-fast`, so a catch list is a count rather than a floor; a
-survivor is the one answer neither can fake.
+**The commit's run was red on its first attempt and green on its second, and the
+redness is worth more than the green.** `e5d5b06`'s run `35086572733` first came
+back with **Windows and macOS green and Ubuntu failing two tests that are not this
+task's** — `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` in
+`tests/runtime_start.rs` and `a_service_that_is_dropped_is_stopped_anyway` in
+`tests/service_supervisor.rs`, both with **`Text file busy (os error 26)`** from the
+`fs::copy` of the test binary each of those fixtures makes as its `python`.
+**Neither file is touched by this commit.** `gh run rerun --failed` re-ran that one
+job *inside the same run* and it came back green, so the run's conclusion is now
+success — and **the failure is written down here rather than left to the run's own
+state, where the re-run replaced it**; the log excerpt is kept at
+`target/tmp/p5t003-run1-ubuntu-failure.txt` and the mechanism, the evidence and the
+reason it is recorded rather than repaired here are in the section below. What the
+second attempt measured is what the acceptance runs on: **Windows 1643 / macOS 1644
+/ Ubuntu 1645 passed, 0 failed, 12 ignored, 60 result lines = 50 parents + 10
+children**, **+24 on every platform** against `35067317216` with a nameset delta of
+**`+24 −0`** naming exactly the twelve unit tests and the twelve integration tests,
+and **not one of the thirty platform-gated names is a route name**, so the pairwise
+readings (`−13 +14` against macOS, `−14 +16` against Ubuntu) do not move either.
+**The mutation set is 35 rows over the one source file this task adds, and it has
+now been red twice in two unrelated ways — and the second redness is the most
+serious single thing any set on this branch has found.** The first run read one row
+that **did not compile** and five that **survived**, and the five are five
+different kinds of gap rather than five instances of one: a fixture that could not
+reach the rule, a rule nothing distinguished, a row whose name was a false claim
+about what it mutates, a sentence nothing read, and a byte a file name cannot hold
+where the test looked. **Not one of them was closed by weakening a row** — each was
+closed by writing the test the row was supposed to have, or by correcting the row's
+own name where the name was the wrong thing. The sixth, the one that did not
+compile, is the one that matters most for how this harness is read: it used
+`Severity::Minor`, which does not exist, and a `DID NOT COMPILE` is kept in its own
+list and **can never reach `CAUGHT`**, because a suite that did not build says
+nothing about whether a test would have noticed — recording it would have been a
+false green **in the mutation record**, which is the one place this branch has no
+second opinion about.
 
-**The shape of this set is the opposite of the last one, and that is the reading worth
-keeping.** **18 of the 32 caught rows are caught by exactly one test**, 10 by two and
-4 by three, with 22 distinct catchers — against `P5-T001`'s set, whose widest row was
-caught by 16 tests and where only 10 of 25 were singletons. A wide catch list means a
-row was broken into something many tests happen to notice; a narrow one means it was
-broken into something one test was written to hold, and here that is the ordinary
-case rather than the exception. The most-used catchers are the two tests a service
-that ends or overruns is read through, at 7 rows each. **The row this task's second
-commit exists for — *the service's own words are repeated without being escaped* — is
-caught by two tests, one of them the test written with the fix**, so the set that
-signed this task off could see the defect the first set could not.
+**The second run left exactly one survivor, it was the row that had been repaired
+rather than closed in the first, and what it found is a false green one field to the
+left of the status.** *A route that failed is reported as a warning* replaces the
+two constants `RouteSmoke::run` hands to `Outcome::verdict` — `Severity::MustFix,
+true` becomes `Severity::Note, false` — so it breaks two properties at once and
+neither was asserted anywhere. `CheckResult::blocks_green` returns `false` the
+moment `critical` is `false`, so **a route the project declares and does not serve
+stops blocking green**: a reader would be told the project is fit to hand off while
+the one check that had noticed the missing route was quietly demoted. **The
+assertion in the test named for exactly this behaviour — `!aggregate(&results).is_green()`
+— could not catch it, and the reason is precise rather than an oversight**: a failed
+check is never green whatever its weight, so the aggregate stays not-green and the
+row survives on the *weaker* verdict. **The file already asserted a route check's
+severity and critical flag one test away, where the *proposal* is built, and that
+assertion cannot see these** — `RouteSmoke::run` passes its own constants, and a
+**result's** weight is a second decision made in a different place. Closed by three
+assertions in `a_route_the_service_does_not_have_is_a_failure_and_not_a_missing_row`,
+the third being `blocks_green()` itself, and **the catch was verified by hand before
+the set was re-run** — the two constants swapped, the single test seen to fail at
+`left: Note / right: MustFix`, the file restored and confirmed byte-equal — because a
+test written to close a survivor is a claim until it is seen to fail. That repaired
+row being the survivor is **a coincidence worth noticing and not a lesson**: the two
+failures share nothing but a name.
 
-**The rows are aimed at the task's two sentences.** *"Supported service can be
-started/probed/terminated"* is broken by the row that reports a service which ended
-by itself as a pass, by the one that asks its question of a service that had already
-ended, by the two that move the window and the budget, and by the row that credits an
-answer the service never gave. *"Startup failure remains explicit"* is broken by the
-rows that make a missing program a project failure, make an unvouchable run a pass,
-credit a port that said nothing, and turn the budget running out into SURE's own
-stop. The rest are the ones a reader would want to be able to point at: the admitted
-command, the working directory, the fingerprint, the two sentences a stream's origin
-is chosen by, the tail, the line count, the two bounds, the dropped-line count, the
-duration spelling, an exit with no code, and the refusal that names what a browser
-probe would have done instead.
+**The set was stopped mid-run twice, and the two stops are different lessons.** The
+first kill left its mutation applied to the file — the third time on this branch
+— and the harness prints no *restored* line, so that is checked rather than
+assumed: `target/tmp/http_routes.rs.pre` is a byte copy taken before the run
+precisely because the file this task adds is new and has no committed blob to hash
+against, and it is what caught it — the worktree copy came back **13 bytes
+shorter** than the snapshot. **The second stop was a decision rather than an
+accident**: a sixth review arrived while the third run was in flight, its second
+finding was real, and the fix changed the source — so that run was measuring a tree
+that could no longer be the accepted tree, and it was stopped rather than left to
+spend twenty-five more minutes proving something about a file that no longer
+exists. Its log is the artefact that says so, at **0 bytes**. **The log that counts
+is the fourth run** — the three before it all measure trees that are gone, since
+both the source and the test file changed twice under them, and a catch list from
+an earlier one is not a catch list for this one. **The accepted log is `all 35 observable mutations caught by a failing test, and 0 declared unobservable as expected`** — 35 rows, 0 survivors, 0 that failed to build, 0 skipped, and 0 whose anchor did not apply.
 
-**The change is one source file, one test file, one line of `lib.rs`, one census
-rule and one paragraph of `support.rs`.** `crates/sure-core/src/runtime_start.rs`
-is new at **881** lines and holds one type, and `0b72dce` takes it to **937** —
-the escaping fix and its test, and nothing else;
-`crates/sure-core/tests/runtime_start.rs` is new at **1790** lines and starts real
-processes; `lib.rs` gains one line; `tests/spawn_sites.rs` gains a **fourth**
-rule — *nothing outside `runtime_start.rs` mentions `StartSmoke`* — which is the
-third rule's own technique applied one level higher again, and it moved the same
-rule's exemption list from one file to two.
+**The shape of this set is worth keeping next to the last one's.** The fourth run's own shape: **20 of the 35 rows are caught by exactly one test**, 4 by two and 11 by three, across **17 distinct catchers**. The widest row is caught by three, which is the opposite end of `P5-T001`'s set, where a single row took sixteen. The most-used catcher is `a_route_read_from_a_file_is_anchored_at_the_line_that_states_it` at **13 rows**, and the test that is the *sole* catcher of the most rows is `a_route_sure_cannot_place_is_read_and_says_why_it_was_not_asked` at **4** — and both of those are tests about where a route is and whether SURE may ask it, which is what the task's first acceptance sentence is about. **14 different tests are the sole catcher of at least one row**, which is the concentration worth naming rather than the coverage worth celebrating: a suite where a fifth of the rows hang on one test is a suite whose next edit to that test is a silent loss of a property.
+The rows are aimed at the task's two sentences. *"Known local routes can be probed
+safely"* is broken by the rows that move the third column of the reading's
+table — the receiver rule in the two dynamic languages and the `nest(`/`merge(`
+rule in Rust — by the rows that ask a route SURE read but must not ask, and by the
+rows that put the request somewhere other than where the route is served.
+*"Response evidence is bound to run/fingerprint"* is broken by the row that takes
+the fingerprint from anywhere other than the plan the command was admitted under.
+The rest are the ones a reader would want to be able to point at: the two refusal
+kinds that look alike and are not, the ten arms of `NotProbedBecause`, the one
+request line, the three headers, the loopback address, the status mapping, and the
+escaping of a project's own text before it becomes a sentence.
 
-**The platform difference this task found is the kind that only a real socket
-produces, and it is a portability caveat rather than a defect.** Windows hands an
-accepted socket the **listener's** non-blocking mode and Unix does not, so the
-child — which `P3-T010`'s `serve()` sets non-blocking on purpose — read
-`WouldBlock` with the request still in the socket, closed on top of it, and made
-the far end report *the exchange could not be made (os error 10054)*; a reset is
-an **abortive** close, which the operating system sends only when the closing
-side still had unread bytes, and that chain is what named the missing line. The
-fix is `stream.set_nonblocking(false)` after every `accept`, and **the comment
-explaining it was corrected once by measurement** — its first draft claimed the
-child read nothing at all, and removing the line left the test passing, because
-the parent's write usually beats the child's read. It is a race and not a zero.
-**The second is in the run rather than in the code.** The one row whose status
-belongs to the platform is a service stopped while SURE's question is still
-open: on Windows a force-terminated process's socket is aborted, so the probe
-reports the exchange could not be made (`error`); on Unix the kernel closes it,
-so the probe reports that an open port is not an answer (`unknown`). Both are
-what the probe saw, neither is a pass, and the test asserts the **set** rather
-than this machine's answer — which puts it in the v0.1 report's limitations
-rather than in the module.
+**The change is one source file, one test file, one line of `lib.rs`, one reason
+added to the schedule's vocabulary and one census rule.**
+`crates/sure-core/src/http_routes.rs` is new at **1952** lines — nine public types
+and twelve unit tests — and `crates/sure-core/tests/http_routes.rs` is new at
+**1508** lines with **twelve** integration tests over real workspaces and a real
+socket. `lib.rs` gains one line; `schedule.rs` gains
+`CheckReason::RouteDeclared { declared_in, route, line }` with its three arms;
+`tests/check_schedule.rs` gains one `MAY_PROPOSE` entry. **The tracked files the
+task changes are `lib.rs` (+1), `schedule.rs` (+60) and `tests/check_schedule.rs`
+(+15)**, measured with `git diff --shortstat` against `14ca785`.
 
+**Two push reviews named this module, and the second is the one that says what was
+wrong with the first fix.** The first carried no finding text, so the surface was
+read directly: a route's path and the file it was read from are both **project
+text** and both go *inside* a sentence SURE prints, so a project whose source holds
+a real control byte inside
+a route's string reaches SURE's own output carrying it — and **a failing route
+could erase the report of its own failure while a person was reading it**, which is
+a false green in the terminal rather than in the verdict and the hardest kind to
+notice afterwards, because the JSON would have been right. The treatment already
+existed in the workspace and this module had not used it, so the first fix was one
+private `in_a_sentence` at **five** call sites — **and five call sites is an
+enumeration, which is exactly what the second review found the hole in.** The
+sixth review's second finding was real, and it named `NotProbedBecause`'s own
+sentence: two of its ten arms interpolate a mount call's prefix and the name a
+route is declared on, **both read out of the project's source**, and the module's
+doc comment had *written down* that this sentence was SURE's text — which is why it
+was the one place with neither an escape nor a test. **The correction was not a
+sixth call site.** The escape moved to the boundary, `in_a_sentence(&match self {— })`
+around the whole `match`, so one call covers every arm that exists and every arm
+added later, and a test builds those two arms with a real escape byte, because
+Windows forbids that byte in a file name and an integration test is not a place to
+assert a property the platform will not produce. `Route::path` is still
+**deliberately not escaped**: it is what SURE asks for, and a request line built
+from an escaped path would ask for something the project does not serve. **The
+tests assert the invariant — no control character survives in the sentences a reader
+gets — rather than the two characters that prompted it**, and they also assert
+that this is an escape and not a redaction, since deleting the byte would satisfy
+the invariant while leaving a reader unable to see what the project actually
+wrote.
+
+**Three reading shapes were found while closing the survivors and are recorded
+rather than fixed, and the first of them is a false-green risk rather than a
+withholding.** They are one rule — a route's name is *a plain identifier on the
+left of one `=`* — and `let api = app.route("/health", get(health));` on one line
+is attributed to **`api`**, the name the expression *becomes*, rather than to
+`app`, the name it is a call on; `let mut app = …` and `let app: Router = …` bind
+no name at all. In a file where the true receiver is nested under a prefix,
+asking the declared path could get an answer from a different route and report a
+**pass** for a path the project does not serve. **Nothing in the product
+constructs a `RouteReading` yet** — `lib.rs` declares the module, `schedule.rs`
+holds the reason, and every construction in the workspace is in a test — so it is
+not reachable in a verdict today, and the falsifier is the task that wires the
+reading into the schedule, which must decide the three together rather than the
+first alone. It is carried below and in `DECISIONS.md` with that falsifier.
+## What `P5-T003` added
+
+**The one thing about `P5-T003` a reader should know before the detail: the
+module is the second half of a sentence another module had already written.** The
+task's acceptance is *"Known local routes can be probed safely"* and *"Response
+evidence is bound to run/fingerprint"*, and the first was not a gap in the
+product's plans — it was a gap `runtime_probes.rs` had **named and refused to
+paper over** one task earlier: *a probe that asked whether `/api/health` answers
+would have to name where SURE read that a route exists, and nothing in the
+discovery holds one — a `package.json` declares scripts and dependencies, not
+routes*. So `crates/sure-core/src/http_routes.rs` is a **reading** first and a
+probe second, and the anchor is not decoration on it: `Route::declared_in` with
+`Route::line` is the whole answer to that paragraph, and
+`a_route_read_from_a_file_is_anchored_at_the_line_that_states_it` reads the file
+back off disk and asserts that the line the anchor names contains the route the
+anchor names. A `line` off by one would leave every other test in the file green
+and the product's central claim false.
+
+**"Known" means one line states the method and the path, and the third column of
+the reading's table decides every verdict.** Three stacks — a Flask or FastAPI
+decorator, an Express statement, a Rust `.route(...)` chain — and **each needs a
+different rule for when the path it names is the whole path, because each stacks
+mounts differently.** In Python and JavaScript the rule is *the receiver must be
+the application object*: `app.use("/api", router)` mounts another object and
+moves nothing already declared, so a route on `router.get("/health")` has a real
+path that depends on a line which may not even be in the file being read. In Rust
+the application object is not distinguishable from a nested router — both are
+`Router::new()` — so the rule runs the other way: the chain's name must not
+appear as the argument of a `nest(` or `merge(` call in the same file. **Every
+uncertain case is a `NotProbed` with a reason rather than a probe**, which is
+`runtime_probes::NotPlanned`'s shape and for its reason: a route that produced no
+check would produce no row, and a reader takes the absence of a row for the
+absence of a problem. `NotProbedBecause` has ten arms.
+
+**One request line, and the two ways a route is not asked for its method are
+different claims.** `probe.rs` writes exactly one request line —
+`GET <path> HTTP/1.1` — so `HEAD` and `OPTIONS` are reads by HTTP's meaning and
+**not reads this product can make**, while a `POST` is a request that would change
+a project's data to see whether it works. `WouldChangeSomething` is a claim about
+the project and `NotTheReadSureAsks` is a claim about SURE, and collapsing them
+would make SURE's own limitation read as a fact about the project. A path with a
+slot in it (`/items/{item_id}`, `/items/<int:item_id>`, `/items/:id`) is read and
+not asked for the same kind of reason: inventing a value for the slot — `1`,
+`test` — would be SURE asking a question the project never offered, and a `404` on
+`/items/1` is not evidence about `/items/{item_id}`. `HasASlot` is that refusal.
+
+**Safety is a property of the constructors rather than of the module's care, and
+the one thing the module could get wrong on its own is *where* it asks.** The
+address is loopback because `Endpoint` refuses anything that is not
+`IpAddr::is_loopback` (so a route probe is `ActionKind::LocalProbe` and needs
+`Permission::Inspect`, which the vocabulary grants unconditionally); the method is
+`GET`; and nothing is written but one request line and three headers, which is
+`probe.rs`'s existing argument. What is left is the path, and that is what the
+third column above is for. **A route read from the source and asked at the wrong
+path is a working project reported as broken, and the integration tests hold the
+claim at a socket rather than by reading the module's own intent** — the
+listener's thread is the only thing that can say what actually arrived.
+
+**The fingerprint is read from the plan rather than taken as a parameter.** Every
+`CheckResult` this module produces carries `Enforcement::check_plan()`'s
+fingerprint, for the reason `StartSmoke::of` gives about the same line: a
+fingerprint that arrived separately is one that could describe a project state the
+command was not admitted for. `EVIDENCE_MODEL.md`'s test-freshness rule is what
+that field serves, and `RouteSmoke` has no constructor that omits it.
+
+**The change is one source file, one test file, one line of `lib.rs`, and one
+reason added to the schedule's vocabulary.** `crates/sure-core/src/http_routes.rs`
+is new at **1952** lines — nine public types, twelve unit tests, and a module
+document with the three-stack table above and a "What this does not do" section —
+and `crates/sure-core/tests/http_routes.rs` is new at **1508** lines with
+**twelve** integration tests over real workspaces and a real socket.
+`lib.rs` gains one line; `schedule.rs` gains `CheckReason::RouteDeclared
+{ declared_in, route, line }` with its three arms (a sentence, `names_something`
+rejecting `line == 0`, and an anchor whose subject is `AnchorSubject::LineRange`
+and whose location is the file); `tests/check_schedule.rs` gains one `MAY_PROPOSE`
+entry.
+
+### The two security-relevant defects this task found, and how they were found
+
+**Two push reviews named this module and each found a real instance of the class
+this repository treats as the most serious one, and the second is the one that
+says what was wrong with the first fix.** The first carried no finding text, so the
+module's surface was read directly instead of answered: **a route's path and the file it was read from are both project
+text, and both go *inside* a sentence SURE prints** rather than being handed to a
+renderer as a field, because they are what a reader needs in order to find the
+thing SURE is talking about. `quoted` returns the characters between a literal's
+quotes unchanged, so a project whose source file holds a **real** control byte
+inside a route's string reaches SURE's own output carrying it, and a failing route
+could **erase the report of its own failure as a person was reading it** — a false
+green in the terminal rather than in a verdict, and the hardest kind to notice
+afterwards because the JSON would have been right. The treatment already existed
+in the workspace (`setup.rs`'s `in_a_sentence`, `runtime_start.rs`,
+`diagnostics::Field`, all on `redact::escape_control_characters`) and this module
+had not used it, so the first fix was one private `in_a_sentence` at **five** call
+sites: `spelling`, `Route::anchor`'s location, `Route::plain_description`,
+`NotProbed::plain_description`, and `RouteCheck::of`'s
+`CheckReason::RouteDeclared.declared_in` — the last escaped at the boundary rather
+than inside `schedule.rs`, because one escape there covers both the sentence and
+the anchor that reason builds.
+
+**Five call sites is an enumeration, and the sixth review's second finding is the
+hole in it.** That finding named `NotProbedBecause`'s own sentence, and it is real:
+two of the enum's ten arms interpolate **a mount call's prefix** and **the name a
+route is declared on**, and both of those are read out of the project's source.
+The enumeration had been done one call site at a time and this sentence had been
+passed over — and the reason it was passed over is written into the module, which
+is what makes it worth recording rather than just fixing: **the doc comment stated
+that this sentence was SURE's own text.** It was not, for those two arms. The
+correction is therefore *not* a sixth call site: the escape moved to where the
+sentence is composed, `in_a_sentence(&match self { ... })` around the whole
+`match`, so **one call covers every arm that exists and every arm added later** —
+which is the property an enumeration cannot have. `RouteCheck::of` already had that
+shape for the same reason. The new test does not read a workspace and cannot: it
+constructs the two arms with a real escape byte inside them, because **Windows
+forbids bytes 0—31 in a file name**, so the arm's input is not reachable through
+the filesystem on the primary platform, and an integration test is not a place to
+assert a property the platform will not produce. It was seen to fail before it was
+trusted: with the boundary replaced by the identity, the single test failed on the
+real byte.
+
+**`Route::path` is deliberately not escaped**: it is
+what SURE asks for, and a request line built from an escaped path would ask for
+something the project does not serve. The tests assert the invariant — no control
+character survives in six sentences a reader gets — rather than the two characters
+that prompted it, and they also assert that this is an escape and not a
+redaction, since deleting the byte would satisfy the invariant while leaving a
+reader unable to see what the project actually wrote.
+
+**One adjacent gap was found and deliberately not fixed.** `env_completeness.rs`
+builds a sentence and an anchor location from `display_path` without escaping
+either, so the same defect class is present one module over. It is pre-existing
+and outside this task's scope — `P5-T003` adds a file, and a fix there would be a
+change to a module this task otherwise does not touch, measured by a suite whose
+anchors were not aimed at it. The falsifier is the ordinary one: **a task that
+touches that module fixes it there, with its own evidence.**
+
+### The mutation set was red twice, and the second red is the one that mattered
+
+**Thirty-five rows over the one source file, and the set has now been run four
+times: the first left one row that did not compile and five that survived, the
+second left one survivor, the third was stopped in flight when the second review
+changed the source under it, and the fourth is the log this task is accepted on.**
+**The accepted log is `all 35 observable mutations caught by a failing test, and 0 declared unobservable as expected`** — 35 rows, 0 survivors, 0 that failed to build, 0 skipped, and 0 whose anchor did not apply. **The survivors are worth more than the count, and the second
+run's is the most serious thing this set found.**
+
+- **The second run's survivor is a false green one field to the left of the
+  status.** *A route that failed is reported as a warning* replaces the two
+  constants `RouteSmoke::run` hands to `Outcome::verdict` — `Severity::MustFix,
+  true` becomes `Severity::Note, false` — so it breaks **two** properties at once
+  and neither was asserted anywhere. `CheckResult::blocks_green` returns `false`
+  the moment `critical` is `false`, so **a route the project declares and does not
+  serve stops blocking green**: a reader would be told the project is fit to hand
+  off while the one check that noticed the missing route had been quietly demoted.
+  **The existing assertion in the test named for exactly this behaviour —
+  `!aggregate(&results).is_green()` — could not catch it, and the reason is precise
+  rather than an oversight**: a failed check is never green whatever its weight, so
+  the aggregate stays not-green and the row survives on the *weaker* verdict.
+  Asserting the verdict is not asserting the weight. **The file already asserted a
+  route check's severity and critical flag one test away, where the *proposal* is
+  built** — `tests/http_routes.rs:682-683` — and that assertion cannot see these,
+  because `RouteSmoke::run` passes its own constants and a **result's** weight is a
+  second decision made in a different place. It is closed by three assertions in
+  `a_route_the_service_does_not_have_is_a_failure_and_not_a_missing_row` — the
+  severity, the flag, and `blocks_green()` itself, the third being the derived
+  property a reader is actually misled by. **The catch was verified by hand before
+  the set was re-run**, because a test written to close a survivor is a claim until
+  it is seen to fail: the two constants swapped, the single test run, `FAILED` at
+  `crates/sure-core/tests/http_routes.rs:1278` with `left: Note / right: MustFix`
+  and exit 101, the file restored and confirmed byte-equal to the snapshot, and only
+  then the harness restarted.
+
+**The first run's five survivors were five different kinds of gap, and not one was
+closed by weakening a row** — which is why they are still listed here from the run
+that no longer counts:
+
+- **A fixture that could not reach the rule.** The receiver test in
+  `read_javascript` is only consulted in a file that binds **both** the
+  application and something else, and `src/router.js` binds only `router` — so the
+  early return skipped the file and the mutation was invisible. The code was right
+  and the fixture was thin; the fix is a router **in `src/app.js`**, the file that
+  also holds `app`, whose `/admin` joins `NOT_READ`. `src/router.js`'s two routes
+  were never able to carry that claim and were being read as if they could.
+- **A rule that nothing distinguished.** `chain.or(bound)` against
+  `bound.or(chain)` agree on every input the reading reaches in valid Rust,
+  because a line that binds a name *and* continues a chain is a line whose
+  statement ran past its end — a missing `;`, which is a thing an AI writing Rust
+  produces and therefore an input this product exists to read. The ordering is now
+  a rule with its reason asserted next to it: the receiver is what the call is on,
+  and the binding is only what the expression becomes.
+- **A row whose name was a false claim.** *Two routes on one path in one file are
+  one check* mutates the **route's spelling** half of the identifier, so every
+  check in one file shares an identifier — not the collision its name described.
+  Renamed, and the property is asserted in three parts by
+  `a_check_read_from_a_file_is_named_by_the_route_and_not_only_by_the_file`: two
+  checks in one file are two identifiers, one route in two files is two
+  identifiers, and the same project read out of two directories is the same set of
+  identifiers. **A mutation's name is a claim, and this one was wrong.**
+- **A sentence nothing read.** The loop that walks the reasons compared each
+  sentence against **the reason it is built from**, so a reason that stopped saying
+  the path had moved satisfied it: the assertion was checking the sentence against
+  itself. The assertion now names the prefix and the clause, because a mount is the
+  one reason where the sentence has to say more than a name.
+- **A byte a file name cannot hold where the test looked.** **Windows forbids
+  bytes 0–31 in a file name**, so the file-name half of the escaping is reachable
+  on Unix and macOS (where every byte but NUL and `/` is legal) and unreachable
+  through the filesystem on the primary platform — which is why the module's own
+  unit test constructs the `Route` and asserts over
+  `NotProbed::plain_description` instead of reading a workspace. An integration
+  test is not a place to assert a property the platform will not produce.
+- **The sixth did not compile, and the harness was right to refuse it.** The row
+  meant to report a failing route as a warning used `Severity::Minor`, which does
+  not exist — the vocabulary is `MustFix`, `ShouldFixFirst`, `CanFixLater`,
+  `Note`. A `DID NOT COMPILE` is kept in its own list and can never reach
+  `CAUGHT`, because a suite that did not build says nothing about whether a test
+  would have noticed, and recording it as caught would have been a false green in
+  the mutation record itself. The row was repaired to `Severity::Note, false` — and
+  **that repaired row is the one that survived the second run, which is a
+  coincidence worth noticing and not a lesson**: the two failures share nothing but
+  a name, and reading the first as having predicted the second would be exactly the
+  kind of pattern this file refuses to assert.
+
+**The set was stopped mid-run twice, and the two stops are different lessons.**
+The first kill left its mutation applied to the file — the third time on this
+branch — and the harness prints no `restored` line, so it is checked rather than
+assumed: `target/tmp/http_routes.rs.pre` is a byte copy taken before the run, and it
+exists because **this file is new and has no committed blob to hash against**,
+which is what the rule against `request.rs` (`git show HEAD:<path>`) cannot do
+here. It is what caught the kill: the worktree copy came back 13 bytes shorter than
+the snapshot. The file was restored from the snapshot, the edit that prompted the
+stop was made, the snapshot was re-taken, and the set was re-run.
+
+**The second stop was a decision rather than an accident, and the rule it applies
+is the one this section keeps restating**: the sixth review's second finding
+arrived while the third run was in flight, the finding was real, and the fix
+changed the source — so that run could only ever produce a catch list for a tree
+that no longer existed. **A run measuring a dead tree is worth nothing and costs
+twenty-five minutes**, so it was stopped rather than left to finish, and its log is
+the artefact that says so at 0 bytes. The file it had mutated was restored and
+checked byte-equal against the snapshot's hash before the fix was applied, which is
+the order the next paragraph is about.
+
+**A set is evidence about one tree, and the three trees before this one no longer
+exist** — both the source and the test file changed under them — so a catch list from
+any of them is not a catch list for this one. Generalised rule: *check a state
+against a copy the harness does not own — `HEAD` where there is one, a snapshot where
+there is not.*
+
+**And the snapshot's order in the procedure is load-bearing, which this run learned
+by getting it wrong.** The copy has to be taken **after** the last source change and
+**before** the harness starts. A copy taken before the new test was written is one
+that restoring will **delete the test from** — which is what happened here on the
+first attempt, and it was caught by the test filter matching zero tests rather than
+by reading the file back. The restore is checked byte-equal against a hash recorded
+in the session, not against the file it just overwrote.
+
+### Three reading shapes found while closing the survivors, recorded and not fixed
+
+They are one rule rather than three defects — a route's name is *a plain
+identifier on the left of one `=`* — and they are the same narrowness the module
+documents, except that the first answers with the **wrong name** rather than with
+nothing:
+
+- `let api = app.route("/health", get(health));` on one line is attributed to
+  **`api`**, the name the expression *becomes*, rather than to `app`, the name it
+  is a call on.
+- `let mut app = Router::new().route(...)` binds no name, because `mut app` is not
+  a plain identifier, so the route is reported as *on something SURE cannot name*.
+- `let app: Router = Router::new().route(...)` binds no name for the same reason,
+  one character later.
+
+**The first is the one that matters**: a wrong name is a route SURE believes it
+placed, and in a file where the true receiver is nested under a prefix, SURE
+asking the declared path could get an answer from a different route and report a
+**pass** for a path the project does not serve. Nothing in the product constructs
+a `RouteReading` yet, so it is not reachable in a verdict today — which is the
+reason it is recorded rather than fixed inside a task whose acceptance is about
+probing the routes the reading *does* place. **The falsifier is the task that
+wires this reading into the schedule, and it must decide the three together rather
+than the first alone.**
+
+### What `P5-T003` did not do
+
+**Nothing in the product constructs a `RouteReading` yet.** `lib.rs` declares the
+module, `schedule.rs` holds the reason a route check is written with, and every
+construction in the workspace is in a test — the same ceiling `support.rs` records
+for `StartSmoke` and `tests/spawn_sites.rs` checks. The module is a unit with its
+own tests and no caller until the schedule-to-runner step exists. **The safety
+work is in now because the module is new and the next task builds on it, not
+because anything was reachable**, and it is worth saying which half *is* reachable:
+the reading takes a project's bytes as input, so the sentences it composes are the
+first place a project's text meets SURE's output on this path. It also does not
+start a service (`P5-T002`'s `StartSmoke`), run a browser (`P5-T004`), resolve a
+mount that lives in another file, split a command line, or decide whether a probe
+may run — that is `PlanBuilder`'s and the domain's `decide`.
 ## What `P5-T002` added
 
 **The one thing about `P5-T002` a reader should know before the detail: its
@@ -5455,6 +5792,10 @@ Three of the five jobs were failing the whole time.
 | 35063118526 | `ee050da` — **the `P5-T002` implementation** | **all five green.** Windows **1618** / macOS **1619** / Ubuntu **1620** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each. Against `35056098080`, the run of `3cabc96` and this task's `base_sha`: **+23 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `tests/runtime_start.rs` is a new test binary and the child count not moving because it is a new *parent*; the ignored count moves 11 → 12 because the new integration file carries one `#[ignore]`d child entry point that the smoke tests start by name. **The nameset delta against that run reads +24 −1 on all three platforms**: the new tests are **10** `runtime_start::tests::` unit tests, **12** runnable integration tests and **1** new `spawn_sites` test, and the **−1** is a rename — `nothing_outside_the_supervisor_names_a_supervisor` out, `nothing_outside_the_named_files_names_a_supervisor` in — which is the fourth census rule moving the third rule's exemption list from one file to two. **The arithmetic closes rather than approximately closing**: 23 new runnable names plus the one ignored name is 24 test functions, and **+23 passed and +1 ignored is exactly what the result lines report**. The pairwise readings are unchanged from the run above. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The implementation is green on its first push. This is not the tree the task is accepted on**: a push review named this module and reading its security surface found the service's own output being quoted unescaped, so `0b72dce` follows it and is the row below |
 
 | 35064050013 | `0b72dce` — **the `P5-T002` escaping fix** | **all five green.** Windows **1619** / macOS **1620** / Ubuntu **1621** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each — **+1 passed on every platform against the row above and nothing else moved**, which is the shape a one-test fix has to have, and **Windows 1619 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. **The nameset delta against `35063118526` reads +1 −0 on all three platforms**, and the one name it adds is `runtime_start::tests::a_service_cannot_write_an_escape_into_the_line_sure_prints` — so the run's extra pass is the test that was added and not something else that began passing quietly, which a bare count would not have told apart. The pairwise readings are unchanged again (`−13 +14` against macOS, `−14 +16` against Ubuntu), as they must be for a change with no platform-gated name in it. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This is the tree `P5-T002` is accepted on**, and the mutation set's log against it — not the log against `ee050da`, which measures a tree that no longer exists — is what the acceptance cites |
+
+| 35067317216 | `14ca785` — **the `P5-T002` acceptance** | **all five green.** Windows **1619** / macOS **1620** / Ubuntu **1621** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each — **every one of those figures identical to `35064050013`, the run of `0b72dce` and this task's `base_sha`**, which is the shape an acceptance commit has to have: it changes `progress/` and nothing else, so a number that moved would be the acceptance's fault and not the suite's. The reading is the same one the row above records, and the parents/children split is derived the same way — **45 `Running` lines plus 4 `Doc-tests` lines are the 49 parents**, and the ten children are the ten consecutive `test result:` lines a reader finds with no `Running` line between them (nine of them `1 passed`, and `6 passed; 1 ignored` for the one that starts the multi-test child entry point), which is what makes the split a measurement rather than a convention carried forward. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row is a backfill**, and it is the case the table's own rule names: the run of the commit that *records* runs cannot be written into the commit that records them, so `P5-T002`'s acceptance section described the implementation's run and the escaping fix's run, and the acceptance's own run is read here — at `P5-T003`'s acceptance, in the session that pushed it, from `gh run view --log` rather than from the job colours |
+
+| 35086572733 | `e5d5b06` — **the `P5-T003` implementation and its tests** | **all five green, and only on the second attempt — the first attempt is recorded here rather than erased.** Windows **1643** / macOS **1644** / Ubuntu **1645** passed, **0 failed**, 12 ignored, **60** result lines = **50 parents + 10 children** on each — **+24 passed on every platform against `35067317216`, the row above, and nothing else moved**, which is the shape a task's first commit has to have. The nameset delta against that row reads **+24 −0 on Windows**, and the twenty-four names are exactly this task's own: the twelve `http_routes::tests::` unit tests and the twelve `tests/http_routes.rs` integration tests — so the run's extra passes are the tests that were added and not something else that began passing quietly, which a bare count would not have told apart. The parents/children split moved with them: **46 `Running` lines plus 4 `Doc-tests` lines are the 50 parents**, where the row above has 45, so the +1 parent is `tests/http_routes.rs` arriving as a test binary of its own, and **the twelve inside `sure-core`'s own lib result line — 796 to 808 — are the twelve unit tests**. The pairwise readings are **unchanged** (`−13 +14` against macOS, `−14 +16` against Ubuntu) and **not one of the thirty platform-gated names is a route name**, which is what a change with nothing platform-specific in it must read as. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The first attempt of this run was red on Ubuntu, and that is the part of this row worth reading.** `rust (windows-latest)` and `rust (macos-latest)` were green in it; Ubuntu failed `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` and `a_service_that_is_dropped_is_stopped_anyway` with **`Text file busy (os error 26)`** — the spawn refusing a program that a *concurrent* `fs::copy` still had open for writing. **Neither file is touched by `e5d5b06`, neither test is this task's, and the re-run of that one job came back green**, so what the attempt found is a pre-existing Linux-only race in another task's fixtures rather than a defect in this commit — its mechanism, its evidence and the reason it is recorded rather than fixed inside this task are in the section below. **The run id is the same run**: `gh run rerun --failed` re-runs a job inside a run and does not mint a second one, which is exactly why the failure had to be written down here instead of being left to the run's own state, where a green re-run replaces it |
 
 **The pairwise readings in this table are not all the same number, and the ones
 that moved did so for a reason rather than drifting.** Every row from `P3-T006`'s
@@ -10795,6 +11136,92 @@ it needs a Mac.
   so a search for it as written finds nothing, and a search that finds nothing reads
   exactly like a session with no survivors. This acceptance closes `P4`: 9 of 9.
 
+- `c9057d7` **`P5-T001`** (accepted at `3cabc96`) — *"Implement runtime probe planner"*,
+  and **the task that gave `start` and `dev` a consumer**. Five files, **+2271 −4**:
+  `crates/sure-core/src/runtime_probes.rs` (**+1152**, new) and
+  `crates/sure-core/tests/runtime_probes.rs` (**+1071**, new), plus
+  `crates/sure-core/src/checks/node.rs` (+39 −4), one line of `lib.rs` and twelve of
+  `tests/check_schedule.rs`. **The sentence this module is the first to keep was
+  already written down three phases earlier**: `checks/node.rs` says why four of
+  `ScriptRole`'s eight variants produce checks and four do not — *"`dev` and `start`
+  **do not finish**. They are servers, and a check is something that ends. Starting
+  one is what `service` and `checks.browser_probe` are for"* — prose written when
+  those two roles had **no consumer anywhere in the shipped source**, and
+  `ScriptRole::Start` and `ScriptRole::Dev` are now read in exactly one place. Four
+  `pub(crate)` widenings carry the load — `Runner`, `Runner::of`, `components` and
+  `command_for` — each with a doc paragraph naming `P5-T001` as the second caller,
+  **because a widening whose documentation does not say who else is calling it is
+  indistinguishable from a visibility change nobody needed**. Two kinds and **three
+  absences, and the absences are the decisions**: a route check is absent because
+  `CheckReason`'s own rule refuses one (`P5-T003`'s work), `ActionKind::ExternalService`
+  is absent as a boundary rather than a gap (`P5-T006`'s subject), and
+  `ActionKind::ArbitraryCommand` is absent as forbidden — there is no field a caller
+  could put a command line in. Run `35054249354`: all five green, Windows **1595** /
+  macOS **1596** / Ubuntu **1597**, 0 failed, 11 ignored, **58** result lines = **48
+  parents + 10 children**, **+29 on every platform**, `+1` result line, `+1` parent,
+  `+0` children; nameset **`+29 −0`**, and the 29 are exactly the module's **14** unit
+  tests and **15** integration tests. The acceptance run `35056098080` is identical to
+  it in every figure with a nameset delta of **`+0 −0`** — and **it is the run where
+  the platform-drift reading was noticed**, its pairwise sets being `windows vs macos:
+  −13 +14` and `windows vs ubuntu: −14 +16`, which is why the `−12 +14` recorded
+  against `P3-T006`'s rows is high by two names. Twenty-five mutation rows, and **the
+  first run was 23 caught, 2 survivors, 0 inconclusive** with the survivors `m20` and
+  `m25`; both were closed by tests written for them and **the set was then re-run in
+  full against the committed blob, because the two earlier trees no longer exist** —
+  one vintage, twenty-five rows, the same file the commit holds. Ten of the
+  twenty-five are caught by exactly one test, and the widest row is caught by
+  **sixteen**; the most-used catcher is
+  `a_probe_carries_the_weight_it_argues_for_and_nothing_louder` at 9 rows, **and it is
+  the sole catcher of four (`m11`–`m14`)**, which is the concentration risk the entry
+  records rather than a reassurance. Detail in *What `P5-T001` added*, above.
+- `ee050da` **`P5-T002`** (accepted at `14ca785`, with the fix commit `0b72dce`
+  between them) — *"Implement web/service start smoke check"*, *"Supported service can
+  be started/probed/terminated"* and *"Startup failure remains explicit"*. Two commits
+  because **the tree the first one pushed is not the tree the task is accepted on**.
+  `ee050da` is five files, **+2757 −35**: `crates/sure-core/src/runtime_start.rs`
+  (**+881**, new), `crates/sure-core/tests/runtime_start.rs` (**+1790**, new),
+  `support.rs` (+22), one line of `lib.rs`, and a census rule in
+  `tests/spawn_sites.rs` (+98) that moves the third rule's exemption list from one
+  file to two. `0b72dce` is **+57 −1 in the one source file**, and it exists because a
+  push review named this module and reading its security surface found **a service
+  able to erase the report of its own failure while a person was reading it**. **The
+  table of endings is total, every arm has a status, and the two arms that could be
+  mistaken for a pass are the two the tests are written against** — including the row
+  with two ways in, *"it ended by itself"*, which is a failure whether it ended inside
+  the window or after it, **because a service that exits is not a service whatever it
+  printed on the way out**. `StartSmoke::of` takes an `Enforcement` rather than a
+  command, which is `enforce.rs`'s own rule applied one level up, and the lookup is by
+  the probe's **own** check id — the decoy test admits two commands with the **decoy
+  first**, so a lookup that took the first command it found takes the wrong one. Runs
+  `35063118526` (Windows **1618** / macOS **1619** / Ubuntu **1620**, **+23 on every
+  platform**, ignored 11 → 12, nameset **`+24 −1`**, the `−1` a rename and the
+  arithmetic closing exactly: 23 passed + 1 ignored = 24 test functions) and
+  `35064050013` (Windows **1619**, **+1 on every platform**, nameset **`+1 −0`** = the
+  one name `runtime_start::tests::a_service_cannot_write_an_escape_into_the_line_sure_prints`).
+  Thirty-four mutation rows, and **the first run was 33 rows — 30 caught, 1 declared
+  unobservable, 2 survivors** — against the accepted log's **`all 32 observable
+  mutations caught by a failing test, and 2 declared unobservable as expected`**: 34
+  rows, 0 survivors, 0 that failed to build, 0 skipped. **18 of the 32 are caught by
+  exactly one test**, 10 by two and 4 by three, with 22 distinct catchers, and the two
+  most-used catchers are the tests a service that ends or overruns is read through, at
+  7 rows each. Detail in *What `P5-T002` added*, above.
+
+- `e5d5b06` **`P5-T003`** (accepted at the progress-only commit that follows `e5d5b06` and carries this entry) — *"Implement HTTP route smoke
+  framework"*, *"Project-exposed HTTP endpoints can be probed"* and *"Failed route
+  smoke checks remain visible"*. **The task's own detail is the section above**; this
+  entry is the place in the accepted list that names it, and what belongs here is the
+  shape rather than a second telling: two files added and three changed,
+  `crates/sure-core/src/http_routes.rs` at **1952** lines and
+  `crates/sure-core/tests/http_routes.rs` at **1508**, the reading that decides which
+  declared routes become checks and the probing that asks each one, **with the two
+  kept apart so that a route SURE cannot place is reported rather than silently
+  dropped**. **One push, and its run was red once before it was green.** `35086572733` is Windows **1643** / macOS **1644** / Ubuntu **1645** passed, **0 failed**, 12 ignored, **60** result lines = **50 parents + 10 children**, **+24 on every platform** against `35067317216` with a nameset delta of **`+24 −0`** naming exactly the twelve unit tests and the twelve integration tests. **Its first attempt was red on Ubuntu** — two tests in `runtime_start.rs` and `service_supervisor.rs`, neither of them this task's, both `Text file busy (os error 26)` — and the re-run of that one job, inside the same run, came back green; both facts are in the run table's row for this commit and in the section below the table.  Thirty-five mutation rows, **red twice**: the first
+  run left five survivors and one row that did not compile, the second left one
+  survivor, and the third was stopped in flight when the second review changed the source under it, and **the fourth run is `all 35 observable mutations caught by a failing test, and 0 declared unobservable as expected`** **The survivors are the record here and not the
+  count** — the second run's survivor is the most serious thing this set found, a
+  route the project declares and does not serve that stopped blocking green, which is
+  a false green one field to the left of the status.
+
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all
 `accepted` and none of them appeared here: the list was last extended for
@@ -10904,6 +11331,22 @@ went unspent six times — the check's output is the only thing that distinguish
 reading, not the fourth. **The stale paragraphs are left standing above**, because
 each is a claim about what a specific acceptance printed, and the gap between them
 is the record.
+
+**And this is the fourth occurrence, so the check was skipped across a gap a third
+time.** Run at this acceptance against the tree before the entries above were added,
+it returns **`accepted: 54 missing: ['P5-T001', 'P5-T002']`** — exactly the two tasks
+accepted in the window, and **the window is three acceptances long**: the last reading
+recorded above is `P4-T008`'s, `accepted: 51 missing: none`, and the acceptances since
+are `P4-T009`, `P5-T001` and `P5-T002`. **`P4-T009` added its own entry and the other
+two did not, which is the whole of the difference between them** — nothing separates
+those three acceptances but whether the person writing it ran the command, and the two
+that did not are named by the check to the id. **The check has now been run five
+times and skipped twice, and both gaps were closed by the same run that found them**:
+the six-acceptance gap `P4-T008` closed, and this three-acceptance one. After the
+entries above, the same command returns **`accepted: 55 missing: none`**, and that is
+the reading the next acceptance has to reproduce rather than assume — **the count was
+never the test and the command is the test**, which is why the command is what is
+written down here and not the number it printed.
 
 ## Next concrete action
 1. **`P4-T009` is implemented, pushed, read, and accepted by the commit carrying
@@ -12177,6 +12620,299 @@ ignored, which is how the earliest tasks came to record an empty note.
 
 None. No task has been marked `block-external`. No credential or authorization
 outside this machine has been needed yet.
+
+### A Linux-only race the first push found in another task's fixtures, and why it is recorded rather than repaired here
+
+The run of `e5d5b06` was **red on its first attempt and green on its second**, and
+the red is worth more than the green: it is a real defect, in this repository's own
+test fixtures, that no gate on this machine can see. **The first attempt** had
+`rust (windows-latest)` and `rust (macos-latest)` green and Ubuntu failing two
+tests — `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` in
+`crates/sure-core/tests/runtime_start.rs` and
+`a_service_that_is_dropped_is_stopped_anyway` in
+`crates/sure-core/tests/service_supervisor.rs` — and both failed the same way:
+the status was `Error` where the test wanted `Fail`, because **SURE could not start
+the program at all**. The reason SURE wrote names the operating system's own
+words: **`Text file busy (os error 26)`**. The two panics are kept verbatim at
+`target/tmp/p5t003-run1-ubuntu-failure.txt`, and the interesting half is the path
+in them: `.../outlives-then-ends-7168-8/bin/python` and
+`/tmp/sure-service-dropped-7272/working/python`.
+
+**Both of those files are a copy of the test binary, and both are made by
+`fs::copy` immediately before they are run.** `Fixture::python` in
+`runtime_start.rs:342` and the helper at `service_supervisor.rs:170` do the same
+thing and say why in their own comments: the program has to be *named* `python` so
+that `sure_core::safety`'s classification reads it as one, and it has to *be* this
+binary so that the child is the test binary run again in child mode.
+`std::fs::copy` opens the destination `O_WRONLY|O_CREAT|O_TRUNC` and holds that
+descriptor for the whole copy — and what is being copied is not small: **5.6 MB on
+Windows and a debug binary on Linux is larger still**. So the window in which
+`bin/python` exists, is complete, and is open for writing by its own test is
+**milliseconds wide**, which is an eternity next to everything else in these tests.
+
+**The mechanism is a `fork`, and the window it needs is the one `O_CLOEXEC` does
+not close.** Every one of these tests spawns processes, and the tests in a binary
+run in parallel threads. A spawn calls `fork`, and **`fork` duplicates the whole
+descriptor table into the child** — including the write descriptor another thread's
+`fs::copy` is holding — and the child keeps it until its own `execve`. If any
+thread `execve`s that file inside *that* window, Linux answers `ETXTBSY`, because
+the rule is about the **inode** being open for writing by *any* process and not
+about who opened it. `O_CLOEXEC`, which Rust sets on everything it opens, closes
+the descriptor at the child's `execve` — which is precisely the moment after the
+window that matters, so it does not help. That two different tests in two different
+binaries failed in one run, at paths no other test uses, is what that mechanism
+predicts and what "a shared resource" would not.
+
+**This is a claim with its reasoning shown rather than a reproduction, and it
+should be read that way.** It cannot be reproduced on this machine: **Windows has
+no `ETXTBSY`**, so the platform that would fail is the platform that cannot be run
+here, and the evidence is the errno, the `fs::copy` idiom, the size of what is
+copied, and the fact that a re-run of the same job on the same commit came back
+green. Nothing in this session saw the race happen twice, and the falsifier below
+is what would settle it.
+
+**Three things follow, and the third is why this is a section rather than a fix in
+this task's commit.** First, **the product behaved correctly**: SURE reported that
+it could not start the program, in the operating system's own words, and reported
+`Error` rather than a pass — which is `NOT STARTED IS NOT A PASS` doing its job one
+layer down, on a condition nobody designed a test for. Second, **this commit cannot
+be its cause**: `e5d5b06` touches `lib.rs`, `schedule.rs`, `check_schedule.rs` and
+two new route files, and neither of the two failing tests' files is among them —
+they are `P5-T001`'s and `P5-T002`'s, accepted and green on five previous runs.
+Third, **the fix belongs to those fixtures**, and the substantive one is not a
+retry: the copied program must not be the path that is executed, so the copy should
+go to a unique temporary name, be closed, and only then be renamed into place —
+which removes the millisecond window and leaves only the fork window — and a
+complete fix needs a bounded retry on `ETXTBSY`, which is what the kernel's own
+users do, because the residual window is a property of `fork` rather than of this
+code. **That is a change to two modules this task does not otherwise touch, measured
+by a suite whose anchors were not aimed at it** — the same reason
+`env_completeness.rs`'s escaping gap is recorded above rather than repaired here,
+with the same kind of falsifier.
+
+**The falsifier: the task that next touches either fixture makes that change and
+re-runs the workspace under load, recording *n* runs clean rather than *fixed* —
+because a flake that has stopped appearing has not thereby been explained, and this
+one has an explanation that a green re-run does not test.** Until then the honest
+statement is the one this section opens with: the gate went red once for a reason
+that is understood, the same gate went green on the same commit, and **both facts
+are part of the record of `e5d5b06` rather than only the second.**
+
+### A sixth review, two findings, one of them false — and the real one is a hole in the first fix
+
+At 2026-09-16, later again the same day and still during the `P5-T003` work, a
+background security review reported **two** findings against
+`crates/sure-core/src/http_routes.rs`, both `MEDIUM`. It arrived **while the third
+mutation run was in flight**, which is what made the second finding cost something
+beyond the fix: the run had to be stopped, because a set in flight measures a tree
+that can no longer be the accepted tree. Both findings were checked against
+`target/tmp/http_routes.rs.pre` — the byte copy, since the file was untracked and
+`HEAD` had nothing — and **one was false of this code and the other was real**.
+
+**Finding 1, a symlink TOCTOU between the read and the join, is not applicable here,
+and the answer is a reason rather than an argument.** The concern is that a path SURE
+derives from a scan could name a symlink, so `fs::metadata` and `fs::read` could
+follow it out of the project after the scan's own policy had approved the path. It
+cannot, for three reasons that are all in one module and are all locatable:
+
+- `crates/sure-core/src/scan/mod.rs:494` answers a link with
+  `SkipReason::NotFollowed` — **into `skipped`, never into `entries`** — and the
+  comment above it at `:490` says why it is answered before the ignore tables are
+  consulted: *"What it points at is not in the scan whatever it is called."* So the
+  file list SURE's reading iterates **holds no symlink for the join to follow**.
+- `scan/mod.rs:447` — *"`file_type` does not follow a link, so a link is seen as a
+  link here and never as what it points at"* — is what makes the classification at
+  `:494` possible in the first place.
+- `scan/mod.rs:482` builds every path as `relative.join(&name)`, and `name` came from
+  `entry.file_name()` at `:446`. **No component of any candidate is `..`**, because
+  every one of them is a name the operating system gave.
+
+The answer to this finding was **a comment at the join site rather than a change**,
+and the comment is the artifact: `RouteReading::with_options` now states, one line
+above `let full = discovery.root.join(path);`, that the join is safe *because of what
+the scanner did* and that **the reason is one module away** — so a later reader does
+not have to re-derive it, and does not get to relax it by editing the scanner without
+seeing who was depending on it. That is the shape this repository prefers for a
+finding that is false: not silence, and not a defensive check that re-decides the
+scanner's policy per reader.
+
+**Finding 2, terminal escape injection, is real — and it is a hole in the first
+fix rather than a second defect.** It named `NotProbedBecause::plain_description`,
+and specifically the two arms that interpolate text **the project wrote**:
+`MountedUnder { prefix }` carries a mount call's literal and
+`NotOnTheApplication { receiver }` carries the name a route is declared on. Both are
+read out of a source file. The first fix had escaped five call sites — `spelling`,
+`Route::anchor`'s location, `Route::plain_description`, `NotProbed::plain_description`
+and `RouteCheck::of`'s `CheckReason::RouteDeclared.declared_in` — and this sentence
+was not one of them, **because the module had written down that it was SURE's own
+text.** It was not, for those two arms.
+
+**That sentence in the doc comment is the most interesting thing in this finding, and
+it is why the write-up is this long.** The escape was applied one call site at a
+time, and the enumeration missed exactly the sentence the module's own prose claimed
+did not need it. **A false claim in a comment is not only a documentation defect: it
+is the reason the code was wrong.** The correction is therefore not a sixth call
+site — a sixth entry in the same enumeration would have left the property in the same
+place, dependent on someone remembering to add a seventh:
+
+```rust
+pub fn plain_description(&self) -> String {
+    in_a_sentence(&match self {
+```
+
+**The escape now wraps the whole `match`**, so one call covers every arm that exists
+and every arm added later, which is the property an enumeration cannot have.
+`RouteCheck::of` already had that shape for the same reason, and that is recorded
+next to it. The false claim was corrected rather than deleted: the doc now says the
+sentence *is* SURE's own text **and is not all of it**, naming the two arms and
+saying why that is the reason the escape belongs at the boundary.
+
+**The test does not read a workspace, and it cannot.** It builds the two arms with a
+real escape byte inside them and asserts both that no control character survives and
+that the project's spelling is **escaped rather than dropped**, since deleting the
+byte would satisfy the first assertion while telling a reader less than the file
+says. Reading a workspace is not available for this half: **Windows forbids bytes
+0–31 in a file name**, so a route whose *declared_in* carries the byte and a mount
+prefix carrying it are reachable on Unix and macOS and unreachable through the
+filesystem on the primary platform. `An integration test is not a place to assert a
+property the platform will not produce` — the same conclusion the fifth survivor of
+run 1 reached from the other direction.
+
+**The catch was verified by hand before the set was re-run, because a test written to
+close a finding is a claim until it is seen to fail.** Two mutations were applied in
+turn and both were seen to fail the single test — first the boundary deleted
+outright, then, because the harness's anchors must be contiguous and exactly-once,
+the boundary replaced by `String::from`, which on a `String` is
+`impl<T> From<T> for T` and therefore the identity. The second is the one the mutation
+row uses, and it matters that it was checked: **it compiles**, so the row lands in
+`CAUGHT` rather than in the `BUILD` list. The failure in both cases was at
+`crates/sure-core/src/http_routes.rs:1747`, on the real byte.
+
+**Two consequences follow from this finding, and both are recorded where they
+belong rather than here.** The source changed after the third mutation run had
+started, so **the third run was stopped and the accepted log is the fourth** — a set
+is evidence about one tree. And the module's escaping is now tested from two
+directions: the invariant over the sentences a reader gets, and the two arms that
+carry a project's own text. Detail in *What `P5-T003` added*, above.
+
+### A review that named `http_routes.rs`, and the defect the reading then found
+
+At 2026-09-16, during the `P5-T003` work, a background security review named
+`crates/sure-core/src/http_routes.rs` and carried **no finding text** — the same
+shape as the `config/mod.rs` notification recorded below. **This one had a real
+defect behind it**, which is the reason the two are written up differently: the
+file was read directly instead of the notification being acknowledged, and the
+reading found a genuine instance of the class this repository treats as the most
+serious one.
+
+**The defect: a project's own text reaching a sentence SURE prints without being
+escaped.** A route's path and the file it was read from are both project text, and
+both go *inside* a sentence rather than being handed to a renderer as a field,
+because they are what a reader needs in order to find the thing SURE is talking
+about. `quoted` returns the characters between a literal's quotes **unchanged**,
+so a project whose source holds a real control byte inside a route's string reaches
+SURE's own output carrying it, and **a failing route could erase the report of its
+own failure while a person was reading it** — a false green in the terminal rather
+than in the verdict, and the hardest kind to notice afterwards, because the JSON
+would have been right and only the line a human looked at would have lied.
+
+**The treatment already existed three modules over and this one had not used it.**
+`setup.rs`'s `in_a_sentence`, `runtime_start.rs` and `diagnostics::Field` are all
+built on `redact::escape_control_characters`; this module was simply the first
+place where the text entering the sentence is not text SURE composed. The fix is
+one private `in_a_sentence` at **five** call sites — `spelling`, `Route::anchor`'s
+location, `Route::plain_description`, `NotProbed::plain_description`, and
+`RouteCheck::of`'s `CheckReason::RouteDeclared.declared_in` — the last escaped at
+the boundary rather than inside `schedule.rs`, because one escape there covers both
+the sentence and the anchor that reason builds. **`Route::path` is deliberately not
+escaped**: it is what SURE asks for, and a request line built from an escaped path
+would ask for something the project does not serve.
+
+**The test asserts the invariant rather than the trigger.** No control character
+survives in the six sentences a reader gets, and the assertion also holds that this
+is an **escape and not a redaction** — deleting the byte would satisfy the
+invariant while leaving a reader unable to see what the project actually wrote,
+which is the same false green one step further in.
+
+**The five call sites above are not the end of this story, and the subsection at the
+top of this file is where it continues**: a sixth review found the one sentence the
+enumeration missed, and the fix was to stop enumerating. A reader who takes *five*
+from this paragraph as the count of places a project's text can reach SURE's output
+in this module should read the newer one first.
+
+**One adjacent gap was found by that reading and deliberately not fixed.**
+`env_completeness.rs` builds a sentence and an anchor location from `display_path`
+without escaping either, so the same defect class is present one module over. It is
+pre-existing and outside this task's scope; the falsifier is the ordinary one — a
+task that touches that module fixes it there, with its own evidence.
+
+### A fifth review, the first one whose quoted text is a mutation anchor verbatim, and the one command that does not exist yet
+
+At 2026-09-16, later the same day and still during the `P5-T003` work, a background
+security review reported a `MEDIUM` against the same file — *"Broken security
+control / evidence-integrity bypass — response evidence not bound to the run
+fingerprint"* — quoting this, verbatim:
+
+```rust
+pub fn run(&self) -> Vec<CheckResult> {
+    let fingerprint = sure_domain::ids::FingerprintId::generate();
+```
+
+and suggesting the fix:
+
+```rust
+let fingerprint = self.enforcement.check_plan().fingerprint.clone();
+```
+
+**The suggested fix is the shipped line, character for character, and the quoted
+line is mutation row 24 of the harness that was running at the time.** The row is
+`the fingerprint is invented rather than read from the plan`, its anchor is exactly
+`let fingerprint = self.enforcement.check_plan().fingerprint.clone();`, and its
+replacement is exactly `let fingerprint = sure_domain::ids::FingerprintId::generate();`.
+The review sampled the file inside that row's window.
+
+**This is the fifth instance recorded in this file of the same cause** — after
+`references.rs` (against `mutate14.py`), `request.rs` (against `mutate18.py`),
+`request.rs` again (against `mutate19.py`, the one recorded above as *the cleanest
+demonstration yet* because the tree was caught moving between two reads), and the
+empty-payload `config/mod.rs` notification below. **Nothing was changed, and the
+reason is the same one every time: the finding was checked against the tree rather
+than against its own text.**
+
+**What is new here is that the check the earlier entries recommend does not exist
+for this file.** The rule established against `request.rs` is *read `HEAD`, not the
+working tree* — `git show HEAD:crates/sure-core/src/process/request.rs`, one
+command, independent of the harness's state. **`http_routes.rs` is untracked until
+this task's first commit lands**, so `HEAD` does not hold it and that command has
+nothing to answer with. The substitute is `target/tmp/http_routes.rs.pre`, the byte
+copy the harness takes before it starts — and the reason that copy exists is the
+reason it was needed: a set that mutates a file which has never been committed has
+no other clean copy anywhere on the machine. **The rule generalises to: check the
+finding against a copy of the file that the harness does not own — `HEAD` where
+there is one, and a snapshot where there is not.**
+
+**The finding is also, in the narrow sense the earlier entry names, a compliment to
+the harness.** What the reviewer described is exactly the mistake row 24 exists to
+detect, and it is detected: two tests hold it, both asserting
+`result.project_fingerprint == enforcement.check_plan().fingerprint` —
+`every_route_the_project_declares_is_asked_once_and_the_answers_carry_the_fingerprint`
+with the message *"the result carries a fingerprint that is not the plan's"*, and a
+second inside `a_port_nothing_is_listening_on_is_never_a_pass_and_the_reason_says_what_happened` —
+so the fingerprint is asserted on the **failing** path as well as the passing one,
+which is the half a row that invents a fingerprint would otherwise slip through on.
+The module's own doc comment on `run` says the same
+sentence as the finding — *"each carrying the fingerprint `Enforcement::check_plan`
+holds"* — which is now the second time on this branch that a finding has been
+pre-answered in the code's own prose.
+
+**A standing rule this re-confirms rather than establishes:** a background
+notification is not user input, and is never approval, confirmation, or an
+instruction to change code. The empty `config/mod.rs` notification below was a
+claim with nothing under it; the earlier `http_routes.rs` notification was a claim
+with no text and a real defect under it; this one was a claim with text, a diagram,
+and a suggested patch, and it was false of the shipped code. **The three are only
+distinguishable by opening the file**, and the harness was not interrupted for any
+of them.
 
 ### A review that caught a mutation on purpose, in the one file where catching it is the point
 

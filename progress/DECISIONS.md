@@ -3681,3 +3681,275 @@ second vocabulary beside one, which is what makes it droppable into a
   does a project whose start script exits immediately. Whether the thing that came
   up is the thing the project means is not a question a table of roles can answer,
   and saying so is the same limit `crate::browser` states about its drivers.
+
+## P5-T002 — a service started, asked and stopped, the two processes one row of the table needs, a platform difference found by asking, and a project that could erase its own report
+
+**The acceptance is two sentences, and the second is the one that shapes the
+module.** *"Supported service can be started/probed/terminated"* is a claim about
+a real process doing three things in order; *"Startup failure remains explicit"*
+is the claim that none of the ways that process can disappoint SURE ends up
+looking like success. `crates/sure-core/src/runtime_start.rs` is the whole of the
+code — **881** lines and one `StartSmoke` at `ee050da`, **937** as accepted, and
+`crates/sure-core/tests/runtime_start.rs` holds it by starting real processes: a
+copy of the test binary, renamed `python`, told what to do through its own
+argument vector, because a service can only be started from an `AdmittedCommand`
+and only a name the classifier reads as *runs the project's code* is admitted by
+any mode.
+
+- **The chain, and the door this module comes in through.**
+  `ProbePlan::of` → `PermissionPlan::add` → `Enforcement::of` →
+  `Supervisor::start` → `StartSmoke::run`. [`StartSmoke::of`] takes an
+  `Enforcement` rather than a command, which is `enforce.rs`'s own rule applied
+  one level up, and it looks the admitted command up **by the probe's own check
+  id** — so a smoke check cannot run a command a mode stopped, and cannot run one
+  that was planned for a different check. Two tests hold the halves of that: one
+  under a mode that stops the check (the refusal names the same check
+  `Enforcement::stopped()` already wrote a result for, and no child was started),
+  and one where the enforcement admits **two** commands and the decoy is admitted
+  first. The decoy is what makes the second test about the lookup rather than
+  about the plan: a lookup that took the first command it found would take the
+  wrong one, and the decoy's child writes a marker on its way out.
+
+- **The verdict table, and the row with two ways in.** Five rows, of which the
+  interesting one is *it ended by itself, inside the window or after it* — a
+  failure both times, in two sentences that differ only in which fact they lead
+  with. **A service that exits is not a service, whatever it printed on the way
+  out**, and `"start"` is the one script whose whole meaning is *this keeps
+  running*; so a start that came up, answered SURE's question, and then ended by
+  itself is still a failure, and the reason says which of the two orders it
+  happened in. The other three rows are the pass (`the probe's own status`,
+  carried rather than re-decided), the warning (it came up and there was nothing
+  to ask), and two `error` rows (the program never started; SURE cannot say what
+  the run did or cannot stop it).
+
+- **A question is only asked while the process SURE started is still running.**
+  Not after it ended, and that is a rule rather than an ordering. A port
+  answering after SURE's own process is gone may be answering for something SURE
+  did not start — a leftover from a previous run, another server on the machine,
+  or a child the start script detached — and a pass built on that would be a
+  claim about a service SURE never saw come up. The test that holds it asserts
+  the **absence** of the asked clause in a reason about a service that had
+  already ended, which is a claim about a sentence SURE did not write.
+
+- **Windows hands an accepted socket the listener's non-blocking mode, and that
+  cost a test before it was understood.** `serve()` sets its listener
+  non-blocking on purpose (a child nobody ever connects to has to have a way
+  out), Windows inherits that onto every socket it accepts, and Unix does not —
+  so on this machine a child's read returned `WouldBlock` with the request still
+  in the socket, the child closed, and the far end reported a **connection
+  reset**. The failure read *the exchange could not be made (os error 10054)*,
+  and the chain from there is three steps long and worth writing down because
+  each step is forced: a reset is an *abortive* close, which the operating system
+  sends only when the closing side still had unread bytes; the request was still
+  unread, so the read that was supposed to take it had returned without it; and a
+  blocking read cannot return before the bytes arrive. So the accepted socket was
+  not blocking, and the fix is one line — `stream.set_nonblocking(false)` after
+  every `accept` — with the reasoning in a comment above it. It is written as an
+  explicit call rather than a `cfg(windows)` branch because the difference is not
+  this module's to model: the socket is asked to be blocking, which is what the
+  code that reads it has always assumed. The comment's first draft claimed the
+  child "read nothing at all", and that was measured rather than believed: the
+  line was removed and the test still passed, because the parent's write usually
+  beats the child's read. It is a race, not a zero, and the comment now says so.
+
+- **The row that needs two processes, and why no one process can reach it.**
+  *A service that outlived the window and then ended by itself* is decided by
+  `observe()`, which asks its question and then calls `stop()` with microseconds
+  in between, while the runner's own wait loop checks `try_wait()` before the
+  deadline and before the cancellation and sleeps 1 ms. When the death and the
+  end of the exchange are the same instant — which is what a service that ends
+  *because* it was asked produces — the runner can poll in that gap and report
+  `Cancelled` microseconds after a self-inflicted death, which is the wrong row
+  and was a flaky test: it failed as `left: Error, right: Fail` under load, and
+  `Error` is the arm for a run SURE cannot vouch for. The fix is not a longer
+  sleep. It is that **the port must belong to a different process than the one
+  that dies**: the service starts an *anchor*, the anchor holds the question
+  open, the service ends when the **anchor reports that the question arrived**,
+  and the anchor then waits a further 100 ms and lets the connection go. Every
+  ordering is carried by a marker file rather than by two clocks agreeing —
+  `asked`, `died`, and a third give-up marker that must *not* exist — and the
+  test asserts all three. That shape is not a contrivance: a real dev server is
+  exactly this, since `npm run dev` starts a server and is not itself the server,
+  so the process SURE supervises can end while the port it opened is still
+  answering. Two variants were considered and rejected as instruments because
+  they would have made the module's own sentence false about the process — a
+  child holding the service's pipes open (which makes `has_finished()` lag the
+  process by the drain grace), and exploiting that same lag — and a
+  one-process child that answers and then dies, whose read still ends at the
+  death.
+
+- **The third ending, and the one row whose status is the platform's.**
+  `Termination::TimedOut` is reachable only in one ordering: the service has to
+  outlive the window (or SURE never asks and the run ends by another door) and
+  the exchange has to still be open when the service's whole-life budget expires.
+  The test that reaches it gives a silent service a 2 second window, a 3.5 second
+  budget and a 6 second exchange bound, and it found two things. The first is
+  that **the kill lands in the middle of an open exchange, and the two systems
+  report that differently**: on Windows a socket is aborted when the process
+  holding it is force-terminated, so the probe sees a reset and reports *the
+  exchange could not be made* (`Unreachable`, which `probe.rs` maps to `error`);
+  on Unix the kernel closes the socket, so the probe sees the connection end with
+  nothing said and reports *an open port is not an answer* (`NoAnswer`, mapped to
+  `unknown`). Both are what the probe saw, this module carries the probe's
+  verdict rather than replacing it with an opinion of its own, and neither is a
+  pass — but the same run therefore reports `error` on Windows and `unknown` on
+  Unix, which is a **portability caveat rather than a defect**, is asserted as a
+  set in the test rather than pinned to this machine's answer, and belongs in the
+  v0.1 report's limitations. The second finding is a sentence: the arm read *"the
+  service ran until its own 3.5 seconds budget ran out"*, which is not English,
+  and no test had ever read that sentence because no test had ever reached the
+  arm. It now reads *"its own budget of 3.5 seconds ran out"*, which is right for
+  every duration `spoken` produces.
+
+- **What the tests were taught after the set ran.** The mutation set is 33 rows
+  over the one file this task adds, and it found the tests thin in four places
+  that had nothing to do with the set's own anchors: the fingerprint on a result
+  was asserted nowhere (so a module that generated its own would have survived),
+  the *absence* of the asked clause for a service that had ended was asserted
+  nowhere, the dropped-line count in a reason was asserted only where a
+  hand-built outcome lives and never against a real process, and the DIE child
+  wrote one line, so *the tail and not the head* had no head to drop. Each is now
+  held by a test: the child writes seven lines of noise before the sentence that
+  says why, the reason has to name the three that were dropped and the fourth
+  that was kept, the answering test asserts the fingerprint the plan admitted
+  under and the stream the service wrote on, and the failing test asserts both
+  that SURE said which ending it was and that it did not ask a question of a
+  service that was already gone.
+
+- **The one mutation that cannot be caught, and the argument rather than an
+  assertion.** The `Warning` default in the `TimedOut` arm — a service that used
+  its whole budget with nothing to ask — is unreachable, and the argument is
+  short: `TimedOut` means the deadline arrived before `Service::stop` was called,
+  which means this module was still inside `ask`; `ask` only runs when the window
+  closed with the service alive and returns `None` only when there is no
+  endpoint; so either there was no endpoint *and* the deadline beat a stop that
+  follows the window by microseconds — a race, not a state — or `asked` is `Some`
+  and the default is never taken. The `Cancelled` arm, whose default *is*
+  reachable, is caught by a test. The declaration is derived for this tree rather
+  than carried over from a set where it was true, and making the no-endpoint case
+  a state instead of a race would be a change to the module rather than to the
+  harness.
+
+- **What this module does not do, and one thing it cannot do yet.** It does not
+  split a command line: turning the project's declared `start` script into a
+  program and an argument vector is the executor's work, one step before this
+  module, and there is no such step in the crate yet — so **nothing in the
+  product builds a `StartSmoke`**, which is the state `support.rs`'s ceiling
+  paragraph records and `tests/spawn_sites.rs` checks. It does not read a body
+  (`P5-T003`'s routes and `P5-T004`'s browser check are the feature claims), it
+  does not run two services (`P5-T007`), and it does not decide whether a probe
+  may run (that is `PlanBuilder`'s and the domain's `decide`). And when the
+  splitter is written, **the batch-file question reaches the serve path**:
+  Windows completes a name with no extension with `.exe` and nothing else, so a
+  bare `npm` is not found where `npm.cmd` is installed, and a `.cmd`/`.bat`
+  **named with its extension** is classified `Destructive` — no permission covers
+  it in any mode. So on Windows a Node project's `start` script cannot be started
+  in this build by either spelling, for a reason that is documented, open, and
+  the owner's to settle (item 26 in `HANDOFF.md`'s decisions list). That is not a
+  defect in this module, which runs what it is handed; it is the price of the
+  question being open, and it is worth knowing that the price is a whole
+  ecosystem's start scripts rather than a corner case.
+
+- **A service's own words are escaped before SURE repeats them, and this is the
+  one thing in the task a push review prompted rather than the acceptance.** The
+  review's notification named `crates/sure-core/src/runtime_start.rs` and carried
+  **no finding text**, so the module's security surface was read directly instead
+  of answered: what a service writes is placed inside a sentence SURE prints, and
+  a service is a project's process. `\n` cannot arrive — it is what `lines()`
+  split on — but `CapturedOutput::text_lossy` replaces only what is not valid
+  UTF-8, so **every other control character survives**: a lone `\r` sends a
+  terminal's carriage to column 0, and `\x1b[2K` erases the line it is printed
+  on. A failing service could therefore **erase SURE's report of its own failure
+  as a person was reading it** — a false green in the terminal rather than in the
+  verdict, which is the class of defect this product treats as the most serious,
+  and the hardest to notice afterwards because the JSON would have been right.
+  The workspace already had the treatment and this module had not used it:
+  `setup.rs`'s `in_a_sentence` escapes project text for exactly this reason and
+  in nearly these words, and `diagnostics::Field` does the same for a value in a
+  message — both built on `redact::escape_control_characters`. What is new here
+  is the *kind* of text: every other caller escapes a name a project chose, and
+  this is the first place where it is **whatever a project's process decided to
+  write**. Three details are decisions rather than mechanics. The escaping goes
+  **before** `QUOTED_CHARS` and not after, because the constant's own doc says
+  the quote is bounded by characters, and a bound applied to the raw bytes would
+  let a service hold a reason line open six times longer than the constant
+  claims; `\n` is not escaped *by this call* because it cannot reach it, and
+  saying so in the comment is what keeps a later reader from deleting the call as
+  redundant. The test asserts the **invariant** —
+  `!quoted.chars().any(char::is_control)` — and not the two characters that
+  prompted it, because a test for `\x1b` alone passes on a module that learned
+  one character instead of the rule; it also asserts that the service's words
+  still come through and that each control character is shown as the escape it
+  is, which is what makes this an escape rather than a redaction. And **it is not
+  live today**: nothing in the product constructs a `StartSmoke`, so no reason of
+  this module's reaches a terminal, which is the same absence `support.rs`'s
+  ceiling and `spawn_sites.rs`'s fourth rule record — the fix is in now because
+  the module is new and the next task builds on it, not because anything was
+  exploitable. It is `0b72dce`, one call and one test, and the catch was verified
+  the way this branch verifies one: the call removed by hand, the test run,
+  `FAILED` at exit 101, and the file restored to its committed hash. **What it
+  does not cover is a service that writes a *lot* of escapes**: the quote is cut
+  at 400 characters of escaped text, so a stream of them crowds out the words a
+  reader wanted. That is the character bound doing its job on a case no service
+  in this suite produces, and it is a bound to revisit if one ever does.
+
+- **THE MUTATION SET FOUND TWO REAL GAPS ON ITS FIRST RUN, AND ONE OF THEM WAS A TEST
+  THAT PASSED FOR THE WRONG REASON.** Thirty-four rows over the one source file this
+  task adds, with an empty filter on every row so a survivor is a mutation the whole
+  crate's suite missed: **run 1 was 33 rows — 30 caught, 1 declared unobservable, 2
+  survivors, 0 inconclusive** — and it is not the log the acceptance cites, because
+  the escaping fix changed the **source** afterwards. Earlier tasks on this branch
+  re-ran their sets when a *test* changed; this is the first where the file under test
+  did, so run 1 measures a tree that no longer exists and the accepted log is a run
+  against `5972d6a01ae1`, the blob `0b72dce` commits, re-hashed in the worktree
+  afterwards rather than trusted — this harness prints no *restored* line, so the
+  hash is the whole of the evidence. It reads **`all 32 observable mutations caught
+  by a failing test, and 2 declared unobservable as expected`**: 34 rows, 0
+  survivors, 0 that failed to build, 0 skipped. **18 of the 32 are caught by exactly
+  one test**, against `P5-T001`'s set where 10 of 25 were — a narrow catch list
+  means the row was broken into something a test was written to hold.
+
+- **The two survivors are the part worth keeping, because neither was explained
+  away.** *The character bound counts bytes rather than characters* **had a test
+  written for exactly that, and the test was passing for the wrong reason**: it
+  quoted `QUOTED_CHARS * 2` characters, and at twice the bound **both** counts are
+  over it, so a bound measured in bytes cuts to the same place by accident and answers
+  the same assertion. The fix is not a bigger number but a case where the two counts
+  disagree — the test now quotes 200 characters, which is **600 bytes: under the bound
+  in characters and over it in bytes** — and it asserts that disagreement *before* it
+  asserts anything about the quote, so the case cannot quietly stop being about the
+  difference it exists for. A bound in a report is a claim about what a reader sees,
+  and a test for it has to be built where the two readings differ.
+
+- ***A service that has already finished is noticed only after the window* is declared
+  unobservable, which is a claim that has to carry a derivation rather than a
+  shrug.** The row moves `wait_out`'s `has_finished()` check below its deadline check,
+  so the two orders diverge only when the process has finished **and** the deadline
+  has passed — and the loop's own last sleep is `min(POLL, deadline − now)`, which
+  lands it *on* the deadline rather than past it, so the band is at most one `POLL`,
+  20 milliseconds, wide. `Service::has_finished()` is the runner **thread**'s
+  `is_finished()`, true only after the process exits and its streams have drained, so
+  the band is a tie-break at a boundary rather than a behaviour the operating system
+  could widen. **The declaration carries its falsifier**: a test that fails while it
+  stands makes the row reachable and the derivation wrong, which is what makes this a
+  checked claim and not a comfortable one.
+
+- **The row the escaping fix added is the one this task would most have regretted
+  missing**, and it is why the accepted log is a re-run rather than the first log: a
+  set that could not see the escaping would have signed off on the defect the second
+  commit exists to fix, and the catch had already been verified by hand — the call
+  removed, the test run, `FAILED` at exit 101, the file restored — before the set was
+  re-run to check that it could see the same thing.
+
+- **The escaping convention was not written into `docs/architecture/DIAGNOSTICS.md`,
+  and that is a decision rather than an omission.** The document already states the rule
+  for a diagnostic value — its `## One line, always` section, on backslashes and quotes
+  escaped first and control characters second — and the helpers that enforce it are
+  `redact::escape_control_characters` with its **three pre-existing callers**
+  (`redact_for_diagnostic`, `diagnostics::Field`, `setup::in_a_sentence`) plus, now,
+  `last_words`' own doc comment. A second prose copy for this module would be a place for
+  the rule to drift out of step with the code rather than a place for it to be found.
+  **The falsifier is the ordinary one**: a future task that adds a new kind of text to a
+  sentence SURE prints and cannot find the rule by reading the helper from there should
+  treat this as the wrong call and put it in the document then, with that task's own
+  evidence for where a reader would look.

@@ -2,52 +2,309 @@
 
 Last updated: 2026-09-16
 Branch: `claude/v0.1-autonomous`
-Progress: 53 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 54 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 1/7.** `P5-T001` is implemented as **two** commits —
-`c9057d7`, the implementation and its tests, and the commit carrying this file,
-which is its acceptance. **The run of `c9057d7` is read in full below**, in the run
-table and in this section. What the task added is described under "What
-`P5-T001` added", which is this section; `P4-T009`'s is the next one down.
+(9/9), phase P5 open at 2/7.** `P5-T002` is implemented as **three** commits —
+`ee050da`, the implementation and its tests; `0b72dce`, the escaping fix below;
+and the commit carrying this file, which is its acceptance. **The run of
+`0b72dce` is read in full below**, in the run table and in this section, and so
+is `ee050da`'s, because the task was green on its first push and then changed.
+What the task added is described under "What `P5-T002` added", which is this
+section; `P5-T001`'s is the next one down.
 
-**Accepting `P5-T001` adds a READY entry rather than only removing one, which is
-the first time in this stretch of acceptances that the list grows.** `P5-T002` —
-*"Implement web/service start smoke check"* — names `P5-T001` in `depends_on` and
-**nothing else**, so this acceptance makes it READY. The list goes from seven
-entries to **eight**: `P5-T002`, `P6-T001`, `P6-T005`, `P6-T007`, `P8-T001`,
-`P12-T008`, `P13-T001`, `P13-T004` — computed by resolving every queued task whose
-dependencies are all accepted, before and after the accept, rather than by reading
-a replay. The lowest-numbered is `P5-T002`, which is also the entry this task's
-own module is the input to; that is convenient rather than decisive, because the
-rule is the lowest number and not the tidiest story.
+**A push review named this module and the reading it prompted found the one
+security-relevant thing in it, which is the reason there are three commits.** The
+review's notification named `crates/sure-core/src/runtime_start.rs` and carried
+no finding text, so the file's security surface was read directly: what a service
+writes is quoted into a sentence SURE prints, and nothing escaped it. `\n` cannot
+arrive — it is what the lines were split on — but a lone `\r` and an escape
+sequence such as `\x1b[2K` can, and an escape sequence that reaches the line a
+person is reading can erase SURE's own report of the failure. **That is a false
+green in the terminal rather than in the verdict** — the JSON would have been
+right and the thing a person looked at would have said the service was fine —
+which is the class of defect this product treats as the most serious one. The
+workspace already had the treatment (`setup.rs`'s `in_a_sentence`, and
+`diagnostics::Field`, both built on `redact::escape_control_characters`); this
+module was simply the first place where the text entering that sentence is not a
+name a project chose but **whatever a project's process decided to write**. The
+fix is one call, placed before the character bound so the bound keeps bounding
+what a reader sees, and the test asserts the invariant — no control character
+survives — rather than the two characters that happened to prompt it.
 
-**This task's mutation set found its two gaps on the first run, and the set was run a
-third time before the numbers were written down.** Twenty-five rows over the one source
-file this task adds, empty filter on every row so that a survivor is a mutation the whole
-crate's suite missed: **run 1 was 23 caught, 2 survivors, 0 inconclusive** — `m20`
-reverses the plan's own line order and `m25` reports every missing command as one that
-was never declared, and each survived because *nothing asserted the order of the plan's
-report* and *nothing held the four missing-command sentences apart where a gap renders
-them*. Both were closed by tests written for them, and **the whole set was then re-run
-against the tree that was committed** rather than in part — because the two earlier runs
-measured trees that were never staged and are no longer in the object database, and
-`m3`'s catch count moving from two to three between them is the proof that the difference
-matters. That third log is the record: **25 rows, 25 caught, 0 survivors, 0
-inconclusive**, every row's catch count equal to its own number of failed tests, and all
-25 restores verified against `15d1dad1…`. The row-level detail, including the one
-scrambled line in that log and what it does and does not cost, is under "What `P5-T001`
-added" and in `progress/DECISIONS.md`.
+**Accepting `P5-T002` adds two READY entries and removes none, so the list goes from
+seven to nine — and the third task that names this one does *not* become reachable,
+because it is waiting on one of the two.** `P5-T003` — *"Implement HTTP route smoke
+framework"* — names `P5-T002` and nothing else, so it becomes READY; `P5-T004` —
+*"Implement optional browser smoke adapter"* — names `P3-T011` and `P5-T002`, both
+now accepted, so it does too. `P5-T007` — *"Implement runtime evidence cleanup and
+cancellation"* — also names `P5-T002`, **and `P5-T004`, which this acceptance makes
+READY and not accepted**, so it stays queued. An acceptance unblocks what depends on
+it and not what depends on that, which makes this the first acceptance on the branch
+where the answer to *what does this unblock* is not the same as *what names it*. The
+list goes from **seven** entries to **nine** — `P5-T003`, `P5-T004`, `P6-T001`,
+`P6-T005`, `P6-T007`, `P8-T001`, `P12-T008`, `P13-T001`, `P13-T004` — resolved from
+`tasks/tasks.json` and `progress/state.json` before and after the accept rather than
+read off a replay, and confirmed by `taskctl status` itself afterwards. The
+lowest-numbered is `P5-T003`, which is also the entry this task's module is the input
+to.
 
-**Two commits, and the run of the first was green on the first push.** `c9057d7`
-is **2271 insertions and 4 deletions across five files**: the new
-`crates/sure-core/src/runtime_probes.rs` at **1152** lines, the new
-`crates/sure-core/tests/runtime_probes.rs` at **1071**, four `pub(crate)`
-widenings and three doc paragraphs in `checks/node.rs` (+39 −4), one line of
-`lib.rs`, and the fifth entry on `check_schedule.rs`'s proposer rule — **the first
-entry on that list that is not a submodule of `checks/`**. This acceptance opens
-`P5` at 1 of 7.
+**The mutation set is 34 rows over the one source file this task adds, and what makes
+this record different from every earlier one is that the *source* moved after the set
+had run.** Earlier tasks re-ran their sets because a test had been added to close a
+survivor; here the shipped file itself changed, so the first log is not evidence about
+the tree that ships and the set had to be re-derived for it. The first run measured 33
+rows against the tree that became `ee050da` and read **30 caught, 1 declared
+unobservable, 2 survivors, 0 inconclusive** — and neither survivor was explained away.
+*The character bound counts bytes rather than characters* was closed by strengthening
+the test that was supposed to hold it, which was passing for the wrong reason: at twice
+the bound **both** counts are over it, so a bound measured in bytes cuts to the same
+place by accident and answers the same assertion. The test now quotes a line of 200
+characters — 600 bytes, so **under the bound in characters and over it in bytes** —
+asserts that the two counts disagree before it asserts anything about the quote, and
+fails if a line SURE kept whole comes back with an ellipsis on it. *A service that has
+already finished is noticed only after the window* is **declared unobservable**, with
+its derivation in the harness rather than in this file: the row moves `wait_out`'s
+`has_finished()` check below its deadline check, and the two orders diverge only when
+the process has finished **and** the deadline has passed — a band the loop's own last
+sleep truncates onto the deadline, so it is at most one `POLL`, 20 milliseconds, wide.
+That is a tie-break at a boundary rather than a behaviour, and the declaration carries
+its falsifier: a test that fails while it stands makes the row reachable and the
+derivation wrong. The escaping fix then **added** row 34 and the test that catches it,
+which is why the accepted log is a run over the committed tree rather than over the
+tree that was being edited.
 
-## What `P5-T001` added
+**That run is the third one, and it reads `all 32 observable mutations caught by a
+failing test, and 2 declared unobservable as expected` — 34 rows, 0 survivors, 0 that
+failed to build, 0 skipped — against blob `5972d6a01ae1`**, the file `0b72dce`
+commits, re-hashed in the worktree afterwards rather than trusted. That check is not
+ceremony and this task is the reason: **a harness killed mid-flight leaves its
+mutation on disk**, which has already happened once on this branch, and this harness
+prints no *restored* line for a reader to lean on — so the hash is the whole of the
+evidence that the tree the set measured is the tree the commit holds. Every row's
+catch list is read from `test ... FAILED` lines rather than from a summary, and the
+run passes `--no-fail-fast`, so a catch list is a count rather than a floor; a
+survivor is the one answer neither can fake.
+
+**The shape of this set is the opposite of the last one, and that is the reading worth
+keeping.** **18 of the 32 caught rows are caught by exactly one test**, 10 by two and
+4 by three, with 22 distinct catchers — against `P5-T001`'s set, whose widest row was
+caught by 16 tests and where only 10 of 25 were singletons. A wide catch list means a
+row was broken into something many tests happen to notice; a narrow one means it was
+broken into something one test was written to hold, and here that is the ordinary
+case rather than the exception. The most-used catchers are the two tests a service
+that ends or overruns is read through, at 7 rows each. **The row this task's second
+commit exists for — *the service's own words are repeated without being escaped* — is
+caught by two tests, one of them the test written with the fix**, so the set that
+signed this task off could see the defect the first set could not.
+
+**The rows are aimed at the task's two sentences.** *"Supported service can be
+started/probed/terminated"* is broken by the row that reports a service which ended
+by itself as a pass, by the one that asks its question of a service that had already
+ended, by the two that move the window and the budget, and by the row that credits an
+answer the service never gave. *"Startup failure remains explicit"* is broken by the
+rows that make a missing program a project failure, make an unvouchable run a pass,
+credit a port that said nothing, and turn the budget running out into SURE's own
+stop. The rest are the ones a reader would want to be able to point at: the admitted
+command, the working directory, the fingerprint, the two sentences a stream's origin
+is chosen by, the tail, the line count, the two bounds, the dropped-line count, the
+duration spelling, an exit with no code, and the refusal that names what a browser
+probe would have done instead.
+
+**The change is one source file, one test file, one line of `lib.rs`, one census
+rule and one paragraph of `support.rs`.** `crates/sure-core/src/runtime_start.rs`
+is new at **881** lines and holds one type, and `0b72dce` takes it to **937** —
+the escaping fix and its test, and nothing else;
+`crates/sure-core/tests/runtime_start.rs` is new at **1790** lines and starts real
+processes; `lib.rs` gains one line; `tests/spawn_sites.rs` gains a **fourth**
+rule — *nothing outside `runtime_start.rs` mentions `StartSmoke`* — which is the
+third rule's own technique applied one level higher again, and it moved the same
+rule's exemption list from one file to two.
+
+**The platform difference this task found is the kind that only a real socket
+produces, and it is a portability caveat rather than a defect.** Windows hands an
+accepted socket the **listener's** non-blocking mode and Unix does not, so the
+child — which `P3-T010`'s `serve()` sets non-blocking on purpose — read
+`WouldBlock` with the request still in the socket, closed on top of it, and made
+the far end report *the exchange could not be made (os error 10054)*; a reset is
+an **abortive** close, which the operating system sends only when the closing
+side still had unread bytes, and that chain is what named the missing line. The
+fix is `stream.set_nonblocking(false)` after every `accept`, and **the comment
+explaining it was corrected once by measurement** — its first draft claimed the
+child read nothing at all, and removing the line left the test passing, because
+the parent's write usually beats the child's read. It is a race and not a zero.
+**The second is in the run rather than in the code.** The one row whose status
+belongs to the platform is a service stopped while SURE's question is still
+open: on Windows a force-terminated process's socket is aborted, so the probe
+reports the exchange could not be made (`error`); on Unix the kernel closes it,
+so the probe reports that an open port is not an answer (`unknown`). Both are
+what the probe saw, neither is a pass, and the test asserts the **set** rather
+than this machine's answer — which puts it in the v0.1 report's limitations
+rather than in the module.
+
+## What `P5-T002` added
+
+**The one thing about `P5-T002` a reader should know before the detail: its
+acceptance is two sentences and the second is the one that shapes the module.**
+*"Supported service can be started/probed/terminated"* is a claim about a real
+process doing three things in order; *"Startup failure remains explicit"* is the
+claim that none of the ways that process can disappoint SURE ends up looking like
+success. The module is arranged so that the second sentence is structural rather
+than documented: **the table of endings is total**, every arm of it has a status,
+and the two arms that could be mistaken for a pass are the two the tests are
+written against.
+
+**The chain, and the door this module comes in through.** `ProbePlan::of` →
+`PermissionPlan::add` → `Enforcement::of` → `Supervisor::start` → `StartSmoke::run`,
+and `StartSmoke::of` takes an **`Enforcement`** rather than a command. That is
+`enforce.rs`'s own rule applied one level up: the module looks the admitted command
+up **by the probe's own check id**, so a smoke check cannot run a command that a
+mode stopped, and cannot run one that was planned for a different check. Two tests
+hold the halves of that, and the second one is the interesting one: the enforcement
+admits **two** commands and the decoy is admitted **first**, so a lookup that took
+the first command it found would take the wrong one — the decoy's child writes a
+marker on its way out and the test asserts the marker is not there. Without the
+decoy the test would be about the plan rather than about the lookup.
+
+**The verdict table has five rows, and the row with two ways in is the one a
+start check exists for.** *It ended by itself* is a failure whether it ended
+inside the window or after it, in two sentences that differ in which fact they
+lead with — **a service that exits is not a service, whatever it printed on the
+way out**, and `start` is the one script whose whole meaning is *this keeps
+running*. A start that came up, answered SURE's question and then ended by itself
+is therefore a failure too, which is the case a check that only asked about the
+port would have called green. The other three rows are the pass — **the probe's
+own status, carried rather than re-decided**, which is what keeps this module from
+becoming a second opinion about what a port said — the warning for a service that
+came up with nothing to ask, and two `error` rows for a program that never started
+and a run SURE cannot vouch for.
+
+**A question is only asked while the process SURE started is still running, and
+that is a rule rather than an ordering.** A port that answers after SURE's own
+process is gone may be answering for something SURE did not start — a leftover
+from a previous run, another server on the machine, or a child the start script
+detached — and a pass built on that would be a claim about a service SURE never
+saw come up. The test that holds it asserts the **absence** of the asked clause in
+a reason about a service that had already ended, which is a claim about a sentence
+SURE did not write.
+
+**The hardest row needed a second process, and the first instrument for it was
+flaky rather than slow.** *A service that outlived the window and then ended by
+itself* is decided by `observe()`, which asks its question and then calls `stop()`
+with microseconds in between, while the runner's wait loop checks `try_wait()`
+before the deadline and before the cancellation and sleeps 1 ms. When the death
+and the end of the exchange are the same instant — which is what a service that
+ends **because** it was asked produces — the runner can poll in that gap and
+report `Cancelled`, which is the wrong row; the test failed as `left: Error,
+right: Fail` under load. **The fix is not a longer sleep.** The port has to belong
+to a **different process** than the one that dies: the service starts an *anchor*,
+the anchor holds the question open, the service ends when the **anchor reports
+that the question arrived**, and the anchor waits a further 100 ms and only then
+lets the connection go. Every ordering in that instrument is carried by a marker
+file rather than by two clocks agreeing, and the test asserts all three markers —
+including the give-up marker that must **not** exist. That shape is not a
+contrivance for a test: a real dev server is exactly this, since `npm run dev`
+starts a server and is not itself the server, so the process SURE supervises can
+end while the port it opened is still answering.
+
+**Windows hands an accepted socket the listener's non-blocking mode, and that cost
+a test before it was understood.** `P3-T010`'s `serve()` sets its listener
+non-blocking on purpose — a child nobody ever connects to has to have a way out —
+Windows inherits that onto every socket it accepts, and Unix does not. The child's
+read returned `WouldBlock` with the request still in the socket, the child closed,
+and the far end reported a **connection reset**; the failure read *the exchange
+could not be made (os error 10054)*. The chain from there is three steps and each
+is forced: a reset is an *abortive* close, which the operating system sends only
+when the closing side still had unread bytes; the request was still unread, so the
+read that was supposed to take it had returned without it; and a blocking read
+cannot return before the bytes arrive. The fix is one line —
+`stream.set_nonblocking(false)` after every `accept` — written as an explicit call
+rather than a `cfg(windows)` branch, because the socket is being asked to be
+blocking, which is what the code that reads it has always assumed. **The comment
+that explains it was corrected once by measurement**: its first draft claimed the
+child "read nothing at all", and removing the line left the test passing, because
+the parent's write usually beats the child's read. It is a race and not a zero,
+and the comment now says so.
+
+**The one row whose status is the platform's, and the reason it is asserted as a
+set.** `Termination::TimedOut` is reachable in one ordering only: the service
+outlives the window and the exchange is still open when the service's whole-life
+budget expires. The test that reaches it gives a **silent** service a 2 second
+window, a 3.5 second budget and a 6 second exchange bound, and it found two
+things. The first is that **SURE's own kill lands in the middle of an open
+exchange and the two systems report that differently**: on Windows a socket is
+aborted when the process holding it is force-terminated, so the probe sees a reset
+and reports *the exchange could not be made* (`Unreachable`, which `probe.rs` maps
+to `error`); on Unix the kernel closes the socket, so the probe sees the
+connection end with nothing said and reports *an open port is not an answer*
+(`NoAnswer`, mapped to `unknown`). Both are what the probe saw, the module carries
+the probe's verdict rather than replacing it with an opinion of its own, and
+neither is a pass — but **the same run reports `error` on Windows and `unknown` on
+Unix**, which is asserted as a set in the test rather than pinned to this
+machine's answer and belongs in the v0.1 report's limitations. The second finding
+is a sentence: the arm read *"the service ran until its own 3.5 seconds budget ran
+out"*, which is not English, and no test had ever read it because no test had ever
+reached the arm. It now reads *"its own budget of 3.5 seconds ran out"*, which is
+right for every duration `spoken` produces.
+
+**The service's output is quoted for a person to read, so it is escaped before it
+is quoted — and this is the one thing in the module that a push review prompted
+rather than the task.** The review named `runtime_start.rs` and carried no finding
+text, so the module's security surface was read directly, and this is what it
+turned up: `last_words` places a service's own bytes inside a sentence SURE writes,
+and a service is a project's process. `\n` cannot get through — it is what the
+lines were split on — but `text_lossy` replaces only what is not valid UTF-8, so
+every other control character can: a lone `\r` sends a terminal's carriage to
+column 0, and `\x1b[2K` erases the line it is printed on. **A failing service could
+therefore erase SURE's report of its own failure while a person was reading it**,
+which is a false green in the terminal rather than in the verdict. The workspace
+already had the answer and this module simply had not used it — `setup.rs`'s
+`in_a_sentence` escapes project text for exactly this reason, in exactly these
+words, and `diagnostics::Field` does the same for a value in a message. Two
+details are decisions rather than mechanics: the escaping is applied **before**
+`QUOTED_CHARS` rather than after, so the constant's own doc (*the quote is bounded
+... by characters*) keeps being true of what a reader sees, since the escape
+sequence a service wrote is six characters of SURE's report; and the test asserts
+the **invariant** — no control character survives — rather than the two characters
+that prompted it, while also asserting that the service's words are still quoted
+and each control character is shown as the escape it is. A test that only checked
+for `\x1b` would pass on a module that had learned one character and not the rule.
+It is fixed in `0b72dce`, and the catch was verified the way this branch verifies
+one: the call removed by hand, the test run, `FAILED` at exit 101, and the file
+restored to its committed hash.
+
+**The tests were taught four things after the set's first run, and none of them was
+one of the set's own anchors.** The fingerprint on a result was asserted nowhere,
+so a module that generated its own would have survived; the *absence* of the asked
+clause for a service that had ended was asserted nowhere; the dropped-line count in
+a reason was asserted only where a hand-built outcome lives and never against a
+real process; and the `DIE` child wrote **one** line, so *the tail and not the head*
+had no head to drop. Each is now held by a test: the child writes seven lines of
+noise before the sentence that says why, the reason has to name the three that were
+dropped and the fourth that was kept, the answering test asserts the fingerprint the
+plan admitted under and the stream the service wrote on, and the failing test
+asserts both that SURE said which ending it was and that it did not ask a question
+of a service that was already gone.
+
+**What this module does not do, and one thing it cannot do yet.** It does not split
+a command line: turning a project's declared `start` script into a program and an
+argument vector is the executor's work, one step before this module, and **there is
+no such step in the crate** — so nothing in the product builds a `StartSmoke`, which
+is the state `support.rs`'s ceiling paragraph now records and the fourth census rule
+checks. It does not read a body (`P5-T003`'s routes and `P5-T004`'s browser check
+are the feature claims), it does not run two services (`P5-T007`), and it does not
+decide whether a probe may run — that is `PlanBuilder`'s and, through it, the
+domain's `decide`.
+
+**And when the splitter is written, the batch-file question reaches the serve
+path.** Windows completes a name with no extension with `.exe` and nothing else, so
+a bare `npm` is not found where `npm.cmd` is installed, and a `.cmd`/`.bat` **named
+with its extension** is classified `Destructive`, which no permission covers in any
+mode. So on Windows a Node project's `start` script cannot be started in this build
+by either spelling — for a reason that is documented, open, and the owner's to
+settle (`HANDOFF.md`'s decisions list, item 26). That is not a defect in this
+module, which runs what it is handed; it is the price of the question being open,
+and it is worth knowing that the price is a whole ecosystem's start scripts rather
+than a corner case.
 
 ## What `P5-T001` added
 
@@ -5192,6 +5449,46 @@ Three of the five jobs were failing the whole time.
 | 35051377226 | `fc1b862` — **the `P4-T009` acceptance** | **all five green.** Windows **1566** / macOS **1567** / Ubuntu **1568** passed, **0 failed**, 11 ignored, **57** result lines = **47 parents + 10 children** on each — **identical to `35050752542` in every one of those figures**, which is the right reading for a commit that touches only `progress/`, and it is read out of the log rather than assumed from the commit's file list. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row was added at `P5-T001`'s acceptance because the run was recorded nowhere**: the run of a commit that *records* runs cannot be written into the commit that records them, and `P4-T009`'s acceptance section described the implementation's run instead — the same shape of gap as the six `P2` runs above, arriving the same way |
 
 | 35054249354 | `c9057d7` — **the `P5-T001` implementation** | **all five green.** Windows **1595** / macOS **1596** / Ubuntu **1597** passed, **0 failed**, 11 ignored, **58** result lines = **48 parents + 10 children** on each, and **Windows 1595 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. Against `35051377226`, the run of `fc1b862` and this task's `base_sha`: **+29 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `runtime_probes` is a new test binary and the child count not moving because it is a new *parent*. **The nameset delta against that run reads +29 −0 on all three platforms, which equals the passed delta**, and the 29 names are exactly this task's **14** unit tests and **15** integration tests — the module's fourteen are printed qualified (`runtime_probes::tests::…`), so no name is defined twice and the delta is not undercounted. **A nameset delta that equals the passed delta is what makes this green checkable rather than merely green.** `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The implementation commit is green on its first push, and the two mutation survivors the first run found are `m20` and `m25`** — the plan's own line order, and the four sentences a gap can show — both closed by tests written for them. Detail in *What `P5-T001` added*, above |
+
+| 35056098080 | `3cabc96` — **the `P5-T001` acceptance** | **all five green.** Windows **1595** / macOS **1596** / Ubuntu **1597** passed, **0 failed**, 11 ignored, **58** result lines = **48 parents + 10 children** on each — **every figure identical to the implementation row above it, which is the shape an acceptance commit has to have**: it changes `progress/` and nothing else, so a number that moved would be the acceptance's fault and not the suite's. Against `35054249354`, the run of `c9057d7` and this task's `base_sha`: **+0 passed, +0 result lines, +0 parents, +0 children on all three platforms**, and **the nameset delta against that run reads +0 −0 on all three**, which is what makes *the acceptance changed nothing the tests can see* a measurement rather than a claim. **This is the run where the platform-drift reading was noticed**: its pairwise sets are `windows vs macos: −13 +14` and `windows vs ubuntu: −14 +16`, and the `−12 +14` recorded against `P3-T006`'s rows was high by two names. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row is a backfill**: the run is of `P5-T001`'s acceptance commit and its log is read here rather than in the session that pushed it, which is the rule this table keeps |
+
+| 35063118526 | `ee050da` — **the `P5-T002` implementation** | **all five green.** Windows **1618** / macOS **1619** / Ubuntu **1620** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each. Against `35056098080`, the run of `3cabc96` and this task's `base_sha`: **+23 passed on every platform, +1 result line, +1 parent, +0 children**, the parent moving because `tests/runtime_start.rs` is a new test binary and the child count not moving because it is a new *parent*; the ignored count moves 11 → 12 because the new integration file carries one `#[ignore]`d child entry point that the smoke tests start by name. **The nameset delta against that run reads +24 −1 on all three platforms**: the new tests are **10** `runtime_start::tests::` unit tests, **12** runnable integration tests and **1** new `spawn_sites` test, and the **−1** is a rename — `nothing_outside_the_supervisor_names_a_supervisor` out, `nothing_outside_the_named_files_names_a_supervisor` in — which is the fourth census rule moving the third rule's exemption list from one file to two. **The arithmetic closes rather than approximately closing**: 23 new runnable names plus the one ignored name is 24 test functions, and **+23 passed and +1 ignored is exactly what the result lines report**. The pairwise readings are unchanged from the run above. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The implementation is green on its first push. This is not the tree the task is accepted on**: a push review named this module and reading its security surface found the service's own output being quoted unescaped, so `0b72dce` follows it and is the row below |
+
+| 35064050013 | `0b72dce` — **the `P5-T002` escaping fix** | **all five green.** Windows **1619** / macOS **1620** / Ubuntu **1621** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each — **+1 passed on every platform against the row above and nothing else moved**, which is the shape a one-test fix has to have, and **Windows 1619 is the same figure the local `cargo test --workspace --no-fail-fast` gives**. **The nameset delta against `35063118526` reads +1 −0 on all three platforms**, and the one name it adds is `runtime_start::tests::a_service_cannot_write_an_escape_into_the_line_sure_prints` — so the run's extra pass is the test that was added and not something else that began passing quietly, which a bare count would not have told apart. The pairwise readings are unchanged again (`−13 +14` against macOS, `−14 +16` against Ubuntu), as they must be for a change with no platform-gated name in it. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This is the tree `P5-T002` is accepted on**, and the mutation set's log against it — not the log against `ee050da`, which measures a tree that no longer exists — is what the acceptance cites |
+
+**The pairwise readings in this table are not all the same number, and the ones
+that moved did so for a reason rather than drifting.** Every row from `P3-T006`'s
+until `35050752542` reads `windows vs ubuntu: −12 +14` and `windows vs macos: −13
++14`. From `35051377226` on, the Ubuntu figure is `−14 +16` while the macOS figure
+has not moved at all. **Both** numbers in the Ubuntu reading moved, by two, and
+the four names behind that are `P4-T007`'s: that task added a case-sensitivity
+pair whose two halves are gated to different platforms — one spelling asserted on
+the case-sensitive platform and its twin on the folding ones — so Ubuntu runs
+
+`db_migrations::tests::this_platform_reads_a_differently_cased_name_as_a_different_name`
+`db_migrations::tests::this_platform_reads_a_differently_cased_schema_as_a_different_file`
+
+and neither folding half, while Windows and macOS run
+`this_platform_reads_a_differently_cased_name_as_the_same_name` and
+`this_platform_reads_a_differently_cased_schema_as_the_same_file` and neither
+Linux half. Neither of the new Ubuntu names is new to the other two platforms,
+which is why the Windows/macOS reading does not move: both folding halves run on
+both of those platforms, so they differ from Windows on neither. **A count that
+moves by exactly the number of names the commit added, on the one platform whose
+gating changed and not at all on the other two, is the signature of a
+platform-gated test pair rather than of a suite that lost or gained tests**, and
+the attribution is measured rather than assumed: a grep for `differently_cased`
+over the three logs returns **zero** names at `702cfee` and two on each platform
+at `ee050da`, four distinct names across the three; `git log -S` names `576d2b0`
+for the two Linux spellings and names `576d2b0` **and** `928920b` for the two
+folding ones; `702cfee` is an ancestor of `576d2b0` and `576d2b0` is an ancestor
+of `ee050da`; and those are exactly the two `P4-T007` commits among the fifteen in
+the range that has no logs on disk. The reading was noticed at `3cabc96` and is
+recorded here rather than left standing against the older rows, which were true
+when they were written and are not true of the suite that runs now.
+`pairwise-drift.py` reproduces the walk: `12 14` holds from `b0dcc69` through
+`702cfee` and reads `14 16` at `ee050da`, the first commit after the gap that has
+all three logs on disk.
 
 **Six runs were missing from this table when `P2-T011` was accepted, and they are
 added above: `P2-T010`'s acceptance, and every commit of `P2-T008`'s and

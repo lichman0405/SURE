@@ -122,6 +122,12 @@ at 6 of 9.
     task. The CLI module renders a `ProjectVerdict` to plain terminal text with
     no ANSI codes by default, material findings first, a coverage/not-checked
     section, and control-character escaping throughout.
+20. A security review after `P7-T006` found that evidence-anchor `location`/
+    `locator` fields and `CheckResult::reason` text were not escaped before
+    reaching the terminal renderer. Follow-up commit `f0e7032` fixes both:
+    `plain_language_finding::summary_from_anchor` now escapes location and
+    locator, and `coverage_summary` escapes `Error`/`Unknown` reasons. Regression
+    tests assert the escaping.
 
 **Phase P7 is open at 6 of 9.** The READY list is now `P7-T007`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The

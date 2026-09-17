@@ -8,13 +8,16 @@
 use serde::{Deserialize, Serialize};
 
 use crate::capability::CapabilityReport;
-use crate::evidence::{ClaimAssessment, Evidence, EvidenceClass};
+use crate::evidence::{ClaimAssessment, Evidence};
 use crate::execution::ExecutionMode;
 use crate::ids::{CheckId, ClaimId, EventId, FingerprintId, ProjectId, RepairId, SessionId};
 use crate::intent::ProjectIntent;
-use crate::severity::Severity;
 use crate::status::{Aggregate, CheckResult, NotCheckedReason};
 use crate::variants::variants;
+
+pub use crate::finding::{
+    AssessmentSource, Finding, FindingBuildError, FindingBuilder, FindingStatus, SeverityRationale,
+};
 
 /// A local software project or workspace under inspection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -406,103 +409,6 @@ impl CheckPlan {
     }
 }
 
-/// Whether a finding is still standing.
-///
-/// The wire names are frozen by `schemas/finding.schema.json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FindingStatus {
-    /// Still a problem.
-    Open,
-    /// Later evidence showed the problem is gone.
-    Resolved,
-    /// The user decided to live with it.
-    AcceptedRisk,
-    /// SURE cannot tell whether the problem is still there.
-    CannotConfirm,
-}
-
-variants!(FindingStatus {
-    Open,
-    Resolved,
-    AcceptedRisk,
-    CannotConfirm
-});
-
-impl FindingStatus {
-    /// The stable wire name.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Resolved => "resolved",
-            Self::AcceptedRisk => "accepted_risk",
-            Self::CannotConfirm => "cannot_confirm",
-        }
-    }
-
-    /// Whether this finding still needs attention.
-    ///
-    /// `CannotConfirm` counts as needing attention: SURE does not close a
-    /// finding merely because it can no longer see the problem.
-    #[must_use]
-    pub const fn needs_attention(self) -> bool {
-        matches!(self, Self::Open | Self::CannotConfirm)
-    }
-}
-
-/// A material user-facing problem or uncertainty, anchored in evidence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Finding {
-    /// Identity of the finding.
-    pub id: crate::ids::FindingId,
-    /// Short title, written for someone who is not a programmer.
-    pub title: String,
-    /// How serious it is.
-    pub severity: Severity,
-    /// Whether it is still standing.
-    pub status: FindingStatus,
-    /// What is wrong, in plain language.
-    pub explanation: String,
-    /// What it means for the person reading the report.
-    pub user_impact: String,
-    /// What SURE thinks should happen next.
-    pub next_step: String,
-    /// The evidence that grounds this finding.
-    pub evidence: Vec<Evidence>,
-    /// Which project state the finding was raised against.
-    pub fingerprint: FingerprintId,
-    /// Detail the user can expand, already redacted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub technical_details: Option<serde_json::Value>,
-}
-
-impl Finding {
-    /// Whether this finding is honest about its own basis.
-    ///
-    /// A `must_fix` finding needs at least one anchor that is not a model
-    /// opinion or a guess.
-    #[must_use]
-    pub fn is_grounded(&self) -> bool {
-        if !self.severity.blocks_hand_off() {
-            return !self.evidence.is_empty();
-        }
-        self.evidence
-            .iter()
-            .any(|e| e.class.can_alone_support_must_fix() && e.anchor.is_checkable())
-    }
-
-    /// The strongest evidence class behind this finding.
-    #[must_use]
-    pub fn strongest_evidence_class(&self) -> EvidenceClass {
-        self.evidence
-            .iter()
-            .map(|e| e.class)
-            .min_by_key(|c| c.truth_rank())
-            .unwrap_or(EvidenceClass::Unknown)
-    }
-}
-
 /// A statement a coding agent made that can sometimes be checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claim {
@@ -644,7 +550,8 @@ impl ProjectVerdict {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::evidence::{AnchorSubject, EvidenceAnchor};
+    use crate::evidence::{AnchorSubject, EvidenceAnchor, EvidenceClass};
+    use crate::severity::Severity;
 
     fn anchor() -> EvidenceAnchor {
         EvidenceAnchor::new(AnchorSubject::File, "src/x.rs", "line 1")
@@ -655,6 +562,15 @@ mod tests {
     }
 
     fn finding(severity: Severity, class: EvidenceClass) -> Finding {
+        let assessment_source = match class {
+            EvidenceClass::ObservedFact => AssessmentSource::ObservedFact,
+            EvidenceClass::DeterministicCheck => AssessmentSource::DeterministicCheck,
+            EvidenceClass::ModelAssessment => AssessmentSource::ModelAssessment,
+            EvidenceClass::Inference => AssessmentSource::Inference,
+            EvidenceClass::Unknown => AssessmentSource::Unknown,
+        };
+        let severity_rationale =
+            SeverityRationale::for_severity(severity).expect("test severity maps to a rationale");
         Finding {
             id: crate::ids::FindingId::generate(),
             title: "Payment looks successful but nothing is charged".to_owned(),
@@ -672,28 +588,9 @@ mod tests {
             )],
             fingerprint: fingerprint(),
             technical_details: None,
+            assessment_source,
+            severity_rationale,
         }
-    }
-
-    #[test]
-    fn finding_status_wire_names_match_the_schema() {
-        for status in [
-            FindingStatus::Open,
-            FindingStatus::Resolved,
-            FindingStatus::AcceptedRisk,
-            FindingStatus::CannotConfirm,
-        ] {
-            let json = serde_json::to_string(&status).expect("serialize");
-            assert_eq!(json, format!("\"{}\"", status.as_str()));
-        }
-    }
-
-    #[test]
-    fn cannot_confirm_keeps_a_finding_open() {
-        assert!(FindingStatus::CannotConfirm.needs_attention());
-        assert!(FindingStatus::Open.needs_attention());
-        assert!(!FindingStatus::Resolved.needs_attention());
-        assert!(!FindingStatus::AcceptedRisk.needs_attention());
     }
 
     #[test]

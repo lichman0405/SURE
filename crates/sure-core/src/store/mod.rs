@@ -924,6 +924,8 @@ mod tests {
             "status": "open",
             "explanation": explanation,
             "evidence": [],
+            "assessment_source": "deterministic_check",
+            "severity_rationale": "blocks_hand_off",
         })
     }
 
@@ -996,6 +998,8 @@ mod tests {
                             "class": "observed_fact",
                             "summary": format!("the log line said token={secret}"),
                         }],
+                        "assessment_source": "observed_fact",
+                        "severity_rationale": "blocks_hand_off",
                     }),
                 )
                 .unwrap();

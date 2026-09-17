@@ -23,13 +23,14 @@ use sure_domain::capability::CapabilityTier;
 use sure_domain::evidence::{
     AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
 };
+use sure_domain::finding::{
+    AssessmentSource, Finding, FindingBuilder, FindingStatus, SeverityRationale,
+};
 use sure_domain::ids::{CheckId, ClaimId, FindingId, FingerprintId, RepairId, SessionId};
 use sure_domain::intent::{IntentSource, Requirement};
 use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
-use sure_domain::vocabulary::{
-    Claim, Finding, FindingStatus, GitState, ProjectFingerprint, RepairContract,
-};
+use sure_domain::vocabulary::{Claim, GitState, ProjectFingerprint, RepairContract};
 use sure_protocol::documents::DocumentKind;
 use sure_protocol::event::EventEnvelope;
 
@@ -54,18 +55,22 @@ pub fn evidence(class: EvidenceClass) -> Evidence {
 }
 
 pub fn finding() -> Finding {
-    Finding {
-        id: FindingId::generate(),
-        title: "Email is reported as sent but nothing is sent".to_owned(),
-        severity: Severity::MustFix,
-        status: FindingStatus::Open,
-        explanation: "The app says the email went out, and the code only prints a line.".to_owned(),
-        user_impact: "People believe a message was delivered when it was not.".to_owned(),
-        next_step: "Call the configured provider on the real send path.".to_owned(),
-        evidence: vec![evidence(EvidenceClass::DeterministicCheck)],
-        fingerprint: fingerprint(),
-        technical_details: Some(json!({"file": "src/email/send.rs", "line": 42})),
-    }
+    FindingBuilder::new(
+        AssessmentSource::DeterministicCheck,
+        SeverityRationale::BlocksHandOff,
+    )
+    .id(FindingId::generate())
+    .title("Email is reported as sent but nothing is sent")
+    .severity(Severity::MustFix)
+    .status(FindingStatus::Open)
+    .explanation("The app says the email went out, and the code only prints a line.")
+    .user_impact("People believe a message was delivered when it was not.")
+    .next_step("Call the configured provider on the real send path.")
+    .evidence(vec![evidence(EvidenceClass::DeterministicCheck)])
+    .fingerprint(fingerprint())
+    .technical_details(json!({"file": "src/email/send.rs", "line": 42}))
+    .build()
+    .expect("fixture finding is valid")
 }
 
 pub fn claim() -> Claim {

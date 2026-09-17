@@ -39,8 +39,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sure_domain::capability::CapabilityTier;
 use sure_domain::evidence::EvidenceClass;
+use sure_domain::finding::FindingStatus;
 use sure_domain::status::CheckStatus;
-use sure_domain::vocabulary::FindingStatus;
 use sure_domain::{
     evidence::ClaimAssessment, intent::IntentSource, severity::Severity, vocabulary::Finding,
 };

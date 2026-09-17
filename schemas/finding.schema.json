@@ -8,7 +8,9 @@
     "severity",
     "status",
     "explanation",
-    "evidence"
+    "evidence",
+    "assessment_source",
+    "severity_rationale"
   ],
   "properties": {
     "id": {
@@ -47,6 +49,20 @@
     },
     "technical_details": {
       "type": "object"
+    },
+    "assessment_source": {
+      "type": [
+        "string",
+        "object"
+      ]
+    },
+    "severity_rationale": {
+      "enum": [
+        "blocks_hand_off",
+        "reliability_or_quality_risk",
+        "non_blocking_improvement",
+        "informational"
+      ]
     }
   }
 }

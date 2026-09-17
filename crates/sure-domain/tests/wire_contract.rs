@@ -33,13 +33,14 @@ use sure_domain::evidence::{
 use sure_domain::execution::{
     ActionKind, CommandClass, ConsentGrantor, ExecutionDecision, ExecutionMode, Permission,
 };
+use sure_domain::finding::FindingStatus;
 use sure_domain::ids::{IdKind, ProjectId};
 use sure_domain::intent::{IntentSource, RequirementAuthority};
 use sure_domain::severity::Severity;
 use sure_domain::status::{
     AggregateSeverity, CheckStatus, CriticalState, NotCheckedReason, RequirementClaim,
 };
-use sure_domain::vocabulary::{FindingStatus, FingerprintKind, Project, SupportLevel};
+use sure_domain::vocabulary::{FingerprintKind, Project, SupportLevel};
 
 /// Pin the wire name of every variant of a unit-variant enum.
 macro_rules! frozen {

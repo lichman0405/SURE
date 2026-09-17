@@ -20,6 +20,7 @@
 pub mod capability;
 pub mod evidence;
 pub mod execution;
+pub mod finding;
 pub mod ids;
 pub mod intent;
 pub mod severity;

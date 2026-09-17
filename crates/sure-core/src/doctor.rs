@@ -917,6 +917,8 @@ mod tests {
             "status": "open",
             "explanation": "the handler returns before the send call",
             "evidence": [],
+            "assessment_source": "deterministic_check",
+            "severity_rationale": "blocks_hand_off",
         })
     }
 

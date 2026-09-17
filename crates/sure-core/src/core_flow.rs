@@ -485,6 +485,40 @@ fn manifest_for_component(component: &Path) -> String {
     }
 }
 
+/// Format the title for a [`FlowStep::StartService`] check.
+///
+/// Escapes the flow name so attacker-controlled text cannot inject control
+/// characters into a human-readable title.
+fn start_service_title(flow_name: &str) -> String {
+    format!(
+        "start the project for flow `{}`",
+        crate::redact::escape_control_characters(flow_name)
+    )
+}
+
+/// Format the title for a [`FlowStep::ProbeRoute`] check.
+///
+/// Escapes both the path and the flow name so attacker-controlled text cannot
+/// inject control characters into a human-readable title.
+fn probe_route_title(path: &str, flow_name: &str) -> String {
+    format!(
+        "the route `GET {}` answers for flow `{}`",
+        crate::redact::escape_control_characters(path),
+        crate::redact::escape_control_characters(flow_name)
+    )
+}
+
+/// Format the title for a [`FlowStep::BrowserProbe`] check.
+///
+/// Escapes the flow name so attacker-controlled text cannot inject control
+/// characters into a human-readable title.
+fn browser_probe_title(flow_name: &str) -> String {
+    format!(
+        "check the interface in a browser for flow `{}`",
+        crate::redact::escape_control_characters(flow_name)
+    )
+}
+
 /// Build a [`CheckProposal`] for a [`FlowStep::StartService`].
 fn propose_start_service(
     flow_name: &str,
@@ -521,11 +555,10 @@ fn propose_start_service(
         })?;
 
     let id = check_id(&manifest, &format!("flow{flow_name}{index}"));
-    let title = format!("start the project for flow `{flow_name}`");
 
     Ok(CheckProposal::new(
         id,
-        title,
+        start_service_title(flow_name),
         Severity::MustFix,
         true,
         EvidenceClass::ObservedFact,
@@ -558,11 +591,10 @@ fn propose_probe_route(
     }
 
     let id = check_id("flow", &format!("{flow_name}-probe-{index}-{path}"));
-    let title = format!("the route `GET {path}` answers for flow `{flow_name}`");
 
     Ok(CheckProposal::new(
         id,
-        title,
+        probe_route_title(path, flow_name),
         Severity::MustFix,
         true,
         EvidenceClass::ObservedFact,
@@ -574,11 +606,10 @@ fn propose_probe_route(
 /// Build a [`CheckProposal`] for a [`FlowStep::BrowserProbe`].
 fn propose_browser_probe(flow_name: &str, index: usize, path: &str, _port: u16) -> CheckProposal {
     let id = check_id("flow", &format!("{flow_name}-browser-{index}-{path}"));
-    let title = format!("check the interface in a browser for flow `{flow_name}`");
 
     CheckProposal::new(
         id,
-        title,
+        browser_probe_title(flow_name),
         Severity::ShouldFixFirst,
         false,
         EvidenceClass::ObservedFact,
@@ -1036,5 +1067,29 @@ steps:
         let flow = CoreFlow::from_yaml(yaml).unwrap();
         let err = flow.expand(&ctx).unwrap_err();
         assert!(matches!(err, FlowRefused::RouteNotDeclared { .. }));
+    }
+
+    #[test]
+    fn titles_escape_control_characters_in_flow_names_and_paths() {
+        let name_with_newline = "evil\nflow";
+        let path_with_tab = "/bad\tpath";
+        let path_with_escape = "/x\u{1b}[2Ky";
+
+        assert_eq!(
+            start_service_title(name_with_newline),
+            "start the project for flow `evil\\nflow`"
+        );
+        assert_eq!(
+            probe_route_title(path_with_tab, name_with_newline),
+            "the route `GET /bad\\tpath` answers for flow `evil\\nflow`"
+        );
+        assert_eq!(
+            probe_route_title(path_with_escape, "normal"),
+            "the route `GET /x\\u{001b}[2Ky` answers for flow `normal`"
+        );
+        assert_eq!(
+            browser_probe_title(name_with_newline),
+            "check the interface in a browser for flow `evil\\nflow`"
+        );
     }
 }

@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 78 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 79 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -16,10 +16,10 @@ accepted as commit `16cb94a`. `P7-T002` is accepted as commit `c6b0969`.
 `2c1f2cb`. `P7-T005` is accepted as commit `f683c18`. `P7-T006` is accepted as
 commit `ee4d087`. `P7-T007` is accepted as commit `693d0ce`. `P7-T008` is
 accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
-`P8-T001` is accepted as commit `8d9a506`. `P5-T005` received two follow-up
-security fixes in commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006`
-received a follow-up security fix in commit `f0e7032`. Phase P8 is open at 1 of
-11.
+`P8-T001` is accepted as commit `8d9a506`. `P8-T002` is accepted as commit
+`d0c496d`. `P5-T005` received two follow-up security fixes in commits `3d5f9a9`
+and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up security fix in
+commit `f0e7032`. Phase P8 is open at 2 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -149,11 +149,21 @@ received a follow-up security fix in commit `f0e7032`. Phase P8 is open at 1 of
     terminal, Markdown, HTML, and JSON reports, and a small fix makes the human
     report show the escaped `CheckResult::reason` when no structured
     `not_checked_reason` is available.
+24. A worker agent completed `P8-T001` — *Implement versioned harness event
+    ingestion* — as commit `8d9a506`. The supervisor verified all quality gates
+    and accepted the task. The module ingests harness event documents, validates
+    protocol version and schema, and produces plain-language diagnostics for
+    malformed or mismatched input.
+25. A worker agent completed `P8-T002` — *Implement session/event persistence*
+    — as commit `d0c496d`. The supervisor verified all quality gates and accepted
+    the task. Harness events are persisted into the local SQLite store bound to
+    project/session/time/capability source, with retention metadata, idempotent
+    ingestion, and query helpers for future pruning.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 1 of 11.** The READY list is now
-`P8-T002`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
-`P14-T010`. The lowest-numbered READY task is `P8-T002`, *"Implement session/event
-persistence"*, which is the next concrete action.
+**Phase P7 is complete (9/9). Phase P8 is open at 2 of 11.** The READY list is now
+`P8-T003`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
+`P14-T010`. The lowest-numbered READY task is `P8-T003`, *"Implement standard
+recording projection"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13759,6 +13769,42 @@ absent text.
   I/O errors, and plain-language error messages.
 
 ## Validation of `P8-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P8-T002` added
+
+- `crates/sure-core/src/store/sql/0002_sessions.sql` (new) — migration creating
+  `sessions` and `session_events` tables with retention metadata, indexes, and a
+  foreign key from events to sessions.
+- `crates/sure-core/src/store/migrations.rs` — wired migration 0002 into the
+  append-only migration list.
+- `crates/sure-core/src/store/mod.rs` — refactored `Store::insert` to share
+  `validate_and_stringify` and `redact_document` with cross-table writes; exposed
+  `connection()`, `validate_and_stringify()`, and `is_busy()` as `pub(crate)`.
+- `crates/sure-core/src/session_event_store.rs` (new) — `SessionEventStore`,
+  `StoredSession`, `StoredEvent`, `PersistResult`, and `SessionEventStoreError`.
+- `SessionEventStore::persist` binds an ingested event to project root,
+  fingerprint, session, event time, capability tier, and payload; creates or
+  reuses the session row; stores the event as a `Document(Event)` record; and
+  returns idempotently when the same `event_id` is seen twice.
+- Retention helpers `event_retention_days`, `session_retention_days`, and
+  `retention_deadline_ms` compute deadlines with saturating arithmetic.
+- Query helpers `events_for_session`, `sessions_past_retention`, and
+  `events_past_retention` support reading and future pruning.
+- Plain-language errors escape attacker-controlled fields before display.
+- 10 inline tests cover session creation/reuse, event binding, retention
+  metadata, duplicate handling, ingestion-layer refusal, store-history
+  round-trip, retention-query boundaries, escaped error messages, and overflow
+  safety.
+
+## Validation of `P8-T002`
 
 | Gate | Result |
 | --- | ------ |

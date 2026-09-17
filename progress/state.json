@@ -1006,13 +1006,19 @@
       "notes": "target/tmp/p8t001-accept-note.md"
     },
     "P8-T002": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-17T14:57:23.177Z",
-      "finished_at": null,
+      "finished_at": "2026-09-17T15:38:00Z",
       "base_sha": "0f8a6dd",
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "head_sha": "d0c496d",
+      "evidence": [
+        "crates/sure-core/src/session_event_store.rs",
+        "crates/sure-core/src/store/sql/0002_sessions.sql",
+        "crates/sure-core/src/store/migrations.rs",
+        "crates/sure-core/src/store/mod.rs",
+        "crates/sure-core/src/lib.rs"
+      ],
+      "notes": "target/tmp/p8t002-accept-note.md"
     },
     "P8-T003": {
       "status": "queued",

@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 73 of 166 v0.1 tasks accepted (phase P7 in progress).
+- **Progress:** 74 of 166 v0.1 tasks accepted (phase P7 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -51,6 +51,7 @@ Implemented so far:
 - Finding model: four-level severity, `AssessmentSource`, `SeverityRationale`, concrete evidence anchors including intent/claim/model, a builder that refuses unsupported `MustFix` sources, and a plain-language finding contract (`what`/`impact`/`severity`/`next action`).
 - Coverage and not-checked summary: joins a scheduled check plan to its run report, counts checked/skipped/could-not-run checks, surfaces critical gaps, and reports the adapter support level in plain language.
 - Overall project verdict: assembles findings, aggregate result, coverage gaps, capability level, and intent into a `ProjectVerdict`, then renders a plain-language summary with independent false-green protection.
+- Terminal human report: renders a `ProjectVerdict` to plain text for a standard terminal, with no ANSI codes by default, material findings first, coverage gaps, and escaped attacker-controlled text.
 - Evidence-grounded reporting with plain-language verdicts and `Cannot confirm` as a valid result.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.

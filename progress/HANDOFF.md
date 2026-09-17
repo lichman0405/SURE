@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 73 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 74 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -13,8 +13,9 @@ commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
 accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
 `P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
 `a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P7-T005` is accepted as
-commit `f683c18`. `P5-T005` received two follow-up security fixes in commits
-`3d5f9a9` and `cc121ed`. Phase P7 is open at 5 of 9.
+commit `f683c18`. `P7-T006` is accepted as commit `ee4d087`. `P5-T005` received
+two follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P7 is open
+at 6 of 9.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -116,10 +117,16 @@ commit `f683c18`. `P5-T005` received two follow-up security fixes in commits
     protection: it says the project is not ready whenever the aggregate is not
     green or an open finding blocks hand-off, and it surfaces skipped/could-not-run
     checks and the user-request caveat.
+19. A worker agent completed `P7-T006` — *Implement terminal human report* — as
+    commit `ee4d087`. The supervisor verified all quality gates and accepted the
+    task. The CLI module renders a `ProjectVerdict` to plain terminal text with
+    no ANSI codes by default, material findings first, a coverage/not-checked
+    section, and control-character escaping throughout.
 
-**Phase P7 is open at 5 of 9.** The READY list is now `P7-T006`, `P8-T001`,
+**Phase P7 is open at 6 of 9.** The READY list is now `P7-T007`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T006`, which is the next concrete action.
+lowest-numbered READY task is `P7-T007`, *"Implement stable JSON report"*, which
+is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13584,6 +13591,35 @@ absent text.
   `crate::redact::escape_control_characters` before being listed.
 
 ## Validation of `P7-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P7-T006` added
+
+- `crates/sure-cli/src/human_report.rs` (new, ~495 lines) — `HumanReportSettings`,
+  `render_verdict()`, and `write_verdict()`.
+- Renders a `ProjectVerdict` to plain terminal text: aggregate headline, overall
+  summary from `project_verdict::render_summary`, findings rendered via
+  `plain_language_finding::render_findings`, coverage/not-checked section via
+  `coverage_summary::summarize`, and the user-request caveat.
+- Material findings are shown first; non-material findings are grouped under an
+  explicit "some details are missing" label.
+- No ANSI colour codes by default; `color` is opt-in.
+- Attacker-controlled titles and descriptions are escaped with
+  `escape_control_characters`; `crates/sure-core/src/redact.rs` made the function
+  public so the CLI can reuse it.
+- 12 inline tests cover green project report, must-fix says not ready,
+  skipped/errored checks visible, caveat presence/absence, control-character
+  escaping, plain-text default, material/non-material ordering, and model-only
+  flagging.
+
+## Validation of `P7-T006`
 
 | Gate | Result |
 | --- | ------ |

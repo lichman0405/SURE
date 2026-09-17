@@ -212,10 +212,10 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     event categories. Detection uses event types only, never payloads.
 
 **Phase P7 is complete (9/9). Phase P8 is open at 9 of 11.** The READY list is now
-`P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
+`P8-T010`, `P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P8-T009`, *"Implement capability/blind-spot reporting"*, which is the next
+`P8-T009`, *"Implement capability/blind-spot reporting"*`P8-T010`, *"Implement AI-claim report section"*, which is the next
 concrete action.
 
 ## What `P5-T007` added

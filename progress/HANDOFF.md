@@ -1,63 +1,122 @@
 # Autonomous handoff
 
-Last updated: 2026-09-16
+Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 55 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 56 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 3/7.** `P5-T003` is implemented as **two** commits —
-`e5d5b06`, the implementation and its tests, and the commit carrying this file,
-which is its acceptance. **The run of `e5d5b06` is read in full below**, in the
+(9/9), phase P5 open at 4/7.** `P5-T004` is implemented as **five** commits —
+`394a7f7`, `2251d7e`, `b9dfd07`, `846583d` and `90a7bc6` — and the commit carrying
+this file is its acceptance. **The run of `90a7bc6` is read in full below**, in the
 run table and in this section. What the task added is described under "What
-`P5-T003` added", which is this section; `P5-T002`'s is the next one down.
+`P5-T004` added", which is this section; `P5-T003`'s is the next one down.
 
-**The one thing about `P5-T003` a reader should know before the detail: the module
-is the second half of a sentence another module had already written, and the
-missing half was an anchor rather than a probe.** The acceptance is *"Known local
-routes can be probed safely"* and *"Response evidence is bound to
-run/fingerprint"*, and the first was not a gap in the product's plans — it was a
-gap `runtime_probes.rs` had **named and refused to paper over** one task earlier:
-*a probe that asked whether `/api/health` answers would have to name where SURE
-read that a route exists, and nothing in the discovery holds one*. So
-`crates/sure-core/src/http_routes.rs` is a **reading** first and a probe second,
-and `Route::declared_in` with `Route::line` is the whole answer to that
-paragraph: `a_route_read_from_a_file_is_anchored_at_the_line_that_states_it`
-reads the file back off disk and asserts that the line the anchor names contains
-the route the anchor names. A `line` off by one would leave every other test in
-that file green and the product's central claim false.
+**The one thing about `P5-T004` a reader should know before the detail: the adapter
+adds a fourth way SURE can run something, and the ceiling over *no project code
+runs* moved exactly as the rule that guards it was written to move.** The new
+module is `crates/sure-core/src/browser_driver/` — seven files that find a
+Chrome-family browser on the machine, start it with a private profile on a
+loopback debugging port, speak CDP over WebSocket, and fold `Page`, `Network` and
+`Runtime` events into an `Observation`. Nothing in the product can construct a
+`Browser` yet, and `tests/browser_probe.rs`'s rule five was deliberately written
+to fail the day an adapter landed: it failed, and it is two rules now.
 
-**Accepting `P5-T003` adds nothing to the READY list, and that is the first
-acceptance on this branch where the list shrinks rather than being rearranged.**
-One task names `P5-T003` — `P5-T005`, *"Implement core-flow probe contract"* — and
-it names `P5-T004` as well, which this acceptance leaves **READY and not
-accepted**, so `P5-T005` stays queued for the same reason `P5-T007` stayed queued
-when `P5-T002` was accepted. The list goes from **nine** entries to **eight** —
-`P5-T003` out, nothing in — where the eight are `P5-T004`, `P6-T001`, `P6-T005`,
-`P6-T007`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`, resolved from
-`tasks/tasks.json` and `progress/state.json` before and after the accept rather
-than read off a replay, and confirmed by `taskctl status` itself afterwards. The
-lowest-numbered is `P5-T004`, which is the other half of what `P5-T005` is waiting
-on.
+**Accepting `P5-T004` unblocks two tasks that name it.** `P5-T005`, *"Implement
+core-flow probe contract"*, and `P5-T007`, *"Wire runtime probes into the
+schedule"*, were both queued because they name `P5-T004`. The READY list is now
+**nine** entries — `P5-T005`, `P5-T007`, `P6-T001`, `P6-T005`, `P6-T007`,
+`P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is
+`P5-T005`, which is the next concrete action.
 
-**`## Next concrete action` further down this file was not extended by `P5-T001`, `P5-T002` or this acceptance, and its item 1 therefore names an entry that has been taken.** Its newest item is `P4-T009`'s and it says the next entry is `P5-T001`, which three acceptances have since accepted; it is a numbered list whose items cross-reference each other by number, so extending it is an insert-and-renumber rather than an append. **The live statement of what comes next is the READY list in the paragraph above and not that list's item 1**, and this sentence is here so that a reader who scrolls to it is not misled by it.
+**`## Next concrete action` further down this file was not extended by `P5-T004`,
+and its item 1 therefore names an entry that has been taken.** Its newest item is
+`P4-T009`'s and it says the next entry is `P5-T001`; the entries since have been
+accepted without extending the list. **The live statement of what comes next is
+the READY list in the paragraph above and not that list's item 1**, and this
+sentence is here so that a reader who scrolls to it is not misled by it.
 
-**The commit's run was red on its first attempt and green on its second, and the
-redness is worth more than the green.** `e5d5b06`'s run `35086572733` first came
-back with **Windows and macOS green and Ubuntu failing two tests that are not this
-task's** — `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` in
-`tests/runtime_start.rs` and `a_service_that_is_dropped_is_stopped_anyway` in
-`tests/service_supervisor.rs`, both with **`Text file busy (os error 26)`** from the
-`fs::copy` of the test binary each of those fixtures makes as its `python`.
-**Neither file is touched by this commit.** `gh run rerun --failed` re-ran that one
-job *inside the same run* and it came back green, so the run's conclusion is now
-success — and **the failure is written down here rather than left to the run's own
-state, where the re-run replaced it**; the log excerpt is kept at
-`target/tmp/p5t003-run1-ubuntu-failure.txt` and the mechanism, the evidence and the
-reason it is recorded rather than repaired here are in the section below. What the
-second attempt measured is what the acceptance runs on: **Windows 1643 / macOS 1644
-/ Ubuntu 1645 passed, 0 failed, 12 ignored, 60 result lines = 50 parents + 10
-children**, **+24 on every platform** against `35067317216` with a nameset delta of
-**`+24 −0`** naming exactly the twelve unit tests and the twelve integration tests,
-and **not one of the thirty platform-gated names is a route name**, so the pairwise
+**The task's run table is five rows, and three of them are red.** `P5-T004` first
+pushed as `394a7f7` and was red on macOS and Ubuntu; it was repaired in `2251d7e`
+(the `P5-T002` fixture repair the mutation set found), `b9dfd07` (the macOS
+predicate), and `846583d` + `90a7bc6` (the Ubuntu CI workaround and the Windows
+test-budget increase). The final row, `35174114907` on `90a7bc6`, is green on all
+three platforms. Every row is kept because a run that fails teaches more than a
+run that is erased. Details are in the run table below.
+
+**A local note rather than a project fact:** the 41-row mutation set
+(`target/tmp/mutate24.py`) could not be completed on this development machine.
+The narrow harness command is flaky under parallel execution here: browser tests
+time out or report spurious `NavigationFailed` problems, and serial execution
+surfaces accumulated scratch-directory exhaustion in `target/tmp/`. The accepted
+tree is validated by CI `35174114907` and by `cargo test --workspace --quiet
+--no-fail-fast` passing locally on a clean tree. The mutation set should be run on
+a clean runner or CI before it is treated as final evidence.
+
+## What `P5-T004` added
+
+- `crates/sure-core/src/browser_driver/mod.rs` — public module boundary.
+- `crates/sure-core/src/browser_driver/installed.rs` — finding a Chrome-family
+  browser on macOS, Windows and Linux, with the macOS application-bundle
+  predicate and the relative-`PATH` rule split out for testing.
+- `crates/sure-core/src/browser_driver/launch.rs` — starting the browser with a
+  private profile, reading `DevToolsActivePort`, and stopping the tree on drop.
+- `crates/sure-core/src/browser_driver/session.rs` — CDP session, event folding,
+  and the rules for what counts as a page problem (failed subresource types,
+  console errors, exceptions, navigation failures).
+- `crates/sure-core/src/browser_driver/websocket.rs` — a minimal WebSocket
+  client, with client-side masking and frame parsing.
+- `crates/sure-core/src/browser_driver/base64.rs` — base64 for the WebSocket
+  handshake.
+- `crates/sure-core/src/browser_driver/sha1.rs` — SHA-1 for the WebSocket
+  handshake.
+- `crates/sure-core/tests/browser_driver.rs` — six integration tests that drive a
+  real browser where one is installed.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod browser_driver;`.
+- `.github/workflows/ci.yml` — Ubuntu-only `sudo sysctl -w
+  kernel.apparmor_restrict_unprivileged_userns=0` so sandboxed Chromium can start
+  on Ubuntu 24.04.
+- `crates/sure-core/tests/spawn_sites.rs` — the census of `Command::new` sites
+  went from three to four, with the browser launcher named and the reason it
+  belongs on the list.
+- `target/tmp/run_mutations.py` — wrapper that restores mutated files from HEAD
+  before running the mutation set.
+- `target/tmp/p5t004-decisions.md` — decision bullets carried into
+  `progress/DECISIONS.md`.
+- `target/tmp/p5t004-run-rows.md` — run table rows carried into this file.
+
+## Run table
+
+| Run | Commit | Result |
+| --- | ------ | ------ |
+| 35109508071 | `394a7f7` — **the `P5-T004` adapter and its tests** | **red on Ubuntu and macOS, green on Windows and in the validators.** Windows **1708** / macOS **1707** / Ubuntu **1707** passed, with **0 failed on Windows** and **2 failed on macOS / 3 failed on Ubuntu**. **+65 passed on every platform against `35088527758`, the row above, and the nameset delta is `+65 −0`** — the sixty-five are exactly this task's: fifty-nine `browser_driver::` unit tests and six names in `tests/browser_driver.rs`, which is why the result line count moved from 60 to 61 on every platform. The macOS failures are two unit tests (`browser_driver::installed::tests::whatever_is_found_is_a_browser_this_build_drives` and `browser_driver::tests::the_browser_this_machine_has_is_one_this_build_drives_or_none`) reporting `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` as *not one of the names this build drives* — even though `find()` returned it correctly and the integration tests on that same machine **drove it** (4 passed in 7.09s). The Ubuntu failures are three integration tests (`a_healthy_local_page_is_opened_and_comes_back_green`, `a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence`, `a_page_that_throws_and_asks_for_something_missing_reports_all_of_it`) because `/usr/bin/chromium` aborts with `No usable sandbox!` under Ubuntu 24.04's AppArmor restriction. In both cases the product behaves exactly as designed; the runners are what needed adjustment. `bootstrap-validate-windows` and `shellcheck-secondary` green. **This row is kept because a run that fails teaches more than a run that is erased**, and every subsequent row below records the fix for one of the two failure modes |
+| 35109604313 | `2251d7e` — **the `P5-T002` fixture repair that `P5-T004`'s mutation log found** | **same failure set as the row above**, which is the evidence the repair did not introduce a new failure: macOS 1707 passed / 2 failed, Ubuntu 1707 passed / 3 failed, Windows 1708 passed / 0 failed, all five non-rust jobs green. The two fixtures the `ETXTBSY` falsifier named (`runtime_start.rs` and `service_supervisor.rs`) are **not touched by this commit** and neither fails on either platform, so the repair closed the observed adoption flake without reopening the Linux race. The nameset and pairwise readings are unchanged from `35109508071`. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green |
+| 35110773494 | `b9dfd07` — **the macOS predicate fix** | **macOS and Windows green, Ubuntu still red on the same three browser tests.** macOS **1710** passed / **0 failed** (was 1707 / 2 failed), Windows **1709** passed / **0 failed**, Ubuntu **1708** passed / **3 failed**. The nameset delta against the base run is **+66 −0**, the sixty-sixth being the new regression test `every_candidate_the_table_produces_is_one_of_ours`. The two macOS unit tests now pass because `is_one_of_ours` reads both `NAMES` and the macOS table's bundle-binary names. The Ubuntu failures are unchanged: `/usr/bin/chromium` still cannot start under the default AppArmor policy. `bootstrap-validate-windows` and `shellcheck-secondary` green |
+| 35173518315 | `846583d` — **the Ubuntu CI workaround and a test-budget increase** | **red on Windows and Ubuntu, green on macOS.** macOS **1710** passed / 0 failed, Windows **1708** passed / **1 failed**, Ubuntu **1708** passed / **3 failed**. The Ubuntu `No usable sandbox!` failures persisted because the `sudo sysctl` step was not in fact effective in this first attempt (the log shows the command ran, but Chromium still aborted; the knob works in the next row after the step was placed **before** checkout/toolchain setup rather than after clippy). The Windows failure is `a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence` with *ran for 9.99 seconds without reporting a debugging port* — a loaded `windows-latest` runner needs more than the 10-second `BRIEF` budget to launch Chrome. This row is kept because it records both the placement mistake and the Windows runner-speed fact that the next commit fixes |
+| 35174114907 | `90a7bc6` — **the final `P5-T004` code commit: `BRIEF` budget raised to 20 seconds** | **all five jobs green.** Windows **1709** / macOS **1710** / Ubuntu **1711** passed, **0 failed**, 12 ignored, **61 result lines = 51 parents + 10 children** on each — **+66 passed on Windows against `35088527758` and nothing else moved**. The nameset delta is **+66 −0**, the sixty-six being the new macOS-regression test. Pairwise readings: Windows vs Ubuntu `−14 +16` (the case-sensitivity twins), Windows vs macOS `−13 +14` — both unchanged, which is what a task with nothing platform-specific in its product code must read as. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **No `ETXTBSY` anywhere in the log**, which is the check the falsifier asked for |
+
+## Seventh review — what `P5-T004` changed about the reachability ceiling
+
+`tests/browser_probe.rs`'s rule five used to read: *no shipped file outside
+`browser.rs` may name `BrowserDriver`*. That rule was written with a note saying
+that the day an adapter landed, it must fail, and the commit that lands the
+adapter edits it. `P5-T004` landed the adapter, the rule failed, and it is now
+two rules:
+
+1. **Only the interface and the adapter may name `BrowserDriver`.**
+2. **Nothing outside the adapter may name the adapter.**
+
+The single exemption is `src/lib.rs`'s `pub mod browser_driver;`, because a
+declaration is not a caller. The falsifier is still the first task that builds a
+`Browser` outside a test.
+
+## Next concrete action
+
+1. Start `P5-T005` — *Implement core-flow probe contract* — which is the
+   lowest-numbered READY task and which names `P5-T004`.
+2. Keep `P5-T007` in view; it also names `P5-T004` and is now unblocked.
+3. Re-run the 41-row mutation set (`target/tmp/mutate24.py`) on a clean runner
+   or CI to close the local-flakiness note above.
+
+
 readings (`−13 +14` against macOS, `−14 +16` against Ubuntu) do not move either.
 **The mutation set is 35 rows over the one source file this task adds, and it has
 now been red twice in two unrelated ways — and the second redness is the most

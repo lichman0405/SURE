@@ -4373,4 +4373,120 @@ task changes are `lib.rs` (+1), `schedule.rs` (+60) and
   cannot be run on this machine; the falsifier is the task that next touches either
   fixture, and what it owes is *n* runs clean rather than the word *fixed*.
 
-- **The acceptance commit's run was red on Ubuntu too, and the second occurrence is what turns the falsifier into a task rather than a date.** `35087849335` (`c4ec1ac`) failed one test — `a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange` — with the same `Text file busy (os error 26)`, and **`c4ec1ac` changes three files under `progress/` and nothing a compiler reads**, so the failure is inherited and not caused. **The decision not to repair it here survives the second occurrence unchanged**; what the second occurrence adds is the base rate. Eight runs before `e5d5b06` contain zero occurrences of the string, and the two runs since contain one each, **which is an exact correlation over two samples and not a cause** — the branch's only base rate is zero over eight, and zero over eight is consistent both with *new* and with *rare*. **A rare race seen twice in a row is weak evidence for anything except its own existence**, so the mechanism stays derived rather than reproduced and the fix stays the standard one (copy to a unique temporary name, close, rename into place, plus a bounded retry on `ETXTBSY`). **What does change is who owes it.** The falsifier was *the task that next touches either fixture*; it is now also *the task that adds a fixture of its own that copies the test binary and executes it*, because that is the idiom being copied and not just the two files that contain it today — and **`P5-T004` is that task**, so the clause is pinned to a name rather than left to a reader. **The trap this closes is the one the whole branch is built against**: if the next *n* runs are green, the tempting reading is *fixed by having done nothing*, and a flake that stopped appearing has not thereby been explained. Reasoning in `HANDOFF.md`, under *The second occurrence, and what two in a row does and does not establish*.
+## P5-T004 — optional browser smoke adapter
+
+- **An adapter that starts a browser landed, and the ceiling over *no project
+  code runs* did not move — because the ceiling was never about the number of ways
+  SURE could run something.** `crates/sure-core/src/browser_driver/` is seven files
+  whose whole job is to launch a program that is not part of this repository and is
+  not the project's either, and **nothing in the product can construct it**. The
+  census in `tests/spawn_sites.rs` went from three `Command::new` sites to four and
+  now names the launcher with the reason it belongs on the list — every way SURE
+  runs something belongs in one list, and starting a browser is not safe by nature —
+  while the paragraph the ceiling rests on (`support.rs`) was rewritten rather than
+  renumbered: what keeps it true is reachability, and the reachability is checked in
+  two places. **`tests/browser_probe.rs`'s rule five was written to fail on this
+  day, and it failed**: it said no shipped file outside `browser.rs` may name
+  `BrowserDriver`, and it is two rules now — only the interface and the adapter may
+  name the trait, and nothing outside the adapter may name the adapter. The single
+  exemption is `lib.rs`'s `pub mod browser_driver;`, and it is exempt because **a
+  declaration is not a caller**: a file that cannot name the module cannot construct
+  anything in it. The falsifier is the task that first builds a `Browser` outside a
+  test — that is the day the ceiling becomes false, and rule five is what will say so.
+
+- **A machine that has a browser this build cannot drive fails the integration test
+  rather than passing as an absence, and that is a decision with an environment
+  consequence rather than a test detail.** There are three states a browser check can
+  be in, and the third is the one nobody designs for: no browser at all is
+  `NoDriverInstalled` and a skip, a browser that starts and answers is an
+  observation, and **a browser that exists and will not start is
+  `DriverWouldNotStart`** — which the product reports correctly and which is the one
+  state where the first acceptance sentence is never exercised. A test that treated
+  that as a pass would be green on exactly the machines where the adapter does not
+  work, so the file makes it a failure, and the consequence is written down rather
+  than discovered: a Linux runner whose Chrome cannot start under its own sandbox is
+  a machine in that state, and the run of this task's push is what says whether the
+  runner is one. **The alternative was considered and refused** — skipping when a
+  browser is present but undrivable would make the suite's green a statement about
+  the runner rather than about the product.
+
+- **The page is untrusted and everything around it is not, and the two rules that
+  buy that are in the constructors rather than in this module's care.**
+  `--no-sandbox` is never passed for a page under test — a browser that will not
+  start without it is reported as an absence and the check is skipped, because a
+  skipped check is a smaller loss than running a project's JavaScript without the
+  boundary that exists to hold it — and **the page's address is not an argument at
+  all**: it is sent later as a protocol command, so there is no argument vector for
+  a project-supplied path to be injected into. A relative `PATH` entry produces no
+  candidate, because SURE is normally run with the project as its working directory
+  and `./chrome.exe` is therefore a program the project could have written. **What
+  is not established is written beside it**: the debugging port is a socket on
+  loopback that any other process on the machine can reach and nothing here
+  authenticates a client, which is a property of CDP rather than of this adapter.
+
+- **No dependency was added, and the one that was genuinely considered was
+  randomness — decided by measurement rather than by preference.** The protocol
+  needs a WebSocket client, SHA-1, base64 and sixteen bytes of nonce, and the first
+  three are implementations in the tree with their arguments written above them and
+  their answers checked against published vectors. `Sec-WebSocket-Key` is specified
+  as nonces and a nonce is the thing you would normally reach for a crate to get:
+  `std::random::random()` is unstable on this toolchain and `rust-src` is not
+  installed beside it, so `std::collections::hash_map::RandomState` was **measured**
+  to produce a fresh key on every call and a disjoint set of keys across processes.
+  It is not a cryptographic source and is not claimed to be; what makes it enough is
+  what the nonce is for, and there is no intermediary between SURE and a browser
+  SURE started on a loopback port.
+
+- **Four rules with no test were found while the mutation set was being written, and
+  the response to each was a test rather than a comment.** Three of them survived the
+  first run as `NOT CAUGHT`: the `Other`-type filter on `Network.loadingFailed`, the
+  console error with no location, and the guard against reporting a page that never
+  arrived twice. **The third is the one worth keeping**, because the rule was not
+  wrong and could not be reached: it lived inside `Connection::look`, which needs a
+  socket and a browser, and the only test that could reach it drove a real one — where
+  the case is invisible, since a refusal produces the browser's own reason too and the
+  verdict is `fail` either way. It moved into `Folding::a_page_that_never_arrived`,
+  which is the same move `on_a_path` and `first_that_is_a_file` exist for: **take the
+  value as a parameter**, so a rule that otherwise reads this machine can be asked
+  about a value a test controls. The first run's log is kept at
+  `target/tmp/mutate24.run1.log` and **is not evidence about this tree** — a set is
+  evidence about one tree, and the log that counts is the one whose tree is the
+  accepted one.
+
+- **A test that asserts only that nothing came out can be green for the wrong
+  reason, and this task has the instance rather than the principle.**
+  `Path::is_absolute` is **false on Windows for `/a/directory`** — a rooted path with
+  no drive prefix is not absolute there — so the first version of the relative-`PATH`
+  test, which used that spelling on both platforms, produced zero candidates on
+  Windows and failed the half of the test that asserted the other direction. Had the
+  test only asserted the empty result, it would have been green on exactly the
+  machines where the adapter does not work. The same shape appears one level up in
+  `installed.rs`: the rule is split so that `first_that_is_a_file` can be asked about
+  a table and a `PATH` a test controls, because a rule about *which of two lists is
+  preferred* cannot be put to a function that builds both lists by reading the
+  machine.
+
+- **`P5-T004` is the task the Linux `ETXTBSY` falsifier named, and the clause
+  fired — but not the way it predicted, and the difference is recorded rather than
+  smoothed over.** The clause binds the task that next touches either fixture *or
+  that adds a fixture of its own that copies the test binary and executes it*. The
+  diff before this task's own evidence arrived touched neither fixture — `grep -rn
+  "fs::copy\|current_exe" crates/sure-core/tests` named four files and not one was
+  in it — and the fixture it adds is a browser, which copies nothing. **What made it
+  fire is the mutation set this task runs**: the accepted log names
+  `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` as a catcher
+  of a row about whether a page was reached, which no test in another file can hold,
+  and chasing that name produced a reproduction under this task's own fixture. So
+  the repair of `runtime_start.rs` is this task's second commit, `2251d7e`. **The
+  mechanism found is not `ETXTBSY`**: it is a run reading a directory an earlier run
+  had already written, and the repair closes it by requiring the directory to be
+  removable before the run uses it — on Windows that removal fails with `WinError
+  32` while a live process sits in the tree, measured, so such a name is skipped.
+  **The honest statement about Linux is an argument and not a measurement**: the
+  change removes the window the two Ubuntu failures needed, those failures were
+  never reliably reproducible, and **the next full Linux workspace run is the
+  check**. That run — `35174114907` on `90a7bc6` — is green on Ubuntu with zero
+  `ETXTBSY` occurrences, so the falsifier's predicted fix is not required and the
+  clause is satisfied by the repair actually made.
+
+

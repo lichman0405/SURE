@@ -2,20 +2,20 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 58 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 60 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 6/7.** `P5-T007` is in progress (agent dispatched).
-`P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
-`cc121ed`.
+(9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
+`P6-T001` is accepted as commit `e2610c4`. `P5-T005` received two follow-up
+security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at 1 of 9.
 
-**Since `P5-T006`'s acceptance, four things happened:**
-1. A worker agent was dispatched for `P5-T007` — *Implement runtime evidence cleanup
-   and cancellation* — and is still running. It has modified
-   `crates/sure-core/src/service.rs` and `crates/sure-core/src/runtime_start.rs`;
-   the workspace does not currently compile because `runtime_start.rs` calls the
-   old `Supervisor::start` signature. The agent is expected to finish the refactor.
-2. A worker agent was dispatched for `P6-T001` — *Implement candidate scanner for
-   TODO/mock/stub/placeholder patterns* — and is running in parallel.
+**Since `P5-T006`'s acceptance, five things happened:**
+1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
+   cancellation* — as commit `a6dbf98`. The supervisor verified all quality gates
+   on the combined tree and accepted the task.
+2. A worker agent completed `P6-T001` — *Implement candidate scanner for
+   TODO/mock/stub/placeholder patterns* — and the supervisor reviewed, added a
+   path-containment defense-in-depth check and escaping for `CheckReason::
+   CandidateFound`, verified gates, and accepted it as `e2610c4`.
 3. A security review finding on `P5-T005`'s `core_flow.rs` was fixed: flow names
    and route paths are now escaped with `crate::redact::escape_control_characters`
    before being embedded in check titles, and an adversarial unit test asserts the
@@ -23,11 +23,67 @@ Progress: 58 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 4. A second security review finding was addressed: `FlowRefused` error messages
    also escape attacker-controlled component paths and route paths. The fix is
    commit `cc121ed`.
+5. `CheckReason::CandidateFound` (added by `P6-T001`) escapes path and context
+   before composing human-readable output and evidence anchors, and
+   `candidate_scanner.rs` canonicalises the resolved path against the project root
+   before reading any file, as defense in depth against the same class of
+   terminal/report injection and path traversal.
 
-**The READY list is now eight entries** — `P6-T001`, `P6-T005`, `P6-T007`,
+**The READY list is now eight entries** — `P6-T002`, `P6-T005`, `P6-T007`,
 `P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
-is `P6-T001`, but it is already in progress; `P6-T005` is the next unstarted READY
-task once `P5-T007` lands.
+is `P6-T002`, *"Implement production-path/context filter"*, which is the next
+concrete action.
+
+## What `P5-T007` added
+
+- `crates/sure-core/src/runtime_start.rs` — `StartSmoke::run` and `wait_out` accept
+  `Cancellation`; the runtime stops services cleanly when cancelled.
+- `crates/sure-core/src/service.rs` — `Supervisor::start` accepts `Cancellation`;
+  `Service::stop` cancels via `Stopper` drop.
+- `crates/sure-core/src/browser.rs` — `BrowserDriver::observe` accepts
+  `Cancellation`.
+- `crates/sure-core/src/browser_driver/launch.rs` — polling loop checks
+  cancellation, terminates the browser process tree, waits for it, and removes the
+  private profile temp directory.
+- `crates/sure-core/src/browser_driver/session.rs` — `open`, `Connection::attach`,
+  `Connection::look`, and `Connection::pump` all accept and check `Cancellation`.
+- `crates/sure-core/src/browser_driver/websocket.rs` — new `WsError::Cancelled`
+  variant.
+- `crates/sure-core/src/browser_driver/mod.rs` and tests updated to pass
+  `Cancellation::default()` where required.
+- `crates/sure-core/tests/browser_driver.rs` — new test
+  `a_browser_check_that_is_cancelled_before_it_starts_is_skipped`.
+
+## Validation of `P5-T007`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P6-T001` added
+
+- `crates/sure-core/src/candidate_scanner.rs` (new, ~640 lines) —
+  `CandidateScanner`, `CandidateCategory`, and source-file scanning for
+  TODO/FIXME/mock/stub/placeholder patterns.
+- `crates/sure-core/src/schedule.rs` — new `CheckReason::CandidateFound { path,
+  line, context }` variant with escaped plain description and anchor.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod candidate_scanner;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `candidate_scanner.rs` to the
+  `MAY_PROPOSE` source-rule list.
+
+## Validation of `P6-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What the `P5-T005` follow-up added
 
@@ -39,28 +95,11 @@ task once `P5-T007` lands.
   `refusal_messages_escape_attacker_controlled_text` covering newline, tab and
   ANSI-clear escape sequences.
 
-## Validation of the follow-up fix
-
-`core_flow.rs` was formatted and its unit tests passed before the `P5-T007` agent
-introduced the workspace compile break. **The workspace gates cannot be re-run
-until the `P5-T007` agent completes its refactor.**
-
-| Gate | Result |
-| --- | ------ |
-| `cargo fmt --all -- --check` | green (on current tree) |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | blocked by `P5-T007` agent's incomplete refactor |
-| `cargo test --workspace --no-fail-fast` | blocked by `P5-T007` agent's incomplete refactor |
-| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
-| `node scripts/taskctl.mjs validate` | green (state OK) |
-
 ## Next concrete action
 
-1. Wait for the `P5-T007` worker agent to complete, then review, verify gates,
-   and accept.
-2. Wait for the `P6-T001` worker agent to complete, then review, verify gates,
-   and accept.
-3. Start `P6-T005` — *Implement frontend/backend route consistency* — the next
-   unstarted READY task once the running agents land.
+1. Start `P6-T002` — *Implement production-path/context filter* — the
+   lowest-numbered READY task.
+2. Keep `P6-T005` in view; it is the next READY task after `P6-T002`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

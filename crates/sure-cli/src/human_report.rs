@@ -166,9 +166,17 @@ fn render_coverage_summary(out: &mut String, summary: &CoverageNotCheckedSummary
 fn render_not_checked_fallback(out: &mut String, not_checked: &[CheckResult]) {
     for result in not_checked {
         let title = escape_control_characters(&result.title);
-        let reason = result
-            .not_checked_reason
-            .map_or("unknown reason", |r| r.plain_explanation());
+        let reason = result.not_checked_reason.map_or_else(
+            || {
+                let r = escape_control_characters(&result.reason);
+                if r.is_empty() {
+                    "unknown reason".to_owned()
+                } else {
+                    r
+                }
+            },
+            |r| r.plain_explanation().to_owned(),
+        );
         out.push_str(&format!("  - {title} ({reason})"));
         if result.critical {
             out.push_str(" [critical]");

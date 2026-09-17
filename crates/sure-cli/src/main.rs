@@ -25,22 +25,12 @@
 //! than SURE's is how a documented table quietly becomes wrong. `try_parse`
 //! hands the error back, and [`status_of`] is the whole of the mapping.
 
-mod check;
-mod cli;
-mod commands;
-mod doctor;
-mod human_report;
-mod json_report;
-mod output;
-mod portable_report;
-mod report;
-
 use std::process::ExitCode;
 
 use clap::Parser;
 
-use crate::cli::Cli;
-use crate::report::exit;
+use sure_cli::cli::Cli;
+use sure_cli::report::exit;
 
 fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
@@ -64,7 +54,7 @@ fn run(cli: &Cli) -> u8 {
             // The command did its work and the answer did not reach the user.
             // Reporting success here would be exactly the failure this program
             // exists to find, so it is reported as a failure of SURE's own.
-            output::write_stream_failure(&error);
+            sure_cli::output::write_stream_failure(&error);
             exit::FAILED
         }
     }
@@ -87,8 +77,9 @@ fn status_of(error: &clap::Error) -> u8 {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::output::Format;
     use clap::CommandFactory;
+    use sure_cli::cli::Cli;
+    use sure_cli::output::Format;
 
     #[test]
     fn the_long_help_leads_with_the_product_promise() {

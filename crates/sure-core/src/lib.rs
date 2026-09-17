@@ -30,6 +30,7 @@ pub mod env_completeness;
 pub mod external_service;
 pub mod fingerprint;
 pub mod http_routes;
+pub mod intent_implementation;
 pub mod intent_model;
 pub mod noop_heuristics;
 pub mod paths;

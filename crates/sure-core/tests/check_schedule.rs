@@ -265,6 +265,20 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          Checks use `Severity::Note`, `critical: false`, and \
          `CheckReason::CandidateFound` anchored to the source file, line and context",
     ),
+    (
+        "src/intent_implementation.rs",
+        "`P6-T008`: it compares a project's stated intent against its discovered \
+         implementation and produces candidate checks only where a concrete \
+         comparison fails. User requirements (`ExplicitUserGoal` and \
+         `ObservedUserRequest`) are matched deterministically against component \
+         paths, declared commands, HTTP routes and source-file identifiers; \
+         unmatched requirements, documented instructions (`ProjectSpec`) and agent \
+         claims (`AgentClaim`) become candidate checks carrying `Severity::Note`, \
+         `critical: false`, `EvidenceClass::Inference` and \
+         `CheckReason::CandidateFound`. Inferred sources are ignored, and when no \
+         trusted user requirement exists the module returns the frozen \
+         after-the-fact limitation instead of fabricating a passing result",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

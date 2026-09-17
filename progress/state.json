@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P5",
-  "last_updated": "2026-09-17T04:29:10.989Z",
+  "last_updated": "2026-09-17T04:31:13.620Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -727,8 +727,8 @@
       "notes": "target/tmp/p5t005-accept-note.md"
     },
     "P5-T006": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-17T04:31:13.619Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

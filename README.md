@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 84 of 166 v0.1 tasks accepted (phase P8 in progress).
+- **Progress:** 85 of 166 v0.1 tasks accepted (phase P8 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -63,6 +63,7 @@ Implemented so far:
 - Observed ProjectIntent capture path: converts harness `user.request` events into `ObservedUserRequest` requirements when full recording is granted, redacts credential-shaped prompt text before storage, and retains the raw event only under explicit full-recording consent.
 - Agent completion-claim extraction: validates harness `agent.claim` events, redacts credential-shaped `claim_text`, and stores a `Claim` document with `assessment: cannot_confirm` plus original event provenance.
 - Deterministic claim checkers: checks stored `Claim` documents against recorded harness events via the standard recording projection. `test_ran`, `file_changed`, `git_state`, and `current_code` claims can be `Confirmed` when evidence exists, `CannotConfirm` when it does not, or `NotCheckable` for unknown/missing types; the checker never treats absence of evidence as `Contradicted`.
+- Stale test/result evidence detection: `test_ran` and `current_code` claims are downgraded to `CannotConfirm` when a later file write/delete or relevant git operation supersedes the proof event, so a passing run before the latest code changes is not reported as proof of the current version.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.
 

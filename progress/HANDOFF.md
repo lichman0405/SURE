@@ -23,7 +23,7 @@ accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T00
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
-`3f9d002`. Phase P8 is open at 8 of 11.
+`3f9d002`. `P8-T009` received a follow-up security fix. Phase P8 is open at 9 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -206,10 +206,12 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
 32. A worker agent completed `P8-T009` — *Implement capability/blind-spot reporting*
     — and the supervisor verified all quality gates and accepted the task.
     `report_from_events` derives a [`CapabilityReport`] from stored harness events,
-    sets the tier to `Snapshot` only when no events exist, otherwise to `Observed`
-    or `Protected` based on event capability tiers, and reports honest blind spots
-    for missing user-request, agent-claim, tool/command, failure, file, and git
-    event categories. Detection uses event types only, never payloads.
+    sets the tier to `Snapshot` only when no events exist and to `Observed`
+    otherwise, and reports honest blind spots for missing user-request,
+    agent-claim, tool/command, failure, file, and git event categories. It does
+    not promote the report to `Protected` just because an event carries a
+    self-reported `Protected` tier; detection uses event types only, never
+    payloads.
 
 **Phase P7 is complete (9/9). Phase P8 is open at 9 of 11.** The READY list is now
 `P8-T010`, `P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,

@@ -3,7 +3,9 @@
 //! Adapters may claim a tier, but the events SURE actually received are what
 //! determine what it can honestly say. This module turns a slice of ingested
 //! events into a [`CapabilityReport`] whose tier and blind spots reflect what
-//! was really observed.
+//! was really observed. It never promotes a report to `Protected` just because
+//! an event carries a self-reported `Protected` tier; pre-action control must
+//! be proved by something stronger than the adapter's own label.
 
 use sure_domain::capability::{
     BlindSpot, BlindSpotKind, CapabilityReport, CapabilityTier, HookFailureBehaviour,
@@ -18,6 +20,10 @@ use crate::intent_capture::USER_REQUEST_EVENT_TYPE;
 /// The returned report is based only on the events; it does not trust an
 /// adapter's self-reported tier. If the caller has an adapter report, it can
 /// take the lower of the two tiers.
+///
+/// The tier is `Snapshot` when no events exist and `Observed` otherwise. Events
+/// alone cannot prove pre-action control, so this function never returns
+/// `Protected`.
 #[must_use]
 pub fn report_from_events(
     events: &[IngestedEvent],
@@ -64,9 +70,6 @@ pub fn report_from_events(
             || event_type.contains("failed")
             || event_type.contains("failure")
     });
-    let has_protected = events
-        .iter()
-        .any(|event| event.envelope.capability_tier == Some(CapabilityTier::Protected));
 
     let mut blind_spots = Vec::new();
     if !has_user_request {
@@ -118,17 +121,11 @@ pub fn report_from_events(
         });
     }
 
-    let tier = if has_protected {
-        CapabilityTier::Protected
-    } else {
-        CapabilityTier::Observed
-    };
-
     CapabilityReport {
         adapter,
-        tier,
+        tier: CapabilityTier::Observed,
         blind_spots,
-        pre_action_control: has_protected,
+        pre_action_control: false,
         hook_failure: HookFailureBehaviour::NotApplicable,
     }
 }
@@ -145,16 +142,23 @@ mod tests {
 
     use crate::harness_event::IngestedEvent;
 
-    fn event(event_type: &str, tier: Option<CapabilityTier>) -> IngestedEvent {
-        let mut envelope =
-            EventEnvelope::new("claude-code", event_type, "2026-09-14T09:10:56.827Z");
-        if let Some(t) = tier {
-            envelope = envelope.with_capability_tier(t);
-        }
+    fn event(event_type: &str) -> IngestedEvent {
+        let envelope = EventEnvelope::new("claude-code", event_type, "2026-09-14T09:10:56.827Z");
         IngestedEvent {
             envelope,
             protocol_version: PROTOCOL_VERSION,
             document_kind: DocumentKind::Event,
+        }
+    }
+
+    trait WithEnvelopeTier {
+        fn with_envelope_tier(self, tier: CapabilityTier) -> Self;
+    }
+
+    impl WithEnvelopeTier for IngestedEvent {
+        fn with_envelope_tier(mut self, tier: CapabilityTier) -> Self {
+            self.envelope = self.envelope.with_capability_tier(tier);
+            self
         }
     }
 
@@ -172,7 +176,7 @@ mod tests {
 
     #[test]
     fn user_request_only_is_observed_but_has_many_blind_spots() {
-        let events = vec![event("user.request", Some(CapabilityTier::Observed))];
+        let events = vec![event("user.request")];
         let report = report_from_events(&events, "claude-code");
         assert_eq!(report.tier, CapabilityTier::Observed);
         assert!(!has_blind_spot(&report, BlindSpotKind::NoSessionVisibility));
@@ -193,12 +197,12 @@ mod tests {
     #[test]
     fn full_observed_session_has_no_blind_spots() {
         let events = vec![
-            event("user.request", Some(CapabilityTier::Observed)),
-            event("agent.claim", Some(CapabilityTier::Observed)),
-            event("tool.completed", Some(CapabilityTier::Observed)),
-            event("command.failed", Some(CapabilityTier::Observed)),
-            event("file.write", Some(CapabilityTier::Observed)),
-            event("git.commit", Some(CapabilityTier::Observed)),
+            event("user.request"),
+            event("agent.claim"),
+            event("tool.completed"),
+            event("command.failed"),
+            event("file.write"),
+            event("git.commit"),
         ];
         let report = report_from_events(&events, "claude-code");
         assert_eq!(report.tier, CapabilityTier::Observed);
@@ -206,29 +210,30 @@ mod tests {
     }
 
     #[test]
-    fn protected_event_lifts_tier_to_protected_and_removes_control_blind_spot() {
+    fn self_reported_protected_tier_is_not_trusted() {
+        // Every event claims Protected, but the derived report must stay Observed
+        // because the adapter's own labels are not proof of pre-action control.
         let events = vec![
-            event("user.request", Some(CapabilityTier::Protected)),
-            event("agent.claim", Some(CapabilityTier::Protected)),
-            event("tool.completed", Some(CapabilityTier::Protected)),
-            event("command.failed", Some(CapabilityTier::Protected)),
-            event("file.write", Some(CapabilityTier::Protected)),
-            event("git.commit", Some(CapabilityTier::Protected)),
+            event("user.request").with_envelope_tier(CapabilityTier::Protected),
+            event("agent.claim").with_envelope_tier(CapabilityTier::Protected),
+            event("tool.completed").with_envelope_tier(CapabilityTier::Protected),
+            event("command.failed").with_envelope_tier(CapabilityTier::Protected),
+            event("file.write").with_envelope_tier(CapabilityTier::Protected),
+            event("git.commit").with_envelope_tier(CapabilityTier::Protected),
         ];
         let report = report_from_events(&events, "claude-code");
-        assert_eq!(report.tier, CapabilityTier::Protected);
-        assert!(report.pre_action_control);
-        assert!(!has_blind_spot(&report, BlindSpotKind::NoPreActionControl));
+        assert_eq!(report.tier, CapabilityTier::Observed);
+        assert!(!report.pre_action_control);
     }
 
     #[test]
     fn missing_failure_events_are_reported_honestly() {
         let events = vec![
-            event("user.request", Some(CapabilityTier::Observed)),
-            event("agent.claim", Some(CapabilityTier::Observed)),
-            event("tool.completed", Some(CapabilityTier::Observed)),
-            event("file.write", Some(CapabilityTier::Observed)),
-            event("git.commit", Some(CapabilityTier::Observed)),
+            event("user.request"),
+            event("agent.claim"),
+            event("tool.completed"),
+            event("file.write"),
+            event("git.commit"),
         ];
         let report = report_from_events(&events, "claude-code");
         assert!(has_blind_spot(&report, BlindSpotKind::FailuresNotExposed));

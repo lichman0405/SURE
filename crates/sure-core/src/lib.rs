@@ -42,6 +42,7 @@ pub mod probe;
 pub mod process;
 pub mod project_intent;
 pub mod project_verdict;
+pub mod recording_projection;
 pub mod redact;
 pub mod references;
 pub mod route_consistency;

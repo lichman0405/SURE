@@ -4,51 +4,31 @@ Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
 Progress: 58 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 6/7.** `P5-T006` is implemented as commit `524371b` and
-the commit carrying this file is its acceptance. **What `P5-T006` added is an
-external-service verification boundary: payment/email/cloud behaviors that need a
-real external system are detected statically and reported as
-`ExternalServiceUnavailable` so they cannot become a local pass.**
+(9/9), phase P5 open at 6/7.** `P5-T007` is in progress (agent dispatched).
+`P5-T005` received a follow-up security fix in commit `3d5f9a9`.
 
-**The one thing about `P5-T006` a reader should know before the detail: the
-check-schedule source-rule moved for the third task in a row.**
-`tests/check_schedule.rs` names the files that may build `CheckProposal`;
-`external_service.rs` joined the list, and the test was updated before the
-acceptance.
+**Since `P5-T006`'s acceptance, two things happened:**
+1. A worker agent was dispatched for `P5-T007` — *Implement runtime evidence cleanup
+   and cancellation* — and is still running.
+2. A security review finding on `P5-T005`'s `core_flow.rs` was fixed: flow names
+   and route paths are now escaped with `crate::redact::escape_control_characters`
+   before being embedded in check titles, and an adversarial unit test asserts the
+   escaping. The fix is commit `3d5f9a9`.
 
-**Accepting `P5-T006` unblocks nothing new — it was the only task that named
-`P5-T005`.** The READY list is now **seven** entries — `P5-T007`, `P6-T001`,
-`P6-T005`, `P6-T007`, `P8-T001`, `P12-T008` and `P13-T004`. The lowest-numbered
-is `P5-T007`, *"Implement runtime evidence cleanup and cancellation"*, which is
-the next concrete action.
+**The READY list is now eight entries** — `P6-T001`, `P6-T005`, `P6-T007`,
+`P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
+is `P6-T001`, *"Implement candidate scanner for TODO/mock/stub/placeholder
+patterns"*, which is the next concrete action once `P5-T007` lands.
 
-**`## Next concrete action` further down this file was not extended by `P5-T006`,
-and its item 1 still names `P5-T001`.** Its newest item is `P4-T009`'s; the
-entries since have been accepted without extending the list. **The live
-statement of what comes next is the READY list in the paragraph above and not
-that list's item 1**, and this sentence is here so that a reader who scrolls to
-it is not misled by it.
+## What the `P5-T005` follow-up added
 
-**`P5-T006` was validated locally rather than by CI.** All five quality gates
-passed on this Windows development machine:
-`cargo fmt --all -- --check`,
-`cargo clippy --workspace --all-targets --all-features -- -D warnings`,
-`cargo test --workspace --no-fail-fast`,
-`node scripts/validate-bootstrap.mjs` and
-`node scripts/taskctl.mjs validate`. The commit `524371b` is on
-`claude/v0.1-autonomous` and has not yet been pushed to origin at the time this
-section is written.
+- `crates/sure-core/src/core_flow.rs` — three new title helpers
+  (`start_service_title`, `probe_route_title`, `browser_probe_title`) that escape
+  attacker-controlled flow names and paths before building human-readable titles.
+- Unit test `titles_escape_control_characters_in_flow_names_and_paths` covering
+  newline, tab and ANSI-clear escape sequences.
 
-## What `P5-T006` added
-
-- `crates/sure-core/src/external_service.rs` (new, 734 lines) —
-  `ExternalServiceChecks`, `ServiceCategory`, static detection of payment/email/cloud
-  signals, and `not_checked()` results using `NotCheckedReason::ExternalServiceUnavailable`.
-- `crates/sure-core/src/lib.rs` — one line: `pub mod external_service;`.
-- `crates/sure-core/tests/check_schedule.rs` — adds `external_service.rs` to the
-  `MAY_PROPOSE` source-rule list.
-
-## Validation
+## Validation of the follow-up fix
 
 | Gate | Result |
 | --- | ------ |
@@ -58,18 +38,12 @@ section is written.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
-## What `P5-T006` changed about the reachability ceiling
-
-`tests/check_schedule.rs`'s `MAY_PROPOSE` list now includes
-`crates/sure-core/src/external_service.rs`. The rule is: only these files may
-construct a `CheckProposal`. A new proposer lands by editing the list, and the
-test fails until the edit is made. `P5-T006` made the edit.
-
 ## Next concrete action
 
-1. Start `P5-T007` — *Implement runtime evidence cleanup and cancellation* — the
-   lowest-numbered READY task.
-2. Keep `P6-T001` in view; it is the next phase's first task once P5 closes.
+1. Wait for the `P5-T007` worker agent to complete, then review, verify gates,
+   and accept.
+2. Start `P6-T001` — *Implement candidate scanner for TODO/mock/stub/placeholder
+   patterns* — the lowest-numbered READY task once P5 closes.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

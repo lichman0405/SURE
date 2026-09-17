@@ -814,8 +814,8 @@
       "status": "accepted",
       "started_at": "2026-09-17T09:50:42.546Z",
       "finished_at": "2026-09-17T10:15:00.000Z",
-      "base_sha": null,
-      "head_sha": "01c5b764e256b9cf532e1eb02f14ed99985c4709",
+      "base_sha": "5336754",
+      "head_sha": "01c5b76",
       "evidence": [
         "cargo test --workspace --no-fail-fast passed",
         "cargo clippy --workspace --all-targets --all-features -- -D warnings passed",
@@ -823,7 +823,7 @@
         "node scripts/validate-bootstrap.mjs passed",
         "node scripts/taskctl.mjs validate passed"
       ],
-      "notes": ""
+      "notes": "target/tmp/p6t007-accept-note.md"
     },
     "P6-T008": {
       "status": "queued",

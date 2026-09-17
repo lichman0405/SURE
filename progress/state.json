@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P6",
-  "last_updated": "2026-09-17T08:13:11.758Z",
+  "last_updated": "2026-09-17T08:36:43.607Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -778,13 +778,13 @@
       "notes": "target/tmp/p6t003-accept-note.md"
     },
     "P6-T004": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
+      "status": "accepted",
+      "started_at": "2026-09-17T08:17:30.666Z",
+      "finished_at": "2026-09-17T08:36:43.607Z",
+      "base_sha": "14c1101",
+      "head_sha": "a0575de",
       "evidence": [],
-      "notes": ""
+      "notes": "target/tmp/p6t004-accept-note.md"
     },
     "P6-T005": {
       "status": "queued",

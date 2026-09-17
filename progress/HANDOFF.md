@@ -2,13 +2,13 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 62 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 63 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
 `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is accepted as commit
-`de684e9`. `P6-T003` is accepted as commit `09d5fb5`. `P5-T005` received two
-follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at
-3 of 9.
+`de684e9`. `P6-T003` is accepted as commit `09d5fb5`. `P6-T004` is accepted as
+commit `a0575de`. `P5-T005` received two follow-up security fixes in commits
+`3d5f9a9` and `cc121ed`. Phase P6 is open at 4 of 9.
 
 **Since `P5-T006`'s acceptance, five things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -39,10 +39,16 @@ follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at
    the task. Fake email addresses, fake payment/sandbox tokens, no-op functions,
    and hard-coded success responses are now detected and reported as grounded,
    context-aware candidates.
+8. A worker agent completed `P6-T004` — *Implement hard-coded demo-data heuristics*
+   — as commit `a0575de`. The supervisor verified all quality gates and accepted
+   the task. Hard-coded demo analytics values, demo/sample datasets, placeholder
+   user/content IDs, and hard-coded chart/dashboard values are now detected and
+   reported as grounded, context-aware candidates, without blanket constant
+   flagging.
 
-**The READY list is now eight entries** — `P6-T004`, `P6-T005`, `P6-T007`,
-`P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
-is `P6-T004`, *"Implement hard-coded demo-data heuristics"*, which is the next
+**The READY list is now seven entries** — `P6-T005`, `P6-T007`, `P7-T004`,
+`P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is
+`P6-T005`, *"Implement frontend/backend route consistency"*, which is the next
 concrete action.
 
 ## What `P5-T007` added
@@ -150,6 +156,34 @@ concrete action.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
+## What `P6-T004` added
+
+- `crates/sure-core/src/demo_data_heuristics.rs` (new, ~1007 lines) —
+  `DemoDataCategory` enum (`DemoAnalytics`, `DemoDataset`, `PlaceholderUserId`,
+  `HardCodedDemoValue`) and line-based heuristics detecting hard-coded demo
+  analytics values, demo/sample datasets, placeholder user/content IDs, and
+  hard-coded chart/dashboard values.
+- Produces one `CheckProposal` per detected category with `Severity::Note`,
+  `critical: false`, `EvidenceClass::Inference`, `ActionKind::ReadFile`, and
+  `CheckReason::CandidateFound` anchored to file/line/context.
+- Uses `CandidateContext` so titles reflect test/example/doc/mock/product context,
+  and prefers `Product`-context detections when both exist for the same category.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod demo_data_heuristics;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `demo_data_heuristics.rs` to
+  the `MAY_PROPOSE` source-rule list.
+- Tests prove the mandatory demo-analytics fixture is identified and ordinary
+  constants (`MAX_RETRIES`, `"alice"`) are NOT blanket-flagged.
+
+## Validation of `P6-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
@@ -162,9 +196,9 @@ concrete action.
 
 ## Next concrete action
 
-1. Start `P6-T004` — *Implement hard-coded demo-data heuristics* — the
+1. Start `P6-T005` — *Implement frontend/backend route consistency* — the
    lowest-numbered READY task.
-2. Keep `P6-T005` in view; it is the next READY task after `P6-T004`.
+2. Keep `P6-T007` in view; it is the next READY task after `P6-T005`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

@@ -44,6 +44,7 @@ pub mod runtime_start;
 pub mod safety;
 pub mod scan;
 pub mod schedule;
+pub mod semantic_contract;
 pub mod service;
 pub mod setup;
 pub mod store;

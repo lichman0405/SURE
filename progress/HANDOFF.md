@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 80 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 81 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -17,11 +17,12 @@ accepted as commit `16cb94a`. `P7-T002` is accepted as commit `c6b0969`.
 commit `ee4d087`. `P7-T007` is accepted as commit `693d0ce`. `P7-T008` is
 accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `P8-T001` is accepted as commit `8d9a506`. `P8-T002` is accepted as commit
-`d0c496d`. `P8-T003` is accepted as commit `178b574`. `P5-T005` received two
-follow-up security fixes in commits `3d5f9a9` and `cc121ed`. `P7-T004` and
-`P7-T006` received a follow-up security fix in commit `f0e7032`. `P8-T002`
-received a follow-up security fix in commit `1069704`. `P8-T003` received a
-follow-up security fix in commit `3f9d002`. Phase P8 is open at 3 of 11.
+`d0c496d`. `P8-T003` is accepted as commit `178b574`. `P8-T004` is accepted as
+commit `79610cd`. `P5-T005` received two follow-up security fixes in commits
+`3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up security
+fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in commit
+`1069704`. `P8-T003` received a follow-up security fix in commit `3f9d002`.
+Phase P8 is open at 4 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -168,11 +169,17 @@ follow-up security fix in commit `3f9d002`. Phase P8 is open at 3 of 11.
     summarizes tool/command/git/file/build-test/outcome activity from harness
     events and stores the summary as a recording without keeping the full
     transcript.
+27. A worker agent completed `P8-T004` — *Implement full recording opt-in
+    projection* — as commit `79610cd`. The supervisor verified all quality gates
+    and accepted the task. Full raw transcript/terminal payload retention is
+    explicit (`FullRecordingConsent::Full`), refused by default
+    (`ProjectionOnly`), redacted before storage, and distinguishable from
+    standard projections via a `full_recording` wrapper marker.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 3 of 11.** The READY list is now
-`P8-T004`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
-`P14-T010`. The lowest-numbered READY task is `P8-T004`, *"Implement harness
-adapter interface contract"*, which is the next concrete action.
+**Phase P7 is complete (9/9). Phase P8 is open at 4 of 11.** The READY list is now
+`P8-T005`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
+`P14-T010`. The lowest-numbered READY task is `P8-T005`, *"Implement observed
+ProjectIntent capture path"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13846,6 +13853,40 @@ absent text.
   arbitrary `BuildTest.counts` value before storage.
 
 ## Validation of `P8-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P8-T004` added
+
+- `crates/sure-core/src/full_recording.rs` (new) — `FullRecordingConsent`,
+  `FullRecordingError`, `StoredFullRecording`, and persistence/query helpers.
+- `FullRecordingConsent::ProjectionOnly` is the default; `Full` requires explicit
+  opt-in.
+- `persist_full_recording` refuses with `FullRecordingError::NotOptedIn` when the
+  consent level is `ProjectionOnly`, and stores a wrapper object when consent is
+  `Full`.
+- The wrapper object carries `full_recording: true`, `consent: "full"`,
+  `retained_until_ms`, `event_type`, `timestamp`, `session_id`, `event_id`,
+  `source`, and the payload.
+- The raw payload is run through `crate::store::redact_document` before storage
+  even under full opt-in.
+- Default retention is 3 days via `DEFAULT_FULL_RECORDING_RETENTION_DAYS` and
+  saturating `retention_deadline_ms`.
+- `is_full_recording` distinguishes full recordings from standard projections
+  and other recordings when reading `RecordKind::Recording` rows.
+- `full_recordings_for_project` and `full_recordings_past_retention` support
+  reading and future pruning.
+- 10 inline tests cover opt-in storage, opt-out refusal, distinction from
+  standard projections, payload redaction, retention metadata, default-history
+  exclusion, expired-retention queries, and escaped error messages.
+
+## Validation of `P8-T004`
 
 | Gate | Result |
 | --- | ------ |

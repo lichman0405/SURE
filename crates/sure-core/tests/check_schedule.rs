@@ -219,6 +219,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          *where SURE read the pattern* and a `FilePresent` naming a file would \
          not be specific enough",
     ),
+    (
+        "src/noop_heuristics.rs",
+        "`P6-T003`: it scans source files for no-op / fake-success patterns — \
+         fake email addresses or domains, fake payment or sandbox tokens, \
+         no-op function bodies that return constant success values, and \
+         hard-coded success responses for external integrations. It produces \
+         candidate checks with `Severity::Note`, `critical: false`, and \
+         `EvidenceClass::Inference`, using `CheckReason::CandidateFound` to \
+         anchor each proposal to the file, line and context where the pattern \
+         was found. The `CandidateContext` classifier distinguishes test, \
+         example, mock-fixture and production code",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

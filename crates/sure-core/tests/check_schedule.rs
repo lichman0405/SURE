@@ -195,6 +195,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          `#[serde(deny_unknown_fields)]`, and a YAML document that tries to \
          slip a `command:` key in is refused at parse time rather than ignored",
     ),
+    (
+        "src/external_service.rs",
+        "`P5-T006`: it detects project behaviors that require real external \
+         systems — payment processors, email delivery services and cloud storage \
+         providers — and produces checks that can only be confirmed against the \
+         real outside service. Detection is entirely static, from \
+         `package.json` dependencies, import/require statements in source files \
+         and environment variable references. The checks it produces carry \
+         [`ActionKind::ExternalService`] and resolve to \
+         [`NotCheckedReason::ExternalServiceUnavailable`] because SURE cannot \
+         confirm them locally",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

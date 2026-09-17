@@ -163,6 +163,7 @@ frozen!(ActionKind, test: action_kind_wire_names_are_frozen, {
     StartService => "start_service",
     LocalProbe => "local_probe",
     BrowserProbe => "browser_probe",
+    BrowserObservation => "browser_observation",
     InstallDependencies => "install_dependencies",
     NetworkAccess => "network_access",
     WriteProjectFile => "write_project_file",

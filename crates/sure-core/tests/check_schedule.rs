@@ -255,6 +255,16 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          Dynamic routes, template literals and slotted paths are skipped rather \
          than guessed",
     ),
+    (
+        "src/ui_action_bridge.rs",
+        "`P6-T006`: it scans frontend source files for declared UI action \
+         bindings (`onClick`, `onSubmit`, action links) and produces candidate \
+         checks. When runtime browser evidence confirms an action, the proposal \
+         carries `EvidenceClass::ObservedFact` and `ActionKind::BrowserObservation`; \
+         otherwise it remains `EvidenceClass::Inference` with `ActionKind::ReadFile`. \
+         Checks use `Severity::Note`, `critical: false`, and \
+         `CheckReason::CandidateFound` anchored to the source file, line and context",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

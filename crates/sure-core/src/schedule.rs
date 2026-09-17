@@ -1149,7 +1149,7 @@ mod tests {
         permissions.sort();
         assert_eq!(permissions, Permission::ALL);
 
-        assert_eq!(ActionKind::ALL.len(), 17, "an action was added or removed");
+        assert_eq!(ActionKind::ALL.len(), 18, "an action was added or removed");
         assert_eq!(
             Permission::ALL.len(),
             6,

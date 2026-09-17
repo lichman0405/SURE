@@ -37,6 +37,8 @@ pub enum ActionKind {
     LocalProbe,
     /// Driving a real browser against a local address.
     BrowserProbe,
+    /// Observing interactive UI elements in a real browser.
+    BrowserObservation,
     /// Installing project dependencies.
     InstallDependencies,
     /// Reaching the network.
@@ -63,6 +65,7 @@ variants!(ActionKind {
     StartService,
     LocalProbe,
     BrowserProbe,
+    BrowserObservation,
     InstallDependencies,
     NetworkAccess,
     WriteProjectFile,
@@ -96,6 +99,7 @@ impl ActionKind {
                 | Self::InstallDependencies
                 | Self::ExternalService
                 | Self::BrowserProbe
+                | Self::BrowserObservation
                 | Self::StartService
         )
     }
@@ -121,7 +125,9 @@ impl ActionKind {
             Self::RunTests | Self::Build | Self::TypeCheck | Self::Lint | Self::StartService => {
                 Permission::RunProjectCode
             }
-            Self::BrowserProbe | Self::ExternalService => Permission::ConnectService,
+            Self::BrowserProbe | Self::BrowserObservation | Self::ExternalService => {
+                Permission::ConnectService
+            }
             Self::InstallDependencies => Permission::InstallDependencies,
             Self::NetworkAccess => Permission::Network,
             Self::WriteProjectFile | Self::DeleteProjectFile => Permission::WriteProject,

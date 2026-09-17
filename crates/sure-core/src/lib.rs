@@ -48,6 +48,7 @@ pub mod service;
 pub mod setup;
 pub mod store;
 pub mod support;
+pub mod ui_action_bridge;
 
 pub use sure_domain::{
     PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,

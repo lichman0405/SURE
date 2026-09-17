@@ -10,6 +10,7 @@ pub mod aggregation;
 pub mod approval;
 pub mod browser;
 pub mod browser_driver;
+pub mod candidate_scanner;
 pub mod checks;
 pub mod components;
 pub mod config;

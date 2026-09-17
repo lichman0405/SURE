@@ -207,6 +207,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          [`NotCheckedReason::ExternalServiceUnavailable`] because SURE cannot \
          confirm them locally",
     ),
+    (
+        "src/candidate_scanner.rs",
+        "`P6-T001`: it scans source files for TODO, FIXME, mock, stub and \
+         placeholder patterns, and produces candidate checks that include the \
+         file, line and context where each pattern was found. Candidates are \
+         not automatically product defects: they carry `Severity::Note`, \
+         `critical: false`, and `EvidenceClass::Inference`. The reason they \
+         build is `CheckReason::CandidateFound`, the variant added to \
+         `schedule.rs` with this module, because a candidate check has to name \
+         *where SURE read the pattern* and a `FilePresent` naming a file would \
+         not be specific enough",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

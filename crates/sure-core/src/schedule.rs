@@ -187,6 +187,21 @@ pub enum CheckReason {
         /// The line it was read from, counting from one.
         line: usize,
     },
+    /// A candidate pattern was found in source code.
+    ///
+    /// **This is the variant `P6-T001` added**, and it exists for the same reason
+    /// `RouteDeclared` does: a candidate check has to name *where SURE read the
+    /// pattern*, and a `FilePresent` naming a file would not be specific enough.
+    /// A TODO comment on line 42 is a different claim from a TODO comment on line
+    /// 100, and the context SURE read is part of the claim.
+    CandidateFound {
+        /// The file the candidate was read from, relative to the project root.
+        path: String,
+        /// The line it was read from, counting from one.
+        line: usize,
+        /// The context SURE read around the pattern.
+        context: String,
+    },
     /// The check applies to the project as a whole.
     ProjectWide,
 }
@@ -215,6 +230,11 @@ impl CheckReason {
             } => format!(
                 "Your project declares the route `{route}`, in {declared_in} on line {line}."
             ),
+            Self::CandidateFound {
+                path,
+                line,
+                context,
+            } => format!("SURE found `{context}` in {path} on line {line}."),
             Self::ProjectWide => "This is about the project as a whole.".to_owned(),
         }
     }
@@ -247,6 +267,9 @@ impl CheckReason {
                 route,
                 line,
             } => !declared_in.trim().is_empty() && !route.trim().is_empty() && *line != 0,
+            Self::CandidateFound { path, context, .. } => {
+                !path.trim().is_empty() && !context.trim().is_empty()
+            }
             Self::ProjectWide => true,
         }
     }
@@ -309,6 +332,15 @@ impl CheckReason {
                 AnchorSubject::LineRange,
                 declared_in.clone(),
                 format!("the route `{route}` declared on line {line}"),
+            )),
+            Self::CandidateFound {
+                path,
+                line,
+                context,
+            } => Some(EvidenceAnchor::new(
+                AnchorSubject::LineRange,
+                path.clone(),
+                format!("the candidate `{context}` on line {line}"),
             )),
             Self::ProjectWide => None,
         }

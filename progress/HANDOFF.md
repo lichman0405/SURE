@@ -2,44 +2,75 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 57 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 58 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 5/7.** `P5-T005` is implemented as commit `ba9984e` and
-the commit carrying this file is its acceptance. **What `P5-T005` added is the
-core-flow probe contract: a way for a project or fixture to describe safe local
-acceptance flows using only the typed actions SURE already understands, with no
-field that accepts arbitrary shell.**
+(9/9), phase P5 open at 6/7.** `P5-T006` is implemented as commit `524371b` and
+the commit carrying this file is its acceptance. **What `P5-T006` added is an
+external-service verification boundary: payment/email/cloud behaviors that need a
+real external system are detected statically and reported as
+`ExternalServiceUnavailable` so they cannot become a local pass.**
 
-**The one thing about `P5-T005` a reader should know before the detail: the
-check-schedule source-rule had to move again, because a fifth module is now
-allowed to construct `CheckProposal`.** `tests/check_schedule.rs` names the files
-that may build proposals; `core_flow.rs` joined the list, and the test was
-updated before the acceptance.
+**The one thing about `P5-T006` a reader should know before the detail: the
+check-schedule source-rule moved for the third task in a row.**
+`tests/check_schedule.rs` names the files that may build `CheckProposal`;
+`external_service.rs` joined the list, and the test was updated before the
+acceptance.
 
-**Accepting `P5-T005` unblocks `P5-T006`,** *"Implement external-service
-verification boundary"*, which depends on `P5-T005`. The READY list is now
-**eight** entries — `P5-T006`, `P5-T007`, `P6-T001`, `P6-T005`, `P6-T007`,
-`P8-T001`, `P12-T008` and `P13-T004`. The lowest-numbered is `P5-T006`, which is
+**Accepting `P5-T006` unblocks nothing new — it was the only task that named
+`P5-T005`.** The READY list is now **seven** entries — `P5-T007`, `P6-T001`,
+`P6-T005`, `P6-T007`, `P8-T001`, `P12-T008` and `P13-T004`. The lowest-numbered
+is `P5-T007`, *"Implement runtime evidence cleanup and cancellation"*, which is
 the next concrete action.
 
-**`## Next concrete action` further down this file was not extended by `P5-T005`,
+**`## Next concrete action` further down this file was not extended by `P5-T006`,
 and its item 1 still names `P5-T001`.** Its newest item is `P4-T009`'s; the
 entries since have been accepted without extending the list. **The live
 statement of what comes next is the READY list in the paragraph above and not
 that list's item 1**, and this sentence is here so that a reader who scrolls to
 it is not misled by it.
 
-**`P5-T005` was validated locally rather than by CI.** All five quality gates
+**`P5-T006` was validated locally rather than by CI.** All five quality gates
 passed on this Windows development machine:
 `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
 `cargo test --workspace --no-fail-fast`,
 `node scripts/validate-bootstrap.mjs` and
-`node scripts/taskctl.mjs validate`. The commit `ba9984e` is on
+`node scripts/taskctl.mjs validate`. The commit `524371b` is on
 `claude/v0.1-autonomous` and has not yet been pushed to origin at the time this
 section is written.
 
-## What `P5-T005` added
+## What `P5-T006` added
+
+- `crates/sure-core/src/external_service.rs` (new, 734 lines) —
+  `ExternalServiceChecks`, `ServiceCategory`, static detection of payment/email/cloud
+  signals, and `not_checked()` results using `NotCheckedReason::ExternalServiceUnavailable`.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod external_service;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `external_service.rs` to the
+  `MAY_PROPOSE` source-rule list.
+
+## Validation
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P5-T006` changed about the reachability ceiling
+
+`tests/check_schedule.rs`'s `MAY_PROPOSE` list now includes
+`crates/sure-core/src/external_service.rs`. The rule is: only these files may
+construct a `CheckProposal`. A new proposer lands by editing the list, and the
+test fails until the edit is made. `P5-T006` made the edit.
+
+## Next concrete action
+
+1. Start `P5-T007` — *Implement runtime evidence cleanup and cancellation* — the
+   lowest-numbered READY task.
+2. Keep `P6-T001` in view; it is the next phase's first task once P5 closes.
+
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,
   `FlowContext`, `FlowParseError` and `FlowRefused`. Three step kinds:

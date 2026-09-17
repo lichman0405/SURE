@@ -341,7 +341,11 @@ impl fmt::Display for FlowRefused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoSuchComponent { component } => {
-                write!(f, "{component} is not a component of this project")
+                write!(
+                    f,
+                    "{} is not a component of this project",
+                    crate::redact::escape_control_characters(component)
+                )
             }
             Self::NoCommandForRole {
                 component,
@@ -350,7 +354,8 @@ impl fmt::Display for FlowRefused {
             } => {
                 write!(
                     f,
-                    "{component} has no command for `{}` ({})",
+                    "{} has no command for `{}` ({})",
+                    crate::redact::escape_control_characters(component),
                     role.conventional_name(),
                     reason.plain_explanation()
                 )
@@ -358,7 +363,8 @@ impl fmt::Display for FlowRefused {
             Self::RouteNotDeclared { path } => {
                 write!(
                     f,
-                    "the route `{path}` was not declared in the project's source"
+                    "the route `{}` was not declared in the project's source",
+                    crate::redact::escape_control_characters(path)
                 )
             }
         }
@@ -1091,5 +1097,28 @@ steps:
             browser_probe_title(name_with_newline),
             "check the interface in a browser for flow `evil\\nflow`"
         );
+    }
+
+    #[test]
+    fn refusal_messages_escape_attacker_controlled_text() {
+        let no_component = FlowRefused::NoSuchComponent {
+            component: "evil\ncomponent".to_owned(),
+        };
+        assert!(no_component.to_string().contains("evil\\ncomponent"));
+        assert!(!no_component.to_string().contains("evil\ncomponent"));
+
+        let no_command = FlowRefused::NoCommandForRole {
+            component: "bad\tcomponent".to_owned(),
+            role: ScriptRole::Start,
+            reason: MissingKind::NotDeclared,
+        };
+        assert!(no_command.to_string().contains("bad\\tcomponent"));
+        assert!(!no_command.to_string().contains("bad\tcomponent"));
+
+        let no_route = FlowRefused::RouteNotDeclared {
+            path: "/evil\npath".to_owned(),
+        };
+        assert!(no_route.to_string().contains("/evil\\npath"));
+        assert!(!no_route.to_string().contains("/evil\npath"));
     }
 }

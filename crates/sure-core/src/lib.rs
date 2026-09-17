@@ -35,6 +35,7 @@ pub mod intent_implementation;
 pub mod intent_model;
 pub mod noop_heuristics;
 pub mod paths;
+pub mod plain_language_finding;
 pub mod probe;
 pub mod process;
 pub mod project_intent;

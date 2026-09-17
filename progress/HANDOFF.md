@@ -2,22 +2,23 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 76 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 77 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
-as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
-accepted as commit `de684e9`. `P6-T003` is accepted as commit `09d5fb5`.
-`P6-T004` is accepted as commit `a0575de`. `P6-T005` is accepted as commit
-`cf35947`. `P6-T006` is accepted as commit `05af66f`. `P6-T007` is accepted as
-commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
-accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
-`P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
-`a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P7-T005` is accepted as
-commit `f683c18`. `P7-T006` is accepted as commit `ee4d087`. `P7-T007` is
-accepted as commit `693d0ce`. `P7-T008` is accepted as commit `bc01d99`.
+(9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
+(9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
+accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
+`P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
+`05af66f`. `P6-T007` is accepted as commit `01c5b76`. `P6-T008` is accepted as
+commit `71c8f55`. `P6-T009` is accepted as commit `8b890b3`. `P7-T001` is
+accepted as commit `16cb94a`. `P7-T002` is accepted as commit `c6b0969`.
+`P7-T003` is accepted as commit `a1fc0c5`. `P7-T004` is accepted as commit
+`2c1f2cb`. `P7-T005` is accepted as commit `f683c18`. `P7-T006` is accepted as
+commit `ee4d087`. `P7-T007` is accepted as commit `693d0ce`. `P7-T008` is
+accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
 `cc121ed`. `P7-T004` and `P7-T006` received a follow-up security fix in commit
-`f0e7032`. Phase P7 is open at 8 of 9.
+`f0e7032`. Phase P8 is open at 0 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -140,11 +141,18 @@ accepted as commit `693d0ce`. `P7-T008` is accepted as commit `bc01d99`.
     accepted the task. The CLI module renders a `ProjectVerdict` to self-contained
     Markdown and HTML reports with HTML entity escaping, control-character
     escaping, and no external resources or scripts.
+23. A worker agent completed `P7-T009` — *Implement plain-language golden tests*
+    — as commit `129f766`. The supervisor verified all quality gates and accepted
+    the task. The refactor exposes all CLI modules through `crates/sure-cli/
+    src/lib.rs` so integration tests can assert exact user-facing phrases across
+    terminal, Markdown, HTML, and JSON reports, and a small fix makes the human
+    report show the escaped `CheckResult::reason` when no structured
+    `not_checked_reason` is available.
 
-**Phase P7 is open at 8 of 9.** The READY list is now `P7-T009`, `P8-T001`,
-`P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T009`, *"Implement plain-language golden
-tests"*, which is the next concrete action.
+**Phase P7 is complete (9/9). Phase P8 is open at 0 of 11.** The READY list is
+now `P8-T001`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
+`P14-T010`. The lowest-numbered READY task is `P8-T001`, *"Implement versioned
+harness event ingestion"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13696,6 +13704,35 @@ absent text.
   no external resources, caveat absence when intent is trusted, and empty verdict.
 
 ## Validation of `P7-T008`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P7-T009` added
+
+- `crates/sure-cli/src/lib.rs` (new) — public library root exposing all CLI
+  modules so integration tests can reach the renderers.
+- `crates/sure-cli/src/main.rs` — refactored to use the public `sure_cli::*`
+  modules instead of private `mod` declarations.
+- `crates/sure-cli/src/human_report.rs` — `render_not_checked_fallback` now falls
+  back to the escaped `result.reason` when `not_checked_reason` is `None`.
+- `crates/sure-cli/tests/golden_reports.rs` (new) — 6 golden tests covering:
+  - green project with no findings,
+  - green aggregate + open must-fix says not ready,
+  - not-enough-checked aggregate,
+  - after-the-fact intent caveat,
+  - skipped/errored not-checked checks,
+  - model-only finding flagging.
+- Each scenario asserts expected phrases and forbids forbidden phrases across
+  terminal, Markdown, HTML, and JSON outputs; also checks determinism and HTML
+  well-formedness.
+
+## Validation of `P7-T009`
 
 | Gate | Result |
 | --- | ------ |

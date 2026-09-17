@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 76 of 166 v0.1 tasks accepted (phase P7 in progress).
+- **Progress:** 77 of 166 v0.1 tasks accepted (phase P8 starting).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -54,6 +54,7 @@ Implemented so far:
 - Terminal human report: renders a `ProjectVerdict` to plain text for a standard terminal, with no ANSI codes by default, material findings first, coverage gaps, and escaped attacker-controlled text.
 - Stable JSON report: deterministic, versioned, schema-validated JSON output from a `ProjectVerdict` for downstream tools, with safe handling of control characters.
 - Portable Markdown/HTML reports: self-contained reports from a `ProjectVerdict` with HTML entity escaping, control-character escaping, and no external resources.
+- Plain-language golden tests: integration tests lock down exact user-facing wording across terminal, Markdown, HTML, and JSON reports, including false-green protection and after-the-fact caveat cases.
 - Evidence-grounded reporting with plain-language verdicts and `Cannot confirm` as a valid result.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.

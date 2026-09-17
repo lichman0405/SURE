@@ -4,10 +4,12 @@
 //! using a model, reading files, or calling external processes.
 
 use serde_json::Value;
+use sure_domain::evidence::{ClaimAssessment, Freshness, StalenessReason};
 use sure_domain::ids::FingerprintId;
 use sure_protocol::documents::DocumentKind;
 use sure_protocol::event::EventEnvelope;
 
+use crate::diagnostics::Timestamp;
 use crate::harness_event::IngestedEvent;
 use crate::recording_projection::{BuildTestKind, FileOperation, StandardProjection, project};
 use crate::store::{HistoryFilter, RecordKind, Store, StoreError};
@@ -168,11 +170,11 @@ pub fn check_claims_against_events(
 
 /// Check one claim against the available events.
 ///
-/// Returns [`sure_domain::evidence::ClaimAssessment::Confirmed`] when a
-/// matching event is found, [`ClaimAssessment::CannotConfirm`] when no
-/// matching event exists, and [`ClaimAssessment::NotCheckable`] when the
-/// claim type is missing or unknown. Never returns
-/// [`ClaimAssessment::Contradicted`].
+/// Returns [`ClaimAssessment::Confirmed`] when a matching event is found and
+/// its evidence is still fresh, [`ClaimAssessment::CannotConfirm`] when no
+/// matching event exists or the matching evidence has been superseded by a
+/// later code change, and [`ClaimAssessment::NotCheckable`] when the claim type
+/// is missing or unknown. Never returns [`ClaimAssessment::Contradicted`].
 pub fn check_claim(
     claim: &ClaimDocument,
     events: &[IngestedEvent],
@@ -186,7 +188,7 @@ pub fn check_claim(
                 id: claim.id.clone(),
                 claim_text: claim.claim_text.clone(),
                 claim_type: String::new(),
-                assessment: sure_domain::evidence::ClaimAssessment::NotCheckable,
+                assessment: ClaimAssessment::NotCheckable,
                 evidence: Vec::new(),
                 reason: String::from("Claim has no claim_type, so SURE cannot check it."),
             };
@@ -199,9 +201,12 @@ pub fn check_claim(
             id: claim.id.clone(),
             claim_text: claim.claim_text.clone(),
             claim_type: claim_type.to_owned(),
-            assessment: sure_domain::evidence::ClaimAssessment::NotCheckable,
+            assessment: ClaimAssessment::NotCheckable,
             evidence: Vec::new(),
-            reason: format!("Claim type '{}' is not a type SURE can check.", claim_type),
+            reason: format!(
+                "Claim type '{}' is not a type SURE can check.",
+                crate::redact::escape_control_characters(claim_type)
+            ),
         };
     }
 
@@ -210,6 +215,12 @@ pub fn check_claim(
         .find(|event| event_matches_claim_type(event, claim_type));
 
     if let Some(event) = matching_event {
+        let freshness = if is_result_claim_type(claim_type) {
+            evidence_freshness(event, events)
+        } else {
+            Freshness::Fresh
+        };
+
         let projection = project(event);
         let category_name = match projection {
             Some(StandardProjection::Tool { .. }) => "Tool",
@@ -231,14 +242,29 @@ pub fn check_claim(
             Some(fingerprint.clone()),
             sure_domain::severity::Severity::Note,
         );
-        CheckedClaim {
-            record_id: claim.record_id,
-            id: claim.id.clone(),
-            claim_text: claim.claim_text.clone(),
-            claim_type: claim_type.to_owned(),
-            assessment: sure_domain::evidence::ClaimAssessment::Confirmed,
-            evidence: vec![evidence],
-            reason: format!("A recorded harness event supports this {claim_type} claim."),
+
+        match freshness {
+            Freshness::Fresh => CheckedClaim {
+                record_id: claim.record_id,
+                id: claim.id.clone(),
+                claim_text: claim.claim_text.clone(),
+                claim_type: claim_type.to_owned(),
+                assessment: ClaimAssessment::Confirmed,
+                evidence: vec![evidence],
+                reason: format!(
+                    "A recorded harness event supports this {} claim.",
+                    crate::redact::escape_control_characters(claim_type)
+                ),
+            },
+            Freshness::Stale(reason) => CheckedClaim {
+                record_id: claim.record_id,
+                id: claim.id.clone(),
+                claim_text: claim.claim_text.clone(),
+                claim_type: claim_type.to_owned(),
+                assessment: ClaimAssessment::CannotConfirm,
+                evidence: vec![evidence],
+                reason: String::from(reason.plain_explanation()),
+            },
         }
     } else {
         CheckedClaim {
@@ -246,7 +272,7 @@ pub fn check_claim(
             id: claim.id.clone(),
             claim_text: claim.claim_text.clone(),
             claim_type: claim_type.to_owned(),
-            assessment: sure_domain::evidence::ClaimAssessment::CannotConfirm,
+            assessment: ClaimAssessment::CannotConfirm,
             evidence: Vec::new(),
             reason: String::from("SURE has no recorded event that supports this claim."),
         }
@@ -263,7 +289,36 @@ fn is_known_claim_type(claim_type: &str) -> bool {
     )
 }
 
+/// Claims about test or build results can be invalidated by later code changes.
+fn is_result_claim_type(claim_type: &str) -> bool {
+    matches!(claim_type, CLAIM_TYPE_TEST_RAN | CLAIM_TYPE_CURRENT_CODE)
+}
+
+/// Known harness event type prefixes for each checkable claim family.
+///
+/// The projection logic in [`crate::recording_projection`] is intentionally
+/// broad so it can summarise arbitrary harness events. Claim checking must not
+/// be fooled by an unrelated event whose name happens to contain a substring,
+/// so each claim type requires the event type to belong to an explicit family.
+fn event_type_matches_claim_family(event_type: &str, claim_type: &str) -> bool {
+    match claim_type {
+        CLAIM_TYPE_TEST_RAN => event_type.starts_with("test."),
+        CLAIM_TYPE_FILE_CHANGED => event_type.starts_with("file."),
+        CLAIM_TYPE_GIT_STATE => event_type.starts_with("git."),
+        CLAIM_TYPE_CURRENT_CODE => {
+            event_type.starts_with("build.")
+                || event_type.starts_with("compile.")
+                || event_type.starts_with("run.")
+        }
+        _ => false,
+    }
+}
+
 fn event_matches_claim_type(event: &IngestedEvent, claim_type: &str) -> bool {
+    if !event_type_matches_claim_family(&event.envelope.event_type, claim_type) {
+        return false;
+    }
+
     let projection = match project(event) {
         Some(p) => p,
         None => return false,
@@ -293,6 +348,63 @@ fn event_matches_claim_type(event: &IngestedEvent, claim_type: &str) -> bool {
                 ..
             }
         ),
+        _ => false,
+    }
+}
+
+fn evidence_freshness(proof_event: &IngestedEvent, events: &[IngestedEvent]) -> Freshness {
+    let proof_time = match Timestamp::parse_rfc3339(&proof_event.envelope.timestamp) {
+        Some(ts) => ts.as_millis(),
+        None => return Freshness::Stale(StalenessReason::UnknownProvenance),
+    };
+
+    for event in events {
+        if std::ptr::eq(event, proof_event) || !is_code_change_event(event) {
+            continue;
+        }
+        let event_time = match Timestamp::parse_rfc3339(&event.envelope.timestamp) {
+            Some(ts) => ts.as_millis(),
+            None => continue,
+        };
+        // At millisecond precision a later-or-equal code change is treated as
+        // superseding the proof, because the harness does not promise ordering
+        // within the same millisecond.
+        if event_time >= proof_time {
+            return Freshness::Stale(StalenessReason::SupersededByLaterChange);
+        }
+    }
+
+    Freshness::Fresh
+}
+
+fn is_code_change_event(event: &IngestedEvent) -> bool {
+    let event_type = event.envelope.event_type.as_str();
+    let projection = match project(event) {
+        Some(p) => p,
+        None => return false,
+    };
+
+    match projection {
+        StandardProjection::File {
+            operation: FileOperation::Write | FileOperation::Delete,
+            ..
+        } => event_type.starts_with("file."),
+        StandardProjection::Git { ref subcommand, .. } => {
+            event_type.starts_with("git.")
+                && matches!(
+                    subcommand.as_str(),
+                    "commit"
+                        | "checkout"
+                        | "merge"
+                        | "rebase"
+                        | "reset"
+                        | "cherry-pick"
+                        | "pull"
+                        | "apply"
+                        | "am"
+                        | "revert"
+                )
+        }
         _ => false,
     }
 }
@@ -642,6 +754,213 @@ mod tests {
         assert_eq!(
             results[0].evidence[0].fingerprint,
             Some(fingerprint.clone())
+        );
+    }
+
+    fn make_event_at(event_type: &str, timestamp: &str, payload: Value) -> IngestedEvent {
+        IngestedEvent {
+            envelope: EventEnvelope::new("claude-code", event_type, timestamp)
+                .with_capability_tier(CapabilityTier::Observed)
+                .with_session_id("session-42")
+                .with_project_root("C:\\work\\my project")
+                .with_payload(payload),
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        }
+    }
+
+    #[test]
+    fn test_ran_claim_is_cannot_confirm_after_later_file_write() {
+        let claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("tests ran"),
+            claim_type: Some(String::from(CLAIM_TYPE_TEST_RAN)),
+        };
+        let test_event = make_event_at(
+            "test.finished",
+            "2026-09-14T09:10:56.000Z",
+            json!({"target": "unit tests", "success": true}),
+        );
+        let later_write = make_event_at(
+            "file.write",
+            "2026-09-14T09:10:57.000Z",
+            json!({"path": "src/main.rs"}),
+        );
+        let fingerprint = FingerprintId::generate();
+        let result = check_claim(&claim, &[test_event, later_write], &fingerprint);
+        assert_eq!(
+            result.assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+        assert_eq!(result.evidence.len(), 1);
+        assert!(
+            result.reason.contains("later changes"),
+            "stale reason was: {}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn current_code_claim_is_cannot_confirm_after_later_git_commit() {
+        let claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("code builds"),
+            claim_type: Some(String::from(CLAIM_TYPE_CURRENT_CODE)),
+        };
+        let build_event = make_event_at(
+            "build.finished",
+            "2026-09-14T09:10:56.000Z",
+            json!({"target": "sure-core", "success": true}),
+        );
+        let later_commit = make_event_at(
+            "git.commit",
+            "2026-09-14T09:10:58.000Z",
+            json!({"subcommand": "commit", "branch": "main"}),
+        );
+        let fingerprint = FingerprintId::generate();
+        let result = check_claim(&claim, &[build_event, later_commit], &fingerprint);
+        assert_eq!(
+            result.assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+        assert!(
+            result.reason.contains("later changes"),
+            "stale reason was: {}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn file_changed_claim_stays_confirmed_despite_later_write() {
+        let claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("file was changed"),
+            claim_type: Some(String::from(CLAIM_TYPE_FILE_CHANGED)),
+        };
+        let write_event = make_event_at(
+            "file.write",
+            "2026-09-14T09:10:56.000Z",
+            json!({"path": "src/main.rs"}),
+        );
+        let later_write = make_event_at(
+            "file.write",
+            "2026-09-14T09:10:57.000Z",
+            json!({"path": "src/lib.rs"}),
+        );
+        let fingerprint = FingerprintId::generate();
+        let result = check_claim(&claim, &[write_event, later_write], &fingerprint);
+        assert_eq!(
+            result.assessment,
+            sure_domain::evidence::ClaimAssessment::Confirmed
+        );
+    }
+
+    #[test]
+    fn git_state_claim_stays_confirmed_despite_later_commit() {
+        let claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("git state"),
+            claim_type: Some(String::from(CLAIM_TYPE_GIT_STATE)),
+        };
+        let commit_event = make_event_at(
+            "git.commit",
+            "2026-09-14T09:10:56.000Z",
+            json!({"subcommand": "commit", "branch": "main"}),
+        );
+        let later_commit = make_event_at(
+            "git.commit",
+            "2026-09-14T09:10:57.000Z",
+            json!({"subcommand": "commit", "branch": "main"}),
+        );
+        let fingerprint = FingerprintId::generate();
+        let result = check_claim(&claim, &[commit_event, later_commit], &fingerprint);
+        assert_eq!(
+            result.assessment,
+            sure_domain::evidence::ClaimAssessment::Confirmed
+        );
+    }
+
+    #[test]
+    fn mismatched_event_type_prefix_does_not_confirm_claim() {
+        let fingerprint = FingerprintId::generate();
+
+        let test_claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("tests ran"),
+            claim_type: Some(String::from(CLAIM_TYPE_TEST_RAN)),
+        };
+        let spoof_test = make_event(
+            "mytest.finished",
+            json!({"target": "unit tests", "success": true}),
+        );
+        assert_eq!(
+            check_claim(&test_claim, &[spoof_test], &fingerprint).assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+
+        let file_claim = ClaimDocument {
+            record_id: 2,
+            id: String::from("claim-2"),
+            claim_text: String::from("file changed"),
+            claim_type: Some(String::from(CLAIM_TYPE_FILE_CHANGED)),
+        };
+        let spoof_file = make_event("myfile.write", json!({"path": "src/main.rs"}));
+        assert_eq!(
+            check_claim(&file_claim, &[spoof_file], &fingerprint).assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+
+        let git_claim = ClaimDocument {
+            record_id: 3,
+            id: String::from("claim-3"),
+            claim_text: String::from("git state"),
+            claim_type: Some(String::from(CLAIM_TYPE_GIT_STATE)),
+        };
+        let spoof_git = make_event(
+            "mygit.commit",
+            json!({"subcommand": "commit", "branch": "main"}),
+        );
+        assert_eq!(
+            check_claim(&git_claim, &[spoof_git], &fingerprint).assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+
+        let code_claim = ClaimDocument {
+            record_id: 4,
+            id: String::from("claim-4"),
+            claim_text: String::from("code builds"),
+            claim_type: Some(String::from(CLAIM_TYPE_CURRENT_CODE)),
+        };
+        let spoof_build = make_event("mybuild.finished", json!({"target": "x", "success": true}));
+        assert_eq!(
+            check_claim(&code_claim, &[spoof_build], &fingerprint).assessment,
+            sure_domain::evidence::ClaimAssessment::CannotConfirm
+        );
+    }
+
+    #[test]
+    fn claim_type_in_reason_is_escaped() {
+        let claim = ClaimDocument {
+            record_id: 1,
+            id: String::from("claim-1"),
+            claim_text: String::from("something"),
+            claim_type: Some(String::from("bad\ntype")),
+        };
+        let fingerprint = FingerprintId::generate();
+        let result = check_claim(&claim, &[], &fingerprint);
+        assert_eq!(
+            result.assessment,
+            sure_domain::evidence::ClaimAssessment::NotCheckable
+        );
+        assert!(
+            result.reason.contains("bad\\ntype"),
+            "claim_type was not escaped: {}",
+            result.reason
         );
     }
 

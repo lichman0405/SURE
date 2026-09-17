@@ -88,6 +88,125 @@ impl fmt::Display for Timestamp {
     }
 }
 
+impl Timestamp {
+    /// Parse an RFC 3339 timestamp into a UTC millisecond instant.
+    ///
+    /// Accepts `YYYY-MM-DDTHH:MM:SS[.fff...]Z` and offsets `±HH:MM`.
+    /// Fractional seconds may have any number of digits; only the first three
+    /// (milliseconds) are kept. Returns `None` if the text is not a valid
+    /// RFC 3339 timestamp or the instant does not fit in `i64` milliseconds.
+    #[must_use]
+    pub fn parse_rfc3339(s: &str) -> Option<Self> {
+        let s = s.trim();
+
+        // Split the date/time portion from the time-zone indicator. The
+        // indicator is the *last* occurrence of one of these characters, because
+        // '-' also appears as a date separator.
+        let tz_start = s.rfind(['Z', '+', '-'].as_slice())?;
+        let (datetime, tz) = s.split_at(tz_start);
+        if tz.is_empty() {
+            return None;
+        }
+
+        let tz_seconds: i64 = if let Some(rest) = tz.strip_prefix('Z') {
+            if !rest.is_empty() {
+                return None;
+            }
+            0
+        } else {
+            let sign: i64 = if tz.starts_with('+') { 1 } else { -1 };
+            let rest = &tz[1..];
+            if rest.len() != 5 || rest.as_bytes()[2] != b':' {
+                return None;
+            }
+            let hours = rest[..2].parse::<i64>().ok()?;
+            let minutes = rest[3..5].parse::<i64>().ok()?;
+            if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
+                return None;
+            }
+            sign * (hours * 3_600 + minutes * 60)
+        };
+
+        // Separate optional fractional seconds.
+        let (date_time, fraction_ms) = if let Some(dot) = datetime.find('.') {
+            let (dt, frac_with_dot) = datetime.split_at(dot);
+            let frac_digits = &frac_with_dot[1..];
+            if frac_digits.is_empty() {
+                return None;
+            }
+            let mut ms = 0_i64;
+            for (i, c) in frac_digits.chars().enumerate() {
+                if i >= 3 {
+                    break;
+                }
+                let digit = c.to_digit(10)? as i64;
+                ms = ms * 10 + digit;
+            }
+            let missing_digits = 3_usize.saturating_sub(frac_digits.len());
+            let ms = ms * 10_i64.pow(u32::try_from(missing_digits).ok()?);
+            (dt, ms)
+        } else {
+            (datetime, 0)
+        };
+
+        // date_time must now be exactly "YYYY-MM-DDTHH:MM:SS".
+        let bytes = date_time.as_bytes();
+        if bytes.len() != 19
+            || bytes[4] != b'-'
+            || bytes[7] != b'-'
+            || bytes[10] != b'T'
+            || bytes[13] != b':'
+            || bytes[16] != b':'
+        {
+            return None;
+        }
+
+        let year = date_time[..4].parse::<i64>().ok()?;
+        let month = date_time[5..7].parse::<i64>().ok()?;
+        let day = date_time[8..10].parse::<i64>().ok()?;
+        let hour = date_time[11..13].parse::<i64>().ok()?;
+        let minute = date_time[14..16].parse::<i64>().ok()?;
+        let second = date_time[17..19].parse::<i64>().ok()?;
+
+        if !(1..=12).contains(&month)
+            || !(1..=31).contains(&day)
+            || !(0..=23).contains(&hour)
+            || !(0..=59).contains(&minute)
+            || !(0..=59).contains(&second)
+        {
+            return None;
+        }
+
+        let days = civil_to_days(year, month, day);
+        let local_seconds = days
+            .checked_mul(SECONDS_PER_DAY)?
+            .checked_add(hour.checked_mul(3_600)?)?
+            .checked_add(minute.checked_mul(60)?)?
+            .checked_add(second)?;
+        let utc_seconds = local_seconds.checked_sub(tz_seconds)?;
+        let millis = utc_seconds
+            .checked_mul(MS_PER_SECOND)?
+            .checked_add(fraction_ms)?;
+        Some(Self::from_millis(millis))
+    }
+}
+
+/// Convert a civil calendar date to the number of days since 1970-01-01.
+///
+/// This is the inverse of [`civil_from_days`]; together they round-trip every
+/// date that fits in an `i64` day count. The algorithm places January and
+/// February in the previous year so that February's leap-day handling is
+/// absorbed by the year/era arithmetic.
+fn civil_to_days(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let month = if month <= 2 { month + 12 } else { month };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let day_of_year = (153 * (month - 3) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 /// The civil date for a count of days since 1970-01-01.
 ///
 /// Howard Hinnant's algorithm, which is valid for the whole `i64` range and has
@@ -220,5 +339,52 @@ mod tests {
         // returning a constant, and that it does not panic on this machine.
         let now = Timestamp::now();
         assert!(now.as_millis() > 1_600_000_000_000, "{now}");
+    }
+
+    #[test]
+    fn rfc3339_round_trips_through_display() {
+        let text = "2026-09-14T09:10:56.827Z";
+        let ts = Timestamp::parse_rfc3339(text).expect("valid timestamp parses");
+        assert_eq!(ts.to_string(), text);
+    }
+
+    #[test]
+    fn rfc3339_parses_offsets_to_utc() {
+        // 2026-09-14T09:10:56.827+02:00 is two hours earlier in UTC.
+        let with_offset = Timestamp::parse_rfc3339("2026-09-14T09:10:56.827+02:00").unwrap();
+        let utc = Timestamp::parse_rfc3339("2026-09-14T07:10:56.827Z").unwrap();
+        assert_eq!(with_offset, utc);
+
+        let negative = Timestamp::parse_rfc3339("2026-09-14T07:10:56.827-05:00").unwrap();
+        let expected = Timestamp::parse_rfc3339("2026-09-14T12:10:56.827Z").unwrap();
+        assert_eq!(negative, expected);
+    }
+
+    #[test]
+    fn rfc3339_parses_varied_fraction_lengths() {
+        let no_frac = Timestamp::parse_rfc3339("2026-09-14T09:10:56Z").unwrap();
+        let three_frac = Timestamp::parse_rfc3339("2026-09-14T09:10:56.000Z").unwrap();
+        assert_eq!(no_frac, three_frac);
+
+        let one_frac = Timestamp::parse_rfc3339("2026-09-14T09:10:56.100Z").unwrap();
+        let two_frac = Timestamp::parse_rfc3339("2026-09-14T09:10:56.1000Z").unwrap();
+        assert_eq!(one_frac, two_frac);
+    }
+
+    #[test]
+    fn rfc3339_rejects_invalid_inputs() {
+        assert!(Timestamp::parse_rfc3339("").is_none());
+        assert!(Timestamp::parse_rfc3339("not-a-date").is_none());
+        assert!(Timestamp::parse_rfc3339("2026-09-14 09:10:56Z").is_none());
+        assert!(Timestamp::parse_rfc3339("2026-09-14T09:10:56").is_none());
+        assert!(Timestamp::parse_rfc3339("2026-09-14T25:10:56Z").is_none());
+        assert!(Timestamp::parse_rfc3339("2026-09-14T09:10:56+25:00").is_none());
+    }
+
+    #[test]
+    fn rfc3339_round_trips_known_pre_epoch_instant() {
+        let ts = Timestamp::from_millis(-1);
+        let back = Timestamp::parse_rfc3339(&ts.to_string()).expect("rendered timestamp parses");
+        assert_eq!(ts, back);
     }
 }

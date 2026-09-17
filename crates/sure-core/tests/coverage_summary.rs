@@ -313,3 +313,39 @@ fn control_characters_in_check_titles_are_escaped() {
     );
     assert_eq!(summary.not_checked[0].check_title, "check\\nline");
 }
+
+#[test]
+fn control_characters_in_error_reasons_are_escaped() {
+    let mut builder = an_inspecting_builder();
+    let id = CheckId::generate();
+    builder
+        .propose(a_proposal(
+            id.clone(),
+            "check formatting",
+            Severity::CanFixLater,
+            false,
+            ActionKind::StaticAnalysis,
+        ))
+        .unwrap();
+    let schedule = builder.build();
+    let fingerprint = fingerprint();
+    let result = CheckResult::errored(
+        id,
+        "check formatting",
+        Severity::CanFixLater,
+        false,
+        "parser\npanicked",
+        fingerprint.clone(),
+    );
+    let report = aggregate_run(&schedule, &[result], &fingerprint).unwrap();
+
+    let summary = summarize(&schedule, &report, &capability());
+
+    assert_eq!(summary.not_checked.len(), 1);
+    assert!(
+        !summary.not_checked[0].reason.contains('\n'),
+        "control characters must be escaped: {:?}",
+        summary.not_checked[0].reason
+    );
+    assert!(summary.not_checked[0].reason.contains("\\n"));
+}

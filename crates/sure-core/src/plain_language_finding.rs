@@ -153,8 +153,8 @@ fn evidence_anchor_summaries(evidence: &[Evidence]) -> Vec<EvidenceAnchorSummary
 
 fn summary_from_anchor(anchor: &EvidenceAnchor) -> EvidenceAnchorSummary {
     EvidenceAnchorSummary {
-        location: anchor.location.clone(),
-        locator: anchor.locator.clone(),
+        location: escape_control_characters(&anchor.location),
+        locator: escape_control_characters(&anchor.locator),
         subject: anchor.subject.as_str().to_owned(),
     }
 }
@@ -356,6 +356,36 @@ mod tests {
             .expect("claim anchor present");
         assert_eq!(claim_summary.location, "agent-transcript.md");
         assert_eq!(claim_summary.locator, "claim #42");
+    }
+
+    #[test]
+    fn control_characters_in_evidence_anchor_location_and_locator_are_escaped() {
+        let finding = FindingBuilder::new(
+            AssessmentSource::ObservedFact,
+            SeverityRationale::BlocksHandOff,
+        )
+        .title("Anchor with control characters")
+        .severity(Severity::MustFix)
+        .explanation("Evidence points to a malicious-looking path.")
+        .user_impact("It matters.")
+        .next_step("Sanitise the input.")
+        .fingerprint(fingerprint())
+        .evidence(vec![Evidence::new(
+            EvidenceClass::ObservedFact,
+            "evidence",
+            EvidenceAnchor::new(AnchorSubject::File, "src/escape\nme.rs", "line\t1"),
+            Some(fingerprint()),
+            Severity::MustFix,
+        )])
+        .build()
+        .expect("valid finding");
+
+        let plain = render_finding(&finding);
+        let summary = plain.evidence_anchors.first().expect("one anchor");
+        assert!(!summary.location.contains('\n'));
+        assert_eq!(summary.location, "src/escape\\nme.rs");
+        assert!(!summary.locator.contains('\t'));
+        assert_eq!(summary.locator, "line\\t1");
     }
 
     #[test]

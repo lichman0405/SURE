@@ -144,7 +144,7 @@ fn categorize(result: &CheckResult) -> (Category, String) {
             let reason = if result.reason.trim().is_empty() {
                 "SURE's own check failed.".to_owned()
             } else {
-                result.reason.clone()
+                escape_control_characters(&result.reason)
             };
             (Category::CouldNotRun, reason)
         }
@@ -152,7 +152,7 @@ fn categorize(result: &CheckResult) -> (Category, String) {
             let reason = if result.reason.trim().is_empty() {
                 "SURE has no basis for a verdict on this check.".to_owned()
             } else {
-                result.reason.clone()
+                escape_control_characters(&result.reason)
             };
             (Category::CouldNotRun, reason)
         }

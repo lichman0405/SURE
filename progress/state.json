@@ -793,7 +793,7 @@
       "base_sha": "49b85a0",
       "head_sha": "cf35947",
       "evidence": [],
-      "notes": ""
+      "notes": "target/tmp/p6t005-accept-note.md"
     },
     "P6-T006": {
       "status": "queued",

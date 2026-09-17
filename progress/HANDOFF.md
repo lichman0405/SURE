@@ -2,13 +2,14 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 63 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 64 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
 `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is accepted as commit
 `de684e9`. `P6-T003` is accepted as commit `09d5fb5`. `P6-T004` is accepted as
-commit `a0575de`. `P5-T005` received two follow-up security fixes in commits
-`3d5f9a9` and `cc121ed`. Phase P6 is open at 4 of 9.
+commit `a0575de`. `P6-T005` is accepted as commit `cf35947`. `P5-T005` received
+two follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open
+at 5 of 9.
 
 **Since `P5-T006`'s acceptance, five things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -45,10 +46,16 @@ commit `a0575de`. `P5-T005` received two follow-up security fixes in commits
    user/content IDs, and hard-coded chart/dashboard values are now detected and
    reported as grounded, context-aware candidates, without blanket constant
    flagging.
+9. A worker agent completed `P6-T005` — *Implement frontend/backend route
+   consistency* — as commit `cf35947`. The supervisor verified all quality gates
+   and accepted the task. Frontend `fetch`/`axios`/React Router/Vue Router paths
+   are compared against backend routes read from source, and unmatched paths are
+   reported as grounded candidates. Dynamic/slotted/template-literal routes are
+   skipped to avoid false certainty.
 
-**The READY list is now seven entries** — `P6-T005`, `P6-T007`, `P7-T004`,
+**The READY list is now six entries** — `P6-T006`, `P6-T007`, `P7-T004`,
 `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is
-`P6-T005`, *"Implement frontend/backend route consistency"*, which is the next
+`P6-T006`, *"Implement UI-action completeness bridge"*, which is the next
 concrete action.
 
 ## What `P5-T007` added
@@ -184,6 +191,35 @@ concrete action.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
+## What `P6-T005` added
+
+- `crates/sure-core/src/route_consistency.rs` (new, ~734 lines) — compares
+  frontend route expectations against backend routes read by
+  `crate::http_routes::RouteReading`.
+- Frontend expectations are read from `fetch('/api/users')`,
+  `axios.get('/api/users')`, React Router `<Route path="/users" />`, and Vue Router
+  `path: '/users'` literal declarations.
+- Produces one `CheckProposal` per unmatched frontend path with `Severity::Note`,
+  `critical: false`, `EvidenceClass::Inference`, `ActionKind::ReadFile`, and
+  `CheckReason::CandidateFound` anchored to the frontend file/line/context.
+- Dynamic routes, slotted paths (`/items/:id`), template literals, variables, and
+  string concatenations are skipped rather than guessed, to avoid false certainty.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod route_consistency;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `route_consistency.rs` to the
+  `MAY_PROPOSE` source-rule list.
+- Includes tests for the mandatory route-mismatch fixture and negative tests for
+  dynamic/slotted/template routes.
+
+## Validation of `P6-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
@@ -196,9 +232,9 @@ concrete action.
 
 ## Next concrete action
 
-1. Start `P6-T005` — *Implement frontend/backend route consistency* — the
+1. Start `P6-T006` — *Implement UI-action completeness bridge* — the
    lowest-numbered READY task.
-2. Keep `P6-T007` in view; it is the next READY task after `P6-T005`.
+2. Keep `P6-T007` in view; it is the next READY task after `P6-T006`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

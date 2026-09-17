@@ -130,6 +130,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::browser::{AbsenceReason, Limits, Observation, Problem, ProblemKind, Report, Target};
+use crate::process::Cancellation;
 
 use super::installed;
 use super::launch;
@@ -587,7 +588,16 @@ impl Connection {
     /// about the page, because nothing here has asked for one yet — and the
     /// whole point of connecting the check to a browser is to be able to tell
     /// the difference between *the tool would not start* and *your page broke*.
-    fn attach(browser: &launch::Launched, timeout: Duration, kept: usize) -> Result<Self, Trouble> {
+    fn attach(
+        browser: &launch::Launched,
+        timeout: Duration,
+        kept: usize,
+        cancellation: &Cancellation,
+    ) -> Result<Self, Trouble> {
+        if cancellation.is_cancelled() {
+            return Err(Trouble::Link(WsError::Cancelled));
+        }
+
         let mut socket = WebSocket::connect(browser.address(), browser.browser_path(), timeout)?;
         socket.set_read_timeout(timeout)?;
         let mut connection = Self {
@@ -678,7 +688,12 @@ impl Connection {
     /// that stopped being loaded, and a driver that reported *the tool would not
     /// start* for that would be answering a question about the machine when it
     /// had been asked one about the project.
-    fn look(&mut self, target: &Target, deadline: Instant) -> Observation {
+    fn look(
+        &mut self,
+        target: &Target,
+        deadline: Instant,
+        cancellation: &Cancellation,
+    ) -> Observation {
         let address = target.url();
         let mut ended_naturally = false;
 
@@ -698,7 +713,7 @@ impl Connection {
                         0,
                     );
                 }
-                ended_naturally = self.pump(deadline);
+                ended_naturally = self.pump(deadline, cancellation);
             }
             Err(trouble) => {
                 self.folding.record(
@@ -727,9 +742,12 @@ impl Connection {
     /// browser stops talking.
     ///
     /// Returns whether the look ended because it had nothing left to watch.
-    fn pump(&mut self, deadline: Instant) -> bool {
+    fn pump(&mut self, deadline: Instant, cancellation: &Cancellation) -> bool {
         let mut settled_at: Option<Instant> = None;
         loop {
+            if cancellation.is_cancelled() {
+                return false;
+            }
             if self.folding.overflowed {
                 return false;
             }
@@ -796,7 +814,19 @@ impl Connection {
 /// [`AbsenceReason::DriverWouldNotStart`]; a caller that did not gets
 /// [`AbsenceReason::NoDriverInstalled`] when the search finds nothing, which is
 /// a different fact and a different sentence.
-pub(crate) fn open(program: Option<&Path>, target: &Target, limits: &Limits) -> Report {
+pub(crate) fn open(
+    program: Option<&Path>,
+    target: &Target,
+    limits: &Limits,
+    cancellation: &Cancellation,
+) -> Report {
+    if cancellation.is_cancelled() {
+        return Report::absent(
+            AbsenceReason::DriverWouldNotStart,
+            "the browser check was cancelled before it started",
+        );
+    }
+
     let started = Instant::now();
     let Some(program) = program.map(Path::to_path_buf).or_else(installed::find) else {
         return Report::absent(
@@ -812,29 +842,30 @@ pub(crate) fn open(program: Option<&Path>, target: &Target, limits: &Limits) -> 
         .saturating_sub(started.elapsed())
         .max(NO_LESS_THAN);
 
-    let mut browser = match launch::start(&program, left) {
+    let mut browser = match launch::start(&program, left, cancellation) {
         Ok(browser) => browser,
         Err(error) => {
             return Report::absent(AbsenceReason::DriverWouldNotStart, error.to_string());
         }
     };
 
-    let mut connection = match Connection::attach(&browser, left, limits.problems_kept()) {
-        Ok(connection) => connection,
-        Err(trouble) => {
-            return Report::absent(
-                AbsenceReason::DriverWouldNotStart,
-                format!("{}: {trouble}", program.display()),
-            );
-        }
-    };
+    let mut connection =
+        match Connection::attach(&browser, left, limits.problems_kept(), cancellation) {
+            Ok(connection) => connection,
+            Err(trouble) => {
+                return Report::absent(
+                    AbsenceReason::DriverWouldNotStart,
+                    format!("{}: {trouble}", program.display()),
+                );
+            }
+        };
 
     // Everything from here is about the page. The boundary is drawn at the
     // point where a page could first be asked for, and not at the point where
     // something goes wrong, because the answer a caller needs — *was there a
     // page to look at* — is decided by that and not by the failure.
     let deadline = started + limits.timeout();
-    let observation = connection.look(target, deadline);
+    let observation = connection.look(target, deadline, cancellation);
 
     // In this order, and the order is the point: the socket closes first so the
     // browser hears nothing more, then the browser is given its moment to leave,

@@ -70,7 +70,7 @@ use std::time::{Duration, Instant};
 
 use sure_core::consent::{PermissionPlan, PlannedCheck};
 use sure_core::enforce::Enforcement;
-use sure_core::process::{Limits, ProcessError, Termination};
+use sure_core::process::{Cancellation, Limits, ProcessError, Termination};
 use sure_core::service::{ServiceError, Supervisor};
 use sure_domain::execution::{ExecutionMode, ExecutionPermissions, Permission};
 use sure_domain::ids::{CheckId, FingerprintId};
@@ -470,6 +470,7 @@ fn a_service_starts_is_stopped_and_both_of_its_streams_are_kept() {
                 .admitted()
                 .next()
                 .expect("the one command this plan decided on"),
+            Cancellation::default(),
         )
         .expect("a service that starts");
 
@@ -560,6 +561,7 @@ fn a_program_that_is_not_there_is_refused_at_the_start_and_not_returned_running(
                 .admitted()
                 .next()
                 .expect("the one command this plan decided on"),
+            Cancellation::default(),
         )
         .expect_err("a program that is not there cannot be started");
 
@@ -597,6 +599,7 @@ fn a_service_that_ends_by_itself_reports_the_code_it_ended_with_and_where_it_ran
                 .admitted()
                 .next()
                 .expect("the one command this plan decided on"),
+            Cancellation::default(),
         )
         .expect("a service that starts");
 
@@ -668,6 +671,7 @@ fn a_service_that_outlives_its_budget_is_stopped_by_the_deadline() {
                 .admitted()
                 .next()
                 .expect("the one command this plan decided on"),
+            Cancellation::default(),
         )
         .expect("a service that starts");
 
@@ -736,6 +740,7 @@ fn a_service_that_is_dropped_is_stopped_anyway() {
                 .admitted()
                 .next()
                 .expect("the one command this plan decided on"),
+            Cancellation::default(),
         )
         .expect("a service that starts");
     assert!(
@@ -849,6 +854,7 @@ fn a_mode_that_runs_nothing_admits_nothing_that_a_service_could_be_started_from(
                 .admitted()
                 .next()
                 .expect("the mode that runs project code admits this command"),
+            Cancellation::default(),
         )
         .expect("a service that starts");
     assert!(

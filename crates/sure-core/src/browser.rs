@@ -795,7 +795,12 @@ impl Report {
 /// configuration needs.
 pub trait BrowserDriver {
     /// Open `target` and report what the page did.
-    fn observe(&self, target: &Target, limits: &Limits) -> Report;
+    fn observe(
+        &self,
+        target: &Target,
+        limits: &Limits,
+        cancellation: &crate::process::Cancellation,
+    ) -> Report;
 }
 
 /// The reason a browser check is not run here, or `None` if SURE's own rules
@@ -860,7 +865,12 @@ mod tests {
     struct Stub(Report);
 
     impl BrowserDriver for Stub {
-        fn observe(&self, _target: &Target, _limits: &Limits) -> Report {
+        fn observe(
+            &self,
+            _target: &Target,
+            _limits: &Limits,
+            _cancellation: &crate::process::Cancellation,
+        ) -> Report {
             self.0.clone()
         }
     }
@@ -1244,14 +1254,22 @@ mod tests {
         // than through the constructor: a `Box<dyn BrowserDriver>` is a driver,
         // and what it reports goes through the one door.
         let driver: Box<dyn BrowserDriver> = Box::new(Stub(Report::observed(a_clean_look())));
-        let report = driver.observe(&a_target(), &a_budget());
+        let report = driver.observe(
+            &a_target(),
+            &a_budget(),
+            &crate::process::Cancellation::default(),
+        );
         assert_eq!(report.status(), CheckStatus::Pass);
 
         let absent: Box<dyn BrowserDriver> = Box::new(Stub(Report::absent(
             AbsenceReason::NoDriverInstalled,
             "no chromium on PATH",
         )));
-        let report = absent.observe(&a_target(), &a_budget());
+        let report = absent.observe(
+            &a_target(),
+            &a_budget(),
+            &crate::process::Cancellation::default(),
+        );
         assert_eq!(report.status(), CheckStatus::Skipped);
         let verdict = a_verdict(&report);
         assert_eq!(

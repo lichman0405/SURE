@@ -153,9 +153,12 @@ impl Supervisor {
     /// * [`ServiceError::NotFollowed`] when SURE cannot say what the run did.
     ///   **This is the one error that is not a statement that nothing ran**, and
     ///   it says so.
-    pub fn start(&self, command: AdmittedCommand<'_>) -> Result<Service, ServiceError> {
+    pub fn start(
+        &self,
+        command: AdmittedCommand<'_>,
+        cancellation: Cancellation,
+    ) -> Result<Service, ServiceError> {
         let command = command.command().clone();
-        let cancellation = Cancellation::default();
         let request = ProcessRequest::new(
             command.program(),
             &self.working_directory,

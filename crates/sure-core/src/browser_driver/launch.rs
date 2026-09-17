@@ -50,6 +50,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::process::Cancellation;
+
 /// How often the profile directory is looked at while the browser starts.
 ///
 /// The file appears once and is then read; polling is what bounds the wait by
@@ -168,7 +170,11 @@ impl std::error::Error for LaunchError {}
 ///
 /// [`LaunchError`], which the caller turns into
 /// [`AbsenceReason::DriverWouldNotStart`](crate::browser::AbsenceReason::DriverWouldNotStart).
-pub fn start(program: &Path, budget: Duration) -> Result<Launched, LaunchError> {
+pub fn start(
+    program: &Path,
+    budget: Duration,
+    cancellation: &Cancellation,
+) -> Result<Launched, LaunchError> {
     let profile = private_profile();
     std::fs::create_dir_all(&profile).map_err(|error| LaunchError::WouldNotStart {
         program: program.to_path_buf(),
@@ -214,6 +220,16 @@ pub fn start(program: &Path, budget: Duration) -> Result<Launched, LaunchError> 
 
     let deadline = Instant::now() + budget;
     loop {
+        if cancellation.is_cancelled() {
+            let mut child = child;
+            let _ = crate::process::terminate::stop(&mut child);
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&profile);
+            return Err(LaunchError::WouldNotStart {
+                program: program.to_path_buf(),
+                error: std::io::Error::new(std::io::ErrorKind::Interrupted, "cancelled"),
+            });
+        }
         match read_active_port(&profile) {
             Some((port, browser_path)) => {
                 return Ok(Launched {
@@ -567,8 +583,12 @@ mod tests {
     #[test]
     fn a_program_that_does_not_exist_is_an_error_a_caller_can_read() {
         let missing = std::env::temp_dir().join("sure-there-is-no-such-browser-anywhere");
-        let error = start(&missing, Duration::from_millis(500))
-            .expect_err("a program that does not exist cannot be started");
+        let error = start(
+            &missing,
+            Duration::from_millis(500),
+            &Cancellation::default(),
+        )
+        .expect_err("a program that does not exist cannot be started");
         assert!(
             matches!(error, LaunchError::WouldNotStart { .. }),
             "{error:?}"

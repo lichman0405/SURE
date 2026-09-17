@@ -115,7 +115,7 @@ use sure_domain::status::{CheckResult, CheckStatus};
 
 use crate::enforce::{AdmittedCommand, Enforcement};
 use crate::probe::{self, Endpoint, Probe, ProbeOutcome};
-use crate::process::{self, Outcome, Termination};
+use crate::process::{self, Cancellation, Outcome, Termination};
 use crate::runtime_probes::{ProbeKind, RuntimeProbe};
 use crate::service::{Service, Supervisor};
 
@@ -392,9 +392,9 @@ impl<'a> StartSmoke<'a> {
     /// started is an `error` result with the runner's own words in it, not a
     /// failure of this function.
     #[must_use]
-    pub fn run(&self) -> CheckResult {
+    pub fn run(&self, cancellation: &Cancellation) -> CheckResult {
         let check = self.admitted.command().check();
-        let (status, reason) = self.observe();
+        let (status, reason) = self.observe(cancellation);
         let id = check.id().clone();
         let title = check.title().to_owned();
         let severity = check.severity();
@@ -443,9 +443,17 @@ impl<'a> StartSmoke<'a> {
     /// `reason()` separately and argue that the two run the same rows in the
     /// same order. Here the rows are the same rows and they are walked once, so
     /// there is no order for the two to disagree about.
-    fn observe(&self) -> (CheckStatus, String) {
+    fn observe(&self, cancellation: &Cancellation) -> (CheckStatus, String) {
+        if cancellation.is_cancelled() {
+            return (
+                CheckStatus::Error,
+                String::from("the check was cancelled before it started"),
+            );
+        }
+
         let supervisor = Supervisor::new(&self.directory, self.limits.service);
-        let service = match supervisor.start(self.admitted) {
+        let service_cancellation = Cancellation::default();
+        let service = match supervisor.start(self.admitted, service_cancellation) {
             Ok(service) => service,
             Err(error) => {
                 return (
@@ -455,7 +463,7 @@ impl<'a> StartSmoke<'a> {
             }
         };
 
-        let outlived_the_window = !self.wait_out(&service);
+        let outlived_the_window = !self.wait_out(&service, cancellation);
         let asked = if self.limits.endpoint.is_some() && outlived_the_window {
             self.ask()
         } else {
@@ -567,9 +575,12 @@ impl<'a> StartSmoke<'a> {
     /// running. The check comes before the first sleep, so a service that was
     /// already gone when the start returned — which the operating system can
     /// report either way round — is not given [`POLL`] of grace.
-    fn wait_out(&self, service: &Service) -> bool {
+    fn wait_out(&self, service: &Service, cancellation: &Cancellation) -> bool {
         let deadline = Instant::now() + self.limits.window;
         loop {
+            if cancellation.is_cancelled() {
+                return true;
+            }
             if service.has_finished() {
                 return true;
             }

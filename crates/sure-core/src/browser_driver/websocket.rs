@@ -120,6 +120,8 @@ pub enum WsError {
     /// A frame arrived that RFC 6455 does not allow, or that this client does
     /// not implement.
     Malformed(String),
+    /// The connection was cancelled before it completed.
+    Cancelled,
 }
 
 impl std::fmt::Display for WsError {
@@ -137,6 +139,7 @@ impl std::fmt::Display for WsError {
             ),
             Self::Closed => write!(formatter, "the peer closed the connection"),
             Self::Malformed(what) => write!(formatter, "{what}"),
+            Self::Cancelled => write!(formatter, "the connection was cancelled"),
         }
     }
 }

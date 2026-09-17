@@ -496,7 +496,12 @@ fn the_two_spellings_of_the_browser_modules_path_agree() {
 struct Outside(Report);
 
 impl BrowserDriver for Outside {
-    fn observe(&self, _target: &Target, _limits: &sure_core::browser::Limits) -> Report {
+    fn observe(
+        &self,
+        _target: &Target,
+        _limits: &sure_core::browser::Limits,
+        _cancellation: &sure_core::process::Cancellation,
+    ) -> Report {
         self.0.clone()
     }
 }
@@ -514,7 +519,11 @@ fn the_interface_is_usable_from_outside_the_crate_and_through_a_boxed_driver() {
     let target = Target::local(3000, "/").expect("a loopback target");
     let limits = sure_core::browser::Limits::new(std::time::Duration::from_secs(5), 10)
         .expect("five seconds is a budget");
-    let report = driver.observe(&target, &limits);
+    let report = driver.observe(
+        &target,
+        &limits,
+        &sure_core::process::Cancellation::default(),
+    );
     assert_eq!(report.status(), CheckStatus::Pass);
 
     // A caller that does not want to build a budget by hand still cannot build

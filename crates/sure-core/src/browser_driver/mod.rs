@@ -179,8 +179,13 @@ impl BrowserDriver for Browser {
     /// Never panics and never returns a verdict: the result is an
     /// [`Absence`](crate::browser::Absence) when no page could be asked for, and
     /// an [`Observation`](crate::browser::Observation) once one could.
-    fn observe(&self, target: &Target, limits: &Limits) -> Report {
-        session::open(self.program.as_deref(), target, limits)
+    fn observe(
+        &self,
+        target: &Target,
+        limits: &Limits,
+        cancellation: &crate::process::Cancellation,
+    ) -> Report {
+        session::open(self.program.as_deref(), target, limits, cancellation)
     }
 }
 
@@ -221,7 +226,11 @@ mod tests {
         let driver: Box<dyn BrowserDriver> = Box::new(Browser::with_program(
             "/definitely/not/a/browser/anywhere/chrome",
         ));
-        let report = driver.observe(&a_target(), &a_budget());
+        let report = driver.observe(
+            &a_target(),
+            &a_budget(),
+            &crate::process::Cancellation::default(),
+        );
 
         let crate::browser::Report::Absent(absence) = &report else {
             panic!("a program that does not exist produced an observation: {report:?}");
@@ -259,7 +268,11 @@ mod tests {
     #[test]
     fn a_named_program_is_the_one_that_is_tried() {
         let named = Browser::with_program("/definitely/not/a/browser/anywhere/chrome");
-        let report = named.observe(&a_target(), &a_budget());
+        let report = named.observe(
+            &a_target(),
+            &a_budget(),
+            &crate::process::Cancellation::default(),
+        );
         let crate::browser::Report::Absent(absence) = &report else {
             panic!("a program that does not exist produced an observation: {report:?}");
         };

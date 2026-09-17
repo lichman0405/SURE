@@ -325,11 +325,16 @@ fn read_request(stream: &mut TcpStream, asked: &Mutex<Vec<String>>) -> Option<St
 /// protocol, the folding, and the report. Nothing here names a program, because
 /// naming one is what a caller does when it has a browser the search cannot
 /// find, and that is a different test — in the module's own unit tests.
-fn observe(port: u16, path: &str, budget: Duration) -> Report {
+fn observe(
+    port: u16,
+    path: &str,
+    budget: Duration,
+    cancellation: &sure_core::process::Cancellation,
+) -> Report {
     let target = Target::local(port, path).expect("a loopback target");
     let limits = Limits::new(budget, PROBLEMS_KEPT).expect("a budget and room for problems");
     let driver: Box<dyn BrowserDriver> = Box::new(Browser::system());
-    driver.observe(&target, &limits)
+    driver.observe(&target, &limits, cancellation)
 }
 
 /// The report, refused unless it is the shape this machine should have produced.
@@ -417,7 +422,12 @@ fn a_healthy_local_page_is_opened_and_comes_back_green() {
     if found.is_none() {
         // The machine branch, asserted in full before the test says what it
         // could not do — so that this is a checked absence rather than a skip.
-        let report = observe(site.port, "/clean", PATIENT);
+        let report = observe(
+            site.port,
+            "/clean",
+            PATIENT,
+            &sure_core::process::Cancellation::default(),
+        );
         let absence = absent(&report, found);
         assert_eq!(absence.reason, AbsenceReason::NoDriverInstalled);
         assert_eq!(report.status(), CheckStatus::Skipped);
@@ -441,7 +451,12 @@ fn a_healthy_local_page_is_opened_and_comes_back_green() {
         return;
     }
 
-    let report = observe(site.port, "/clean", PATIENT);
+    let report = observe(
+        site.port,
+        "/clean",
+        PATIENT,
+        &sure_core::process::Cancellation::default(),
+    );
     let observation = opened(&report, found);
 
     assert!(
@@ -494,7 +509,12 @@ fn a_page_that_throws_and_asks_for_something_missing_reports_all_of_it() {
     let found = find_installed_browser();
 
     if found.is_none() {
-        let report = observe(site.port, "/broken", PATIENT);
+        let report = observe(
+            site.port,
+            "/broken",
+            PATIENT,
+            &sure_core::process::Cancellation::default(),
+        );
         let absence = absent(&report, found);
         assert_eq!(absence.reason, AbsenceReason::NoDriverInstalled);
         assert_eq!(report.status(), CheckStatus::Skipped);
@@ -506,7 +526,12 @@ fn a_page_that_throws_and_asks_for_something_missing_reports_all_of_it() {
         return;
     }
 
-    let report = observe(site.port, "/broken", PATIENT);
+    let report = observe(
+        site.port,
+        "/broken",
+        PATIENT,
+        &sure_core::process::Cancellation::default(),
+    );
     let observation = opened(&report, found);
 
     assert_eq!(observation.title, "a page that broke");
@@ -601,7 +626,12 @@ fn a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence() {
     let found = find_installed_browser();
 
     if found.is_none() {
-        let report = observe(port, "/", PATIENT);
+        let report = observe(
+            port,
+            "/",
+            PATIENT,
+            &sure_core::process::Cancellation::default(),
+        );
         let absence = absent(&report, found);
         assert_eq!(absence.reason, AbsenceReason::NoDriverInstalled);
         assert_eq!(report.status(), CheckStatus::Skipped);
@@ -613,7 +643,12 @@ fn a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence() {
         return;
     }
 
-    let report = observe(port, "/", BRIEF);
+    let report = observe(
+        port,
+        "/",
+        BRIEF,
+        &sure_core::process::Cancellation::default(),
+    );
     let observation = opened(&report, found);
 
     let opened_failure = observation
@@ -709,4 +744,24 @@ fn the_program_sure_would_run_is_not_one_the_project_could_have_written() {
          project's own setup could have put it: {}",
         program.display()
     );
+}
+
+/// **A browser check that is cancelled before it starts is skipped**, and the
+/// cancellation path is wired through the public API.
+#[test]
+fn a_browser_check_that_is_cancelled_before_it_starts_is_skipped() {
+    let cancelled = sure_core::process::Cancellation::default();
+    cancelled.cancel();
+    let site = Site::serving(&[("/clean", Response::html(CLEAN))]);
+    let report = observe(site.port, "/clean", PATIENT, &cancelled);
+    let Report::Absent(absence) = &report else {
+        panic!("a cancelled check produced an observation: {report:?}");
+    };
+    assert_eq!(
+        absence.reason,
+        AbsenceReason::DriverWouldNotStart,
+        "a cancelled check is reported as the driver not starting"
+    );
+    assert_eq!(report.status(), CheckStatus::Skipped);
+    assert!(!report.status().is_green());
 }

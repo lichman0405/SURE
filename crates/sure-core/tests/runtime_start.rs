@@ -1002,7 +1002,7 @@ fn a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange() {
         Some(endpoint(port)),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1099,7 +1099,7 @@ fn a_service_that_comes_up_and_answers_nothing_is_not_a_pass() {
         Some(endpoint(port)),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1171,7 +1171,7 @@ fn a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named() 
         ),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert!(
         result
@@ -1251,7 +1251,7 @@ fn a_service_that_comes_up_with_nothing_to_ask_is_a_warning_and_never_green() {
     );
     let smoke = smoke(&fixture.project, probe, &enforcement, WINDOW, None);
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1327,7 +1327,7 @@ fn a_service_that_ends_by_itself_inside_the_window_fails_and_says_why() {
         Some(endpoint(free_port())),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1445,7 +1445,7 @@ fn a_service_that_outlives_the_window_and_then_ends_is_still_a_failure() {
         limits_with(Duration::from_secs(1), ENDS_DURING, Some(endpoint(port))),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1549,7 +1549,7 @@ fn the_service_runs_in_the_directory_the_probe_names() {
         Some(endpoint(port)),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,
@@ -1626,7 +1626,7 @@ fn a_command_admitted_for_another_check_is_not_the_one_that_runs() {
         Some(endpoint(port)),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert!(
         !died_path(&decoy_report).exists(),
@@ -1680,7 +1680,7 @@ fn a_program_that_is_not_there_is_an_error_and_not_a_failure_or_a_pass() {
         Some(endpoint(free_port())),
     );
 
-    let result = smoke.run();
+    let result = smoke.run(&process::Cancellation::default());
 
     assert_eq!(
         result.status,

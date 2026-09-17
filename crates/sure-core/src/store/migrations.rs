@@ -55,11 +55,18 @@ pub struct Migration {
 /// Append-only. Changing a migration that has shipped would leave two machines
 /// at the same `user_version` with different schemas, which is precisely the
 /// state the version number exists to make impossible.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "records",
-    sql: include_str!("sql/0001_records.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "records",
+        sql: include_str!("sql/0001_records.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "sessions",
+        sql: include_str!("sql/0002_sessions.sql"),
+    },
+];
 
 /// The version this build migrates a database to.
 pub const LATEST: u32 = MIGRATIONS[MIGRATIONS.len() - 1].version;

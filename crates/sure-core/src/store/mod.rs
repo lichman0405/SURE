@@ -340,6 +340,68 @@ impl Store {
         Ok(migrations::version(&self.connection)?)
     }
 
+    /// The underlying SQLite connection, for callers that need to run their own
+    /// SQL inside the store's transaction and concurrency contract.
+    ///
+    /// Not public: a caller that needs this is part of `sure-core` and should
+    /// use `pub(crate)` access. External crates use the typed methods.
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    /// Redact, validate against the schema, and stringify a document.
+    ///
+    /// Returns the JSON text that would be stored, without writing it. Used by
+    /// callers that manage their own transaction and need to insert into
+    /// `records` atomically with other tables.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::NotStorable`], [`StoreError::Rejected`],
+    /// [`StoreError::Schema`], or [`StoreError::MalformedRow`].
+    pub(crate) fn validate_and_stringify(
+        &self,
+        kind: RecordKind,
+        document: &Value,
+    ) -> Result<String, StoreError> {
+        if !kind.is_storable() {
+            return Err(StoreError::NotStorable { kind });
+        }
+        let document = redact_document(document);
+
+        match kind.document() {
+            Some(document_kind) => {
+                let schema = document_kind.schema().map_err(|error| StoreError::Schema {
+                    kind,
+                    message: error.to_string(),
+                })?;
+                let violations = schema.validate(&document);
+                if !violations.is_empty() {
+                    return Err(StoreError::Rejected { kind, violations });
+                }
+            }
+            None if !document.is_object() => {
+                return Err(StoreError::Rejected {
+                    kind,
+                    violations: vec![sure_protocol::schema::Violation {
+                        schema: "(no schema: a recording has no fixed shape)".to_owned(),
+                        path: String::new(),
+                        kind: sure_protocol::schema::ViolationKind::WrongType {
+                            expected: "an object".to_owned(),
+                            found: sure_protocol::schema::type_name(&document).to_owned(),
+                        },
+                    }],
+                });
+            }
+            None => {}
+        }
+
+        serde_json::to_string(&document).map_err(|error| StoreError::MalformedRow {
+            id: 0,
+            message: error.to_string(),
+        })
+    }
+
     /// Store a document, unbound to any project.
     ///
     /// # Errors
@@ -599,44 +661,7 @@ impl Store {
         project_root: Option<&str>,
         project_fingerprint: Option<&str>,
     ) -> Result<i64, StoreError> {
-        if !kind.is_storable() {
-            return Err(StoreError::NotStorable { kind });
-        }
-        let document = redact_document(document);
-
-        match kind.document() {
-            Some(document_kind) => {
-                let schema = document_kind.schema().map_err(|error| StoreError::Schema {
-                    kind,
-                    message: error.to_string(),
-                })?;
-                let violations = schema.validate(&document);
-                if !violations.is_empty() {
-                    return Err(StoreError::Rejected { kind, violations });
-                }
-            }
-            // A recording has no schema. It still has to be an object, so that
-            // a later reader is not left guessing what shape it is.
-            None if !document.is_object() => {
-                return Err(StoreError::Rejected {
-                    kind,
-                    violations: vec![sure_protocol::schema::Violation {
-                        schema: "(no schema: a recording has no fixed shape)".to_owned(),
-                        path: String::new(),
-                        kind: sure_protocol::schema::ViolationKind::WrongType {
-                            expected: "an object".to_owned(),
-                            found: sure_protocol::schema::type_name(&document).to_owned(),
-                        },
-                    }],
-                });
-            }
-            None => {}
-        }
-
-        let text = serde_json::to_string(&document).map_err(|error| StoreError::MalformedRow {
-            id: 0,
-            message: error.to_string(),
-        })?;
+        let text = self.validate_and_stringify(kind, document)?;
         let written_at_ms = Timestamp::now().as_millis();
         let version = i64::from(sure_protocol::DOCUMENT_VERSION);
 
@@ -718,7 +743,7 @@ impl Store {
 /// `DatabaseLocked` is the shared-cache variant, which SURE does not use but
 /// which means the same thing to a caller, so it is reported the same way
 /// rather than as an unexplained open failure.
-fn is_busy(error: &rusqlite::Error) -> bool {
+pub(crate) fn is_busy(error: &rusqlite::Error) -> bool {
     matches!(
         error,
         rusqlite::Error::SqliteFailure(inner, _)
@@ -742,7 +767,7 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 /// and true: nothing reaches the file without having been through
 /// [`crate::redact::redact`], and `tests/store_lifecycle.rs` checks that against
 /// the bytes on disk.
-fn redact_document(value: &Value) -> Value {
+pub(crate) fn redact_document(value: &Value) -> Value {
     match value {
         Value::String(text) => Value::String(redact::redact(text)),
         Value::Array(items) => Value::Array(items.iter().map(redact_document).collect()),
@@ -859,7 +884,7 @@ impl HistoryFilter<'_> {
 /// the compiled location of this crate rather than the working directory, so a
 /// test gives the same answer wherever it was started from.
 #[cfg(test)]
-fn scratch_root() -> PathBuf {
+pub(crate) fn scratch_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)

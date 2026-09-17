@@ -40,6 +40,7 @@ pub mod plain_language_finding;
 pub mod probe;
 pub mod process;
 pub mod project_intent;
+pub mod project_verdict;
 pub mod redact;
 pub mod references;
 pub mod route_consistency;

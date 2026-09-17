@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P7",
-  "last_updated": "2026-09-17T12:09:33Z",
+  "last_updated": "2026-09-17T12:11:05.024Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -916,8 +916,8 @@
       "notes": "target/tmp/p7t004-accept-note.md"
     },
     "P7-T005": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-17T12:11:05.024Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

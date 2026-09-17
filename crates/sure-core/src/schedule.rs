@@ -234,7 +234,11 @@ impl CheckReason {
                 path,
                 line,
                 context,
-            } => format!("SURE found `{context}` in {path} on line {line}."),
+            } => format!(
+                "SURE found `{}` in {} on line {line}.",
+                crate::redact::escape_control_characters(context),
+                crate::redact::escape_control_characters(path)
+            ),
             Self::ProjectWide => "This is about the project as a whole.".to_owned(),
         }
     }
@@ -339,8 +343,11 @@ impl CheckReason {
                 context,
             } => Some(EvidenceAnchor::new(
                 AnchorSubject::LineRange,
-                path.clone(),
-                format!("the candidate `{context}` on line {line}"),
+                crate::redact::escape_control_characters(path),
+                format!(
+                    "the candidate `{}` on line {line}",
+                    crate::redact::escape_control_characters(context)
+                ),
             )),
             Self::ProjectWide => None,
         }

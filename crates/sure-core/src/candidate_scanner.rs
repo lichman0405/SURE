@@ -260,6 +260,9 @@ fn scan_source_files(
         }
 
         let full = discovery.root.join(path);
+        if !is_within_project(&discovery.root, &full) {
+            continue;
+        }
         let Ok(metadata) = fs::metadata(&full) else {
             continue;
         };
@@ -301,6 +304,22 @@ fn scan_source_files(
             }
         }
     }
+}
+
+/// Whether a resolved path is still inside the project root.
+///
+/// The scan module already promises containment and refuses symlinks, but this
+/// is a cheap second lock on the door: a path that climbs out with `..` or that
+/// resolves to something outside the root is not read.
+fn is_within_project(root: &Path, full: &Path) -> bool {
+    let Ok(root_canon) = std::fs::canonicalize(root) else {
+        return false;
+    };
+    let Ok(full_canon) = std::fs::canonicalize(full) else {
+        return false;
+    };
+    full_canon.starts_with(&root_canon)
+        && full_canon.components().count() > root_canon.components().count()
 }
 
 /// Whether a line contains any of the given patterns as whole words.

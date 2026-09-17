@@ -33,6 +33,20 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # **The browser tests need a machine that can host a sandboxed Chromium,
+      # and Ubuntu 24.04 is not one by default.** It restricts unprivileged user
+      # namespaces through AppArmor, and Chromium refuses to start without a
+      # usable sandbox — `/usr/bin/chromium` aborts at `ZygoteHostImpl::Init`
+      # with *No usable sandbox!*. The product never passes `--no-sandbox`: a
+      # browser without it would run the project's JavaScript without the
+      # boundary that exists to hold it, so what has to change is the *runner*
+      # and not the rule. The knob below is the documented one, and it is
+      # deliberately not made tolerant — if a future image drops it this step
+      # fails, which is the honest outcome: the browser tests on Linux are then
+      # visibly missing rather than quietly skipped.
+      - name: Let a sandboxed browser start on Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # `--no-fail-fast` because the first failing target otherwise aborts the
       # rest, and the targets are where the platform-specific tests live: a
       # failure in `sure-core --lib` would hide every integration target after

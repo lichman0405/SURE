@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P8",
-  "last_updated": "2026-09-17T14:57:23.178Z",
+  "last_updated": "2026-09-17T15:33:43.520Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1021,10 +1021,10 @@
       "notes": "target/tmp/p8t002-accept-note.md"
     },
     "P8-T003": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-17T15:33:43.519Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "719d9d2",
       "head_sha": null,
       "evidence": [],
       "notes": ""

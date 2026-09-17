@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P7",
-  "last_updated": "2026-09-17T12:30:12Z",
+  "last_updated": "2026-09-17T12:32:10.340Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -931,13 +931,13 @@
       "notes": "target/tmp/p7t005-accept-note.md"
     },
     "P7-T006": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-17T12:32:10.339Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "crates/sure-cli/src/human_report.rs: renders ProjectVerdict to plain text; uses render_summary, render_findings, coverage_summary::summarize; escapes control characters; no ANSI by default; material/non-material findings separated; 12 inline tests. sure-core/src/redact.rs: escape_control_characters made pub so CLI can escape not-checked titles."
     },
     "P7-T007": {
       "status": "queued",

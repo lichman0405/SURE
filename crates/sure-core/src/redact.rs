@@ -258,7 +258,9 @@ fn bearer_token_length(rest: &str, out: &mut String) -> Option<usize> {
 /// Shared with [`crate::diagnostics::Field`], which escapes quotes and
 /// backslashes as well and needs the same treatment of the newline in the
 /// middle of a value.
-pub(crate) fn escape_control_characters(text: &str) -> String {
+/// Render control characters as escapes so a value cannot add lines to a
+/// message, or start a new "line" that looks like it came from SURE.
+pub fn escape_control_characters(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         if ch == '\n' {

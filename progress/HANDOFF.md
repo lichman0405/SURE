@@ -19,7 +19,8 @@ accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `P8-T001` is accepted as commit `8d9a506`. `P8-T002` is accepted as commit
 `d0c496d`. `P8-T003` is accepted as commit `178b574`. `P8-T004` is accepted as
 commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
-accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted. `P5-T005` received two follow-up security fixes in
+accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted as commit
+`b7068a4`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit

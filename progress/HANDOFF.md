@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 72 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 73 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -12,9 +12,9 @@ accepted as commit `de684e9`. `P6-T003` is accepted as commit `09d5fb5`.
 commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
 accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
 `P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
-`a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P5-T005` received two
-follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P7 is open at
-4 of 9.
+`a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P7-T005` is accepted as
+commit `f683c18`. `P5-T005` received two follow-up security fixes in commits
+`3d5f9a9` and `cc121ed`. Phase P7 is open at 5 of 9.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -109,11 +109,17 @@ follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P7 is open at
     accepted the task. The module joins a scheduled check plan to the run report
     it produced, counts checked/skipped/could-not-run checks, surfaces critical
     gaps, and emits a plain-language support-level sentence.
+18. A worker agent completed `P7-T005` — *Implement overall project verdict* — as
+    commit `f683c18`. The supervisor verified all quality gates and accepted the
+    task. The module assembles the completed-run pieces into a `ProjectVerdict`
+    and renders a plain-language overall summary with independent false-green
+    protection: it says the project is not ready whenever the aggregate is not
+    green or an open finding blocks hand-off, and it surfaces skipped/could-not-run
+    checks and the user-request caveat.
 
-**Phase P7 is open at 4 of 9.** The READY list is now `P7-T005`, `P8-T001`,
+**Phase P7 is open at 5 of 9.** The READY list is now `P7-T006`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T005`, *"Implement overall project verdict"*,
-which is the next concrete action.
+lowest-numbered READY task is `P7-T006`, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13551,6 +13557,33 @@ absent text.
   and control-character escaping.
 
 ## Validation of `P7-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P7-T005` added
+
+- `crates/sure-core/src/project_verdict.rs` (new, ~145 lines) —
+  `build_verdict()` assembles a `ProjectVerdict` from its inputs;
+  `render_summary()` produces a plain-language overall summary.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod project_verdict;`.
+- `crates/sure-core/tests/project_verdict.rs` (new, ~268 lines) — integration
+  tests for the acceptance scenarios.
+- The summary includes the aggregate headline, hand-off readiness, the
+  after-the-fact user-request caveat, the adapter support level, open-finding
+  counts by severity, and a sentence for skipped/could-not-run checks.
+- Independent false-green protection: the summary says the project is not ready
+  if the aggregate is not green or any open finding blocks hand-off, even if
+  `ProjectVerdict::is_ready_for_hand_off` were inconsistent.
+- Critical not-checked check titles are escaped with
+  `crate::redact::escape_control_characters` before being listed.
+
+## Validation of `P7-T005`
 
 | Gate | Result |
 | --- | ------ |

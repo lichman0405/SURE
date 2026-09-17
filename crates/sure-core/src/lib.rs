@@ -19,6 +19,7 @@ pub mod consent;
 pub mod container;
 pub mod core_flow;
 pub mod db_migrations;
+pub mod demo_data_heuristics;
 pub mod dependency_state;
 pub mod diagnostics;
 pub mod discover;

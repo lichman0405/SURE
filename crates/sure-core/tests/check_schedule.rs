@@ -231,6 +231,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          was found. The `CandidateContext` classifier distinguishes test, \
          example, mock-fixture and production code",
     ),
+    (
+        "src/demo_data_heuristics.rs",
+        "`P6-T004`: it scans source files for hard-coded demo-data patterns — \
+         demo analytics values, hard-coded demo or sample datasets, placeholder \
+         user or content IDs, and hard-coded chart or dashboard demo values. It \
+         produces candidate checks with `Severity::Note`, `critical: false`, and \
+         `EvidenceClass::Inference`, using `CheckReason::CandidateFound` to \
+         anchor each proposal to the file, line and context where the pattern \
+         was found. The `CandidateContext` classifier distinguishes test, \
+         example, mock-fixture and production code, preferring Product context \
+         when both exist",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

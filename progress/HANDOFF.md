@@ -2,12 +2,13 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 61 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 62 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
 `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is accepted as commit
-`de684e9`. `P5-T005` received two follow-up security fixes in commits `3d5f9a9`
-and `cc121ed`. Phase P6 is open at 2 of 9.
+`de684e9`. `P6-T003` is accepted as commit `09d5fb5`. `P5-T005` received two
+follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at
+3 of 9.
 
 **Since `P5-T006`'s acceptance, five things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -33,11 +34,16 @@ and `cc121ed`. Phase P6 is open at 2 of 9.
    — as commit `de684e9`. The supervisor verified all quality gates and accepted
    the task. Test/example/docs/fixture paths are now distinguished from likely
    production paths, and candidate check titles reflect the context.
+7. A worker agent completed `P6-T003` — *Implement no-op/fake-success heuristics*
+   — as commit `09d5fb5`. The supervisor verified all quality gates and accepted
+   the task. Fake email addresses, fake payment/sandbox tokens, no-op functions,
+   and hard-coded success responses are now detected and reported as grounded,
+   context-aware candidates.
 
-**The READY list is now nine entries** — `P6-T003`, `P6-T004`, `P6-T005`,
-`P6-T007`, `P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The
-lowest-numbered is `P6-T003`, *"Implement no-op/fake-success heuristics"*, which
-is the next concrete action.
+**The READY list is now eight entries** — `P6-T004`, `P6-T005`, `P6-T007`,
+`P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
+is `P6-T004`, *"Implement hard-coded demo-data heuristics"*, which is the next
+concrete action.
 
 ## What `P5-T007` added
 
@@ -116,6 +122,34 @@ is the next concrete action.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
+## What `P6-T003` added
+
+- `crates/sure-core/src/noop_heuristics.rs` (new, ~908 lines) —
+  `NoOpCategory` enum (`FakeEmail`, `FakePayment`, `NoOpFunction`, `HardCodedSuccess`)
+  and line-based heuristics detecting fake email addresses/domains, fake
+  payment/sandbox tokens, no-op functions that return constant success values,
+  and hard-coded success responses.
+- Produces one `CheckProposal` per detected category with `Severity::Note`,
+  `critical: false`, `EvidenceClass::Inference`, `ActionKind::ReadFile`, and
+  `CheckReason::CandidateFound` anchored to file/line/context.
+- Uses `CandidateContext` so titles reflect test/example/doc/mock/product context,
+  and prefers `Product`-context detections when both exist for the same category.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod noop_heuristics;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `noop_heuristics.rs` to the
+  `MAY_PROPOSE` source-rule list.
+- 20 unit/integration tests, including an acceptance test that proves all four
+  mandatory fixture categories produce grounded candidates in one project.
+
+## Validation of `P6-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
@@ -128,10 +162,9 @@ is the next concrete action.
 
 ## Next concrete action
 
-1. Start `P6-T003` — *Implement no-op/fake-success heuristics* — the
+1. Start `P6-T004` — *Implement hard-coded demo-data heuristics* — the
    lowest-numbered READY task.
-2. Keep `P6-T004` and `P6-T005` in view; they are the next READY tasks after
-   `P6-T003`.
+2. Keep `P6-T005` in view; it is the next READY task after `P6-T004`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

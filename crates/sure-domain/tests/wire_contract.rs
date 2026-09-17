@@ -137,6 +137,9 @@ frozen!(AnchorSubject, test: anchor_subject_wire_names_are_frozen, {
     Documentation => "documentation",
     Git => "git",
     Runtime => "runtime",
+    Intent => "intent",
+    Claim => "claim",
+    Model => "model",
 });
 
 frozen!(ClaimAssessment, test: claim_assessment_wire_names_are_frozen, {
@@ -525,6 +528,14 @@ fn the_json_schemas_and_the_rust_enums_name_the_same_values() {
             "project-intent.schema.json",
             "/properties/source/enum",
             IntentSource::ALL
+                .iter()
+                .map(|s| s.as_str().to_owned())
+                .collect(),
+        ),
+        (
+            "finding.schema.json",
+            "/properties/evidence/items/properties/anchor/properties/subject/enum",
+            AnchorSubject::ALL
                 .iter()
                 .map(|s| s.as_str().to_owned())
                 .collect(),

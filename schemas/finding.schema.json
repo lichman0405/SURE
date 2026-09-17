@@ -44,7 +44,83 @@
     "evidence": {
       "type": "array",
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": [
+          "id",
+          "class",
+          "summary",
+          "anchor",
+          "severity"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "observed_fact",
+              "deterministic_check",
+              "model_assessment",
+              "inference",
+              "unknown"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "anchor": {
+            "type": "object",
+            "required": [
+              "subject",
+              "location",
+              "locator"
+            ],
+            "properties": {
+              "subject": {
+                "enum": [
+                  "file",
+                  "directory",
+                  "line_range",
+                  "command",
+                  "output",
+                  "check",
+                  "event",
+                  "config",
+                  "database",
+                  "documentation",
+                  "git",
+                  "runtime",
+                  "intent",
+                  "claim",
+                  "model"
+                ]
+              },
+              "subject_id": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "locator": {
+                "type": "string"
+              },
+              "excerpt": {
+                "type": "string"
+              }
+            }
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "must_fix",
+              "should_fix_first",
+              "can_fix_later",
+              "note"
+            ]
+          }
+        }
       }
     },
     "technical_details": {

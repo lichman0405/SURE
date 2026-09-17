@@ -135,10 +135,44 @@ impl EvidenceAnchor {
         self
     }
 
+    /// Build an anchor pointing at a project-intent requirement or goal.
+    #[must_use]
+    pub fn intent(location: impl Into<String>, locator: impl Into<String>) -> Self {
+        Self::new(AnchorSubject::Intent, location, locator)
+    }
+
+    /// Build an anchor pointing at an agent claim.
+    #[must_use]
+    pub fn claim(location: impl Into<String>, locator: impl Into<String>) -> Self {
+        Self::new(AnchorSubject::Claim, location, locator)
+    }
+
+    /// Build a model-only anchor with no concrete project location.
+    ///
+    /// The `summary_or_label` is stored as the location so the anchor is still
+    /// labelled and serializable; the locator is left empty so it is never
+    /// considered checkable.
+    #[must_use]
+    pub fn model_only(summary_or_label: impl Into<String>) -> Self {
+        Self {
+            subject: AnchorSubject::Model,
+            subject_id: None,
+            location: summary_or_label.into(),
+            locator: String::new(),
+            excerpt: String::new(),
+        }
+    }
+
     /// Whether the anchor carries enough to be verified by a reader.
     #[must_use]
     pub fn is_checkable(&self) -> bool {
-        !self.location.trim().is_empty() && !self.locator.trim().is_empty()
+        match self.subject {
+            AnchorSubject::Model => false,
+            AnchorSubject::Intent | AnchorSubject::Claim => {
+                !self.location.trim().is_empty() && !self.locator.trim().is_empty()
+            }
+            _ => !self.location.trim().is_empty() && !self.locator.trim().is_empty(),
+        }
     }
 }
 
@@ -170,6 +204,12 @@ pub enum AnchorSubject {
     Git,
     /// A behaviour observed at runtime.
     Runtime,
+    /// A project-intent requirement or goal.
+    Intent,
+    /// An agent claim.
+    Claim,
+    /// A model-only conclusion with no concrete project location.
+    Model,
 }
 
 variants!(AnchorSubject {
@@ -184,8 +224,35 @@ variants!(AnchorSubject {
     Database,
     Documentation,
     Git,
-    Runtime
+    Runtime,
+    Intent,
+    Claim,
+    Model
 });
+
+impl AnchorSubject {
+    /// The stable wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Directory => "directory",
+            Self::LineRange => "line_range",
+            Self::Command => "command",
+            Self::Output => "output",
+            Self::Check => "check",
+            Self::Event => "event",
+            Self::Config => "config",
+            Self::Database => "database",
+            Self::Documentation => "documentation",
+            Self::Git => "git",
+            Self::Runtime => "runtime",
+            Self::Intent => "intent",
+            Self::Claim => "claim",
+            Self::Model => "model",
+        }
+    }
+}
 
 /// One captured piece of evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,6 +456,29 @@ mod tests {
             let json = serde_json::to_string(&assessment).expect("serialize");
             assert_eq!(json, format!("\"{}\"", assessment.as_str()));
         }
+        for &subject in AnchorSubject::ALL {
+            let json = serde_json::to_string(&subject).expect("serialize");
+            assert_eq!(json, format!("\"{}\"", subject.as_str()));
+        }
+    }
+
+    #[test]
+    fn anchor_subject_wire_names_are_frozen() {
+        assert_eq!(AnchorSubject::File.as_str(), "file");
+        assert_eq!(AnchorSubject::Directory.as_str(), "directory");
+        assert_eq!(AnchorSubject::LineRange.as_str(), "line_range");
+        assert_eq!(AnchorSubject::Command.as_str(), "command");
+        assert_eq!(AnchorSubject::Output.as_str(), "output");
+        assert_eq!(AnchorSubject::Check.as_str(), "check");
+        assert_eq!(AnchorSubject::Event.as_str(), "event");
+        assert_eq!(AnchorSubject::Config.as_str(), "config");
+        assert_eq!(AnchorSubject::Database.as_str(), "database");
+        assert_eq!(AnchorSubject::Documentation.as_str(), "documentation");
+        assert_eq!(AnchorSubject::Git.as_str(), "git");
+        assert_eq!(AnchorSubject::Runtime.as_str(), "runtime");
+        assert_eq!(AnchorSubject::Intent.as_str(), "intent");
+        assert_eq!(AnchorSubject::Claim.as_str(), "claim");
+        assert_eq!(AnchorSubject::Model.as_str(), "model");
     }
 
     #[test]
@@ -429,6 +519,21 @@ mod tests {
     }
 
     #[test]
+    fn concrete_anchors_remain_checkable_with_location_and_locator() {
+        assert!(EvidenceAnchor::new(AnchorSubject::File, "src/x.rs", "line 1").is_checkable());
+        assert!(
+            EvidenceAnchor::new(AnchorSubject::LineRange, "src/x.rs", "lines 10-20").is_checkable()
+        );
+        assert!(
+            EvidenceAnchor::new(AnchorSubject::Check, "cargo test", "suite payment").is_checkable()
+        );
+        assert!(
+            EvidenceAnchor::new(AnchorSubject::Runtime, "local dev run", "stdout trace")
+                .is_checkable()
+        );
+    }
+
+    #[test]
     fn an_anchor_without_a_location_is_not_checkable() {
         assert!(anchor().is_checkable());
         assert!(
@@ -436,6 +541,58 @@ mod tests {
             "blank location must not count as checkable"
         );
         assert!(!EvidenceAnchor::new(AnchorSubject::File, "a.rs", "").is_checkable());
+    }
+
+    #[test]
+    fn intent_and_claim_anchors_are_checkable_only_with_location_and_locator() {
+        let intent = EvidenceAnchor::intent("project-intent.json", "requirement P-7");
+        assert!(intent.is_checkable());
+        assert!(
+            !EvidenceAnchor::intent("  ", "requirement P-7").is_checkable(),
+            "blank intent location must not be checkable"
+        );
+        assert!(!EvidenceAnchor::intent("project-intent.json", "  ").is_checkable());
+
+        let claim = EvidenceAnchor::claim("agent-transcript.md", "claim #42");
+        assert!(claim.is_checkable());
+        assert!(!EvidenceAnchor::claim("", "claim #42").is_checkable());
+        assert!(!EvidenceAnchor::claim("agent-transcript.md", "").is_checkable());
+    }
+
+    #[test]
+    fn model_only_anchor_is_never_checkable_and_is_clearly_labelled() {
+        let model = EvidenceAnchor::model_only("model inference: no concrete anchor");
+        assert_eq!(model.subject, AnchorSubject::Model);
+        assert!(
+            !model.is_checkable(),
+            "model-only anchor must never be checkable"
+        );
+        assert!(
+            !model.location.is_empty(),
+            "model-only anchor must still carry a human-readable label"
+        );
+        assert!(model.locator.is_empty());
+    }
+
+    #[test]
+    fn new_anchor_subjects_round_trip_through_serialization() {
+        for subject in [
+            AnchorSubject::Intent,
+            AnchorSubject::Claim,
+            AnchorSubject::Model,
+        ] {
+            let original = EvidenceAnchor::new(subject, "loc", "ptr");
+            let json = serde_json::to_string(&original).expect("serialize");
+            let back: EvidenceAnchor = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, original);
+            assert_eq!(back.subject.as_str(), subject.as_str());
+        }
+
+        let model = EvidenceAnchor::model_only("summary");
+        let json = serde_json::to_string(&model).expect("serialize model-only anchor");
+        let back: EvidenceAnchor = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, model);
+        assert_eq!(back.subject, AnchorSubject::Model);
     }
 
     #[test]

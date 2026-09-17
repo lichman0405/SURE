@@ -753,6 +753,59 @@ mod tests {
     }
 
     #[test]
+    fn model_only_finding_is_grounded_at_note_but_not_must_fix() {
+        let note_finding = FindingBuilder::new(
+            AssessmentSource::ModelAssessment,
+            SeverityRationale::Informational,
+        )
+        .title("Model-only uncertainty")
+        .severity(Severity::Note)
+        .status(FindingStatus::Open)
+        .explanation("The model inferred something but cannot point to a project location.")
+        .fingerprint(fingerprint())
+        .evidence(vec![Evidence::new(
+            EvidenceClass::ModelAssessment,
+            "inferred from prompt",
+            EvidenceAnchor::model_only("model-only conclusion"),
+            Some(fingerprint()),
+            Severity::Note,
+        )])
+        .build()
+        .expect("valid note finding with model anchor");
+        assert!(note_finding.is_grounded());
+        assert!(
+            note_finding
+                .evidence
+                .iter()
+                .any(|e| e.anchor.subject == AnchorSubject::Model),
+            "model-only finding must carry a Model anchor"
+        );
+
+        let must_fix_result = FindingBuilder::new(
+            AssessmentSource::ModelAssessment,
+            SeverityRationale::BlocksHandOff,
+        )
+        .title("t")
+        .severity(Severity::MustFix)
+        .fingerprint(fingerprint())
+        .evidence(vec![Evidence::new(
+            EvidenceClass::ModelAssessment,
+            "inferred from prompt",
+            EvidenceAnchor::model_only("model-only conclusion"),
+            Some(fingerprint()),
+            Severity::MustFix,
+        )])
+        .build();
+        assert!(
+            matches!(
+                must_fix_result,
+                Err(FindingBuildError::UnsupportedSeverityForSource { .. })
+            ),
+            "expected unsupported severity for model-only must_fix, got {must_fix_result:?}"
+        );
+    }
+
+    #[test]
     fn builder_requires_title_severity_and_fingerprint() {
         let missing_title = FindingBuilder::new(
             AssessmentSource::ObservedFact,

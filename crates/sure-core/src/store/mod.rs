@@ -995,8 +995,15 @@ mod tests {
                         "title": "the token leaked",
                         "explanation": "the client logged its authorization header",
                         "evidence": [{
+                            "id": "evd_01j2m8q5aaaabbbbccccddddee",
                             "class": "observed_fact",
                             "summary": format!("the log line said token={secret}"),
+                            "anchor": {
+                                "subject": "file",
+                                "location": "logs/auth.log",
+                                "locator": "line 42"
+                            },
+                            "severity": "must_fix",
                         }],
                         "assessment_source": "observed_fact",
                         "severity_rationale": "blocks_hand_off",

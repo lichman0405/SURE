@@ -34,6 +34,7 @@ pub mod fingerprint;
 pub mod full_recording;
 pub mod harness_event;
 pub mod http_routes;
+pub mod intent_capture;
 pub mod intent_implementation;
 pub mod intent_model;
 pub mod noop_heuristics;

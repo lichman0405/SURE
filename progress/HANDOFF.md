@@ -2,11 +2,12 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 60 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 61 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
-`P6-T001` is accepted as commit `e2610c4`. `P5-T005` received two follow-up
-security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at 1 of 9.
+`P6-T001` is accepted as commit `e2610c4`. `P6-T002` is accepted as commit
+`de684e9`. `P5-T005` received two follow-up security fixes in commits `3d5f9a9`
+and `cc121ed`. Phase P6 is open at 2 of 9.
 
 **Since `P5-T006`'s acceptance, five things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -28,11 +29,15 @@ security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open at 1 of 9.
    `candidate_scanner.rs` canonicalises the resolved path against the project root
    before reading any file, as defense in depth against the same class of
    terminal/report injection and path traversal.
+6. A worker agent completed `P6-T002` — *Implement production-path/context filter*
+   — as commit `de684e9`. The supervisor verified all quality gates and accepted
+   the task. Test/example/docs/fixture paths are now distinguished from likely
+   production paths, and candidate check titles reflect the context.
 
-**The READY list is now eight entries** — `P6-T002`, `P6-T005`, `P6-T007`,
-`P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
-is `P6-T002`, *"Implement production-path/context filter"*, which is the next
-concrete action.
+**The READY list is now nine entries** — `P6-T003`, `P6-T004`, `P6-T005`,
+`P6-T007`, `P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The
+lowest-numbered is `P6-T003`, *"Implement no-op/fake-success heuristics"*, which
+is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -85,6 +90,32 @@ concrete action.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
+## What `P6-T002` added
+
+- `crates/sure-core/src/candidate_context.rs` (new, ~160 lines) —
+  `CandidateContext` enum (`Test`, `Example`, `Doc`, `MockFixture`, `Product`) and
+  `classify_path` heuristic that classifies source paths by conventional directory
+  or file-name patterns.
+- `crates/sure-core/src/candidate_scanner.rs` — every detection now carries a
+  `path_context`; proposal titles are context-aware (e.g., "project contains mock
+  usage in tests" vs "project contains mock usage in production code"); when both
+  Product and non-Product detections exist for a category, the Product context is
+  preferred.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod candidate_context;`.
+- Unit tests in `candidate_context.rs` and integration tests in
+  `candidate_scanner.rs` covering directory patterns, file-name dot-segments,
+  Windows separators, nested paths, case-insensitive matching, and edge cases.
+
+## Validation of `P6-T002`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
@@ -97,9 +128,10 @@ concrete action.
 
 ## Next concrete action
 
-1. Start `P6-T002` — *Implement production-path/context filter* — the
+1. Start `P6-T003` — *Implement no-op/fake-success heuristics* — the
    lowest-numbered READY task.
-2. Keep `P6-T005` in view; it is the next READY task after `P6-T002`.
+2. Keep `P6-T004` and `P6-T005` in view; they are the next READY tasks after
+   `P6-T003`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

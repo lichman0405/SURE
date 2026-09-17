@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P7",
-  "last_updated": "2026-09-17T13:53:01.810Z",
+  "last_updated": "2026-09-17T14:09:09Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -961,13 +961,19 @@
       "notes": "target/tmp/p7t007-accept-note.md"
     },
     "P7-T008": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-17T13:53:01.810Z",
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": "crates/sure-cli/src/portable_report.rs: render_markdown and render_html functions producing self-contained portable reports from ProjectVerdict. HTML escapes all attacker-controlled text with HTML entity encoding plus control-character escaping. Markdown escapes control characters. Includes embedded responsive CSS in HTML output. 10 inline unit tests cover headline/findings/caveat, complete HTML document, XSS escape, control-character escape, must-fix readiness, not-checked reasons, determinism, no external resources, trusted-intent caveat absence, and empty-verdict handling."
+      "finished_at": "2026-09-17T14:09:09Z",
+      "base_sha": "252143d",
+      "head_sha": "bc01d99",
+      "evidence": [
+        "cargo fmt --all -- --check green",
+        "cargo clippy --workspace --all-targets --all-features -- -D warnings green",
+        "cargo test --workspace --no-fail-fast green",
+        "node scripts/validate-bootstrap.mjs green",
+        "node scripts/taskctl.mjs validate green"
+      ],
+      "notes": "target/tmp/p7t008-accept-note.md"
     },
     "P7-T009": {
       "status": "queued",

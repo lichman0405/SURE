@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 75 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 76 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -14,8 +14,10 @@ accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
 `P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
 `a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P7-T005` is accepted as
 commit `f683c18`. `P7-T006` is accepted as commit `ee4d087`. `P7-T007` is
-accepted as commit `693d0ce`. `P5-T005` received two follow-up security fixes in
-commits `3d5f9a9` and `cc121ed`. Phase P7 is open at 7 of 9.
+accepted as commit `693d0ce`. `P7-T008` is accepted as commit `bc01d99`.
+`P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
+`cc121ed`. `P7-T004` and `P7-T006` received a follow-up security fix in commit
+`f0e7032`. Phase P7 is open at 8 of 9.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -133,11 +135,16 @@ commits `3d5f9a9` and `cc121ed`. Phase P7 is open at 7 of 9.
     task. The module produces a deterministic, versioned JSON report from a
     `ProjectVerdict`, validates it against `schemas/report.schema.json`, and
     safely handles control characters.
+22. A worker agent completed `P7-T008` — *Implement Markdown/HTML portable
+    report* — as commit `bc01d99`. The supervisor verified all quality gates and
+    accepted the task. The CLI module renders a `ProjectVerdict` to self-contained
+    Markdown and HTML reports with HTML entity escaping, control-character
+    escaping, and no external resources or scripts.
 
-**Phase P7 is open at 7 of 9.** The READY list is now `P7-T008`, `P8-T001`,
+**Phase P7 is open at 8 of 9.** The READY list is now `P7-T009`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T008`, *"Implement Markdown/HTML portable
-report"*, which is the next concrete action.
+lowest-numbered READY task is `P7-T009`, *"Implement plain-language golden
+tests"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13661,6 +13668,34 @@ absent text.
   and parsed report text contains no raw control characters.
 
 ## Validation of `P7-T007`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P7-T008` added
+
+- `crates/sure-cli/src/portable_report.rs` (new, ~695 lines) — `render_markdown()`
+  and `render_html()`.
+- `crates/sure-cli/src/main.rs` — one line: `mod portable_report;`.
+- Markdown report is self-contained CommonMark-compatible text with headline,
+  readiness, caveat, support level, findings, not-checked checks, and totals.
+- HTML report is a complete `<!doctype html>` document with an embedded
+  responsive stylesheet using semantic elements.
+- Security:
+  - Markdown uses `escape_control_characters` on attacker-controlled text.
+  - HTML applies HTML entity escaping (`<`, `>`, `&`, `"`, `'`) on top
+    of control-character escaping.
+  - No external scripts, inline event handlers, or network resources.
+- 10 inline tests cover report content, complete HTML document, XSS escape,
+  control-character escape, readiness, not-checked reasons, determinism,
+  no external resources, caveat absence when intent is trusted, and empty verdict.
+
+## Validation of `P7-T008`
 
 | Gate | Result |
 | --- | ------ |

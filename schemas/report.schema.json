@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Project Report",
+  "description": "A stable, machine-readable report of a project verdict. Produced by the SURE CLI for downstream tools.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_fingerprint",
+    "aggregate",
+    "ready_for_hand_off",
+    "must_caveat_requirements",
+    "capability",
+    "findings",
+    "not_checked",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of the report schema. Bumped when the shape changes in a way an older reader would get wrong.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_fingerprint": {
+      "description": "The project state this verdict is about.",
+      "type": "string"
+    },
+    "aggregate": {
+      "type": "object",
+      "required": [
+        "severity",
+        "headline",
+        "is_green"
+      ],
+      "properties": {
+        "severity": {
+          "enum": [
+            "green",
+            "needs_attention",
+            "not_ready",
+            "not_enough_checked"
+          ]
+        },
+        "headline": {
+          "type": "string"
+        },
+        "is_green": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ready_for_hand_off": {
+      "type": "boolean"
+    },
+    "must_caveat_requirements": {
+      "type": "boolean"
+    },
+    "caveat": {
+      "type": "string"
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "tier",
+        "summary"
+      ],
+      "properties": {
+        "tier": {
+          "description": "0 snapshot, 1 observed, 2 protected.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "what",
+          "impact",
+          "severity",
+          "status",
+          "next_action",
+          "is_model_only",
+          "evidence_anchors"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "what": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "is_model_only": {
+            "type": "boolean"
+          },
+          "evidence_anchors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "location",
+                "locator",
+                "subject"
+              ],
+              "properties": {
+                "location": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "not_checked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "reason",
+          "is_critical"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "is_critical": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "checked",
+        "skipped",
+        "could_not_run",
+        "open_findings"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "could_not_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_findings": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

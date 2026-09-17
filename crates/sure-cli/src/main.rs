@@ -30,6 +30,7 @@ mod cli;
 mod commands;
 mod doctor;
 mod human_report;
+mod json_report;
 mod output;
 mod report;
 

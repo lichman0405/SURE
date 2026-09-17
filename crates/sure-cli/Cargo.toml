@@ -17,6 +17,7 @@ path = "src/main.rs"
 # only one.
 sure-core = { path = "../sure-core" }
 clap = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 # The testkit is a development-only dependency, for the same reason `sure-core`
@@ -26,6 +27,7 @@ serde_json = { workspace = true }
 # dependency, so no fixture can ship inside the product — a rule
 # `crates/sure-testkit/tests/repository_shape.rs` checks against these manifests.
 [dev-dependencies]
+sure-protocol = { path = "../sure-protocol" }
 sure-testkit = { path = "../sure-testkit" }
 
 [lints]

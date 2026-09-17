@@ -485,8 +485,10 @@ name = "sure-cli"
 version = "0.0.0-bootstrap"
 dependencies = [
  "clap",
+ "serde",
  "serde_json",
  "sure-core",
+ "sure-protocol",
  "sure-testkit",
 ]
 

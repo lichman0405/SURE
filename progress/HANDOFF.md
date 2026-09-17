@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 79 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 80 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -17,9 +17,11 @@ accepted as commit `16cb94a`. `P7-T002` is accepted as commit `c6b0969`.
 commit `ee4d087`. `P7-T007` is accepted as commit `693d0ce`. `P7-T008` is
 accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `P8-T001` is accepted as commit `8d9a506`. `P8-T002` is accepted as commit
-`d0c496d`. `P5-T005` received two follow-up security fixes in commits `3d5f9a9`
-and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up security fix in
-commit `f0e7032`. Phase P8 is open at 2 of 11.
+`d0c496d`. `P8-T003` is accepted as commit `178b574`. `P5-T005` received two
+follow-up security fixes in commits `3d5f9a9` and `cc121ed`. `P7-T004` and
+`P7-T006` received a follow-up security fix in commit `f0e7032`. `P8-T002`
+received a follow-up security fix in commit `1069704`. `P8-T003` received a
+follow-up security fix in commit `3f9d002`. Phase P8 is open at 3 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -159,11 +161,18 @@ commit `f0e7032`. Phase P8 is open at 2 of 11.
     the task. Harness events are persisted into the local SQLite store bound to
     project/session/time/capability source, with retention metadata, idempotent
     ingestion, and query helpers for future pruning.
+26. A worker agent completed `P8-T003` — *Implement standard recording
+    projection* — as commit `178b574`. The supervisor verified all quality gates,
+    added redaction/escaping of attacker-controlled projection fields and the
+    arbitrary `BuildTest.counts` value, and accepted the task. The module
+    summarizes tool/command/git/file/build-test/outcome activity from harness
+    events and stores the summary as a recording without keeping the full
+    transcript.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 2 of 11.** The READY list is now
-`P8-T003`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
-`P14-T010`. The lowest-numbered READY task is `P8-T003`, *"Implement standard
-recording projection"*, which is the next concrete action.
+**Phase P7 is complete (9/9). Phase P8 is open at 3 of 11.** The READY list is now
+`P8-T004`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
+`P14-T010`. The lowest-numbered READY task is `P8-T004`, *"Implement harness
+adapter interface contract"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13805,6 +13814,38 @@ absent text.
   safety.
 
 ## Validation of `P8-T002`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P8-T003` added
+
+- `crates/sure-core/src/recording_projection.rs` (new) — `StandardProjection`,
+  `ProjectionStore`, and free `project(event)` / `persist_projection()` helpers.
+- `StandardProjection` covers six categories: `Tool`, `Command`, `Git`, `File`,
+  `BuildTest`, and `Outcome`.
+- `project(event)` maps an ingested harness event to a summarized projection by
+  matching `event_type` substrings and extracting only high-level fields (tool
+  name/status/duration, command program/argument signature/exit code, git
+  subcommand/branch/files affected, file operation/basename/size, build/test
+  kind/target/success/counts, outcome name/success).
+- `ProjectionStore::persist` wraps the projection in a JSON object with
+  `standard_projection: true` and `retained_until_ms`, then stores it as
+  `RecordKind::Recording` via the existing `Store::append_for` path.
+- Default retention is 7 days; `projections_for_project` and
+  `projections_past_retention` support reading and future pruning.
+- 22 inline tests cover every category, store round-trip, retention metadata,
+  privacy-default exclusion from history, ordering, and escaping.
+- Supervisor follow-up commit `3f9d002` redacts credential-shaped values and
+  escapes control characters in projection string fields and redacts the
+  arbitrary `BuildTest.counts` value before storage.
+
+## Validation of `P8-T003`
 
 | Gate | Result |
 | --- | ------ |

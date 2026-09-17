@@ -1021,13 +1021,16 @@
       "notes": "target/tmp/p8t002-accept-note.md"
     },
     "P8-T003": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-17T15:33:43.519Z",
-      "finished_at": null,
+      "finished_at": "2026-09-17T15:55:00Z",
       "base_sha": "719d9d2",
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "head_sha": "3f9d002",
+      "evidence": [
+        "crates/sure-core/src/recording_projection.rs",
+        "crates/sure-core/src/lib.rs"
+      ],
+      "notes": "target/tmp/p8t003-accept-note.md"
     },
     "P8-T004": {
       "status": "queued",

@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 68 of 166 v0.1 tasks accepted (phase P7 in progress).
+- **Progress:** 69 of 166 v0.1 tasks accepted (phase P7 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -48,6 +48,7 @@ Implemented so far:
 - Static checks: config references, environment completeness, dependency state, database migration consistency.
 - Runtime checks: local service smoke tests, HTTP route probes, browser-driven flow probes, with cancellation and cleanup.
 - False-completion analysis: candidate scanner for TODO/mock/stub/placeholder patterns, production-path/context filter, no-op/fake-success heuristics, hard-coded demo-data heuristics, frontend/backend route consistency, UI-action completeness bridge, grounded semantic-analysis request/response contract, project-intent versus implementation comparison, and a candidate aggregator that deduplicates by evidence anchor and prioritizes user impact over style noise.
+- Finding model: four-level severity (`MustFix`, `ShouldFixFirst`, `CanFixLater`, `Note`), `AssessmentSource`, `SeverityRationale`, and a builder that refuses unsupported `MustFix` sources.
 - Evidence-grounded reporting with plain-language verdicts and `Cannot confirm` as a valid result.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.

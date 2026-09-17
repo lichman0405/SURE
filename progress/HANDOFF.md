@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 68 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 69 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -10,10 +10,11 @@ accepted as commit `de684e9`. `P6-T003` is accepted as commit `09d5fb5`.
 `P6-T004` is accepted as commit `a0575de`. `P6-T005` is accepted as commit
 `cf35947`. `P6-T006` is accepted as commit `05af66f`. `P6-T007` is accepted as
 commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
-accepted as commit `8b890b3`. `P5-T005` received two follow-up security fixes in
-commits `3d5f9a9` and `cc121ed`.
+accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
+`P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
+`cc121ed`. Phase P7 is open at 1 of 9.
 
-**Since `P5-T006`'s acceptance, eight things happened:**
+**Since `P5-T006`'s acceptance, nine things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
    cancellation* — as commit `a6dbf98`. The supervisor verified all quality gates
    on the combined tree and accepted the task.
@@ -83,10 +84,16 @@ commits `3d5f9a9` and `cc121ed`.
     false-completion scanners, deduplicates by evidence anchor while keeping the
     most serious proposal, drops proposals that name nothing, and separates
     low-user-impact `Note`/`Inference` noise from material candidates.
+14. A worker agent completed `P7-T001` — *Implement Finding model and four-level
+    severity* — as commit `16cb94a`. The supervisor verified all quality gates and
+    accepted the task. The module introduces `AssessmentSource` and
+    `SeverityRationale`, makes them required on `Finding`, and provides a
+    `FindingBuilder` that refuses to build a `MustFix` finding unless the source
+    is an observed fact, deterministic check, or contradicted claim.
 
-**Phase P6 is complete (9/9).** The READY list is now `P7-T001`, `P7-T004`,
-`P8-T001`, `P12-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
-READY task is `P7-T001`, *"Implement Finding model and four-level severity"*,
+**Phase P7 is open at 1 of 9.** The READY list is now `P7-T002`, `P7-T004`,
+`P8-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
+lowest-numbered READY task is `P7-T002`, *"Implement concrete evidence anchors"*,
 which is the next concrete action.
 
 ## What `P5-T007` added

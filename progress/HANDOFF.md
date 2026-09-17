@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 74 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 75 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -13,9 +13,9 @@ commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
 accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
 `P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
 `a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P7-T005` is accepted as
-commit `f683c18`. `P7-T006` is accepted as commit `ee4d087`. `P5-T005` received
-two follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P7 is open
-at 6 of 9.
+commit `f683c18`. `P7-T006` is accepted as commit `ee4d087`. `P7-T007` is
+accepted as commit `693d0ce`. `P5-T005` received two follow-up security fixes in
+commits `3d5f9a9` and `cc121ed`. Phase P7 is open at 7 of 9.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -128,11 +128,16 @@ at 6 of 9.
     `plain_language_finding::summary_from_anchor` now escapes location and
     locator, and `coverage_summary` escapes `Error`/`Unknown` reasons. Regression
     tests assert the escaping.
+21. A worker agent completed `P7-T007` — *Implement stable JSON report* — as
+    commit `693d0ce`. The supervisor verified all quality gates and accepted the
+    task. The module produces a deterministic, versioned JSON report from a
+    `ProjectVerdict`, validates it against `schemas/report.schema.json`, and
+    safely handles control characters.
 
-**Phase P7 is open at 6 of 9.** The READY list is now `P7-T007`, `P8-T001`,
+**Phase P7 is open at 7 of 9.** The READY list is now `P7-T008`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T007`, *"Implement stable JSON report"*, which
-is the next concrete action.
+lowest-numbered READY task is `P7-T008`, *"Implement Markdown/HTML portable
+report"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13626,6 +13631,36 @@ absent text.
   flagging.
 
 ## Validation of `P7-T006`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P7-T007` added
+
+- `schemas/report.schema.json` (new, ~196 lines) — hand-written JSON schema for the
+  stable project report, using only validator keywords the workspace supports.
+- `crates/sure-cli/src/json_report.rs` (new, ~571 lines) — `JsonReport`,
+  `JsonAggregate`, `JsonCapability`, `JsonFinding`, `JsonEvidenceAnchor`,
+  `JsonNotChecked`, `JsonTotals`, `render_json_report()`, and
+  `render_json_report_pretty()`.
+- `crates/sure-cli/src/main.rs` — one line: `mod json_report;`.
+- `crates/sure-cli/Cargo.toml` — added `serde` dependency and `sure-protocol`
+  dev-dependency.
+- Produces deterministic, versioned JSON from a `ProjectVerdict` with no ANSI or
+  terminal formatting.
+- Reuses `plain_language_finding::render_finding` and
+  `project_verdict::render_summary` for consistent plain-language content.
+- Validates generated output against `schemas/report.schema.json` in tests using
+  `sure_protocol::schema::Schema`.
+- Handles control characters safely: compact JSON contains no raw control bytes,
+  and parsed report text contains no raw control characters.
+
+## Validation of `P7-T007`
 
 | Gate | Result |
 | --- | ------ |

@@ -32,6 +32,7 @@ mod doctor;
 mod human_report;
 mod json_report;
 mod output;
+mod portable_report;
 mod report;
 
 use std::process::ExitCode;

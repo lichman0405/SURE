@@ -243,6 +243,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          example, mock-fixture and production code, preferring Product context \
          when both exist",
     ),
+    (
+        "src/route_consistency.rs",
+        "`P6-T005`: it reads frontend route expectations from source files \
+         (`fetch`, `axios`, React Router `path=`, Vue Router `path:`) and \
+         compares them against backend routes read by `http_routes.rs`. \
+         Frontend paths with no corresponding backend route become candidate \
+         checks carrying `Severity::Note`, `critical: false`, and \
+         `EvidenceClass::Inference`, anchored with `CheckReason::CandidateFound` \
+         to the frontend file and line where the unmatched path was read. \
+         Dynamic routes, template literals and slotted paths are skipped rather \
+         than guessed",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

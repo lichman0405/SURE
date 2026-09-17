@@ -38,6 +38,7 @@ pub mod process;
 pub mod project_intent;
 pub mod redact;
 pub mod references;
+pub mod route_consistency;
 pub mod runtime_probes;
 pub mod runtime_start;
 pub mod safety;

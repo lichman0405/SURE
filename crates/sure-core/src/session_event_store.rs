@@ -261,7 +261,7 @@ impl<'a> SessionEventStore<'a> {
                         envelope.timestamp,
                         now_ms,
                         capability_tier.map(|t| i64::from(t.number())),
-                        envelope.payload.to_string(),
+                        crate::store::redact_document(&envelope.payload).to_string(),
                         project_root,
                         fingerprint.as_str(),
                         event_retention,
@@ -849,6 +849,45 @@ mod tests {
         // because every finite retention deadline is before i64::MAX.
         assert_eq!(ses.sessions_past_retention(i64::MAX).unwrap().len(), 1);
         assert_eq!(ses.events_past_retention(i64::MAX).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn payload_secrets_are_redacted_before_storage() {
+        let store = store_in("redacted_payload");
+        let ses = SessionEventStore::new(&store);
+        let fingerprint = FingerprintId::generate();
+        let mut envelope = valid_envelope("tool.completed");
+        envelope.payload = json!({
+            "command": "curl https://user:secret@example.com",
+            "env": {"API_KEY": "supersecret"},
+            "token": "bearer abc123xyz"
+        });
+        let ingested = IngestedEvent {
+            envelope,
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        };
+        let event_id = EventId::generate();
+
+        ses.persist(&ingested, "C:\\work\\my project", &fingerprint, &event_id)
+            .unwrap();
+
+        let sessions = ses.sessions_past_retention(i64::MAX).unwrap();
+        let events = ses.events_for_session(sessions[0].row_id).unwrap();
+        let stored = &events[0];
+        let payload_text = stored.payload.to_string();
+        assert!(
+            !payload_text.contains("user:secret@example.com"),
+            "stored payload still contained URL credentials: {payload_text}"
+        );
+        assert!(
+            !payload_text.contains("abc123xyz"),
+            "stored payload still contained token value: {payload_text}"
+        );
+        assert!(
+            payload_text.contains("REDACTED") || payload_text.contains("***"),
+            "redaction marker missing from payload: {payload_text}"
+        );
     }
 
     #[test]

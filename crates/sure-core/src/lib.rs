@@ -14,6 +14,7 @@ pub mod candidate_context;
 pub mod candidate_scanner;
 pub mod checks;
 pub mod claim_capture;
+pub mod claim_checker;
 pub mod components;
 pub mod config;
 pub mod consent;

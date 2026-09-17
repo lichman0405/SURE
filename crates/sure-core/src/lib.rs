@@ -16,6 +16,7 @@ pub mod capability_report;
 pub mod checks;
 pub mod claim_capture;
 pub mod claim_checker;
+pub mod claim_report;
 pub mod components;
 pub mod config;
 pub mod consent;

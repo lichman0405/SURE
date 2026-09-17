@@ -103,6 +103,7 @@ fn green_aggregate_and_no_findings_means_ready() {
         CapabilityReport::cli(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
     );
     assert!(verdict.is_ready_for_hand_off());
     let summary = render_summary(&verdict);
@@ -125,6 +126,7 @@ fn green_aggregate_with_open_must_fix_is_not_ready() {
         CapabilityReport::cli(),
         vec![a_finding(Severity::MustFix)],
         Vec::new(),
+        Vec::new(),
     );
     assert!(!verdict.is_ready_for_hand_off());
     let summary = render_summary(&verdict);
@@ -141,6 +143,7 @@ fn not_enough_checked_aggregate_is_not_ready_and_says_why() {
         not_enough_checked_aggregate(),
         ProjectIntent::empty(),
         CapabilityReport::cli(),
+        Vec::new(),
         Vec::new(),
         Vec::new(),
     );
@@ -165,6 +168,7 @@ fn after_the_fact_intent_caveat_appears_when_appropriate() {
         CapabilityReport::cli(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
     );
     assert!(verdict.must_caveat_requirements());
     let summary = render_summary(&verdict);
@@ -186,6 +190,7 @@ fn after_the_fact_caveat_is_absent_when_intent_is_trusted() {
         green_aggregate(),
         intent,
         CapabilityReport::cli(),
+        Vec::new(),
         Vec::new(),
         Vec::new(),
     );
@@ -224,6 +229,7 @@ fn skipped_and_could_not_run_checks_are_surfaced() {
         CapabilityReport::cli(),
         Vec::new(),
         not_checked,
+        Vec::new(),
     );
     let summary = render_summary(&verdict);
     assert!(
@@ -255,6 +261,7 @@ fn control_characters_in_titles_are_escaped() {
         CapabilityReport::cli(),
         Vec::new(),
         not_checked,
+        Vec::new(),
     );
     let summary = render_summary(&verdict);
     assert!(

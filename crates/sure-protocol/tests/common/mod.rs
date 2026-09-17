@@ -79,6 +79,7 @@ pub fn claim() -> Claim {
         claim_text: "All tests pass and the feature is complete.".to_owned(),
         claim_type: "tests_pass".to_owned(),
         assessment: ClaimAssessment::Contradicted,
+        reason: String::from("A recorded harness event contradicts this claim."),
         evidence: vec![evidence(EvidenceClass::ObservedFact)],
         session: Some(SessionId::generate()),
     }

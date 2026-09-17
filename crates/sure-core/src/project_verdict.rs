@@ -10,7 +10,7 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::intent::ProjectIntent;
 use sure_domain::severity::Severity;
 use sure_domain::status::{Aggregate, CheckResult};
-use sure_domain::vocabulary::ProjectVerdict;
+use sure_domain::vocabulary::{Claim, ProjectVerdict};
 
 use crate::redact::escape_control_characters;
 
@@ -27,6 +27,7 @@ pub fn build_verdict(
     capability: CapabilityReport,
     findings: Vec<Finding>,
     not_checked: Vec<CheckResult>,
+    claim_checks: Vec<Claim>,
 ) -> ProjectVerdict {
     ProjectVerdict {
         fingerprint,
@@ -35,6 +36,7 @@ pub fn build_verdict(
         capability,
         findings,
         not_checked,
+        claim_checks,
     }
 }
 
@@ -220,6 +222,7 @@ mod tests {
             capability.clone(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         );
         assert_eq!(verdict.fingerprint, fp);
         assert_eq!(verdict.aggregate, agg);
@@ -236,6 +239,7 @@ mod tests {
             green_aggregate(),
             ProjectIntent::empty(),
             CapabilityReport::cli(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -267,6 +271,7 @@ mod tests {
             CapabilityReport::cli(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         );
         let summary = render_summary(&verdict);
         assert!(summary.contains("not ready to hand off"), "{summary}");
@@ -282,6 +287,7 @@ mod tests {
             CapabilityReport::cli(),
             vec![a_finding(Severity::MustFix)],
             Vec::new(),
+            Vec::new(),
         );
         let summary = render_summary(&verdict);
         assert!(summary.contains("not ready to hand off"), "{summary}");
@@ -295,6 +301,7 @@ mod tests {
             ProjectIntent::empty(),
             CapabilityReport::cli(),
             vec![a_finding(Severity::ShouldFixFirst)],
+            Vec::new(),
             Vec::new(),
         );
         let summary = render_summary(&verdict);
@@ -319,6 +326,7 @@ mod tests {
             CapabilityReport::cli(),
             Vec::new(),
             not_checked,
+            Vec::new(),
         );
         let summary = render_summary(&verdict);
         assert!(
@@ -345,6 +353,7 @@ mod tests {
             CapabilityReport::cli(),
             Vec::new(),
             not_checked,
+            Vec::new(),
         );
         let summary = render_summary(&verdict);
         assert!(
@@ -361,6 +370,7 @@ mod tests {
             green_aggregate(),
             ProjectIntent::empty(),
             CapabilityReport::cli(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -383,6 +393,7 @@ mod tests {
             green_aggregate(),
             intent,
             CapabilityReport::cli(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         );

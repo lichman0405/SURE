@@ -10,8 +10,10 @@ use sure_cli::human_report::{HumanReportSettings, render_verdict};
 use sure_cli::json_report::render_json_report;
 use sure_cli::portable_report::{render_html, render_markdown};
 use sure_core::capability::CapabilityReport;
-use sure_core::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
-use sure_core::ids::{CheckId, FingerprintId};
+use sure_core::evidence::{
+    AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
+};
+use sure_core::ids::{CheckId, ClaimId, FingerprintId};
 use sure_core::intent::{IntentSource, ProjectIntent, Requirement};
 use sure_core::severity::Severity;
 use sure_core::status::{
@@ -19,7 +21,7 @@ use sure_core::status::{
     StatusCounts,
 };
 use sure_core::vocabulary::{
-    AssessmentSource, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
+    AssessmentSource, Claim, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
 };
 
 fn fingerprint() -> FingerprintId {
@@ -123,6 +125,7 @@ fn build_verdict(
         capability: CapabilityReport::cli(),
         findings,
         not_checked,
+        claim_checks: Vec::new(),
     }
 }
 
@@ -173,6 +176,7 @@ fn green_trusted_says_ready_and_no_caveat() {
         capability: CapabilityReport::cli(),
         findings: Vec::new(),
         not_checked: Vec::new(),
+        claim_checks: Vec::new(),
     };
 
     let term = render_verdict(&verdict, HumanReportSettings::default());
@@ -511,6 +515,74 @@ fn model_only_finding_is_flagged_and_omits_anchors() {
     assert!(
         json.contains("\"evidence_anchors\":[]"),
         "json must have empty anchors: {json}"
+    );
+
+    assert_deterministic(&verdict, |v| {
+        render_verdict(v, HumanReportSettings::default())
+    });
+    assert_deterministic(&verdict, render_markdown);
+    assert_deterministic(&verdict, render_html);
+    assert_deterministic(&verdict, render_json_report);
+    assert_html_well_formed(&html);
+}
+
+// ---------------------------------------------------------------------------
+// 7. AI-claim checks → explained plainly across all report forms
+// ---------------------------------------------------------------------------
+fn a_claim(assessment: ClaimAssessment, text: &str) -> Claim {
+    Claim {
+        id: ClaimId::generate(),
+        claim_text: text.to_owned(),
+        claim_type: "test_ran".to_owned(),
+        assessment,
+        reason: String::from("A recorded harness event supports this claim."),
+        evidence: Vec::new(),
+        session: None,
+    }
+}
+
+#[test]
+fn ai_claim_section_explains_assessments_plainly() {
+    let verdict = ProjectVerdict {
+        fingerprint: fingerprint(),
+        aggregate: green_aggregate(),
+        intent: trusted_intent(),
+        capability: CapabilityReport::cli(),
+        findings: Vec::new(),
+        not_checked: Vec::new(),
+        claim_checks: vec![
+            a_claim(ClaimAssessment::Confirmed, "I ran the tests"),
+            a_claim(
+                ClaimAssessment::CannotConfirm,
+                "I fixed every outstanding bug",
+            ),
+        ],
+    };
+
+    let term = render_verdict(&verdict, HumanReportSettings::default());
+    let md = render_markdown(&verdict);
+    let html = render_html(&verdict);
+    let json = render_json_report(&verdict);
+
+    assert!(term.contains("AI claims"), "terminal: {term}");
+    assert!(md.contains("## AI claims"), "markdown: {md}");
+    assert!(html.contains("id=\"claims\""), "html: {html}");
+    assert!(json.contains("\"claim_checks\""), "json: {json}");
+
+    assert!(term.contains("Confirmed"), "terminal: {term}");
+    assert!(md.contains("Confirmed"), "markdown: {md}");
+    assert!(html.contains("Confirmed"), "html: {html}");
+    assert!(
+        json.contains("\"assessment\":\"Confirmed\""),
+        "json: {json}"
+    );
+
+    assert!(term.contains("Cannot confirm"), "terminal: {term}");
+    assert!(md.contains("Cannot confirm"), "markdown: {md}");
+    assert!(html.contains("Cannot confirm"), "html: {html}");
+    assert!(
+        json.contains("\"assessment\":\"Cannot confirm\""),
+        "json: {json}"
     );
 
     assert_deterministic(&verdict, |v| {

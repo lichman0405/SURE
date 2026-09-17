@@ -420,6 +420,9 @@ pub struct Claim {
     pub claim_type: String,
     /// What checking it produced.
     pub assessment: ClaimAssessment,
+    /// Plain-language explanation of the assessment.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
     /// The evidence behind the assessment.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
@@ -510,6 +513,9 @@ pub struct ProjectVerdict {
     /// Checks that did not run, kept visible so they are never mistaken for passes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub not_checked: Vec<CheckResult>,
+    /// Agent completion claims that were checked against recorded evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_checks: Vec<Claim>,
 }
 
 impl ProjectVerdict {
@@ -803,6 +809,7 @@ mod tests {
                 NotCheckedReason::ExecutionNotAuthorized,
                 fingerprint(),
             )],
+            claim_checks: Vec::new(),
         };
         assert!(!verdict.is_ready_for_hand_off());
         assert!(verdict.must_caveat_requirements());
@@ -825,6 +832,7 @@ mod tests {
                 resolved,
             ],
             not_checked: Vec::new(),
+            claim_checks: Vec::new(),
         };
         let open = verdict.open_findings();
         assert_eq!(open.len(), 2);
@@ -839,6 +847,7 @@ mod tests {
             claim_text: "all tests pass".to_owned(),
             claim_type: "tests_pass".to_owned(),
             assessment,
+            reason: String::new(),
             evidence: Vec::new(),
             session: None,
         };

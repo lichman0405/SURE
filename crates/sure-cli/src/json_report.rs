@@ -16,7 +16,7 @@ use sure_core::vocabulary::ProjectVerdict;
 /// The schema version of the JSON report.
 ///
 /// Bumped when the shape changes in a way an older reader would get wrong.
-pub const REPORT_SCHEMA_VERSION: u32 = 1;
+pub const REPORT_SCHEMA_VERSION: u32 = 2;
 
 /// A stable JSON report for a project verdict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +40,9 @@ pub struct JsonReport {
     pub findings: Vec<JsonFinding>,
     /// Checks that did not run, kept visible so they are never mistaken for passes.
     pub not_checked: Vec<JsonNotChecked>,
+    /// Agent completion claims checked against recorded evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_checks: Vec<JsonClaimCheck>,
     /// Per-category counts.
     pub totals: JsonTotals,
 }
@@ -110,6 +113,21 @@ pub struct JsonNotChecked {
     pub reason: String,
     /// Whether this check is critical to hand-off.
     pub is_critical: bool,
+}
+
+/// One agent claim that was checked against recorded evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JsonClaimCheck {
+    /// Stable identity of the claim.
+    pub id: String,
+    /// The claim text.
+    pub claim_text: String,
+    /// The claim type that was checked.
+    pub claim_type: String,
+    /// User-facing assessment label.
+    pub assessment: String,
+    /// Plain-language explanation of the assessment.
+    pub reason: String,
 }
 
 /// Per-category counts for the report.
@@ -193,6 +211,18 @@ fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
         })
         .collect();
 
+    let claim_checks: Vec<JsonClaimCheck> = verdict
+        .claim_checks
+        .iter()
+        .map(|claim| JsonClaimCheck {
+            id: claim.id.as_str().to_owned(),
+            claim_text: claim.claim_text.clone(),
+            claim_type: claim.claim_type.clone(),
+            assessment: claim.assessment.label().to_owned(),
+            reason: claim.reason.clone(),
+        })
+        .collect();
+
     let counts = verdict.aggregate.counts;
 
     JsonReport {
@@ -216,6 +246,7 @@ fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
         },
         findings,
         not_checked,
+        claim_checks,
         totals: JsonTotals {
             checked: counts.checked(),
             skipped: counts.skipped,
@@ -230,8 +261,10 @@ fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
 mod tests {
     use super::*;
     use sure_core::capability::CapabilityReport;
-    use sure_core::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
-    use sure_core::ids::{CheckId, FingerprintId};
+    use sure_core::evidence::{
+        AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
+    };
+    use sure_core::ids::{CheckId, ClaimId, FingerprintId};
     use sure_core::intent::ProjectIntent;
     use sure_core::severity::Severity;
     use sure_core::status::{
@@ -239,7 +272,7 @@ mod tests {
         StatusCounts,
     };
     use sure_core::vocabulary::{
-        AssessmentSource, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
+        AssessmentSource, Claim, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
     };
 
     fn fingerprint() -> FingerprintId {
@@ -302,6 +335,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings,
             not_checked,
+            claim_checks: Vec::new(),
         }
     }
 
@@ -418,6 +452,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings: Vec::new(),
             not_checked: Vec::new(),
+            claim_checks: Vec::new(),
         };
         let json = render_json_report(&verdict);
         let report = parse_report(&json);
@@ -567,5 +602,43 @@ mod tests {
         assert!(!report.findings[0].title.contains('\n'));
         assert!(!report.findings[0].what.contains('\t'));
         assert!(!report.findings[0].impact.contains('\r'));
+    }
+
+    fn a_claim(assessment: ClaimAssessment, text: &str) -> Claim {
+        Claim {
+            id: ClaimId::generate(),
+            claim_text: text.to_owned(),
+            claim_type: "test_ran".to_owned(),
+            assessment,
+            reason: String::from("A recorded harness event supports this claim."),
+            evidence: Vec::new(),
+            session: None,
+        }
+    }
+
+    #[test]
+    fn claim_checks_are_absent_from_json_when_empty() {
+        let verdict = build_verdict(green_aggregate(), Vec::new(), Vec::new());
+        let json = render_json_report(&verdict);
+        let report = parse_report(&json);
+        assert!(report.claim_checks.is_empty());
+    }
+
+    #[test]
+    fn claim_checks_are_present_in_json_when_non_empty() {
+        let verdict = ProjectVerdict {
+            fingerprint: fingerprint(),
+            aggregate: green_aggregate(),
+            intent: ProjectIntent::empty(),
+            capability: CapabilityReport::cli(),
+            findings: Vec::new(),
+            not_checked: Vec::new(),
+            claim_checks: vec![a_claim(ClaimAssessment::Confirmed, "I ran the tests")],
+        };
+        let json = render_json_report(&verdict);
+        let report = parse_report(&json);
+        assert_eq!(report.claim_checks.len(), 1);
+        assert_eq!(report.claim_checks[0].assessment, "Confirmed");
+        assert_eq!(report.claim_checks[0].claim_text, "I ran the tests");
     }
 }

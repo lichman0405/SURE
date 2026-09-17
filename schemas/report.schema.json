@@ -165,6 +165,36 @@
         }
       }
     },
+    "claim_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim_text",
+          "claim_type",
+          "assessment",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "claim_text": {
+            "type": "string"
+          },
+          "claim_type": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "totals": {
       "type": "object",
       "required": [

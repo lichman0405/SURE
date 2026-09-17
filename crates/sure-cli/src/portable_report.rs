@@ -59,6 +59,14 @@ pub fn render_markdown(verdict: &ProjectVerdict) -> String {
     out.push_str(&verdict.capability.summary());
     out.push_str("\n\n");
 
+    // AI-claim checks
+    let claim_entries = sure_core::claim_report::render_claim_entries(&verdict.claim_checks);
+    if !claim_entries.is_empty() {
+        out.push_str("## AI claims\n\n");
+        out.push_str(&claim_entries);
+        out.push('\n');
+    }
+
     // Findings
     let open: Vec<_> = verdict.open_findings().into_iter().cloned().collect();
     out.push_str("## Findings\n\n");
@@ -186,6 +194,23 @@ pub fn render_html(verdict: &ProjectVerdict) -> String {
     out.push_str("</p>\n");
     out.push_str("</section>\n");
 
+    // AI-claim checks
+    if !verdict.claim_checks.is_empty() {
+        out.push_str("<section id=\"claims\">\n");
+        out.push_str("<h2>AI claims</h2>\n");
+        out.push_str("<ul>\n");
+        for claim in &verdict.claim_checks {
+            let text = escape_html(&escape_control_characters(&claim.claim_text));
+            let assessment = escape_html(claim.assessment.label());
+            let reason = escape_html(&escape_control_characters(&claim_reason(claim)));
+            out.push_str(&format!(
+                "<li><strong>{text}</strong><br>{assessment}: {reason}</li>\n"
+            ));
+        }
+        out.push_str("</ul>\n");
+        out.push_str("</section>\n");
+    }
+
     // Findings
     let open: Vec<_> = verdict.open_findings().into_iter().cloned().collect();
     out.push_str("<section id=\"findings\">\n");
@@ -245,6 +270,33 @@ pub fn render_html(verdict: &ProjectVerdict) -> String {
     out.push_str("</html>\n");
 
     out
+}
+
+fn claim_reason(claim: &sure_core::vocabulary::Claim) -> String {
+    if !claim.reason.is_empty() {
+        return claim.reason.clone();
+    }
+    match claim.assessment {
+        sure_core::evidence::ClaimAssessment::Confirmed => {
+            String::from("A recorded harness event supports this claim.")
+        }
+        sure_core::evidence::ClaimAssessment::Contradicted => {
+            String::from("A recorded harness event contradicts this claim.")
+        }
+        sure_core::evidence::ClaimAssessment::CannotConfirm => String::from(
+            "SURE has no recorded event that supports or contradicts this claim.",
+        ),
+        sure_core::evidence::ClaimAssessment::NotCheckable => {
+            if claim.claim_type.is_empty() {
+                String::from("SURE does not know how to check this kind of claim.")
+            } else {
+                format!(
+                    "SURE does not know how to check a '{}' claim.",
+                    escape_control_characters(&claim.claim_type)
+                )
+            }
+        }
+    }
 }
 
 fn render_html_finding(out: &mut String, finding: &PlainLanguageFinding) {
@@ -369,8 +421,10 @@ code {
 mod tests {
     use super::*;
     use sure_core::capability::CapabilityReport;
-    use sure_core::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
-    use sure_core::ids::{CheckId, FingerprintId};
+    use sure_core::evidence::{
+        AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
+    };
+    use sure_core::ids::{CheckId, ClaimId, FingerprintId};
     use sure_core::intent::ProjectIntent;
     use sure_core::severity::Severity;
     use sure_core::status::{
@@ -378,7 +432,7 @@ mod tests {
         StatusCounts,
     };
     use sure_core::vocabulary::{
-        AssessmentSource, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
+        AssessmentSource, Claim, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
     };
 
     fn fingerprint() -> FingerprintId {
@@ -441,6 +495,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings,
             not_checked,
+            claim_checks: Vec::new(),
         }
     }
 
@@ -655,6 +710,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings: Vec::new(),
             not_checked: Vec::new(),
+            claim_checks: Vec::new(),
         };
         let md = render_markdown(&verdict);
         let html = render_html(&verdict);
@@ -691,5 +747,57 @@ mod tests {
             !html.contains("id=\"not-checked\""),
             "html must not have not-checked section: {html}"
         );
+    }
+
+    fn a_claim(assessment: ClaimAssessment, text: &str) -> Claim {
+        Claim {
+            id: ClaimId::generate(),
+            claim_text: text.to_owned(),
+            claim_type: "test_ran".to_owned(),
+            assessment,
+            reason: String::from("A recorded harness event supports this claim."),
+            evidence: Vec::new(),
+            session: None,
+        }
+    }
+
+    #[test]
+    fn markdown_claim_section_appears_when_claim_checks_exist() {
+        let verdict = ProjectVerdict {
+            fingerprint: fingerprint(),
+            aggregate: green_aggregate(),
+            intent: ProjectIntent::empty(),
+            capability: CapabilityReport::cli(),
+            findings: Vec::new(),
+            not_checked: Vec::new(),
+            claim_checks: vec![a_claim(ClaimAssessment::Confirmed, "I ran the tests")],
+        };
+        let md = render_markdown(&verdict);
+        assert!(md.contains("## AI claims"), "{md}");
+        assert!(md.contains("I ran the tests"), "{md}");
+        assert!(md.contains("Confirmed"), "{md}");
+    }
+
+    #[test]
+    fn html_claim_section_is_escaped() {
+        let verdict = ProjectVerdict {
+            fingerprint: fingerprint(),
+            aggregate: green_aggregate(),
+            intent: ProjectIntent::empty(),
+            capability: CapabilityReport::cli(),
+            findings: Vec::new(),
+            not_checked: Vec::new(),
+            claim_checks: vec![a_claim(
+                ClaimAssessment::Confirmed,
+                "I ran the tests<script>",
+            )],
+        };
+        let html = render_html(&verdict);
+        assert!(html.contains("id=\"claims\""), "{html}");
+        assert!(
+            !html.contains("I ran the tests<script>"),
+            "unescaped script tag must not appear: {html}"
+        );
+        assert!(html.contains("I ran the tests&lt;script&gt;"), "{html}");
     }
 }

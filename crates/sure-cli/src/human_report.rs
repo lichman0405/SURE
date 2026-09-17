@@ -16,6 +16,7 @@
 
 use std::io::{self, Write};
 
+use sure_core::claim_report::render_claim_section;
 use sure_core::coverage_summary::{CoverageNotCheckedSummary, summarize};
 use sure_core::plain_language_finding::{PlainLanguageFinding, render_findings};
 use sure_core::project_verdict::render_summary;
@@ -47,6 +48,13 @@ pub fn render_verdict(verdict: &ProjectVerdict, settings: HumanReportSettings<'_
     out.push('\n');
     out.push_str(&render_summary(verdict));
     out.push('\n');
+
+    // AI-claim checks
+    let claim_section = render_claim_section(&verdict.claim_checks);
+    if !claim_section.is_empty() {
+        out.push('\n');
+        out.push_str(&claim_section);
+    }
 
     // Findings
     let open: Vec<_> = verdict.open_findings().into_iter().cloned().collect();
@@ -190,8 +198,10 @@ fn render_not_checked_fallback(out: &mut String, not_checked: &[CheckResult]) {
 mod tests {
     use super::*;
     use sure_core::capability::CapabilityReport;
-    use sure_core::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
-    use sure_core::ids::{CheckId, FingerprintId};
+    use sure_core::evidence::{
+        AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
+    };
+    use sure_core::ids::{CheckId, ClaimId, FingerprintId};
     use sure_core::intent::ProjectIntent;
     use sure_core::severity::Severity;
     use sure_core::status::{
@@ -199,7 +209,7 @@ mod tests {
         StatusCounts,
     };
     use sure_core::vocabulary::{
-        AssessmentSource, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
+        AssessmentSource, Claim, FindingBuilder, FindingStatus, ProjectVerdict, SeverityRationale,
     };
 
     fn fingerprint() -> FingerprintId {
@@ -262,6 +272,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings,
             not_checked,
+            claim_checks: Vec::new(),
         }
     }
 
@@ -378,6 +389,7 @@ mod tests {
             capability: CapabilityReport::cli(),
             findings: Vec::new(),
             not_checked: Vec::new(),
+            claim_checks: Vec::new(),
         };
         let text = render(&verdict);
         assert!(
@@ -524,5 +536,60 @@ mod tests {
         write_verdict(&verdict, HumanReportSettings::default(), &mut buf).unwrap();
         let written = String::from_utf8(buf).unwrap();
         assert_eq!(rendered, written);
+    }
+
+    fn a_claim(assessment: ClaimAssessment, text: &str) -> Claim {
+        Claim {
+            id: ClaimId::generate(),
+            claim_text: text.to_owned(),
+            claim_type: "test_ran".to_owned(),
+            assessment,
+            reason: String::from("A recorded harness event supports this claim."),
+            evidence: Vec::new(),
+            session: None,
+        }
+    }
+
+    #[test]
+    fn claim_section_appears_when_claim_checks_exist() {
+        let verdict = ProjectVerdict {
+            fingerprint: fingerprint(),
+            aggregate: green_aggregate(),
+            intent: ProjectIntent::empty(),
+            capability: CapabilityReport::cli(),
+            findings: Vec::new(),
+            not_checked: Vec::new(),
+            claim_checks: vec![a_claim(ClaimAssessment::Confirmed, "I ran the tests")],
+        };
+        let text = render(&verdict);
+        assert!(text.contains("AI claims"), "{text}");
+        assert!(text.contains("I ran the tests"), "{text}");
+        assert!(text.contains("Confirmed"), "{text}");
+    }
+
+    #[test]
+    fn claim_section_is_absent_when_no_claim_checks_exist() {
+        let verdict = build_verdict(green_aggregate(), Vec::new(), Vec::new());
+        let text = render(&verdict);
+        assert!(!text.contains("AI claims"), "{text}");
+    }
+
+    #[test]
+    fn claim_text_is_escaped_in_human_report() {
+        let verdict = ProjectVerdict {
+            fingerprint: fingerprint(),
+            aggregate: green_aggregate(),
+            intent: ProjectIntent::empty(),
+            capability: CapabilityReport::cli(),
+            findings: Vec::new(),
+            not_checked: Vec::new(),
+            claim_checks: vec![a_claim(
+                ClaimAssessment::Confirmed,
+                "I ran the tests\nsecret",
+            )],
+        };
+        let text = render(&verdict);
+        assert!(!text.contains("I ran the tests\nsecret"), "{text:?}");
+        assert!(text.contains("I ran the tests\\nsecret"), "{text}");
     }
 }

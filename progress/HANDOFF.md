@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 86 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 87 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -19,11 +19,11 @@ accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `P8-T001` is accepted as commit `8d9a506`. `P8-T002` is accepted as commit
 `d0c496d`. `P8-T003` is accepted as commit `178b574`. `P8-T004` is accepted as
 commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
-accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P5-T005` received two follow-up security fixes in
+accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
-`3f9d002`. `P8-T009` received a follow-up security fix. Phase P8 is open at 9 of 11.
+`3f9d002`. `P8-T009` received a follow-up security fix. Phase P8 is open at 10 of 11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -212,12 +212,19 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     not promote the report to `Protected` just because an event carries a
     self-reported `Protected` tier; detection uses event types only, never
     payloads.
+33. A worker agent completed `P8-T010` — *Implement AI-claim report section* — and
+    the supervisor verified all quality gates and accepted the task. Checked agent
+    claims flow into `ProjectVerdict::claim_checks` and are rendered in terminal,
+    Markdown, HTML, and JSON reports with escaped attacker-controlled text,
+    assessment labels (`Confirmed`/`Contradicted`/`CannotConfirm`/`NotCheckable`),
+    and a plain-language reason or fallback explanation. The JSON report schema
+    version advanced to 2 with an optional `claim_checks` array.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 9 of 11.** The READY list is now
-`P8-T010`, `P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
+**Phase P7 is complete (9/9). Phase P8 is open at 10 of 11.** The READY list is now
+`P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P8-T009`, *"Implement capability/blind-spot reporting"*`P8-T010`, *"Implement AI-claim report section"*, which is the next
+`P8-T011`, *"Implement idempotent/concurrent hook event ingestion"*, which is the next
 concrete action.
 
 ## What `P5-T007` added

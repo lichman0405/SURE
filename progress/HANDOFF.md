@@ -5,36 +5,51 @@ Branch: `claude/v0.1-autonomous`
 Progress: 58 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 open at 6/7.** `P5-T007` is in progress (agent dispatched).
-`P5-T005` received a follow-up security fix in commit `3d5f9a9`.
+`P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
+`cc121ed`.
 
-**Since `P5-T006`'s acceptance, two things happened:**
+**Since `P5-T006`'s acceptance, four things happened:**
 1. A worker agent was dispatched for `P5-T007` — *Implement runtime evidence cleanup
-   and cancellation* — and is still running.
-2. A security review finding on `P5-T005`'s `core_flow.rs` was fixed: flow names
+   and cancellation* — and is still running. It has modified
+   `crates/sure-core/src/service.rs` and `crates/sure-core/src/runtime_start.rs`;
+   the workspace does not currently compile because `runtime_start.rs` calls the
+   old `Supervisor::start` signature. The agent is expected to finish the refactor.
+2. A worker agent was dispatched for `P6-T001` — *Implement candidate scanner for
+   TODO/mock/stub/placeholder patterns* — and is running in parallel.
+3. A security review finding on `P5-T005`'s `core_flow.rs` was fixed: flow names
    and route paths are now escaped with `crate::redact::escape_control_characters`
    before being embedded in check titles, and an adversarial unit test asserts the
    escaping. The fix is commit `3d5f9a9`.
+4. A second security review finding was addressed: `FlowRefused` error messages
+   also escape attacker-controlled component paths and route paths. The fix is
+   commit `cc121ed`.
 
 **The READY list is now eight entries** — `P6-T001`, `P6-T005`, `P6-T007`,
 `P7-T004`, `P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered
-is `P6-T001`, *"Implement candidate scanner for TODO/mock/stub/placeholder
-patterns"*, which is the next concrete action once `P5-T007` lands.
+is `P6-T001`, but it is already in progress; `P6-T005` is the next unstarted READY
+task once `P5-T007` lands.
 
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
   (`start_service_title`, `probe_route_title`, `browser_probe_title`) that escape
   attacker-controlled flow names and paths before building human-readable titles.
-- Unit test `titles_escape_control_characters_in_flow_names_and_paths` covering
-  newline, tab and ANSI-clear escape sequences.
+- `FlowRefused`'s `Display` impl now escapes component paths and route paths.
+- Unit tests `titles_escape_control_characters_in_flow_names_and_paths` and
+  `refusal_messages_escape_attacker_controlled_text` covering newline, tab and
+  ANSI-clear escape sequences.
 
 ## Validation of the follow-up fix
 
+`core_flow.rs` was formatted and its unit tests passed before the `P5-T007` agent
+introduced the workspace compile break. **The workspace gates cannot be re-run
+until the `P5-T007` agent completes its refactor.**
+
 | Gate | Result |
 | --- | ------ |
-| `cargo fmt --all -- --check` | green |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
-| `cargo test --workspace --no-fail-fast` | green |
+| `cargo fmt --all -- --check` | green (on current tree) |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | blocked by `P5-T007` agent's incomplete refactor |
+| `cargo test --workspace --no-fail-fast` | blocked by `P5-T007` agent's incomplete refactor |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
@@ -42,8 +57,10 @@ patterns"*, which is the next concrete action once `P5-T007` lands.
 
 1. Wait for the `P5-T007` worker agent to complete, then review, verify gates,
    and accept.
-2. Start `P6-T001` — *Implement candidate scanner for TODO/mock/stub/placeholder
-   patterns* — the lowest-numbered READY task once P5 closes.
+2. Wait for the `P6-T001` worker agent to complete, then review, verify gates,
+   and accept.
+3. Start `P6-T005` — *Implement frontend/backend route consistency* — the next
+   unstarted READY task once the running agents land.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

@@ -2,56 +2,76 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 56 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 57 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 open at 4/7.** `P5-T004` is implemented as **five** commits —
-`394a7f7`, `2251d7e`, `b9dfd07`, `846583d` and `90a7bc6` — and the commit carrying
-this file is its acceptance. **The run of `90a7bc6` is read in full below**, in the
-run table and in this section. What the task added is described under "What
-`P5-T004` added", which is this section; `P5-T003`'s is the next one down.
+(9/9), phase P5 open at 5/7.** `P5-T005` is implemented as commit `ba9984e` and
+the commit carrying this file is its acceptance. **What `P5-T005` added is the
+core-flow probe contract: a way for a project or fixture to describe safe local
+acceptance flows using only the typed actions SURE already understands, with no
+field that accepts arbitrary shell.**
 
-**The one thing about `P5-T004` a reader should know before the detail: the adapter
-adds a fourth way SURE can run something, and the ceiling over *no project code
-runs* moved exactly as the rule that guards it was written to move.** The new
-module is `crates/sure-core/src/browser_driver/` — seven files that find a
-Chrome-family browser on the machine, start it with a private profile on a
-loopback debugging port, speak CDP over WebSocket, and fold `Page`, `Network` and
-`Runtime` events into an `Observation`. Nothing in the product can construct a
-`Browser` yet, and `tests/browser_probe.rs`'s rule five was deliberately written
-to fail the day an adapter landed: it failed, and it is two rules now.
+**The one thing about `P5-T005` a reader should know before the detail: the
+check-schedule source-rule had to move again, because a fifth module is now
+allowed to construct `CheckProposal`.** `tests/check_schedule.rs` names the files
+that may build proposals; `core_flow.rs` joined the list, and the test was
+updated before the acceptance.
 
-**Accepting `P5-T004` unblocks two tasks that name it.** `P5-T005`, *"Implement
-core-flow probe contract"*, and `P5-T007`, *"Wire runtime probes into the
-schedule"*, were both queued because they name `P5-T004`. The READY list is now
-**nine** entries — `P5-T005`, `P5-T007`, `P6-T001`, `P6-T005`, `P6-T007`,
-`P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is
-`P5-T005`, which is the next concrete action.
+**Accepting `P5-T005` unblocks `P5-T006`,** *"Implement external-service
+verification boundary"*, which depends on `P5-T005`. The READY list is now
+**eight** entries — `P5-T006`, `P5-T007`, `P6-T001`, `P6-T005`, `P6-T007`,
+`P8-T001`, `P12-T008` and `P13-T004`. The lowest-numbered is `P5-T006`, which is
+the next concrete action.
 
-**`## Next concrete action` further down this file was not extended by `P5-T004`,
-and its item 1 therefore names an entry that has been taken.** Its newest item is
-`P4-T009`'s and it says the next entry is `P5-T001`; the entries since have been
-accepted without extending the list. **The live statement of what comes next is
-the READY list in the paragraph above and not that list's item 1**, and this
-sentence is here so that a reader who scrolls to it is not misled by it.
+**`## Next concrete action` further down this file was not extended by `P5-T005`,
+and its item 1 still names `P5-T001`.** Its newest item is `P4-T009`'s; the
+entries since have been accepted without extending the list. **The live
+statement of what comes next is the READY list in the paragraph above and not
+that list's item 1**, and this sentence is here so that a reader who scrolls to
+it is not misled by it.
 
-**The task's run table is five rows, and three of them are red.** `P5-T004` first
-pushed as `394a7f7` and was red on macOS and Ubuntu; it was repaired in `2251d7e`
-(the `P5-T002` fixture repair the mutation set found), `b9dfd07` (the macOS
-predicate), and `846583d` + `90a7bc6` (the Ubuntu CI workaround and the Windows
-test-budget increase). The final row, `35174114907` on `90a7bc6`, is green on all
-three platforms. Every row is kept because a run that fails teaches more than a
-run that is erased. Details are in the run table below.
+**`P5-T005` was validated locally rather than by CI.** All five quality gates
+passed on this Windows development machine:
+`cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo test --workspace --no-fail-fast`,
+`node scripts/validate-bootstrap.mjs` and
+`node scripts/taskctl.mjs validate`. The commit `ba9984e` is on
+`claude/v0.1-autonomous` and has not yet been pushed to origin at the time this
+section is written.
 
-**A local note rather than a project fact:** the 41-row mutation set
-(`target/tmp/mutate24.py`) could not be completed on this development machine.
-The narrow harness command is flaky under parallel execution here: browser tests
-time out or report spurious `NavigationFailed` problems, and serial execution
-surfaces accumulated scratch-directory exhaustion in `target/tmp/`. The accepted
-tree is validated by CI `35174114907` and by `cargo test --workspace --quiet
---no-fail-fast` passing locally on a clean tree. The mutation set should be run on
-a clean runner or CI before it is treated as final evidence.
+## What `P5-T005` added
 
-## What `P5-T004` added
+- `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,
+  `FlowContext`, `FlowParseError` and `FlowRefused`. Three step kinds:
+  `start_service`, `probe_route`, `browser_probe`.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod core_flow;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `core_flow.rs` to the
+  `MAY_PROPOSE` source-rule list.
+
+## Validation
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P5-T005` changed about the reachability ceiling
+
+`tests/check_schedule.rs`'s `MAY_PROPOSE` list now includes
+`crates/sure-core/src/core_flow.rs`. The rule is: only these files may construct
+a `CheckProposal`. A new proposer lands by editing the list, and the test fails
+until the edit is made. `P5-T005` made the edit.
+
+## Next concrete action
+
+1. Start `P5-T006` — *Implement external-service verification boundary* — the
+   lowest-numbered READY task and the one that names `P5-T005`.
+2. Keep `P5-T007` in view; it is still READY and depends on `P5-T002` and
+   `P5-T004`.
+
 
 - `crates/sure-core/src/browser_driver/mod.rs` — public module boundary.
 - `crates/sure-core/src/browser_driver/installed.rs` — finding a Chrome-family

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P5",
-  "last_updated": "2026-09-17T03:23:47.502Z",
+  "last_updated": "2026-09-17T04:29:10.989Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -712,13 +712,19 @@
       "notes": "target/tmp/p5t004-accept-note.md"
     },
     "P5-T005": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-17T03:23:47.501Z",
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-17T04:29:10.988Z",
+      "base_sha": "816a957",
+      "head_sha": "ba9984e",
+      "evidence": [
+        "cargo fmt --all -- --check clean",
+        "cargo clippy --workspace --all-targets --all-features -- -D warnings clean",
+        "cargo test --workspace --no-fail-fast clean",
+        "node scripts/validate-bootstrap.mjs OK",
+        "node scripts/taskctl.mjs validate OK"
+      ],
+      "notes": "target/tmp/p5t005-accept-note.md"
     },
     "P5-T006": {
       "status": "queued",

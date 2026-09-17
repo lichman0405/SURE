@@ -183,6 +183,18 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          and a `FilePresent` naming a `package.json` would have been a claim \
          about a file that says no such thing",
     ),
+    (
+        "src/core_flow.rs",
+        "`P5-T005`: it turns a fixture or project description of a safe local \
+         acceptance flow into checks. The flow is typed YAML — start a service \
+         by component and script role, probe a declared local route, or run a \
+         browser probe — and each step maps to the same [`ActionKind`] the \
+         rest of the product uses, with the same evidence class, severity and \
+         permission semantics. **There is no path from a flow step to \
+         [`ActionKind::ArbitraryCommand`]**: the structs carry \
+         `#[serde(deny_unknown_fields)]`, and a YAML document that tries to \
+         slip a `command:` key in is refused at parse time rather than ignored",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

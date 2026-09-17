@@ -15,6 +15,7 @@ pub mod components;
 pub mod config;
 pub mod consent;
 pub mod container;
+pub mod core_flow;
 pub mod db_migrations;
 pub mod dependency_state;
 pub mod diagnostics;

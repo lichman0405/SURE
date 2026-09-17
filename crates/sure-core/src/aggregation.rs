@@ -220,6 +220,7 @@ pub fn aggregate_run(
         unreported,
         overruled,
         unscheduled,
+        results: complete,
     })
 }
 
@@ -288,6 +289,11 @@ pub struct RunReport {
     unreported: Vec<CheckId>,
     overruled: Vec<CheckId>,
     unscheduled: Vec<CheckId>,
+    /// Every scheduled check and what became of it, in plan order.
+    ///
+    /// Stored so that downstream summaries can join each scheduled check back to
+    /// its result without recomputing the plan's decisions.
+    results: Vec<CheckResult>,
 }
 
 impl RunReport {
@@ -395,6 +401,15 @@ impl RunReport {
             .iter()
             .map(CriticalCheck::plain_description)
             .collect()
+    }
+
+    /// Every scheduled check and what became of it, in plan order.
+    ///
+    /// This is the same set the aggregate was computed over, so a caller can join
+    /// each scheduled check back to its result without trusting a second list.
+    #[must_use]
+    pub fn results(&self) -> &[CheckResult] {
+        &self.results
     }
 }
 

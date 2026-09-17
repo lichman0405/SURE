@@ -100,8 +100,11 @@ const PATIENT: Duration = Duration::from_secs(30);
 /// The look budget for the page that never arrives. Smaller than [`PATIENT`]
 /// because the look runs to its deadline by design there — there is nothing to
 /// watch — and still comfortably more than a cold browser start plus an attach,
-/// which is all that has to happen before the navigation is refused.
-const BRIEF: Duration = Duration::from_secs(10);
+/// which is all that has to happen before the navigation is refused. **Twenty
+/// rather than ten seconds**, because a loaded CI runner can take more than ten
+/// seconds to launch Chrome and report its debugging port, and a test that fails
+/// because the runner is slow is a test that says nothing about the project.
+const BRIEF: Duration = Duration::from_secs(20);
 
 /// More than the broken page produces, since the bound is not what the test is
 /// about.

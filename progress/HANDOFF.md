@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 71 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 72 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9).** `P5-T007` is accepted
 as commit `a6dbf98`. `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is
@@ -12,8 +12,9 @@ accepted as commit `de684e9`. `P6-T003` is accepted as commit `09d5fb5`.
 commit `01c5b76`. `P6-T008` is accepted as commit `71c8f55`. `P6-T009` is
 accepted as commit `8b890b3`. `P7-T001` is accepted as commit `16cb94a`.
 `P7-T002` is accepted as commit `c6b0969`. `P7-T003` is accepted as commit
-`a1fc0c5`. `P5-T005` received two follow-up security fixes in commits `3d5f9a9`
-and `cc121ed`. Phase P7 is open at 3 of 9.
+`a1fc0c5`. `P7-T004` is accepted as commit `2c1f2cb`. `P5-T005` received two
+follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P7 is open at
+4 of 9.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -103,11 +104,16 @@ and `cc121ed`. Phase P7 is open at 3 of 9.
     non-programmer reader needs — what is wrong, what it means, how serious it
     is, and what to do next — with safe fallbacks, control-character escaping,
     and a clear `is_material` predicate.
+17. A worker agent completed `P7-T004` — *Implement coverage/not-checked
+    summary* — as commit `2c1f2cb`. The supervisor verified all quality gates and
+    accepted the task. The module joins a scheduled check plan to the run report
+    it produced, counts checked/skipped/could-not-run checks, surfaces critical
+    gaps, and emits a plain-language support-level sentence.
 
-**Phase P7 is open at 3 of 9.** The READY list is now `P7-T004`, `P8-T001`,
+**Phase P7 is open at 4 of 9.** The READY list is now `P7-T005`, `P8-T001`,
 `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and `P14-T010`. The
-lowest-numbered READY task is `P7-T004`, *"Implement coverage/not-checked
-summary"*, which is the next concrete action.
+lowest-numbered READY task is `P7-T005`, *"Implement overall project verdict"*,
+which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13519,3 +13525,37 @@ reader's impression, not a review result, and it is written here as one.
 **If a later session finds a real security review waiting, treat this paragraph
 as the acknowledgement and act on the actual finding.** Nothing depends on the
 absent text.
+
+## What `P7-T004` added
+
+- `crates/sure-core/src/coverage_summary.rs` (new, ~220 lines) —
+  `CoverageNotCheckedSummary`, `NotCheckedEntry`, and `summarize(schedule, report,
+  capability)`.
+- Joins each scheduled check to its `CheckResult` by `CheckId`; counts checks that
+  `produced_a_result()` as checked, and categorises the rest as skipped or
+  could-not-run.
+- `CheckStatus::Skipped` becomes a skipped entry with a plain-language reason from
+  `NotCheckedReason::plain_explanation()`; `Error`, `Unknown`, and any other
+  non-result status become could-not-run with an honest fallback sentence.
+- Not-checked entries are ordered by critical-first, then severity descending,
+  then title ascending, so the most important gaps appear first.
+- `support_level` carries the adapter's tier description
+  (`CapabilityReport::tier::plain_description()`), making the report say how much
+  the run could actually see.
+- `CoverageNotCheckedSummary` exposes `is_complete()`,
+  `critical_not_checked_count()`, and a one-sentence `plain_summary()`.
+- `crate::aggregation::RunReport` gained a `results()` accessor so the summary can
+  join against the aggregation without recomputing it.
+- `crates/sure-core/tests/coverage_summary.rs` (new) covers complete runs, skipped
+  and could-not-run counts, critical gaps, support-level propagation, ordering,
+  and control-character escaping.
+
+## Validation of `P7-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |

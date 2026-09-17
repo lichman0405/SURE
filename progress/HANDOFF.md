@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 77 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 78 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -16,9 +16,10 @@ accepted as commit `16cb94a`. `P7-T002` is accepted as commit `c6b0969`.
 `2c1f2cb`. `P7-T005` is accepted as commit `f683c18`. `P7-T006` is accepted as
 commit `ee4d087`. `P7-T007` is accepted as commit `693d0ce`. `P7-T008` is
 accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
-`P5-T005` received two follow-up security fixes in commits `3d5f9a9` and
-`cc121ed`. `P7-T004` and `P7-T006` received a follow-up security fix in commit
-`f0e7032`. Phase P8 is open at 0 of 11.
+`P8-T001` is accepted as commit `8d9a506`. `P5-T005` received two follow-up
+security fixes in commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006`
+received a follow-up security fix in commit `f0e7032`. Phase P8 is open at 1 of
+11.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -149,10 +150,10 @@ accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
     report show the escaped `CheckResult::reason` when no structured
     `not_checked_reason` is available.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 0 of 11.** The READY list is
-now `P8-T001`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
-`P14-T010`. The lowest-numbered READY task is `P8-T001`, *"Implement versioned
-harness event ingestion"*, which is the next concrete action.
+**Phase P7 is complete (9/9). Phase P8 is open at 1 of 11.** The READY list is now
+`P8-T002`, `P9-T001`, `P12-T001`, `P12-T008`, `P13-T001`, `P13-T004` and
+`P14-T010`. The lowest-numbered READY task is `P8-T002`, *"Implement session/event
+persistence"*, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13733,6 +13734,31 @@ absent text.
   well-formedness.
 
 ## Validation of `P7-T009`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P8-T001` added
+
+- `crates/sure-core/src/harness_event.rs` (new) — versioned harness event ingestion.
+- `IngestedEvent` holds the parsed `EventEnvelope`, agreed protocol version, and
+  document kind.
+- `IngestError` gives plain-language diagnostics for I/O failures, invalid JSON,
+  missing version fields, version mismatch (with direction from `handshake::negotiate`),
+  schema violations, and malformed envelopes.
+- `ingest_event(reader)` and `ingest_event_str(text)` entry points.
+- Builds on `EventEnvelope::from_json` and `handshake::negotiate` rather than
+  duplicating version logic.
+- 8 inline tests cover valid event round-trip, older/newer version refusal,
+  malformed JSON, unknown fields, missing required fields, payload preservation,
+  I/O errors, and plain-language error messages.
+
+## Validation of `P8-T001`
 
 | Gate | Result |
 | --- | ------ |

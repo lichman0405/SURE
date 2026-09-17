@@ -799,8 +799,8 @@
       "status": "accepted",
       "started_at": "2026-09-17T09:17:26.772Z",
       "finished_at": "2026-09-17T14:30:00.000Z",
-      "base_sha": null,
-      "head_sha": null,
+      "base_sha": "5b2a1ab",
+      "head_sha": "05af66f",
       "evidence": [
         "cargo test --all-targets --all-features: all pass",
         "cargo clippy --all-targets --all-features: clean",
@@ -808,7 +808,7 @@
         "node scripts/validate-bootstrap.mjs: 17 phases, 166 tasks OK",
         "node scripts/taskctl.mjs validate: state OK"
       ],
-      "notes": "Added ActionKind::BrowserObservation to sure-domain. Created crates/sure-core/src/ui_action_bridge.rs scanning frontend source for onClick/onSubmit/action-link bindings and producing CheckProposals with Severity::Note, critical:false, CheckReason::CandidateFound. Runtime evidence upgrades Inference to ObservedFact and switches action to BrowserObservation; static-only stays Inference with ReadFile. Added to MAY_PROPOSE in tests/check_schedule.rs. Tests cover inference, observed-fact, negative (plain div), submit detection, link detection, addEventListener, not_checked, and plan integration."
+      "notes": "target/tmp/p6t006-accept-note.md"
     },
     "P6-T007": {
       "status": "queued",

@@ -2,14 +2,14 @@
 
 Last updated: 2026-09-17
 Branch: `claude/v0.1-autonomous`
-Progress: 64 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 65 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7).** `P5-T007` is accepted as commit `a6dbf98`.
 `P6-T001` is accepted as commit `e2610c4`. `P6-T002` is accepted as commit
 `de684e9`. `P6-T003` is accepted as commit `09d5fb5`. `P6-T004` is accepted as
-commit `a0575de`. `P6-T005` is accepted as commit `cf35947`. `P5-T005` received
-two follow-up security fixes in commits `3d5f9a9` and `cc121ed`. Phase P6 is open
-at 5 of 9.
+commit `a0575de`. `P6-T005` is accepted as commit `cf35947`. `P6-T006` is
+accepted as commit `05af66f`. `P5-T005` received two follow-up security fixes in
+commits `3d5f9a9` and `cc121ed`. Phase P6 is open at 6 of 9.
 
 **Since `P5-T006`'s acceptance, five things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -52,11 +52,19 @@ at 5 of 9.
    are compared against backend routes read from source, and unmatched paths are
    reported as grounded candidates. Dynamic/slotted/template-literal routes are
    skipped to avoid false certainty.
+10. A worker agent completed `P6-T006` — *Implement UI-action completeness bridge*
+    — and the supervisor verified all quality gates, fixed a formatting issue by
+    amending the commit, and accepted it as `05af66f`. Frontend `onClick`,
+    `onSubmit`, `@click`, `@submit`, and `addEventListener` bindings are now
+    detected and reported as grounded candidates. When runtime browser evidence
+    matches a declared action, the candidate upgrades from `Inference` to
+    `ObservedFact` with `ActionKind::BrowserObservation`; static-only results
+    remain inference.
 
-**The READY list is now six entries** — `P6-T006`, `P6-T007`, `P7-T004`,
-`P8-T001`, `P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is
-`P6-T006`, *"Implement UI-action completeness bridge"*, which is the next
-concrete action.
+**The READY list is now five entries** — `P6-T007`, `P7-T004`, `P8-T001`,
+`P12-T008`, `P13-T001` and `P13-T004`. The lowest-numbered is `P6-T007`,
+*"Implement grounded semantic-analysis request/response contract"*, which is the
+next concrete action.
 
 ## What `P5-T007` added
 
@@ -220,6 +228,35 @@ concrete action.
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
 
+## What `P6-T006` added
+
+- `crates/sure-core/src/ui_action_bridge.rs` (new, ~600 lines) — scans frontend
+  source files for UI action bindings (`onClick`, `onSubmit`, `@click`, `@submit`,
+  `addEventListener('click'/'submit', ...)`) and produces grounded candidates.
+- Added `ActionKind::BrowserObservation` to `crates/sure-domain/src/execution.rs`
+  with `Permission::ConnectService` and `can_touch_network=true`.
+- Produces one `CheckProposal` per binding with `Severity::Note`, `critical: false`,
+  `CheckReason::CandidateFound` anchored to file/line/context.
+- Static-only proposals use `EvidenceClass::Inference` + `ActionKind::ReadFile`.
+- When optional runtime `UiRuntimeEvidence` matches (kind + label-in-context
+  heuristic), the proposal upgrades to `EvidenceClass::ObservedFact` +
+  `ActionKind::BrowserObservation`.
+- `crates/sure-core/src/lib.rs` — one line: `pub mod ui_action_bridge;`.
+- `crates/sure-core/tests/check_schedule.rs` — adds `ui_action_bridge.rs` to the
+  `MAY_PROPOSE` source-rule list.
+- Tests cover inference-only, observed-fact upgrade, negative cases, submit/link
+  detection, `addEventListener`, `not_checked`, and plan integration.
+
+## Validation of `P6-T006`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green (supervisor amended commit for one formatting issue) |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
 ## What the `P5-T005` follow-up added
 
 - `crates/sure-core/src/core_flow.rs` — three new title helpers
@@ -232,9 +269,9 @@ concrete action.
 
 ## Next concrete action
 
-1. Start `P6-T006` — *Implement UI-action completeness bridge* — the
-   lowest-numbered READY task.
-2. Keep `P6-T007` in view; it is the next READY task after `P6-T006`.
+1. Start `P6-T007` — *Implement grounded semantic-analysis request/response
+   contract* — the lowest-numbered READY task.
+2. Keep `P7-T004` in view; it is the next READY task after `P6-T007`.
 
 
 - `crates/sure-core/src/core_flow.rs` (new, 1041 lines) — `CoreFlow`, `FlowStep`,

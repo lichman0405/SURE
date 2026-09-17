@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 81 of 166 v0.1 tasks accepted (phase P8 in progress).
+- **Progress:** 82 of 166 v0.1 tasks accepted (phase P8 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -60,6 +60,7 @@ Implemented so far:
 - Session/event persistence: stores harness events bound to project/session/time/capability source in the local SQLite store, with retention metadata, idempotent ingestion, and redaction before storage.
 - Standard recording projection: summarizes tool/command/git/file/build-test/outcome activity from harness events and stores the privacy-conscious summary without the full transcript.
 - Full recording opt-in projection: retains raw transcript/terminal payloads only under explicit opt-in, with a distinct storage marker, redaction before storage, and short retention.
+- Observed ProjectIntent capture path: converts harness `user.request` events into `ObservedUserRequest` requirements when full recording is granted, redacts credential-shaped prompt text before storage, and retains the raw event only under explicit full-recording consent.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.
 

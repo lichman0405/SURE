@@ -513,7 +513,7 @@ fn project_build_test(payload: &Value, event_type: &str) -> StandardProjection {
 
     let target = safe_string(payload.get("target").and_then(Value::as_str), "unknown");
     let success = payload.get("success").and_then(Value::as_bool) == Some(true);
-    let counts = payload.get("counts").cloned();
+    let counts = payload.get("counts").map(crate::store::redact_document);
 
     StandardProjection::BuildTest {
         kind,
@@ -539,10 +539,11 @@ fn source_names_git(source: &str) -> bool {
 }
 
 /// Turn an optional attacker-controlled string into a safe owned string,
-/// escaping control characters and applying a default when absent.
+/// redacting credential-shaped values, escaping control characters, and applying
+/// a default when absent.
 fn safe_string(value: Option<&str>, default: &str) -> String {
     match value {
-        Some(text) => redact::escape_control_characters(text),
+        Some(text) => redact::escape_control_characters(&redact::redact(text)),
         None => String::from(default),
     }
 }

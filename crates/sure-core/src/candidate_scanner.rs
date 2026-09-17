@@ -29,6 +29,7 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
+use crate::candidate_context::{CandidateContext, classify_path};
 use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::redact::escape_control_characters;
@@ -120,6 +121,25 @@ impl CandidateCategory {
         }
     }
 
+    /// The phrase a check's title is built from, with context.
+    #[must_use]
+    pub fn contextual_description(self, context: CandidateContext) -> String {
+        let base = match self {
+            Self::Todo => "project contains TODO or FIXME comments",
+            Self::Mock => "project contains mock usage",
+            Self::Stub => "project contains stub usage",
+            Self::Placeholder => "project contains placeholder usage",
+        };
+        let suffix = match context {
+            CandidateContext::Test => " in tests",
+            CandidateContext::Example => " in examples",
+            CandidateContext::Doc => " in documentation",
+            CandidateContext::MockFixture => " in mock fixtures",
+            CandidateContext::Product => " in production code",
+        };
+        format!("{base}{suffix}")
+    }
+
     /// The patterns that signal this category.
     const fn patterns(self) -> &'static [&'static str] {
         match self {
@@ -138,6 +158,7 @@ struct Detection {
     file: String,
     line: usize,
     context: String,
+    path_context: CandidateContext,
 }
 
 /// The checks SURE proposes for detected candidate patterns.
@@ -159,18 +180,24 @@ impl CandidateScanner {
         let mut detections: Vec<Detection> = Vec::new();
         let mut seen = HashSet::new();
 
-        scan_source_files(discovery, &mut seen, &mut detections);
+        let graph = crate::components::ComponentGraph::of(discovery);
+        scan_source_files(discovery, &graph, &mut seen, &mut detections);
 
         // Build proposals, one per category, using the first detection as the
-        // reason's anchor.
+        // reason's anchor. Prefer a Product-context detection when one exists,
+        // because a candidate in production code is the more significant claim.
         let mut proposals = Vec::new();
         for &(category, row) in CATEGORIES {
-            let Some(detection) = detections.iter().find(|d| d.category == category) else {
+            let detection = detections
+                .iter()
+                .find(|d| d.category == category && d.path_context == CandidateContext::Product)
+                .or_else(|| detections.iter().find(|d| d.category == category));
+            let Some(detection) = detection else {
                 continue;
             };
             proposals.push(CheckProposal::new(
                 check_id(&detection.file, &format!("candidate{}", category.tag())),
-                category.plain_description().to_owned(),
+                category.contextual_description(detection.path_context),
                 row.severity,
                 row.critical,
                 row.evidence_class,
@@ -240,6 +267,7 @@ impl CandidateScanner {
 /// Scan source files for candidate patterns.
 fn scan_source_files(
     discovery: &Discovery,
+    graph: &crate::components::ComponentGraph,
     seen: &mut HashSet<CandidateCategory>,
     detections: &mut Vec<Detection>,
 ) {
@@ -280,6 +308,7 @@ fn scan_source_files(
         bytes_read = bytes_read.saturating_add(metadata.len());
 
         let file = display_path(path);
+        let path_context = classify_path(path, &discovery.root, Some(graph));
         for (index, line) in text.lines().enumerate() {
             let line_number = index + 1;
             for &(category, _) in CATEGORIES {
@@ -298,6 +327,7 @@ fn scan_source_files(
                         file: file.clone(),
                         line: line_number,
                         context,
+                        path_context,
                     });
                     break;
                 }
@@ -474,7 +504,10 @@ mod tests {
         assert_eq!(scanner.proposed().len(), 1);
 
         let proposal = &scanner.proposed()[0];
-        assert_eq!(proposal.title(), "project contains TODO or FIXME comments");
+        assert_eq!(
+            proposal.title(),
+            "project contains TODO or FIXME comments in production code"
+        );
         assert_eq!(proposal.severity(), Severity::Note);
         assert!(!proposal.critical());
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
@@ -626,6 +659,129 @@ mod tests {
         assert!(
             desc.contains("line 1"),
             "reason should include line: {desc}"
+        );
+    }
+
+    #[test]
+    fn a_project_with_todo_in_tests_produces_test_context_title() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-candidate-test-ctx-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("tests")).unwrap();
+        std::fs::write(temp.join("tests/foo.rs"), "// TODO: fix me\n").unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+        let scanner = CandidateScanner::of(&discovery);
+        assert_eq!(scanner.proposed().len(), 1);
+        assert_eq!(
+            scanner.proposed()[0].title(),
+            "project contains TODO or FIXME comments in tests"
+        );
+    }
+
+    #[test]
+    fn a_project_with_todo_in_src_produces_product_context_title() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-candidate-src-ctx-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("src")).unwrap();
+        std::fs::write(temp.join("src/lib.rs"), "// TODO: fix me\n").unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+        let scanner = CandidateScanner::of(&discovery);
+        assert_eq!(scanner.proposed().len(), 1);
+        assert_eq!(
+            scanner.proposed()[0].title(),
+            "project contains TODO or FIXME comments in production code"
+        );
+    }
+
+    #[test]
+    fn product_context_is_preferred_when_both_test_and_product_exist() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-candidate-prefer-prod-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("tests")).unwrap();
+        std::fs::create_dir_all(temp.join("src")).unwrap();
+        std::fs::write(temp.join("tests/foo.rs"), "// TODO: test fix\n").unwrap();
+        std::fs::write(temp.join("src/lib.rs"), "// TODO: prod fix\n").unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+        let scanner = CandidateScanner::of(&discovery);
+        assert_eq!(scanner.proposed().len(), 1);
+        assert_eq!(
+            scanner.proposed()[0].title(),
+            "project contains TODO or FIXME comments in production code",
+            "Product context should be preferred over Test context"
+        );
+    }
+
+    #[test]
+    fn mock_in_tests_produces_test_context_title() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-candidate-mock-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("tests")).unwrap();
+        std::fs::write(temp.join("tests/foo.rs"), "let mock = 1;\n").unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+        let scanner = CandidateScanner::of(&discovery);
+        assert_eq!(scanner.proposed().len(), 1);
+        assert_eq!(
+            scanner.proposed()[0].title(),
+            "project contains mock usage in tests"
+        );
+    }
+
+    #[test]
+    fn mock_in_src_produces_product_context_title() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-candidate-mock-src-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("src")).unwrap();
+        std::fs::write(temp.join("src/lib.rs"), "let mock = 1;\n").unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+        let scanner = CandidateScanner::of(&discovery);
+        assert_eq!(scanner.proposed().len(), 1);
+        assert_eq!(
+            scanner.proposed()[0].title(),
+            "project contains mock usage in production code"
         );
     }
 }

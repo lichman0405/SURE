@@ -28,6 +28,7 @@ pub mod documents;
 pub mod enforce;
 pub mod env_completeness;
 pub mod external_service;
+pub mod false_completion_aggregator;
 pub mod fingerprint;
 pub mod http_routes;
 pub mod intent_implementation;

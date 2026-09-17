@@ -279,6 +279,16 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          trusted user requirement exists the module returns the frozen \
          after-the-fact limitation instead of fabricating a passing result",
     ),
+    (
+        "src/false_completion_aggregator.rs",
+        "`P6-T009`: it aggregates the candidate checks produced by the P6 false-completion \
+         scanners, deduplicating proposals that share an evidence anchor and keeping \
+         only the most serious one. It names `CheckProposal` because it receives, \
+         selects and returns concrete proposals, and it names `CheckReason` to read \
+         each proposal's anchor and `names_something` predicate. The module does not \
+         invent new checks; it only decides which of several proposals about the same \
+         place should survive",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

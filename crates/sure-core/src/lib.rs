@@ -12,6 +12,7 @@ pub mod browser;
 pub mod browser_driver;
 pub mod candidate_context;
 pub mod candidate_scanner;
+pub mod capability_report;
 pub mod checks;
 pub mod claim_capture;
 pub mod claim_checker;

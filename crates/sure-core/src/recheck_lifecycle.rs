@@ -547,16 +547,86 @@ mod tests {
             },
             another_fingerprint(),
         );
+
+        // Stated outside the platform blocks on purpose: these hold whichever
+        // answer the platform gives to *is this the same file*, so asserting
+        // them inside one branch would leave the other branch's version of them
+        // unrun on two of the three machines this suite runs on. The earlier
+        // finding stayed open either way, it is a finding of this run rather
+        // than last run's record (`clone_for_state` mints this run's id), and
+        // its evidence still anchors the file the previous run complained about.
+        assert_eq!(update.kept_open.len(), 1);
+        assert_eq!(update.kept_open[0].title, previous.title);
+        assert_eq!(update.kept_open[0].status, FindingStatus::Open);
+        assert_eq!(
+            update.kept_open[0].evidence[0].anchor.location,
+            "src/EMAIL/SEND.rs"
+        );
+
+        // What the platform decides is how many findings a reader sees. Windows
+        // folds case in `normalise_path`, so the two spellings are one file and
+        // the current finding is the only one reported; on a case-sensitive
+        // filesystem they are two files, so the current finding is reported and
+        // the previous one is carried forward beside it by `reconcile`'s last
+        // `else` — the same carry as
+        // `a_previous_finding_without_passing_rechecks_stays_open` and
+        // `a_previous_finding_that_did_not_reappear_is_carried_beside_the_current_ones`,
+        // which expect the one `kept_open` entry asserted above and do so on
+        // every platform. So the two branches agree about everything except the
+        // count, and the Unix branch's count is the only claim in this test that
+        // cannot be run on the machine this repository is developed on.
         #[cfg(windows)]
         {
             assert_eq!(update.findings.len(), 1);
-            assert_eq!(update.kept_open.len(), 1);
+            // Matched by key, so the entry in `kept_open` is the previous
+            // finding itself rather than a fresh copy of it.
+            assert_eq!(update.kept_open[0].id, previous.id);
         }
         #[cfg(not(windows))]
-        {
-            assert_eq!(update.findings.len(), 2);
-            assert!(update.kept_open.is_empty());
-        }
+        assert_eq!(update.findings.len(), 2);
+    }
+
+    /// The shape the case-sensitive branch of that test has, written so that it
+    /// holds on every platform: a previous finding for one file and a current
+    /// finding for another. The previous finding is neither matched nor
+    /// resolvable, so it is reported open *and* counted as kept open — which is
+    /// why the `#[cfg(not(windows))]` branch above expects a non-empty
+    /// `kept_open` rather than an empty one. Kept platform-independent on
+    /// purpose: this is the statement that a Unix-only branch cannot make
+    /// locally on the machine this repository is developed on.
+    #[test]
+    fn a_previous_finding_that_did_not_reappear_is_carried_beside_the_current_ones() {
+        let previous = finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open);
+        let current = finding_with("Email not sent", "src/email/other.rs", FindingStatus::Open);
+        let update = reconcile(
+            LifecycleInputs {
+                previous_open: std::slice::from_ref(&previous),
+                current_findings: std::slice::from_ref(&current),
+                check_results: &[],
+                rechecks: &[],
+            },
+            another_fingerprint(),
+        );
+        assert_eq!(update.findings.len(), 2);
+        assert_eq!(update.kept_open.len(), 1);
+        assert_eq!(update.kept_open[0].title, previous.title);
+        assert_eq!(update.kept_open[0].status, FindingStatus::Open);
+        // Not the previous id: a carried finding belongs to this run and gets
+        // this run's id. The anchor is what says it is the same issue.
+        assert_ne!(update.kept_open[0].id, previous.id);
+        assert_eq!(
+            update.kept_open[0].evidence[0].anchor.location,
+            "src/email/send.rs"
+        );
+        // And it is reported as well as counted: the verdict a reader sees has
+        // it in `findings`, and `kept_open` is what the progress sentence counts.
+        assert!(
+            update
+                .findings
+                .iter()
+                .any(|f| f.id == update.kept_open[0].id && f.status == FindingStatus::Open)
+        );
+        assert!(update.resolved.is_empty());
     }
 
     #[test]

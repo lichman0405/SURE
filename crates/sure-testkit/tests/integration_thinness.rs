@@ -430,11 +430,22 @@ fn claude_code_launcher_contract_fixtures_are_valid_json() {
 
 // --- the MCP launcher, which fails closed where the hooks fail open --------
 
+// **Everything below this line that runs a launcher is Windows-only, and so is
+// the apparatus it runs on.** The launcher is `sure-mcp.ps1`, the stand-ins are
+// `.cmd` files that answer with `exit /b`, and the interpreter is the one the
+// package ships against — none of which exists on a Unix runner. The tests are
+// gated to Windows for that reason and not to make a job quieter; the helpers
+// are gated with them, because a helper used only by a Windows-gated test is
+// dead code everywhere else and `-D warnings` in CI fails the ubuntu and macos
+// jobs on it. That is what happened: this file was the only thing stopping the
+// Unix jobs from reaching their test step from `752489c` until `P15-T016`.
+
 /// The PowerShell to run a launcher with.
 ///
 /// Named by absolute path when it can be, because one of these tests empties
 /// `PATH` on purpose — that is how it makes `sure` unfindable — and a test that
 /// could not find its own interpreter would fail for the wrong reason.
+#[cfg(windows)]
 fn powershell() -> PathBuf {
     if let Some(root) = std::env::var_os("SystemRoot") {
         let candidate = PathBuf::from(root)
@@ -450,6 +461,7 @@ fn powershell() -> PathBuf {
 }
 
 /// An empty scratch directory of this test's own, as the install tests use.
+#[cfg(windows)]
 fn launcher_scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("sure-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -471,6 +483,7 @@ fn claude_code_mcp_launcher() -> PathBuf {
 /// A `.cmd` rather than an `.exe` because these tests are about what the
 /// launcher does with the status and the streams of whatever it resolved, and
 /// building a binary to be wrong would test the compiler.
+#[cfg(windows)]
 fn stub_binary(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     let text = format!("@echo off\r\n{body}");

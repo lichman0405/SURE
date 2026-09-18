@@ -468,6 +468,39 @@ fn project_git(payload: &Value, event_type: &str) -> StandardProjection {
     }
 }
 
+/// The last segment of a path that arrived as text rather than as a
+/// [`Path`](std::path::Path).
+///
+/// **A payload path is text from another machine, and its separators are not
+/// necessarily this machine's.** `integrations/cursor/fixtures/after-file-edit.json`
+/// carries `C:\Users\dev\sample-project\src\email\send.rs`, and the cursor
+/// normaliser's own test asserts that string arrives here unchanged, because it
+/// is what the harness said. Read with `Path::file_name` on a Unix build, that
+/// text is *one* file name — the whole string, backslashes and all — so a
+/// recording of the session would name the file `C:\Users\dev\sample-project\src\email\send.rs`
+/// instead of `send.rs`, and a reader comparing two sessions' recordings would
+/// not see the same file in both. On a Windows build the same text happens to
+/// read correctly, which is why this was invisible on the machine SURE is
+/// developed on and visible on the other two: the same input, two answers,
+/// decided by where the reader runs.
+///
+/// So the text is folded before it is read, which is the rule
+/// [`hook_protection`](crate::hook_protection) states for paths of this kind —
+/// a harness may send either separator, so the reading normalises rather than
+/// trusting the platform. One difference there is deliberate: the case is left
+/// alone, because what comes out of here is shown to a reader as the name of the
+/// file the harness said it wrote, and folding `MAIN.RS` to `main.rs` would
+/// report a name the event does not contain.
+///
+/// Nothing is lost by this: on a platform whose own separator is `/`, folding is
+/// a no-op, and a file name cannot contain a `\` on Windows in the first place.
+fn basename_of(text: &str) -> Option<&str> {
+    // `rfind`, not `last`, and not the final component of a split: a path that
+    // ends at a separator names the directory itself, so the empty segments such
+    // a path produces are skipped rather than reported as a name.
+    text.split(['/', '\\']).rfind(|part| !part.is_empty())
+}
+
 fn project_file(payload: &Value, event_type: &str) -> StandardProjection {
     let operation = if payload.get("deleted").and_then(Value::as_bool) == Some(true)
         || event_type.contains("delete")
@@ -485,10 +518,8 @@ fn project_file(payload: &Value, event_type: &str) -> StandardProjection {
     let basename = payload
         .get("path")
         .and_then(Value::as_str)
-        .map(std::path::Path::new)
-        .and_then(std::path::Path::file_name)
-        .and_then(|os| os.to_str())
-        .map(|s| s.to_owned())
+        .and_then(basename_of)
+        .map(str::to_owned)
         .unwrap_or_else(|| safe_string(payload.get("basename").and_then(Value::as_str), "unknown"));
 
     let size_bytes = payload.get("size").and_then(Value::as_u64);
@@ -736,6 +767,38 @@ mod tests {
             }
             other => panic!("expected File projection, got {other:?}"),
         }
+    }
+
+    /// A harness writes a path in the form of the machine it runs on, and that
+    /// need not be the machine SURE reads the recording on. Three spellings of
+    /// the same file must project to the same name, or a reader comparing two
+    /// sessions cannot see that they touched the same file — and a bare file
+    /// name, which is the one shape that has no separators to disagree about,
+    /// stays itself.
+    #[test]
+    fn a_path_projects_to_the_same_basename_however_it_is_spelled() {
+        let basename_of_projection = |path: &str| {
+            let event = make_event("file.write", json!({"path": path}));
+            match project(&event).expect("file event projects") {
+                StandardProjection::File { basename, .. } => basename,
+                other => panic!("expected File projection, got {other:?}"),
+            }
+        };
+
+        assert_eq!(
+            basename_of_projection("C:\\work\\my project\\src\\main.rs"),
+            "main.rs"
+        );
+        assert_eq!(
+            basename_of_projection("/work/my project/src/main.rs"),
+            "main.rs"
+        );
+        assert_eq!(basename_of_projection("src/main.rs"), "main.rs");
+        assert_eq!(basename_of_projection("main.rs"), "main.rs");
+        // A path that ends at a separator names the directory itself, and a
+        // doubled or trailing separator does not create an empty segment that
+        // would be reported as the file's name.
+        assert_eq!(basename_of_projection("src//nested/"), "nested");
     }
 
     #[test]

@@ -95,7 +95,25 @@ use sure_domain::status::CheckStatus;
 /// the slowest thing in this file and a loaded CI machine is not this one, so
 /// this is generous on purpose: a budget tight enough to be interesting is a
 /// budget that fails for reasons that are not the code's.
-const PATIENT: Duration = Duration::from_secs(30);
+///
+/// **Forty-five rather than thirty seconds, measured.** One budget pays for two
+/// things in sequence — the launch, and the look that follows it — so a launch
+/// that takes twenty-five seconds leaves five for a page that was going to
+/// settle in three. On the windows job of `35351409364` Chrome was driven on a
+/// loaded runner and reached `29.999205` and `29.999266` seconds of its launch
+/// without reporting a debugging port, and the two tests here that need to look
+/// at a page then failed with *the look stopped early, so nothing below is a
+/// statement about the page* — which is this file refusing to draw a conclusion
+/// from half a look, and is the right thing to do with the budget it was given.
+/// The same tests drove the same browser well inside this budget on the two runs
+/// either side of that one (`35351293152` and `35349989431` before it,
+/// `35352560694` and `35357365360` after, all four with a green windows job), so
+/// what ran out was the runner's headroom, not the project's. Raising it does
+/// not make anything pass that should fail: a browser
+/// that genuinely cannot be driven still reports `DriverWouldNotStart` and a
+/// look that still runs out still stops early. It only stops the suite measuring
+/// the machine instead of the project.
+const PATIENT: Duration = Duration::from_secs(45);
 
 /// The look budget for the page that never arrives. Smaller than [`PATIENT`]
 /// because the look runs to its deadline by design there — there is nothing to
@@ -104,7 +122,19 @@ const PATIENT: Duration = Duration::from_secs(30);
 /// rather than ten seconds**, because a loaded CI runner can take more than ten
 /// seconds to launch Chrome and report its debugging port, and a test that fails
 /// because the runner is slow is a test that says nothing about the project.
-const BRIEF: Duration = Duration::from_secs(20);
+///
+/// **Thirty rather than twenty, on the same evidence one step further on.** In
+/// `35365324422` this test was the only one of the five in this file to fail on
+/// ubuntu, at `19.999964` seconds of its launch; the four others, on the same
+/// runner and against the same `/usr/bin/chromium`, launched inside thirty. On
+/// the windows job of `35196110213` the same test failed the same way at
+/// `19.999018`, while the two tests beside it got their browser up and failed
+/// later, for a different reason. Twenty seconds is therefore below what a cold
+/// Chrome needs on a loaded runner often enough to be worth paying thirty for,
+/// and the price of the raise is bounded: this budget is spent only when the
+/// browser is slow to report its port, and when it is slow enough to exceed even
+/// this the test still fails and still says which machine state it saw.
+const BRIEF: Duration = Duration::from_secs(30);
 
 /// More than the broken page produces, since the bound is not what the test is
 /// about.

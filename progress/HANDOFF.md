@@ -380,12 +380,42 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     Claude Code events (session-start, check pre/post, repair pre/post, recheck
     pre/post, stop) through the real ingest path without network, asserts the
     expected protection decisions, and verifies that all events are persisted.
+56. The supervisor completed `P10-T009` — *Claude live smoke-test procedure* —
+    and accepted it. Added
+    `integrations/claude-code/docs/smoke-test.md`, an optional manual procedure
+    for exercising the SURE Claude Code integration with a real authenticated
+    session. The document includes prerequisites, step-by-step commands,
+    expected outcomes, a failure-triage table, and instructions for recording
+    results without making the process a CI requirement.
 
-**Phase P11 is open at 7 of 9; Phase P10 is open at 7 of 8.** The READY list is now
-`P10-T009`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+**Phase P11 is open at 7 of 9; Phase P10 is complete at 9 of 9.** The READY list is now
+`P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T009`, *"Claude live smoke-test procedure"*, which is the next concrete action.
+`P14-T007`, `P14-T009` and `P14-T010`. The lowest-numbered READY task is
+`P11-T008`, which is the next concrete action.
+
+## What `P10-T009` added
+
+- `integrations/claude-code/docs/smoke-test.md` — new optional manual smoke-test
+  procedure for the SURE Claude Code integration.
+  - Covers when to run, prerequisites, and a prepared PowerShell snippet to
+    create a throw-away test project.
+  - Walks through eight live steps: session start, read-only tool, blocked
+    write, blocked Bash, `sure check`, and session stop.
+  - Lists expected `sure history` outcomes for each step.
+  - Provides a failure-triage table for common hook problems.
+  - Explicitly states the procedure is manual, not a CI gate, and that the
+    integration remains Observed (Tier 1).
+
+## Validation of `P10-T009`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T008` added
 

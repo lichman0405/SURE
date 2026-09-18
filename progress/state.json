@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P10",
-  "last_updated": "2026-09-18T09:47:47.135Z",
+  "last_updated": "2026-09-18T10:08:58.216Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1234,9 +1234,9 @@
       "notes": "Supervisor review: worker implemented Claude synthetic E2E check-repair-recheck in commit bfc51fc; re-ran full gate set, all green."
     },
     "P10-T009": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T10:05:48.346Z",
+      "finished_at": "2026-09-18T10:08:58.216Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],

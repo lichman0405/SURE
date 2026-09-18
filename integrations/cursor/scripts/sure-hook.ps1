@@ -23,5 +23,5 @@ if (-not $bin) {
 
 # Forward the event to SURE and return its exit code. stdout/stderr are passed
 # through unchanged so Cursor sees any decision/response SURE produces.
-$inputJson | & $bin hook ingest --source cursor @HookArgs
+$inputJson | & $bin --format json hook ingest --source cursor @HookArgs
 exit $LASTEXITCODE

@@ -174,12 +174,17 @@ pub enum ConfigAction {
 pub enum HookAction {
     /// Take one harness event and record it.
     ///
-    /// The harness writes JSON to stdin. This build does not read it: a
-    /// command that consumed input and then refused would report the event as
-    /// handled. `docs/architecture/CLI.md` records that, and
-    /// `tests/cli_contract.rs` checks that this command does not block when
-    /// something is already waiting on the other end of the pipe.
-    Ingest,
+    /// The harness writes JSON to stdin. The event is normalised, validated,
+    /// and persisted. For `pre-tool-use` events a protection decision is also
+    /// evaluated and written to stdout as JSON.
+    Ingest {
+        /// Which harness sent the event.
+        #[arg(long, value_name = "NAME")]
+        source: Option<String>,
+
+        /// The kind of event, as named by the harness.
+        event_kind: Option<String>,
+    },
 }
 
 impl Command {

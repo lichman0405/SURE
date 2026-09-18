@@ -4,6 +4,7 @@ pub mod check;
 pub mod cli;
 pub mod commands;
 pub mod doctor;
+pub mod hook;
 pub mod human_report;
 pub mod json_report;
 pub mod output;

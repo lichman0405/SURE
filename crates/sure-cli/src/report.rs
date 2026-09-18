@@ -210,6 +210,10 @@ pub enum Report {
     Unavailable(NotYet),
     /// A command that tried and did not finish.
     Failed(Box<Failed>),
+    /// `sure hook ingest`, carrying a protection decision for a pre-action hook.
+    ///
+    /// The machine form is the decision JSON that the harness reads from stdout.
+    HookDecision(sure_core::hook_protection::ProtectionDecision),
 }
 
 impl Report {
@@ -256,6 +260,13 @@ impl Report {
             // `not_green` would read as "the project has problems" — which is a
             // statement about a project SURE never got to look at.
             Self::Failed(_) => "failed",
+            // A hook decision is an answer: the command ran and produced a result.
+            // `not_green` for block because the answer is "do not proceed".
+            Self::HookDecision(decision) => match decision.decision {
+                sure_core::hook_protection::ProtectionDecisionKind::Allow
+                | sure_core::hook_protection::ProtectionDecisionKind::Warn => "ok",
+                sure_core::hook_protection::ProtectionDecisionKind::Block => "not_green",
+            },
         }
     }
 
@@ -292,6 +303,13 @@ impl Report {
             Self::GoalRecorded(_) => exit::UNAVAILABLE,
             Self::Unavailable(_) => exit::UNAVAILABLE,
             Self::Failed(_) => exit::FAILED,
+            // 0 for allow/warn so the launcher does not block the operation.
+            // 1 for block so the launcher can relay the refusal.
+            Self::HookDecision(decision) => match decision.decision {
+                sure_core::hook_protection::ProtectionDecisionKind::Allow
+                | sure_core::hook_protection::ProtectionDecisionKind::Warn => exit::OK,
+                sure_core::hook_protection::ProtectionDecisionKind::Block => exit::NOT_GREEN,
+            },
         }
     }
 
@@ -321,6 +339,8 @@ impl Report {
             // a report about the project, and a file holding only the recording
             // would read as one.
             Self::GoalRecorded(_) | Self::Unavailable(_) | Self::Failed(_) => false,
+            // A hook decision is an answer: the command ran and produced a result.
+            Self::HookDecision(_) => true,
         }
     }
 
@@ -426,6 +446,31 @@ impl Report {
                     exit::OK
                 )
             }
+            Self::HookDecision(decision) => match decision.decision {
+                sure_core::hook_protection::ProtectionDecisionKind::Allow => {
+                    writeln!(out, "SURE allows this tool request.")
+                }
+                sure_core::hook_protection::ProtectionDecisionKind::Warn => {
+                    writeln!(
+                        out,
+                        "SURE advises caution: {}",
+                        decision
+                            .reason
+                            .as_deref()
+                            .unwrap_or("This action needs approval.")
+                    )
+                }
+                sure_core::hook_protection::ProtectionDecisionKind::Block => {
+                    writeln!(
+                        out,
+                        "SURE blocks this tool request: {}",
+                        decision
+                            .reason
+                            .as_deref()
+                            .unwrap_or("The current execution mode does not permit this action.")
+                    )
+                }
+            },
         }
     }
 
@@ -518,6 +563,12 @@ impl Report {
                 });
             }
             Self::Version | Self::Protocol => {}
+            Self::HookDecision(decision) => {
+                frame["decision"] = json!(decision.decision.as_str());
+                if let Some(ref reason) = decision.reason {
+                    frame["reason"] = json!(reason);
+                }
+            }
         }
         frame
     }
@@ -538,6 +589,7 @@ impl Report {
             Self::GoalRecorded(_) => "check",
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
+            Self::HookDecision(_) => "hook",
         }
     }
 }
@@ -640,6 +692,13 @@ mod tests {
             a_recorded_goal(),
             a_failure(),
             Report::Unavailable(a_refusal()),
+            Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow()),
+            Report::HookDecision(sure_core::hook_protection::ProtectionDecision::warn(
+                "This action needs explicit approval before it can run.",
+            )),
+            Report::HookDecision(sure_core::hook_protection::ProtectionDecision::block(
+                "The current execution mode does not permit this action.",
+            )),
         ]
     }
 

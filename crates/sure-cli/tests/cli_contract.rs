@@ -84,11 +84,16 @@ const EVERY_COMMAND: &[&[&str]] = &[
     &["version"],
 ];
 
-/// The commands this build carries out, and the only three.
+/// The commands this build carries out.
 ///
 /// Every other command in [`EVERY_COMMAND`] answers `unavailable`, and the
 /// statuses below are only meaningful while that holds.
-const IMPLEMENTED: &[&[&str]] = &[&["doctor"], &["protocol"], &["version"]];
+const IMPLEMENTED: &[&[&str]] = &[
+    &["doctor"],
+    &["hook", "ingest"],
+    &["protocol"],
+    &["version"],
+];
 
 /// The commands whose answer is the same on every machine, and so is a status
 /// this file can demand.
@@ -102,12 +107,7 @@ const ALWAYS_OK: &[&[&str]] = &[&["protocol"], &["version"]];
 
 /// The commands that ran and answered nothing, used where a refusal is the
 /// subject rather than a report.
-const REFUSED: &[&[&str]] = &[
-    &["check"],
-    &["repair"],
-    &["hook", "ingest"],
-    &["history", "delete"],
-];
+const REFUSED: &[&[&str]] = &[&["check"], &["repair"], &["history", "delete"]];
 
 #[test]
 fn every_documented_command_parses() {
@@ -557,35 +557,50 @@ fn the_two_spellings_of_the_version_agree_about_the_number() {
 }
 
 #[test]
-fn hook_ingest_does_not_read_standard_input() {
-    // The refusal says the event was not read, and that is a promise with
-    // consequences: a launcher that pipes an event in has to be able to tell
-    // that SURE did not take it. If this command ever grows a read, it must
-    // grow it deliberately — a command that consumed the event and then
-    // refused would have destroyed the evidence it was refusing to record.
-    //
-    // Checked by writing more than a pipe will hold to a child that never
-    // reads. A reading child would accept all of it; this one is gone, so the
-    // write fails with a broken pipe. That is a fact about the child rather
-    // than about a message, and it cannot hang.
+fn hook_ingest_reads_standard_input_and_evaluates_protection() {
+    // P11-T006: `sure hook ingest` reads stdin, normalises the event, and
+    // for pre-tool-use events evaluates a protection decision.
+    let payload = r#"{
+        "event": "preToolUse",
+        "harness_session_id": "cursor-session-001",
+        "tool": "Shell",
+        "args": {"command": "npm test", "workdir": "C:\\Users\\dev\\sample-project"},
+        "timestamp_utc": "2026-09-18T12:01:00Z",
+        "source": "cursor"
+    }"#;
+
     let mut child = Command::new(SURE)
-        .args(["hook", "ingest"])
+        .args([
+            "--format",
+            "json",
+            "hook",
+            "ingest",
+            "--source",
+            "cursor",
+            "pre-tool-use",
+        ])
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("a child process");
     let mut stdin = child.stdin.take().expect("the pipe");
-    let payload = vec![b'x'; 1 << 20];
-    let outcome = stdin.write_all(&payload);
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
     drop(stdin);
 
-    let status = child.wait().expect("the child exits");
-    assert_ne!(status.code(), Some(0));
+    let output = child.wait_with_output().expect("the child exits");
+    let status = output.status.code().expect("the process exited on its own");
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
+
+    // Default config is inspect_only, so Shell (ArbitraryCommand) is blocked.
+    assert_ne!(status, 0, "a blocked tool should exit non-zero: {stdout}");
+
+    let frame: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{stdout}"));
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
     assert!(
-        outcome.is_err(),
-        "sure hook ingest accepted a megabyte of input, so it is reading standard input \
-         and the refusal is no longer true"
+        frame["reason"].as_str().is_some_and(|r| !r.is_empty()),
+        "a block decision should carry a reason: {frame}"
     );
 }
 

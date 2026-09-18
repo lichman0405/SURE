@@ -65,9 +65,11 @@ impl std::error::Error for CursorNormalizeError {}
 ///
 /// # Capability tier
 ///
-/// Cursor is currently **Observed** (tier 1). The `preToolUse` event is wired in
-/// the hook manifest, but SURE does not yet implement pre-action
-/// decision/response (P11-T006), so the session cannot be considered Protected.
+/// Cursor is **Observed** (tier 1). The `preToolUse` event is wired in the hook
+/// manifest and SURE now evaluates a protection decision (P11-T006), but the
+/// manifest does not confirm that Cursor interprets the response, so the
+/// integration cannot honestly claim Protected (tier 2). Protection remains
+/// advisory: the decision is returned, but the harness may or may not act on it.
 pub fn normalize(text: &str) -> Result<EventEnvelope, CursorNormalizeError> {
     let raw: CursorRawEvent =
         serde_json::from_str(text).map_err(|error| CursorNormalizeError::NotJson {

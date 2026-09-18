@@ -87,11 +87,7 @@ impl Command {
                 "show the settings in effect and which layer each one came from",
                 "No configuration was read.",
             ),
-            Self::Hook { .. } => not_yet(
-                self,
-                "record one event from a coding harness",
-                "The event was not read from standard input and was not recorded.",
-            ),
+            Self::Hook { action } => crate::hook::run(action),
             Self::Explain { .. } => not_yet(
                 self,
                 "explain one recorded result in plain language",
@@ -180,7 +176,10 @@ mod tests {
                 action: Some(ConfigAction::Validate),
             },
             Command::Hook {
-                action: HookAction::Ingest,
+                action: HookAction::Ingest {
+                    source: None,
+                    event_kind: None,
+                },
             },
             Command::Explain { id: None },
             Command::Protocol { speaks: None },
@@ -230,6 +229,11 @@ mod tests {
                 // `a_command_that_runs_never_answers_a_question_it_was_not_asked`
                 // for the name it answers under.
                 Report::Version | Report::Protocol | Report::Handshake(_) | Report::Doctor(_) => {}
+                // `hook ingest` reads stdin and may return a decision or a failure
+                // when stdin is empty. It is in this list because the grammar
+                // accepts it, and its own tests cover the success paths.
+                Report::HookDecision(_) => {}
+                Report::Failed(failure) if failure.command == "hook" => {}
                 // Neither shape is reachable from [`every_command`], and that is
                 // asserted rather than ignored: the list holds no invocation that
                 // writes to the store, so a report of either shape appearing here
@@ -299,7 +303,7 @@ mod tests {
             .collect();
         implemented.sort_unstable();
         implemented.dedup();
-        assert_eq!(implemented, ["doctor", "protocol", "version"]);
+        assert_eq!(implemented, ["doctor", "hook", "protocol", "version"]);
     }
 
     #[test]

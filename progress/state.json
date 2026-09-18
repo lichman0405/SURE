@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P11",
-  "last_updated": "2026-09-18T06:54:52.264Z",
+  "last_updated": "2026-09-18T06:56:29.896Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1288,8 +1288,8 @@
       "notes": "Supervisor review: worker implemented Cursor repair handoff in commit 2062077; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T006": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T06:56:29.896Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

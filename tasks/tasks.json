@@ -2606,5 +2606,44 @@
     ],
     "outputs": [],
     "notes": ""
+  },
+  {
+    "id": "P1-T012",
+    "phase": "P1",
+    "title": "Give the store a location a caller can choose",
+    "required": true,
+    "depends_on": [
+      "P1-T004",
+      "P1-T005"
+    ],
+    "acceptance": [
+      "A caller can name where SURE keeps its store, and `sure doctor` reports the location it is using. The mechanism is not project-controlled: a store that a checked project's own file could redirect is a store that a checked project could point at a place it can write.",
+      "No test in the workspace writes to the per-user store. `crates/sure-cli/tests/cli_contract.rs::hook_ingest_reads_standard_input_and_evaluates_protection` runs a real `sure hook ingest`, and that process opens and writes the developer's `%LOCALAPPDATA%\\SURE\\sure.db` (measured: 4096 bytes added by one isolated run, rows of kind `event` with session `cursor-session-001`). After this task the store is byte-identical across a full `cargo test --workspace`, asserted by a test rather than by a report.",
+      "The default is unchanged: a caller who names nothing gets the OS-native per-user location through the existing path abstraction, and `sure doctor` still reports it.",
+      "A location inside the project being checked is refused, as it already is on the `--goal` path, and the refusal says what did not happen."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor, from P7-T010's verification. Running `cargo test --workspace` on this repository writes rows into the developer's own store, and the per-user directory is read through `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`, so there is no environment variable a test can set to point a spawned SURE elsewhere. `docs/architecture/CLI.md` already described this as \"the phase that gives SURE a store location a caller can choose\"; no such task existed, so the gap had no owner and every gate run added to the history of the machine it ran on."
+  },
+  {
+    "id": "P7-T012",
+    "phase": "P7",
+    "title": "Carry a finding through the repair contract and the re-check",
+    "required": true,
+    "depends_on": [
+      "P7-T010",
+      "P9-T002",
+      "P9-T004",
+      "P9-T005"
+    ],
+    "acceptance": [
+      "`sure repair` on a project with an open finding answers with a repair contract, and a later `sure recheck` reports what that run left open — both observed by running the commands, not by a report about them.",
+      "The re-check list comes from the module that owns the rule (`sure_core::repair_impact`), not from a second rule written in the pipeline. `RepairContract::from_finding` refuses an empty re-check list, and that refusal is met by selecting the checks first rather than bypassed with a hand-built contract that is not actionable.",
+      "Findings are persisted, so `recheck_lifecycle::store_run` gains its caller and a second run's stage 12 compares against a real earlier run instead of an always-empty history. `recheck_lifecycle.rs`'s `store.history(&filter, 0)` call is fixed with it: `Store::history` documents 0 as \"return none\", so the read that is meant to find previous open findings can only ever return empty.",
+      "Stages 11 and 12 stop being `not_run` on a project that has findings, and any stage that still did not run is named in the report.",
+      "`docs/architecture/CLI.md` and `docs/architecture/CHECK_PIPELINE.md` match what the two commands do, including the status each returns."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor, from P7-T010's verification. P7-T010 records stage 11 as not-run and passes `rechecks: &[]` to stage 12, each with a written reason: `RepairContract::from_finding` needs the checks that can observe a finding, `repair_impact::select_impacted_checks` takes the contract it would be helping to build, and nothing writes a finding today so stage 12 has nothing to compare against. Both are honest records of a real gap rather than a false green, and the gap is what the product's repair/re-check promise (priority 8) and the queued fixture task P14-T009 are waiting on."
   }
 ]

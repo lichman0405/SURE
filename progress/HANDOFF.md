@@ -2,13 +2,15 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 124 / 168 tasks accepted (counted from `progress/state.json` against
+Progress: 125 / 170 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
-below record why). **Phase P0 complete (9/9), phase P1 complete
-(11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
+below record why — and from 168 to 170 on the same day, when two gaps found by
+`P7-T010`'s verification got owners: items 73 and 74 below record why). **Phase
+P0 complete (9/9), phase P1 is open at
+11 of 12, phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
-9 of 11, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
+10 of 12, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 8 of 10; Phase P13 is open
 at 1 of 9; Phase P14 is open at 3 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
@@ -41,7 +43,7 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
 and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commit
 `20649d3` with its acceptance recorded in `a5eabb9`. `P12-T009` is accepted as
 commit `60cb152`, with `6ccab01` correcting a stale row in
-`docs/architecture/CLI.md`.
+`docs/architecture/CLI.md`. `P7-T010` is accepted as commit `5af79c7`.
 
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -513,17 +515,44 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
     that worker rather than worked around here), and three documents that said
     "the fourteen `fixtures/adversarial/*/scenario.json` files" were corrected to
     stop naming a count at all.
+73. A worker agent completed `P7-T010` — *Implement the project check pipeline
+    from discovery to verdict* — as commit `5af79c7`. The supervisor re-ran all
+    five gates from PowerShell on the committed tree, ran the three commands and
+    two refusal paths with the real store hashed before and after each, read
+    `is_green` and `Report::exit_code` in source rather than reading the green
+    from a report, and checked every test name `docs/architecture/CLI.md` cites
+    with a script of its own. Accepted; "Validation of `P7-T010`" below carries
+    the numbers. `sure check`, `sure recheck` and `sure repair` now run the
+    twelve stages and answer with a verdict instead of status 3 — and in this
+    build the verdict is 1 for every project SURE can read, because stage 5 has
+    no runner and stage 8 no provider, which is the false-green rule working
+    rather than a defect.
+74. Two gaps that `P7-T010` recorded honestly rather than papered over were given
+    owners on the same day, and the graph went from 168 to 170 tasks. `P7-T012`
+    (item 74's first) wires stages 11 and 12: the repair contract cannot be built
+    because `RepairContract::from_finding` refuses an empty re-check list while
+    `repair_impact::select_impacted_checks` takes the contract it would be
+    helping to build, and nothing persists a finding, so stage 12 compares
+    against an always-empty history and `recheck_lifecycle::store_run` has no
+    caller. `P1-T012` gives the store a location a caller can choose: today a
+    spawned `sure` discovers the per-user store through `SHGetKnownFolderPath`,
+    which ignores `LOCALAPPDATA`, so
+    `cli_contract.rs::hook_ingest_reads_standard_input_and_evaluates_protection`
+    writes an `event` row into the developer's own store on every
+    `cargo test --workspace` — a privacy defect before it is a test-hygiene one,
+    and one that predates `P7-T010`. Both were added by the supervisor with the
+    evidence in the task notes, in the same way `P7-T010` and `P7-T011` were
+    added (items 68 and 69).
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
-`P7-T010`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`,
-`P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
-`P14-T010` and `P15-T008`. The
-lowest-numbered READY task is `P7-T010`, and both crates it writes are free
-(`sure-cli` was released by `P12-T009`'s acceptance), so it is dispatched now.
-`P7-T010` is also what five later tasks are waiting on, so it is
-not queued behind anything else. `P12-T010` became READY on this acceptance too:
-it wires the MCP bridge into the plugin packages, and its brief carries the
-`--format json` deviation recorded below.
+`P7-T011`, `P7-T012`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`,
+`P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
+`P14-T010`, `P15-T008`, `P1-T012` and `P7-T012`. The
+lowest-numbered READY task is `P7-T011` (severity calibration against the
+acceptance corpus), which `P7-T010`'s acceptance just unblocked along with
+everything else that was waiting on a pipeline. `P12-T010` wires the MCP bridge
+into the plugin packages, and its brief carries the `--format json` deviation
+recorded below.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
@@ -571,23 +600,28 @@ accepted dependencies it actually calls. Nothing else in the graph was edited:
 `P14-T011` does need a working check pipeline in practice, but rewiring an
 existing task's dependencies is a further plan change and was not made.
 
-Until `P7-T010` lands, `P12-T009` was instructed to route every tool through the
-existing `Command::report` path, so that there is exactly one engine path for
+Before `P7-T010` landed, `P12-T009` was instructed to route every tool through
+the existing `Command::report` path, so that there is exactly one engine path for
 the orchestrator to land on. It did, and the supervisor read it in source rather
 than taking the report's word: every tool builds a `Command` variant and runs it
 through `Command::report` (`crates/sure-cli/src/mcp.rs:855-907`), and the exposed
 tool list is derived from `crates/sure-cli/src/commands.rs::IMPLEMENTED`, so a
-tool cannot exist for a command this build refuses to carry out. When `P7-T010`
-gives `Command::report` a real `check`, the MCP tools follow with no change to
-`mcp.rs` — four of the five tools answer `sure check`'s refusal today, and that
-refusal becomes a verdict on its own.
+tool cannot exist for a command this build refuses to carry out.
+**That is what happened:** three of the five tools now answer with a real
+check's own report and no line of `mcp.rs`'s dispatch had to change to make it
+so — only the table in `docs/architecture/MCP_BRIDGE.md`, which had said the
+check tools refuse. One consequence is worth keeping in view, because it is a
+trap for callers: a check that ran and found the project not clean is
+`"isError": false` with `outcome` `not_green` and `exit_code` 1. A caller that
+took `isError` for the verdict would read the transport as the result and miss
+the verdict sitting in `structuredContent.sure.outcome`.
 
 `P12-T007` was briefly held back on the argument that an evidence bridge feeding
 a check nobody can run would be built on sand. That argument does not survive
 reading the task: `sure hook ingest` runs today, so a Codex evidence bridge is
 independently testable, and §14 of `MASTER_PROMPT.md` prefers the lowest-numbered
-READY task. It now has a lower-numbered task in front of it — `P7-T010` — and goes
-next after that, once the `sure-cli` working tree is free.
+READY task. With `P7-T010` accepted there is no argument left either way, and it
+goes when the `sure-cli` working tree is free.
 
 ### Plan-level gap, closed 2026-09-18: the detectors cannot reach the severities the corpus requires
 
@@ -644,6 +678,110 @@ platform does start and name it by full path, which also gives
 workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P7-T010` added
+
+`sure check`, `sure recheck` and `sure repair` stopped being commands that say
+they cannot be carried out (status 3) and became one orchestrator under three
+purposes:
+
+| Command | Stages | What it adds |
+| --- | --- | --- |
+| `sure check PATH [--goal TEXT]` | 1–10 | the check: discovery, intent, fingerprint, plan, the checks, completeness, model assessment, claim checking, the verdict |
+| `sure repair PATH` | 1–11 | the same, carried to the repair-contract stage |
+| `sure recheck PATH` | 1–12 | the same, carried to the comparison with what an earlier run left open |
+
+The orchestrator is `crates/sure-core/src/pipeline.rs` (new, 1526 lines). It
+implements no stage: every stage is a call into a module an earlier phase built.
+What it adds is the sequencing, one [`StageRecord`] per stage, and the rule that
+decides what all of them mean together — `PipelineOutcome::is_green()` asks two
+questions and requires both, the verdict permitting hand-off **and** no stage in
+this run's range being anything but `Ran`. **A stage that did not run is never a
+stage that passed**, and the report says which stages those were in the run's own
+words: stages 5, 6 and 8 are marked `NOT CHECKED` in a run on this repository,
+with the reason for each.
+
+The three commands differ only in how far down the twelve stages they go. The
+stages they do not perform are recorded as `not part of this run` rather than
+omitted, so every run shows all twelve and a reader can see what was not asked
+for as well as what failed to happen. Both halves of the CLI read that one
+record: the human form in `crates/sure-cli/src/check.rs`, and the machine frame
+under `details` (`schema_version` 3), which carries the twelve stage records with
+their outcome, the vocabulary's reason where the vocabulary has a word for it,
+and the sentence a person reads.
+
+`docs/architecture/CLI.md` moved with it, and one row of it is a statement worth
+not losing: **exit 0 is unreachable in this build.** A project SURE can plan for
+has stage 5 recorded as `unknown` (no runner for a planned check exists yet) and
+stage 8 as `analysis_provider_disabled` (no provider is configured), so every
+readable project is 1 and an unreadable one is 5. That is not a defect to be
+fixed by returning 0 more often — SURE has not run those checks, so it does not
+call the project clean. The clean path is exercised by a schedule built inside
+`report.rs`'s test module, and the `MAY_PROPOSE` entry says why it had to be
+built rather than observed.
+
+## Validation of `P7-T010`
+
+Commit `5af79c7`, 12 files, +3856/−548, no path under `progress/`, `tasks/`,
+`evaluation/`, `SHA256SUMS.txt`, `integrations/` or `fixtures/`. Gates from
+PowerShell on the committed tree, full capture in
+`target/tmp/p7t010-supervisor-gates.txt`:
+
+| Gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0, no output |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | exit 0 |
+| `cargo test --workspace --all-features --no-fail-fast` | exit 0 — 72 test targets, 2360 passed, 0 failed, no `FAILED` line |
+| `node scripts/validate-bootstrap.mjs` | exit 0, "17 phases, 168 tasks" (170 after the two tasks added below) |
+| `node scripts/taskctl.mjs validate` | exit 0, "state OK: 170 tasks" |
+
+Behaviour, from the real binary, with `%LOCALAPPDATA%\SURE\sure.db` hashed before
+and after every run:
+
+| Run | Exit | What it answered |
+| --- | --- | --- |
+| `sure check <this repository>` | 1 | twelve-stage record, stages 5/6/8 `NOT CHECKED`, 18 checks not run, ends "A run with a stage that did not run is never reported as clean." |
+| `--format json check \| recheck \| repair` | 1 each | frame keys exactly `command, details, exit_code, outcome, protocol_version, sure_version`; `details.stages` has twelve entries |
+| `sure check .` | 5 | a relative root is refused — it could fall inside or outside the project |
+| `sure check <nonexistent>` | 5 | the run tried and did not finish |
+| `sure check --goal ""` | 5 | "Nothing was recorded, and nothing was checked." |
+
+The store was byte-identical after all five (`38DAFD0F…D3CE`, 311296 bytes, no
+`-wal`, no `-journal`), which is what `CLI.md` promises for a goal-less check on
+a machine that already has a store.
+
+The false green was read in source rather than inferred from a green report:
+`is_green()` at `pipeline.rs:533` requires `is_ready_for_hand_off()` **and**
+`every_stage_ran()`, `is_a_gap()` at line 331 counts `NotRun` and `Unfinished`
+but deliberately not `NotPartOfWork`, and `Report::exit_code` at
+`report.rs:507-515` returns `FAILED`(5) for an unfinished run, `OK`(0) only
+through `is_green`, and `NOT_GREEN`(1) otherwise — so 1 and 3 are not merged and
+a stage that did not run cannot produce 0.
+
+The documentation was checked against the tree rather than believed: a script
+(`target/tmp/check-doc-names.mjs`) pulled every backticked snake_case name of 15
+characters or more out of `docs/architecture/CLI.md` — 45 of them — and found 39
+as `fn` in `crates/`. The six that are not functions are wire values rather than
+test names (`protocol_version`, `sure_get_report`, `sure_get_repair`,
+`explicit_user_goal`, `not_part_of_work`, `analysis_provider_disabled`), and each
+was then found in the source as a serialised string.
+
+Two `MAY_PROPOSE` entries were added and neither is a blanket exemption: each
+names what would invalidate it — a line in `pipeline.rs` that constructs a
+`CheckProposal` would make it a proposer, and a proposer word above
+`#[cfg(test)]` in `report.rs` would be a proposer arriving in the CLI. Both
+census tests pass and no rule was weakened. That guard is the one the supervisor
+relayed to this worker when `P14-T003`'s gate tripped on it, rather than
+weakening the test then.
+
+What the verification found, each with an owner: `P7-T012` (the repair contract
+and the re-check have no wiring, so stages 11 and 12 are honestly `not_run`) and
+`P1-T012` (a spawned `sure` cannot be pointed at a store of its own, so one test
+writes into the developer's real history on every workspace run). Two cosmetic
+defects in modules this task did not write — a summary sentence that reads "1 of
+them are critical", and a headline printed twice — are recorded against the
+accepted tasks whose modules carry them (`P7-T005`, `P7-T006`) rather than left
+as prose. Neither is a false green, and neither has a task of its own.
 
 ## What `P14-T003` added
 

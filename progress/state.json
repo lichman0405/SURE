@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P12",
-  "last_updated": "2026-09-18T15:14:22.778Z",
+  "current_phase": "P1",
+  "last_updated": "2026-09-18T15:18:00.175Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1278,7 +1278,7 @@
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "Supervisor review: worker implemented Claude synthetic E2E check-repair-recheck in commit bfc51fc; re-ran full gate set, all green."
+      "notes": "Supervisor review: worker implemented Claude synthetic E2E check-repair-recheck in commit bfc51fc; re-ran full gate set, all green. Read back by the supervisor on 2026-09-18 against the commit it names. The acceptance line — \"works without paid/live network dependency in CI\" — is met: the test builds its own JSON payloads and touches no network. What the title overstates is the word E2E. `bfc51fc` changes one file, `crates/sure-cli/src/hook.rs` (+216/-11), and the test it adds, `claude_code_check_repair_recheck_round_trip`, drives eight synthetic Claude Code events through `run_ingest_with_paths` with a scratch `Paths` and asserts they persist with the right types and one session id, and that pre-tool-use is Block under the default InspectOnly. Nothing in it calls `sure check`, `sure repair` or `sure recheck`; the tool calls it names (`npm test`, `Edit`, `npm test`) are payload fields, not commands that ran. So the round trip is through the ingest path, not through the pipeline, and a reader who takes the title at its word would believe the orchestrator has an end-to-end test that it does not have. The genuine coverage is P14-T009's, and the note is there."
     },
     "P10-T009": {
       "status": "accepted",
@@ -1648,7 +1648,7 @@
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": " Handed here on 2026-09-18 by the supervisor, reading P10-T008 back. That task is titled \"Claude synthetic E2E check-repair-recheck\" and its commit `bfc51fc` adds one test, `claude_code_check_repair_recheck_round_trip`, in `crates/sure-cli/src/hook.rs` — which asserts that eight synthetic hook events persist with the right types. It never invokes `sure check`, `sure repair` or `sure recheck`; the check/repair/recheck in its name are the *names of tool calls inside the payloads*. This task's acceptance, \"repair can close only with new passing evidence; regression variant blocked\", is the real end-to-end claim and the only thing that can honestly carry it: drive the three commands over a fixture project, show a repair closing on a fresh passing check, and show the regression variant refused. A test that asserts an event round trip must not be the evidence for it."
     },
     "P14-T010": {
       "status": "queued",
@@ -1885,8 +1885,8 @@
       "notes": ""
     },
     "P1-T012": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T15:18:00.174Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

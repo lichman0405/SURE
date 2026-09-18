@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 88 of 166 v0.1 tasks accepted (phase P8 complete).
+- **Progress:** 89 of 166 v0.1 tasks accepted (phase P9 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -67,6 +67,7 @@ Implemented so far:
 - Capability/blind-spot reporting from recorded events: `report_from_events` derives an honest [`CapabilityReport`] from stored harness events, reporting the tier as `Snapshot` when no events exist and `Observed` otherwise (events alone cannot prove pre-action control), and listing blind spots for missing user-request, agent-claim, tool/command, failure, file, or git visibility rather than trusting an adapter's self-reported capability.
 - AI-claim report section: checked agent claims flow into `ProjectVerdict::claim_checks` and are rendered in terminal, Markdown, HTML, and JSON reports with escaped attacker-controlled text, assessment labels, and plain-language reasons or fallback explanations; the JSON report schema version advanced to 2 with an optional `claim_checks` array.
 - Idempotent/concurrent hook event ingestion: a unique index on sessions and `INSERT OR IGNORE` ordering in `SessionEventStore::persist` make duplicate event ids and concurrent session creation deterministic; duplicate events return `AlreadyExists`, and racing writers for the same harness session reuse a single session row.
+- Repair contract domain/schema: `RepairContract` carries problem, impact, evidence, required fix, preserve, acceptance, recheck, and forbidden-shortcuts fields; the JSON schema now declares the full wire surface including `id` and `recheck`.
 
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.
 

@@ -3,7 +3,35 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T008` — "Privacy/security integration suite" — dispatched
+**In flight:** `P13-T008` — "Privacy/security integration suite" — **accepted** as
+`79ce3f3`, the hand-back `734f582` plus one correction commit. It took two
+commits because the first was sent back over a single false sentence, and that
+sentence was **the supervisor's error before it was the worker's**: the brief at
+`target/tmp/brief-p13t008.md` and the dispatch commit `2b47d05` both claim the
+three release-blocking `evaluation/acceptance-manifest.json` cases each have no
+directory under `fixtures/adversarial/`, and that is false for `dangerous-delete`,
+whose `scenario.json` is 209 bytes, tracked, and listed at `SHA256SUMS.txt:110`.
+The claim came from a measurement agent's report that contradicted itself — it
+lists `dangerous-delete` among the eighteen directories it found and then says
+none of the three has one — and it was promoted into a committed sentence without
+being checked. It was corrected in the worker's `79ce3f3`, not by rewriting
+`2b47d05`; the record of it is `target/tmp/p13t008-notes.txt` and the paragraph
+below. What the task delivered is the thing `docs/product/PRODUCT_EVALS.md` had
+been scoring without a referent: **`fixtures/privacy/manifest.json`**, 25 cases
+bound to sentences three documents still make, **eight driven end to end and
+seventeen pointers to tests that must still exist**, every one of them
+release-blocking and enforced as such by an assertion rather than by prose; the
+suite fails on any failure, which is what makes the word *mandatory* falsifiable
+rather than decorative. Six gates green on the tip from native PowerShell,
+**2534 parents** against 2544 raw on my own run against a brief baseline of 2528,
+delta +6 closing exactly on the six new tests, and the suite was **made to fail
+on purpose** rather than trusted. It minted three tasks — **`P15-T024`**,
+**`P15-T025`**, **`P15-T026`** — from the three things its corpus recorded as
+`not_confirmed`, two of which had no owner. **The next dispatch is `P13-T010`**,
+whose brief is already written at `target/tmp/brief-p13t010.md` with two stale
+figures named in the notes and corrected at dispatch.
+
+**In flight:** nothing, as of this paragraph — `P13-T008` was dispatched
 from base commit `fe012f0` (the `P13-T009` acceptance) with its brief at
 `target/tmp/brief-p13t008.md`. Its two acceptance lines are *"Full recording off
 by default"* and *"Mandatory secret/protection fixtures pass"*, and the second is
@@ -1666,6 +1694,22 @@ workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
 
+**The same lesson, measured from the opposite direction at `P13-T008`'s
+acceptance: for the first time the shell that is wrong is the Bash tool.** Run
+gate 3 from the Bash tool on the same clean tree and the workspace suite reports
+10 failures — `powershell.exe -NoProfile -File *.ps1` refused with *running
+scripts is disabled on this system* in `mcp_protocol.rs`, `hook_failure_semantics.rs`
+and `integration_thinness.rs` — plus 2 flaky `session_event_store` concurrency
+tests, where native PowerShell reports 0 failed on the identical tree and the
+identical binaries. Neither the worker nor the supervisor weakened any execution
+policy to make the shell agree: a probe that would have added
+`-ExecutionPolicy Bypass` was denied and left alone, which is correct, because a
+gate that has to be granted a privilege to pass is not measuring the product.
+The paragraph above says a gate result is a fact about a shell as well as about
+the tree; this is what that costs when the shell on the wrong side is the one the
+tool reaches for by default. Gate 3 belongs to native PowerShell, and the six
+gates in every acceptance below were run there.
+
 The same family, one level down, and it will recur on every commit until it is
 written down. Commit messages on this branch are written through the PowerShell
 tool with a literal here-string, `@'…'@`, inside which nothing is expanded. On
@@ -1696,6 +1740,144 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T008` added
+
+**The word *mandatory* now has a referent a reader can enumerate, and every entry
+in it blocks release.** Three documents scored a mandatory fixture set — 
+`docs/testing/ADVERSARIAL_FIXTURES.md` ("A mandatory false green blocks
+release"), `docs/product/DEFINITION_OF_DONE.md` ("secret-redaction fixtures
+pass") and `docs/product/PRODUCT_EVALS.md` ("secret redaction mandatory fixtures:
+100%") — and before this commit nothing in `crates/` bound the word to any list,
+which is a false green of exactly the species this repository exists to refuse.
+`fixtures/privacy/manifest.json` (676 lines) is that list: **25 cases**, split
+`hook_ingest` 4, `check` 3, `full_recording_on_disk` 1 and `covered_by` 17, each
+bound to a `promised_by` sentence that a document still makes — 17 to
+`docs/security/PRIVACY.md`, 9 to `SECRET_REDACTION.md`, 8 to `PROTECTION_MODE.md`
+— and each carrying the evidence that showed it. `fixtures/privacy/README.md` is
+the human half and states the same three facts rather than a summary of them.
+
+**`release_blocking` is enforced rather than documented, and that is the send-back
+that made this task two commits.** The flag is `true` on all 25 entries, and
+`every_case_carries_what_the_corpus_promises_a_reader_can_find` asserts it, so a
+`false` does not belong in this corpus instead of merely being unexplained; the
+README defines the flag once with the three routes by which an entry blocks — a
+driven case's assertions, the pointed-to test as part of `cargo test`, and the
+pointer check that fails when the named test is gone. A genuinely non-blocking
+entry would need a different corpus, and that is the honest consequence. The
+hand-back's own sentence "Every entry is `release_blocking`" was **wrong when it
+was written** — 23 of 25 were true — and the artifact was right while the prose
+about it overreached, which is item 103's family for the fourth time.
+
+**Six tests carry it, 1123 lines, and the spine is that each one can fail.**
+`every_case_in_the_mandatory_corpus_passes` drives the eight executable cases;
+`every_case_carries_what_the_corpus_promises_a_reader_can_find` holds the flags;
+`every_pointer_names_a_test_that_exists` reads each named file so a pointer cannot
+decay into prose; `every_case_binds_a_sentence_a_document_still_makes` checks each
+promised sentence verbatim and whitespace-insensitively, so a withdrawn promise
+takes its fixture with it; `no_settings_file_at_all_is_the_premise_the_binary_cases_run_under`
+asserts the premise *and* cross-checks `sure doctor`'s own report of the same path
+*and* that `details.places.store_location` is `"caller"`, so **a machine whose
+owner has full recording on fails this suite instead of passing on a premise that
+is not true**; and `the_corpus_prints_what_it_could_not_confirm` requires
+`not_confirmed` to be non-empty with all six fields on every entry, so the three
+things this task could not confirm are recorded as findings rather than omitted.
+`assert_untouched` reads the bytes of **the machine's real store** before and
+after every case and distinguishes absent/created/removed/changed — no case writes
+to `C:\Users\lishi\AppData\Local\SURE\sure.db`, which is the reason the suite is
+structured this way rather than around a scratch store.
+
+**What it could not confirm, and the three tasks that came out of saying so.**
+Full-recording consent comes from the user's own settings file alone and
+`Paths::discover_at` moves the store and not the settings, so **the positive half
+of this task's own first acceptance line — a real process opening a recording
+because a user granted one — has never been executed end to end in this
+repository**; the consent case is driven at the store layer and the corpus says
+so. That is `P15-T025`. The report's verbatim goal against the store's redacted
+form is `P15-T024`. The third entry is the seam with `P14-T008` and already had an
+owner.
+
+## Validation of `P13-T008`
+
+**Two commits, verified separately, on `79ce3f3`.** `734f582` — five files:
+`crates/sure-cli/tests/privacy_suite.rs` 1123 lines, `fixtures/privacy/manifest.json`
+676, `fixtures/privacy/README.md` 120, `docs/product/DEFINITION_OF_DONE.md` +4/-1,
+`docs/testing/ADVERSARIAL_FIXTURES.md` +17. `79ce3f3` — three files, 27 insertions,
+on top rather than amending, so the fix is visible as a fix. The tree was clean
+afterwards and nothing under `progress/`, `tasks/` or `SHA256SUMS.txt` was touched,
+which the worker was told and did.
+
+**Six gates from native PowerShell on the tip, all exit 0**: `cargo fmt --all --
+--check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
+`cargo test --workspace --all-features --no-fail-fast`; `node scripts/validate-bootstrap.mjs`;
+`node scripts/taskctl.mjs validate`; `node scripts/check-non-windows.mjs` with its
+`--- NOT CHECKED ---` section naming `sure-core` and `sure-cli`. The bootstrap and
+taskctl gates printed 182 tasks on `79ce3f3`, before the mints below; re-run after
+them they print 185.
+
+**The delta closes exactly.** My own log, `target/tmp/sup-p13t008-workspace.log`,
+measured with `node target/tmp/measure-run.mjs`: **65 headers** (60 `Running` + 5
+`Doc-tests`), 75 `test result:` lines, **2534 parents** by the test-name
+instrument against 2544 raw, 0 failed, 8 ignored, both instruments agreeing. The
+brief's baseline for `fe012f0` was 2528, so the delta is **+6**, which is exactly
+the six tests in `privacy_suite.rs`. The worker's count is reproduced rather than
+taken.
+
+**The suite was made to fail, which matters more than any total.** Mutating the
+first `"recordings": 0` to `1` in the manifest makes
+`every_case_in_the_mandatory_corpus_passes` FAIL with *"no-settings-file-at-all-records-no-full-recording:
+the store holds 0 full recordings rather than 1"* — 5 passed, 1 failed, exit 101 —
+and flipping one `"release_blocking": true` to `false` fails
+`every_case_carries_what_the_corpus_promises_a_reader_can_find` with the worker's
+own message. Both mutations were reproduced independently of the worker, twice,
+and both were restored with `git checkout --` with `git status` clean. A corpus
+that cannot fail is the false green this repository refuses, and the mutation is
+the only evidence this one is not.
+
+**The supervisor's own error, corrected in the worker's commit rather than in the
+record.** `target/tmp/brief-p13t008.md` and `2b47d05` both assert that
+`dangerous-delete`, `force-push` and `sensitive-read` each have no directory under
+`fixtures/adversarial/`. Measured: `fixtures/adversarial/dangerous-delete/scenario.json`
+exists, 209 bytes, tracked, `SHA256SUMS.txt:110`, carrying
+`"fixture_status": "to_be_implemented_by_task_graph"`; `force-push` and
+`sensitive-read` genuinely have none. The worker copied the false sentence into
+`fixtures/privacy/manifest.json:671` — where the entry's own `evidence` field,
+citing that very file as an existing thing, contradicted it — and corrected it in
+`79ce3f3` with `what`, `evidence` and the README's bullet rewritten to the
+measurement, and a commit message saying in those words that the claim came from
+the brief and was copied without running one `ls`. The worker measured the
+falsifying evidence itself rather than taking the send-back's word, and checked
+the clause that had *not* been disputed — `evaluation/acceptance-manifest.json`
+gives all three `release_blocking: true` — before keeping it.
+
+**The manifest was stale in two places and regenerating it found them.**
+`SHA256SUMS.txt` carried `a70efdf8…` for `docs/product/DEFINITION_OF_DONE.md`,
+which hashes `3e2a63e8…`, and `e9776662…` for `docs/testing/ADVERSARIAL_FIXTURES.md`,
+which hashes `a0aca15d…`. Both were rewritten at this acceptance, which is the
+supervisor's file and not the worker's — `P15-T020`'s premise observed a second
+time rather than constructed. **The two new fixture files were deliberately not
+added**: `regen-sums.mjs` recomputes the digests of the paths the manifest already
+lists and never adds, removes or reorders an entry, and that is the right
+contract — what the manifest covers is a decision, and letting an acceptance widen
+it as a side effect is how a manifest turns into a record of whatever happened to
+be present. `fixtures/privacy/manifest.json` and `fixtures/privacy/README.md` are
+therefore **unlisted after this acceptance**, said out loud rather than left for a
+reader to discover, and that is `P15-T020`'s to settle.
+
+**Owed by the previous acceptance and discharged here**: runs `35405022369`
+(`fe012f0`) and `35405545871` (`2b47d05`), all five jobs green at attempt 1 on
+both, measured at 2528 / 2519 / 2520 parents each against 2538 / 2529 / 2530 raw,
+0 failed, 0 `Text file busy`. Identical between the two, which is what a dispatch
+commit touching only `progress/`, `tasks/` and `SHA256SUMS.txt` should give. Rows,
+the ubuntu step check and the streak counts are in
+`target/tmp/run-backfill-owed-6.md`; this is the 14th consecutive green `ci` run
+and the 15th on which the ubuntu arm executed.
+
+**Two stale figures in `target/tmp/brief-p13t010.md` are recorded rather than
+inherited** — the brief's baseline (2528 parents, 64 headers, 74 result lines) is
+now 2534 / 65 / 75 with the same instrument, and its scratch-pool count is a
+number that was stale the moment it was written, so the shape of the failure
+replaces the count at dispatch.
 
 ## What `P13-T009` added
 
@@ -16090,6 +16272,48 @@ the check exists to catch: a mention is not an entry. **For the tree this commit
 creates: 137 accepted, 79 of them absent from the list, 48 absent from everything
 below the heading.** The list is still not rebuilt, for the reason given above;
 what changes here is that the number now says which of the two readings it is.
+
+- `79ce3f3` **`P13-T008`** (accepted by the progress-only commit that carries this
+  entry) — *"Privacy/security integration suite"*. **The task's own detail is the
+  section above**; what belongs here is the shape. Two commits, which is the first
+  thing about it: `734f582` is five files — `crates/sure-cli/tests/privacy_suite.rs`
+  (1123 lines, six tests), `fixtures/privacy/manifest.json` (676 lines, 25 cases),
+  `fixtures/privacy/README.md` (120), and the two documents that had been scoring a
+  mandatory fixture set with nothing to score — and `79ce3f3` is three files and 27
+  insertions on top of it, **not an amend**, so the correction is visible as a
+  correction. It was **sent back once**, and the sentence it was sent back for was
+  the *supervisor's* error before it was the worker's: the brief and the dispatch
+  commit both assert that the three release-blocking cases each have no directory
+  under `fixtures/adversarial/`, which is false for `dangerous-delete`. It was
+  corrected in the worker's commit rather than by rewriting `2b47d05`, which is
+  the rule this file already follows — a measurement is not edited to match a
+  later tree. The delivered shape is **a corpus that can fail**: eight cases driven
+  end to end, seventeen pointers that must resolve to tests that still exist,
+  twenty-five sentences that must still be sentences three documents make, all of
+  them release-blocking and enforced by an assertion rather than by prose, and a
+  premise test that fails on a machine whose owner has full recording on instead
+  of passing on a premise that is not true. It **minted three tasks** — `P15-T024`,
+  `P15-T025` and `P15-T026` — the first two from its own `not_confirmed` list and
+  the third from what its worker measured and declined to fix one document over.
+  **No run of its own commit is in this entry**: the acceptance commit's run is
+  owed to the next acceptance under the chain rule, and the two runs it discharged
+  — `35405022369` and `35405545871` — are recorded in the validation section above.
+
+**The check was run again at this acceptance, and the two counts that moved are
+the two that should have.** For the tree this commit creates: **139 accepted**,
+**79 of them absent from the list**, **48 absent from everything below the
+heading**. The missing counts are unchanged from the reading above, which is the
+honest result rather than a good one: this acceptance added its own entry, so it
+neither worsened the deficit nor closed any of it — **the 79 are the same 79 that
+`P13-T009`'s paragraph counted** (that paragraph states the number; the ids are
+what the script prints), and they are the `P5`-through-`P14` tasks whose
+detail lives in the sections above and whose entries were never written. The list
+is still not rebuilt, for the reason given twice above: an entry is a statement
+about what a later session should do, and 79 of them written now from memory would
+be a reconstruction rather than a record. **Whoever closes this should close it
+with the command**, which is now `target/tmp/accepted-list-check.mjs` — it prints
+all three readings and the ids, so the next acceptance reproduces a number instead
+of inheriting one.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all

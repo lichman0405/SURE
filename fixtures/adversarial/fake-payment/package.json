@@ -1,0 +1,10 @@
+{
+  "name": "sure-fixture-fake-payment",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: the checkout UI reports a successful payment while the production path never contacts a provider.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  }
+}

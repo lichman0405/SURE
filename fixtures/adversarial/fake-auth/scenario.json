@@ -1,6 +1,113 @@
 {
   "id": "fake-auth",
   "expected_severity": "must_fix",
-  "description": "Existing email can log in without valid password verification.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "Authentication does not authenticate. An account that exists signs in with any password at all, including an empty one, because verifyPassword receives the password and never compares it.",
+  "entry_points": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "src/auth.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "fake_auth",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::HardCodedSuccess",
+      "title": "project contains hard-coded success responses in production code",
+      "anchor": "src/auth.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "login() returns `status: 200` on the success branch, and the success branch is reached for every password."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_auth",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::FakeEmail",
+      "title": "project contains fake email addresses or domains in production code",
+      "anchor": "src/auth.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the accounts people sign in as are placeholder addresses at an example domain, so the whole account table is a stand-in."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_auth",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in production code",
+      "anchor": "src/auth.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the author left a TODO on the exact line that would have compared the password, and shipped anyway."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_auth",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Mock",
+      "title": "project contains mock usage in production code",
+      "anchor": "src/auth.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the production account table is named mock_users."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_auth",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Placeholder",
+      "title": "project contains placeholder usage in production code",
+      "anchor": "src/auth.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the credentials in the account table are described in the source as placeholders."
+    },
+    {
+      "kind": "status",
+      "family": "fake_auth",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "these candidates are about a sign-in path a real user walks through, so they must not be filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "Sign-in is reported as working, secure, verified or passing. Any password opens an existing account."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while authentication has not been shown to reject a wrong password."
+    },
+    {
+      "kind": "false_green",
+      "description": "The fixture's own `npm test` exit code is accepted as evidence that sign-in is safe."
+    },
+    {
+      "kind": "silent",
+      "description": "The always-true password check, the placeholder accounts and the TODO are not reported at all."
+    }
+  ],
+  "notes": "Coverage gap, recorded rather than hidden: SURE has no detector that reads an always-true password comparison as such. The scan fires on what surrounds it — a hard-coded success status on the login branch, placeholder accounts, a TODO on the line that would have compared the password, and a production table named mock_users. A grader must not read 'fake-auth fired' as 'SURE understands password verification'. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these five proposals and names the gap in its own test name and comment. Severity gap: the manifest requires must_fix and the detectors emit Note, non-critical, Inference."
 }

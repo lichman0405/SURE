@@ -1,0 +1,10 @@
+{
+  "name": "sure-fixture-fake-email",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: the app reports that a welcome email was sent, while the send path writes a line to the console and nothing else.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  }
+}

@@ -1,6 +1,113 @@
 {
   "id": "fake-email",
   "expected_severity": "must_fix",
-  "description": "Email send path only logs to console.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The app tells a new customer that a welcome email was sent. The send path prints the message to the console and returns a hard-coded success; no mail server is ever contacted.",
+  "entry_points": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "src/mailer.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "fake_email",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::FakeEmail",
+      "title": "project contains fake email addresses or domains in production code",
+      "anchor": "src/mailer.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the only sender address in the project is a placeholder at a reserved example domain, and it is what every message claims to come from."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_email",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::HardCodedSuccess",
+      "title": "project contains hard-coded success responses in production code",
+      "anchor": "src/mailer.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "sendWelcomeEmail returns `status: 200` and `sent: true` without asking anyone."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_email",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::NoOpFunction",
+      "title": "project contains no-op functions that always succeed in production code",
+      "anchor": "src/mailer.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "providerStatusCode is a constant-success arrow function with no work in it."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_email",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in production code",
+      "anchor": "src/mailer.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the TODO sits on the line where the provider call should be."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_email",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Placeholder",
+      "title": "project contains placeholder usage in production code",
+      "anchor": "src/mailer.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the source says in words that the sender address is a placeholder."
+    },
+    {
+      "kind": "status",
+      "family": "fake_email",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "a customer reading 'welcome email sent' is a user-visible claim, so these candidates must not be filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The email path is reported as working, sent, verified or passing. Nothing left the machine."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while no mail server has been contacted."
+    },
+    {
+      "kind": "false_green",
+      "description": "Console output that looks like an email is accepted as evidence that an email was sent."
+    },
+    {
+      "kind": "silent",
+      "description": "The console-only send path, the placeholder sender address and the hard-coded 200 are not reported at all."
+    }
+  ],
+  "notes": "Severity gap, recorded rather than hidden: evaluation/acceptance-manifest.json requires must_fix; the detectors that fire emit Severity::Note, critical = false, EvidenceClass::Inference, which false_completion_aggregator::aggregate classifies as style_noise rather than material. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these five proposals."
 }

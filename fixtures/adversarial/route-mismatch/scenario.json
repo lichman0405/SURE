@@ -1,6 +1,62 @@
 {
   "id": "route-mismatch",
   "expected_severity": "must_fix",
-  "description": "Frontend calls an API route that backend does not expose.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The web page asks the backend for /api/orders. The backend defines /api/order, singular. The request matches no handler, so every customer is told they have no orders, forever.",
+  "entry_points": {
+    "start": "node src/backend/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "src/frontend/api.js",
+    "src/backend/server.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "route_mismatch",
+      "surface": "route_consistency",
+      "module": "crates/sure-core/src/route_consistency.rs",
+      "detector": "FrontendExpectation::path",
+      "title": "frontend expects backend path `/api/orders` which is not declared",
+      "anchor": "src/frontend/api.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "fetch('/api/orders') is a literal path, and the backend reading holds no route for it."
+    },
+    {
+      "kind": "status",
+      "family": "route_mismatch",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "an empty order list is what a customer sees; the mismatch must be surfaced rather than filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The order list is reported as working, or the page is reported as showing the customer's orders."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while a path the frontend calls has no backend route."
+    },
+    {
+      "kind": "false_positive",
+      "description": "/api/health is reported as a mismatch. It is declared by the backend and called by the frontend, so reporting it would be a false alarm about a working route. crates/sure-core/tests/adversarial_fixture_detection.rs asserts that /api/orders is the only route finding in this fixture."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The fixture is reported as having fake or incomplete code it does not have. It holds no TODO, no mock, no placeholder and no fake key; the route checker must find the mismatch without them."
+    },
+    {
+      "kind": "silent",
+      "description": "The mismatch is not reported at all, so a customer's empty page is attributed to there being no orders."
+    }
+  ],
+  "notes": "The fixture ships a local Express-shaped app object (src/backend/mini-express.js) so the whole project runs with zero npm installs. SURE's JavaScript route reader reads `const app = express();` in src/backend/server.js and the statement-initial app.get(...) lines under it, exactly as it reads real Express, which is why src/backend/server.js is listed in defect_files: the backend half is where the reading comes from. Severity gap, recorded rather than hidden: evaluation/acceptance-manifest.json requires must_fix, and route_consistency emits Severity::Note, critical = false, EvidenceClass::Inference."
 }

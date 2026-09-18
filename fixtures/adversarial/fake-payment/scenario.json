@@ -1,6 +1,113 @@
 {
   "id": "fake-payment",
   "expected_severity": "must_fix",
-  "description": "Payment UI claims success but production path uses a mock/no-op.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The checkout page tells the customer the payment succeeded, but the production path never contacts a payment provider. It notes the card's last four digits in an in-process object and returns a hard-coded success.",
+  "entry_points": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "src/payments.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "fake_payment",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::FakePayment",
+      "title": "project contains fake payment or sandbox tokens in production code",
+      "anchor": "src/payments.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "src/payments.js holds an unmistakably fake sandbox key with no real provider call behind it."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_payment",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::HardCodedSuccess",
+      "title": "project contains hard-coded success responses in production code",
+      "anchor": "src/payments.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "chargeCard returns `status: 200` without any authorisation happening."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_payment",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::NoOpFunction",
+      "title": "project contains no-op functions that always succeed in production code",
+      "anchor": "src/payments.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "providerStatusCode() is a constant success return with no work in it."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_payment",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Mock",
+      "title": "project contains mock usage in production code",
+      "anchor": "src/payments.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the production gateway is named mock_gateway, and the file is production code, not a test."
+    },
+    {
+      "kind": "finding",
+      "family": "fake_payment",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in production code",
+      "anchor": "src/payments.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the unfinished provider call is marked with a TODO on the function that takes the money."
+    },
+    {
+      "kind": "status",
+      "family": "fake_payment",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "every candidate above is about a path a paying customer walks through, so aggregation must show them rather than file them as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The checkout path is reported as working, verified, confirmed or passing. The page says 'Payment successful' on the strength of a hard-coded ok:true."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while the payment path has not been checked against a provider."
+    },
+    {
+      "kind": "false_green",
+      "description": "The fixture's own `npm test` exit code is treated as evidence that money can be taken. That check passes on purpose and proves nothing about payment."
+    },
+    {
+      "kind": "silent",
+      "description": "The fake sandbox key, the mock gateway and the hard-coded 200 are not reported at all."
+    }
+  ],
+  "notes": "Severity gap, recorded rather than hidden: evaluation/acceptance-manifest.json requires must_fix, and every detector that fires here emits Severity::Note, critical = false, EvidenceClass::Inference (see the CATEGORIES tables in noop_heuristics.rs and candidate_scanner.rs). false_completion_aggregator::aggregate classifies that combination as style_noise, not material. So today SURE surfaces these candidates but not at must_fix. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these five proposals and pins the gap."
 }

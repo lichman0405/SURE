@@ -1,6 +1,85 @@
 {
   "id": "dead-button",
   "expected_severity": "must_fix",
-  "description": "Visible primary button has no connected behavior.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The primary visible action does nothing. The Buy now button is wired to a real click handler, and that handler calls placeOrder(), which returns nothing, creates nothing and raises no error.",
+  "entry_points": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "public/app.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "ui_action_bridge",
+      "module": "crates/sure-core/src/ui_action_bridge.rs",
+      "detector": "UiActionKind::Click",
+      "title": "UI action: click handler on element in `public/app.js`",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the Buy now button's click binding is found. With no browser evidence it stays an inference, and an inference about a primary action must stay visible rather than be assumed fine."
+    },
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Placeholder",
+      "title": "project contains placeholder usage in production code",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the handler body says in words that it is a placeholder and returns nothing."
+    },
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in production code",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "why": "the unfinished work is marked with a TODO on the same function."
+    },
+    {
+      "kind": "status",
+      "family": "dead_button",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "a first-time visitor presses this button; it must not be filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The Buy now button is reported as working, wired, implemented or passing. Pressing it creates no order."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while the primary action has no observable effect."
+    },
+    {
+      "kind": "false_green",
+      "description": "The existence of a click handler is treated as completion. A handler that does nothing is the defect, not the fix."
+    },
+    {
+      "kind": "silent",
+      "description": "The placeholder body, the TODO and the unwired outcome are not reported at all."
+    }
+  ],
+  "notes": "Severity gap, recorded rather than hidden: evaluation/acceptance-manifest.json requires must_fix; ui_action_bridge and candidate_scanner both emit Severity::Note, critical = false, EvidenceClass::Inference, which false_completion_aggregator::aggregate classifies as style_noise rather than material. Runtime browser evidence is what upgrades a UI action to ObservedFact, and this fixture does not require a browser. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these three proposals."
 }

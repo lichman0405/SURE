@@ -1,0 +1,10 @@
+{
+  "name": "sure-fixture-demo-analytics",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: a dashboard labelled live shows numbers written into the source file, and page views and signups are only printed.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  }
+}

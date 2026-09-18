@@ -702,7 +702,16 @@ impl Report {
             }
             Self::HookDecision(decision) => match decision.decision {
                 sure_core::hook_protection::ProtectionDecisionKind::Allow => {
-                    writeln!(out, "SURE allows this tool request.")
+                    // An allow the rule reached carries the sentence it reached
+                    // it with, and a user who reads the reason can tell a
+                    // request SURE examined and found nothing in from one it
+                    // never saw. `reason: None` is that second case — a
+                    // lifecycle event, not a tool request — and it keeps the
+                    // sentence it has always had.
+                    match decision.reason.as_deref() {
+                        Some(reason) => writeln!(out, "SURE allows this tool request. {reason}"),
+                        None => writeln!(out, "SURE allows this tool request."),
+                    }
                 }
                 sure_core::hook_protection::ProtectionDecisionKind::Warn => {
                     writeln!(

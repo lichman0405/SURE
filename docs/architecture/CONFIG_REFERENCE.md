@@ -119,6 +119,16 @@ release.
 `custom` needs a rule editor and a rule format, neither of which exists in this
 release, and is refused for the same reason as `cloud_enhanced`.
 
+The mode is a restriction, so it is arbitrated like the others: the stricter of
+the two files runs, and a project may raise it and may not lower it
+([CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins)).
+What it changes is decided by `sure hook ingest`, for a pre-action tool request:
+`strict` holds the categories named in
+[PROTECTION_MODE.md](../security/PROTECTION_MODE.md), and every answer it gives
+carries a sentence in the user's terms. In this release that answer is advisory —
+both integrations are capability tier 1 — so it states what SURE would do rather
+than what the harness did.
+
 ### `execution`
 
 | Key | Type | Default | Accepted values |

@@ -4,11 +4,45 @@
 //! domain machinery rather than inventing a new rule engine.
 //!
 //! P11-T006: Cursor protection where supported.
+//!
+//! # Where the protection mode's rule lives
+//!
+//! `docs/security/PROTECTION_MODE.md` gives the user three modes and one
+//! difference between the first two: **strict** additionally asks before
+//! migrations, CI/CD configuration, secret/config areas and broad filesystem
+//! modifications. Until `P13-T004` the mode was parsed, validated and ranked
+//! (`crate::config::ProtectionMode`, `Authority::protection`) and read by
+//! nothing, so `standard` and `strict` were two names for one behaviour.
+//!
+//! The rule is **here**, beside the engine that already turns a request into an
+//! action, and it is a second question asked of the same decision rather than a
+//! second decision path: [`decide`] answers first with the execution mode and
+//! permissions, and only an [`ExecutionDecision::Allowed`] is then put to the
+//! mode. A refusal the domain reached is never diluted by a mode — strict adds
+//! a question, it does not replace an answer.
+//!
+//! What the second question may look at is deliberately narrow. Shell text is
+//! **not** read: `crate::safety` refuses shell grammar on purpose, because a
+//! classifier that reads a command line is either a shell or wrong, and one
+//! that guesses is worse than one that declines. What is classified is the path
+//! the normalised event carries — the argument the harness itself says the tool
+//! is aimed at — and only for the three action kinds that name one file.
+//!
+//! # Capability tier honesty
+//!
+//! Both integrations are **Observed** (Tier 1) and neither can confirm the
+//! harness honours the answer, so what SURE has is a decision about what it
+//! would do, not a record of what the harness did. That is why a reason says
+//! *SURE does not allow it* rather than *it did not happen*: nothing in this
+//! build can establish the second sentence.
 
 use serde::{Deserialize, Serialize};
 use sure_domain::execution::{
     ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions, decide,
 };
+use sure_domain::variants::variants;
+
+use crate::config::{CUSTOM_PROTECTION_EXPLANATION, CUSTOM_PROTECTION_INSTEAD, ProtectionMode};
 
 /// What the protection adapter decided about a tool request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,12 +78,32 @@ pub struct ProtectionDecision {
 }
 
 impl ProtectionDecision {
-    /// Allow with no reason needed.
+    /// Allow with nothing to explain.
+    ///
+    /// `reason: None` on an allow means one thing in this module: **no request
+    /// was put to the rule at all** — a lifecycle event that is not a tool
+    /// request. Every decision the rule itself reaches carries a sentence,
+    /// allows included ([`ProtectionDecision::allow_with`]), so a caller that
+    /// sees `None` here is looking at an event rather than at a verdict.
     #[must_use]
     pub fn allow() -> Self {
         Self {
             decision: ProtectionDecisionKind::Allow,
             reason: None,
+        }
+    }
+
+    /// Allow, and say what the mode looked at before letting it through.
+    ///
+    /// The criterion this module is held to is that each mode returns an action
+    /// **and** a plain-language reason, and an allow is an action: a user who
+    /// reads "allow" and nothing else cannot tell a request SURE examined and
+    /// found nothing in from one it never saw.
+    #[must_use]
+    pub fn allow_with(reason: impl Into<String>) -> Self {
+        Self {
+            decision: ProtectionDecisionKind::Allow,
+            reason: Some(reason.into()),
         }
     }
 
@@ -72,6 +126,38 @@ impl ProtectionDecision {
     }
 }
 
+/// What a harness says it is about to do.
+///
+/// Both fields are the request's own words: the tool name exactly as it was
+/// sent, and the path the normalised event carries, when it carries one. They
+/// are **data** — another program's claim about itself — so nothing here treats
+/// either as evidence that the tool would do what it says, and no field of the
+/// request is echoed back inside a sentence SURE writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolRequest<'a> {
+    /// The tool name, exactly as the harness sent it.
+    pub tool: &'a str,
+    /// The path the normalised event names, when it names one.
+    pub path: Option<&'a str>,
+}
+
+impl<'a> ToolRequest<'a> {
+    /// A request for a tool that names no path.
+    #[must_use]
+    pub const fn of(tool: &'a str) -> Self {
+        Self { tool, path: None }
+    }
+
+    /// The same request, with the path the harness named.
+    #[must_use]
+    pub const fn at(tool: &'a str, path: &'a str) -> Self {
+        Self {
+            tool,
+            path: Some(path),
+        }
+    }
+}
+
 /// Map a Cursor tool name to the [`ActionKind`] the domain understands.
 fn cursor_tool_to_action_kind(tool: &str) -> ActionKind {
     match tool {
@@ -86,7 +172,8 @@ fn cursor_tool_to_action_kind(tool: &str) -> ActionKind {
 /// Decide whether a Cursor `preToolUse` request should be allowed.
 ///
 /// Uses the existing domain [`decide`] function with the current execution
-/// mode and permissions. No new rule engine is invented.
+/// mode and permissions, and then asks the protection mode's question. No new
+/// rule engine is invented.
 ///
 /// # Capability tier honesty
 ///
@@ -96,21 +183,18 @@ fn cursor_tool_to_action_kind(tool: &str) -> ActionKind {
 /// permissions so that the answer is truthful about what SURE would do.
 #[must_use]
 pub fn decide_cursor_tool(
-    tool: &str,
+    request: &ToolRequest<'_>,
     mode: ExecutionMode,
     permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
 ) -> ProtectionDecision {
-    let action_kind = cursor_tool_to_action_kind(tool);
-
-    match decide(action_kind, mode, permissions) {
-        ExecutionDecision::Allowed => ProtectionDecision::allow(),
-        ExecutionDecision::NeedsConsent => ProtectionDecision::block(
-            "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
-        ),
-        ExecutionDecision::Denied => {
-            ProtectionDecision::block("The current execution mode does not permit this action.")
-        }
-    }
+    decide_request(
+        cursor_tool_to_action_kind(request.tool),
+        request,
+        mode,
+        permissions,
+        protection,
+    )
 }
 
 /// Map a Claude Code tool name to the [`ActionKind`] the domain understands.
@@ -127,7 +211,8 @@ fn claude_code_tool_to_action_kind(tool: &str) -> ActionKind {
 /// Decide whether a Claude Code `PreToolUse` request should be allowed.
 ///
 /// Uses the existing domain [`decide`] function with the current execution mode
-/// and permissions. No new rule engine is invented.
+/// and permissions, and then asks the protection mode's question. No new rule
+/// engine is invented.
 ///
 /// # Capability tier honesty
 ///
@@ -138,13 +223,111 @@ fn claude_code_tool_to_action_kind(tool: &str) -> ActionKind {
 /// truthful about what SURE would do.
 #[must_use]
 pub fn decide_claude_code_tool(
-    tool: &str,
+    request: &ToolRequest<'_>,
     mode: ExecutionMode,
     permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
 ) -> ProtectionDecision {
-    let action_kind = claude_code_tool_to_action_kind(tool);
+    decide_request(
+        claude_code_tool_to_action_kind(request.tool),
+        request,
+        mode,
+        permissions,
+        protection,
+    )
+}
 
-    match decide(action_kind, mode, permissions) {
+/// The one decision path both integrations share.
+///
+/// The order is the whole of the design: the existing engine answers, a refusal
+/// it reached is returned unchanged, and only an allowed action is put to the
+/// protection mode. A mode can therefore make an answer firmer and can never
+/// make one weaker — the same rule `Authority::protection` applies to the two
+/// configuration layers.
+fn decide_request(
+    action_kind: ActionKind,
+    request: &ToolRequest<'_>,
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
+) -> ProtectionDecision {
+    let base = decide(action_kind, mode, permissions);
+
+    // The mode this release does not implement is answered first and alone.
+    // Refusing is the direction that fails closed, and it is the same answer
+    // the configuration reader gives the same value in a file: a mode SURE
+    // cannot apply must not be quietly answered as though it were standard.
+    if protection == ProtectionMode::Custom {
+        return ProtectionDecision::block(custom_reason());
+    }
+
+    if !base.is_allowed() {
+        return base_decision(base);
+    }
+
+    match protection {
+        // `Custom` returned above; the arm is here because a value this release
+        // cannot produce from a file is still a value this function is total
+        // over, and `unreachable!` in a decision path would be a panic where an
+        // answer was asked for.
+        ProtectionMode::Custom => ProtectionDecision::block(custom_reason()),
+        ProtectionMode::Standard => ProtectionDecision::allow_with(STANDARD_ALLOWS),
+        ProtectionMode::Strict => match sensitive_area(action_kind, request.path) {
+            Some((area, role)) => ProtectionDecision::block(strict_reason(area, role)),
+            None => ProtectionDecision::allow_with(STRICT_ALLOWS),
+        },
+    }
+}
+
+/// The sentence SURE answers with when the mode in force is the one this
+/// release does not implement.
+///
+/// The two halves are the sentences the configuration reader already refuses
+/// `protection.mode: custom` with, quoted from there rather than written again:
+/// one value, one explanation, in both places a user can meet it.
+fn custom_reason() -> String {
+    format!(
+        "This protection mode cannot be applied, so SURE does not allow the action. \
+         {CUSTOM_PROTECTION_EXPLANATION} {CUSTOM_PROTECTION_INSTEAD}"
+    )
+}
+
+/// What standard allows, in the user's words.
+///
+/// The sentence cannot say what standard looked *for*, because standard is the
+/// mode that adds no question of its own. What it can say is that nothing in the
+/// settings in force stopped the request and that this mode asked nothing
+/// further. Saying the request "is not a secret" would be false for the read
+/// that is one and that standard lets through, and that read is exactly the
+/// difference between the two modes, so this sentence must not imply a check
+/// that did not happen.
+const STANDARD_ALLOWS: &str = "The settings in force do not stop this request, and standard \
+     protection asks no further question about it, so it proceeds.";
+
+/// The same for strict.
+///
+/// It names the four areas, because the useful half of an allow is what SURE
+/// looked for and did not find.
+const STRICT_ALLOWS: &str = "Strict protection does not hold this: it is not a database \
+     migration, CI/CD configuration, credentials or keys, SURE's settings for this project, or a \
+     change that names a whole location, and the permissions in force do not stop it.";
+
+/// The half of a strict-mode block that is the same for every area.
+///
+/// It says what the mode does — *asks you about this* — rather than what the
+/// harness did. Both integrations are Observed (Tier 1), so what SURE has is an
+/// answer, and a sentence claiming the action was prevented would be a false
+/// green.
+const STRICT_TAIL: &str = " Strict protection asks you about this, and a harness hook cannot ask \
+     you, so SURE does not allow it.";
+
+/// Why the existing engine refused, unchanged.
+///
+/// Neither sentence mentions the protection mode, and that is deliberate: the
+/// execution mode and the permissions are what stopped the action, and naming
+/// the protection setting would tell a user to change the wrong thing.
+fn base_decision(decision: ExecutionDecision) -> ProtectionDecision {
+    match decision {
         ExecutionDecision::Allowed => ProtectionDecision::allow(),
         ExecutionDecision::NeedsConsent => ProtectionDecision::block(
             "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
@@ -155,28 +338,366 @@ pub fn decide_claude_code_tool(
     }
 }
 
+/// The sentence a strict-mode block gives a user.
+fn strict_reason(area: SensitiveArea, role: PathRole) -> String {
+    format!("{}{STRICT_TAIL}", area.consequence(role))
+}
+
+/// A category `docs/security/PROTECTION_MODE.md` names for strict mode.
+///
+/// The document names four — migrations, CI/CD configuration, secret/config
+/// areas and broad filesystem modifications — and this is those four with the
+/// third split in two, because they are not the same question for a read:
+/// opening a file of credentials is what exposes it, while reading a project's
+/// configuration is ordinary work. The read/strict question is therefore asked
+/// about [`SensitiveArea::SecretMaterial`] and about no other category, and the
+/// split is what lets that be said rather than guessed.
+///
+/// Declared with [`variants!`] so that every category can be visited: a category
+/// added without a sentence would otherwise reach a user as an empty reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SensitiveArea {
+    /// A database migration.
+    DatabaseMigration,
+    /// CI/CD configuration.
+    CiConfiguration,
+    /// Credentials and key material.
+    SecretMaterial,
+    /// SURE's own settings for the project.
+    ConfigurationArea,
+    /// A change that names a whole location rather than one file.
+    BroadFilesystemChange,
+}
+
+variants!(
+    /// Every category `PROTECTION_MODE.md` names for strict mode.
+    SensitiveArea {
+        DatabaseMigration,
+        CiConfiguration,
+        SecretMaterial,
+        ConfigurationArea,
+        BroadFilesystemChange
+    }
+);
+
+impl SensitiveArea {
+    /// What this category means for the user's own work, in the user's words.
+    ///
+    /// Consequence first, and the name of the setting nowhere: the document
+    /// asks for "consequence, not policy jargon", so none of these says which
+    /// mode was in force or which rule fired.
+    ///
+    /// The match is over the pair, not over the category alone, so a category
+    /// added later has to answer for both a read and a change rather than
+    /// inheriting one of the two sentences.
+    #[must_use]
+    pub const fn consequence(self, role: PathRole) -> &'static str {
+        match (self, role) {
+            (Self::DatabaseMigration, _) => {
+                "This would change your project's database \
+                migrations. A migration that has run is hard to undo, and it can change the data \
+                as well as the shape of it."
+            }
+            (Self::CiConfiguration, _) => {
+                "This would change your project's CI/CD configuration, \
+                which decides what runs on its own after a push."
+            }
+            (Self::SecretMaterial, PathRole::Read) => {
+                "This would read a file that holds \
+                credentials or keys. Reading one is enough to put the secret in the agent's \
+                context, where it can come back out in what the agent writes."
+            }
+            (Self::SecretMaterial, PathRole::Change) => {
+                "This would change a file that holds \
+                credentials or keys. Changing one can break a deployment quietly, or write a \
+                secret somewhere it was not."
+            }
+            (Self::ConfigurationArea, _) => {
+                "This would change SURE's own settings for this \
+                project, which decide what SURE may check and what it keeps."
+            }
+            (Self::BroadFilesystemChange, _) => {
+                "This names a whole location rather than one \
+                file, so it could change many files at once. That may be a valid refactor, and \
+                it can also remove working code."
+            }
+        }
+    }
+}
+
+/// What a request would do to the path it names.
+///
+/// Two roles rather than one, because a read and a change are not the same
+/// question: a secret is exposed by being read, while a migration is only a
+/// migration when it is run or edited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathRole {
+    /// The request reads the path.
+    Read,
+    /// The request writes or deletes the path.
+    Change,
+}
+
+/// What role a domain action kind gives a path, if it names one at all.
+///
+/// A match with every variant named rather than a wildcard: a kind added to the
+/// domain vocabulary must be answered here, and `_ => None` would silently
+/// answer "names nothing" for a kind that names a file.
+const fn path_role(action_kind: ActionKind) -> Option<PathRole> {
+    match action_kind {
+        ActionKind::ReadFile => Some(PathRole::Read),
+        ActionKind::WriteProjectFile | ActionKind::DeleteProjectFile => Some(PathRole::Change),
+        // None of these carries a path through the harness tool classifiers, and
+        // an `ArbitraryCommand` deliberately does not: the only way to know what
+        // a command line touches is to read shell grammar, which
+        // `crate::safety` refuses, and a guess about a command's target is worse
+        // than an answer that declines to make one.
+        ActionKind::ListDirectory
+        | ActionKind::ReadMetadata
+        | ActionKind::StaticAnalysis
+        | ActionKind::RunTests
+        | ActionKind::Build
+        | ActionKind::TypeCheck
+        | ActionKind::Lint
+        | ActionKind::StartService
+        | ActionKind::LocalProbe
+        | ActionKind::BrowserProbe
+        | ActionKind::BrowserObservation
+        | ActionKind::InstallDependencies
+        | ActionKind::NetworkAccess
+        | ActionKind::ArbitraryCommand
+        | ActionKind::ExternalService => None,
+    }
+}
+
+/// Which of the document's categories a request falls in, if any.
+///
+/// `None` is an answer rather than a gap: a path SURE does not recognise is not
+/// classified, and the base decision alone answers it. Nothing here reads a
+/// command line, and no request that names no path is treated as naming one.
+///
+/// The role comes back with the category because the sentence a user reads
+/// depends on both: opening a key and rewriting a key are two different
+/// sentences about two different consequences.
+fn sensitive_area(
+    action_kind: ActionKind,
+    path: Option<&str>,
+) -> Option<(SensitiveArea, PathRole)> {
+    let role = path_role(action_kind)?;
+
+    // A change that names no path is a whole-location change: SURE cannot bound
+    // what it would touch, and reading a gap in the request as a reason to say
+    // yes is the direction that fails open. A read that names no path is not
+    // classified — there is nothing for either the secret rule or any other to
+    // be about.
+    let Some(path) = path else {
+        return match role {
+            PathRole::Change => Some((SensitiveArea::BroadFilesystemChange, role)),
+            PathRole::Read => None,
+        };
+    };
+
+    // Windows separators are folded, and the comparison is case-insensitive on
+    // every platform rather than only on Windows. Finding a category is the
+    // firmer answer, and a rule whose answer changed with the file system under
+    // it would be a rule two machines could disagree about.
+    let folded = path.replace('\\', "/").to_lowercase();
+    let folded = folded.trim();
+
+    if folded.is_empty() {
+        return match role {
+            PathRole::Change => Some((SensitiveArea::BroadFilesystemChange, role)),
+            PathRole::Read => None,
+        };
+    }
+
+    let segments: Vec<&str> = folded.split('/').filter(|part| !part.is_empty()).collect();
+    let file_name = segments.last().copied().unwrap_or_default();
+
+    // A read is asked one question and no other, because the document's areas
+    // are about changes: "strict also asks before additional sensitive
+    // changes". Opening a file of credentials is itself the sensitive act — a
+    // secret is exposed by being read, which is why "sensitive read" is one of
+    // the dangerous actions `THREAT_MODEL.md` names — while reading a migration
+    // or a CI file is ordinary work an agent does all day. So the read rule
+    // covers credentials and stops there.
+    if role == PathRole::Read {
+        return is_secret_material(&segments, file_name)
+            .then_some((SensitiveArea::SecretMaterial, role));
+    }
+
+    if names_a_whole_location(folded, segments.len()) {
+        return Some((SensitiveArea::BroadFilesystemChange, role));
+    }
+    if is_a_migration(&segments, file_name) {
+        return Some((SensitiveArea::DatabaseMigration, role));
+    }
+    if is_ci_configuration(&segments, file_name) {
+        return Some((SensitiveArea::CiConfiguration, role));
+    }
+    if is_secret_material(&segments, file_name) {
+        return Some((SensitiveArea::SecretMaterial, role));
+    }
+    if is_configuration_area(&segments, file_name) {
+        return Some((SensitiveArea::ConfigurationArea, role));
+    }
+    None
+}
+
+/// Directories whose contents are credentials or key material.
+const SECRET_DIRECTORIES: [&str; 5] = [".ssh", ".aws", ".gnupg", ".kube", "secrets"];
+
+/// Files that are credentials or key material by name.
+const SECRET_FILE_NAMES: [&str; 9] = [
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "kubeconfig",
+    ".npmrc",
+    ".netrc",
+    "terraform.tfstate",
+    "secrets",
+];
+
+/// Extensions that carry key material or a secret's value.
+const SECRET_EXTENSIONS: [&str; 7] = [
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".jks",
+    ".keystore",
+    ".tfvars",
+];
+
+/// Directory names a migration lives under.
+const MIGRATION_DIRECTORIES: [&str; 4] = ["migrations", "migration", "migrate", "alembic"];
+
+/// Directory names CI/CD configuration lives under.
+const CI_DIRECTORIES: [&str; 4] = [".circleci", ".buildkite", ".woodpecker", ".teamcity"];
+
+/// Files that are CI/CD configuration by name.
+const CI_FILE_NAMES: [&str; 9] = [
+    ".gitlab-ci.yml",
+    "jenkinsfile",
+    "azure-pipelines.yml",
+    ".travis.yml",
+    "appveyor.yml",
+    "bitrise.yml",
+    ".drone.yml",
+    ".woodpecker.yml",
+    ".gitlab-ci.yaml",
+];
+
+/// Whether the path names a location rather than one file.
+fn names_a_whole_location(normalised: &str, segment_count: usize) -> bool {
+    matches!(normalised, "." | ".." | "~" | "/")
+        // A path ending at a separator names the directory itself, so whatever
+        // is under it is in scope. A Windows root arrives here too: `C:\` folds
+        // to `c:/`.
+        || normalised.ends_with('/')
+        // A pattern matches many files by construction.
+        || normalised.chars().any(|c| matches!(c, '*' | '?' | '['))
+        // A volume with no path on it: `c:` — every path on the drive.
+        || (segment_count == 1 && normalised.ends_with(':'))
+}
+
+/// Whether the path names a database migration.
+///
+/// Names rather than contents: SURE recognises the directory a migration lives
+/// in (`migrations/`, `alembic/`) and a file whose name ends with the word
+/// before its extension. A project that names its migrations something else is
+/// not classified, and the base decision alone answers it — a rule that guessed
+/// from a similarity would be the new rule the surrounding modules exist to
+/// avoid. `tests/migration_tests.rs` is the case that keeps this honest: it is
+/// a test about migrations, and matching any name containing the word would
+/// hold it.
+fn is_a_migration(segments: &[&str], file_name: &str) -> bool {
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _extension)| stem);
+    segments
+        .iter()
+        .any(|segment| MIGRATION_DIRECTORIES.contains(segment))
+        || stem == "migration"
+        || stem.ends_with("_migration")
+        || stem.ends_with("-migration")
+        || stem.ends_with(".migration")
+}
+
+/// Whether the path names CI/CD configuration.
+fn is_ci_configuration(segments: &[&str], file_name: &str) -> bool {
+    CI_FILE_NAMES.contains(&file_name)
+        || segments
+            .iter()
+            .any(|segment| CI_DIRECTORIES.contains(segment))
+        // GitHub keeps workflows one level down, and the other files in
+        // `.github` are issue templates and ownership notices rather than
+        // anything that decides what runs after a push.
+        || segments
+            .windows(2)
+            .any(|pair| pair[0] == ".github" && pair[1] == "workflows")
+}
+
+/// Whether the path names credentials or key material.
+fn is_secret_material(segments: &[&str], file_name: &str) -> bool {
+    segments
+        .iter()
+        .any(|segment| SECRET_DIRECTORIES.contains(segment))
+        || SECRET_FILE_NAMES.contains(&file_name)
+        || SECRET_EXTENSIONS
+            .iter()
+            .any(|extension| file_name.ends_with(extension))
+        || file_name == ".env"
+        || file_name.starts_with(".env.")
+        // `credentials.json`, `credentials.yaml`, `credentials.csv`: the file
+        // the cloud SDKs read a key out of.
+        || file_name.starts_with("credentials")
+}
+
+/// Whether the path names SURE's own settings for the project.
+fn is_configuration_area(segments: &[&str], file_name: &str) -> bool {
+    file_name == crate::paths::USER_CONFIG_FILE
+        || segments.contains(&crate::paths::PROJECT_CACHE_DIR)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
+    fn standard() -> ProtectionMode {
+        ProtectionMode::Standard
+    }
+
+    fn writer() -> ExecutionPermissions {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.write_project = true;
+        permissions
+    }
+
     #[test]
     fn read_file_is_allowed_in_inspect_only() {
         let decision = decide_cursor_tool(
-            "Read",
+            &ToolRequest::of("Read"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
-        assert!(decision.reason.is_none());
+        // An allow reached by the rule explains itself; `None` is reserved for
+        // an event that put no request to the rule (see `allow()`).
+        assert!(decision.reason.is_some());
     }
 
     #[test]
     fn shell_is_blocked_in_inspect_only() {
         let decision = decide_cursor_tool(
-            "Shell",
+            &ToolRequest::of("Shell"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -185,9 +706,10 @@ mod tests {
     #[test]
     fn delete_is_blocked_in_inspect_only() {
         let decision = decide_cursor_tool(
-            "Delete",
+            &ToolRequest::of("Delete"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -196,9 +718,10 @@ mod tests {
     #[test]
     fn write_is_blocked_in_inspect_only() {
         let decision = decide_cursor_tool(
-            "Write",
+            &ToolRequest::of("Write"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -206,17 +729,23 @@ mod tests {
 
     #[test]
     fn delete_is_allowed_with_write_permission() {
-        let mut permissions = ExecutionPermissions::inspect_only();
-        permissions.write_project = true;
-        let decision = decide_cursor_tool("Delete", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_cursor_tool(
+            &ToolRequest::at("Delete", "src/lib.rs"),
+            ExecutionMode::HostConfirmed,
+            &writer(),
+            standard(),
+        );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
     }
 
     #[test]
     fn write_is_allowed_with_write_permission() {
-        let mut permissions = ExecutionPermissions::inspect_only();
-        permissions.write_project = true;
-        let decision = decide_cursor_tool("Write", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_cursor_tool(
+            &ToolRequest::at("Write", "src/lib.rs"),
+            ExecutionMode::HostConfirmed,
+            &writer(),
+            standard(),
+        );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
     }
 
@@ -224,7 +753,12 @@ mod tests {
     fn shell_needs_consent_even_with_run_project_code() {
         let mut permissions = ExecutionPermissions::inspect_only();
         permissions.run_project_code = true;
-        let decision = decide_cursor_tool("Shell", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_cursor_tool(
+            &ToolRequest::of("Shell"),
+            ExecutionMode::HostConfirmed,
+            &permissions,
+            standard(),
+        );
         // ArbitraryCommand always returns NeedsConsent. A hook that cannot ask
         // for consent must fail closed, so it maps to Block rather than Warn.
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
@@ -234,9 +768,10 @@ mod tests {
     #[test]
     fn unknown_tool_is_treated_as_arbitrary_command() {
         let decision = decide_cursor_tool(
-            "UnknownTool",
+            &ToolRequest::of("UnknownTool"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
     }
@@ -244,9 +779,10 @@ mod tests {
     #[test]
     fn claude_code_bash_is_blocked_in_inspect_only() {
         let decision = decide_claude_code_tool(
-            "Bash",
+            &ToolRequest::of("Bash"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -255,9 +791,10 @@ mod tests {
     #[test]
     fn claude_code_read_is_allowed_in_inspect_only() {
         let decision = decide_claude_code_tool(
-            "Read",
+            &ToolRequest::of("Read"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
     }
@@ -265,9 +802,10 @@ mod tests {
     #[test]
     fn claude_code_write_is_blocked_in_inspect_only() {
         let decision = decide_claude_code_tool(
-            "Write",
+            &ToolRequest::of("Write"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -276,9 +814,10 @@ mod tests {
     #[test]
     fn claude_code_edit_is_blocked_in_inspect_only() {
         let decision = decide_claude_code_tool(
-            "Edit",
+            &ToolRequest::of("Edit"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -287,9 +826,10 @@ mod tests {
     #[test]
     fn claude_code_delete_is_blocked_in_inspect_only() {
         let decision = decide_claude_code_tool(
-            "Delete",
+            &ToolRequest::of("Delete"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
@@ -297,17 +837,23 @@ mod tests {
 
     #[test]
     fn claude_code_write_is_allowed_with_write_permission() {
-        let mut permissions = ExecutionPermissions::inspect_only();
-        permissions.write_project = true;
-        let decision = decide_claude_code_tool("Write", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_claude_code_tool(
+            &ToolRequest::at("Write", "src/lib.rs"),
+            ExecutionMode::HostConfirmed,
+            &writer(),
+            standard(),
+        );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
     }
 
     #[test]
     fn claude_code_edit_is_allowed_with_write_permission() {
-        let mut permissions = ExecutionPermissions::inspect_only();
-        permissions.write_project = true;
-        let decision = decide_claude_code_tool("Edit", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_claude_code_tool(
+            &ToolRequest::at("Edit", "src/lib.rs"),
+            ExecutionMode::HostConfirmed,
+            &writer(),
+            standard(),
+        );
         assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
     }
 
@@ -315,7 +861,12 @@ mod tests {
     fn claude_code_bash_needs_consent_even_with_run_project_code() {
         let mut permissions = ExecutionPermissions::inspect_only();
         permissions.run_project_code = true;
-        let decision = decide_claude_code_tool("Bash", ExecutionMode::HostConfirmed, &permissions);
+        let decision = decide_claude_code_tool(
+            &ToolRequest::of("Bash"),
+            ExecutionMode::HostConfirmed,
+            &permissions,
+            standard(),
+        );
         // ArbitraryCommand always returns NeedsConsent. A hook that cannot ask
         // for consent must fail closed, so it maps to Block rather than Warn.
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
@@ -325,10 +876,292 @@ mod tests {
     #[test]
     fn claude_code_unknown_tool_is_treated_as_arbitrary_command() {
         let decision = decide_claude_code_tool(
-            "UnknownTool",
+            &ToolRequest::of("UnknownTool"),
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),
+            standard(),
         );
         assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+    }
+
+    // --- P13-T004: the protection mode changes the answer -------------------
+
+    /// The one the acceptance criterion is about: the same operation, two
+    /// modes, two decisions. `Read` is the case both modes can reach without a
+    /// permission this build cannot grant, and the document's "secret/config
+    /// area" is the area strict adds.
+    #[test]
+    fn strict_blocks_a_secret_read_that_standard_allows() {
+        let inspect = ExecutionPermissions::inspect_only();
+        let read = ToolRequest::at("Read", ".env");
+
+        let under_standard = decide_cursor_tool(
+            &read,
+            ExecutionMode::InspectOnly,
+            &inspect,
+            ProtectionMode::Standard,
+        );
+        let under_strict = decide_cursor_tool(
+            &read,
+            ExecutionMode::InspectOnly,
+            &inspect,
+            ProtectionMode::Strict,
+        );
+
+        assert_eq!(under_standard.decision, ProtectionDecisionKind::Allow);
+        assert_eq!(under_strict.decision, ProtectionDecisionKind::Block);
+        let reason = under_strict.reason.expect("a block has a reason");
+        assert!(
+            reason.contains("credentials"),
+            "the reason should say what the file is, in the user's words: {reason}"
+        );
+        assert!(
+            !reason.contains("protection.mode") && !reason.contains("strict mode is set"),
+            "the reason must explain the consequence rather than name the setting: {reason}"
+        );
+    }
+
+    /// Every path here is a change: the document's areas, and the paths that
+    /// look like them without being them. The second half is the guard against
+    /// the failure this criterion invites — a mode that holds more than the
+    /// document says is a new rule wearing an existing name.
+    #[test]
+    fn strict_holds_a_change_in_the_documents_areas_and_nothing_else() {
+        let cases = [
+            // Migrations: by directory, and by name.
+            ("migrations/0001_init.sql", true),
+            ("db/migrate/20260919_add_users.rb", true),
+            ("alembic/versions/0001_init.py", true),
+            ("db/20260919_add_users_migration.sql", true),
+            // CI/CD configuration.
+            (".github/workflows/ci.yml", true),
+            (".circleci/config.yml", true),
+            ("Jenkinsfile", true),
+            (".gitlab-ci.yml", true),
+            // Credentials and keys.
+            (".env", true),
+            (".env.production", true),
+            ("secrets/prod.yaml", true),
+            ("certs/server.pem", true),
+            (".ssh/id_ed25519", true),
+            ("terraform.tfstate", true),
+            // SURE's own settings for the project.
+            ("sure.yaml", true),
+            (".sure/cache.json", true),
+            // The paths that are not any of those.
+            ("src/lib.rs", false),
+            ("README.md", false),
+            (".github/ISSUE_TEMPLATE/bug.md", false),
+            ("tests/migration_tests.rs", false),
+            ("docs/adr/0004-thin-harness-integrations.md", false),
+            ("src/config/settings.rs", false),
+        ];
+        for (path, held) in cases {
+            let under_standard = decide_cursor_tool(
+                &ToolRequest::at("Write", path),
+                ExecutionMode::HostConfirmed,
+                &writer(),
+                ProtectionMode::Standard,
+            );
+            let under_strict = decide_cursor_tool(
+                &ToolRequest::at("Write", path),
+                ExecutionMode::HostConfirmed,
+                &writer(),
+                ProtectionMode::Strict,
+            );
+            assert_eq!(
+                under_standard.decision,
+                ProtectionDecisionKind::Allow,
+                "standard held a change to {path}, which the document says it does not"
+            );
+            assert_eq!(
+                under_strict.decision == ProtectionDecisionKind::Block,
+                held,
+                "strict and the document disagree about a change to {path}"
+            );
+            if held {
+                assert!(under_strict.reason.is_some());
+            }
+        }
+    }
+
+    /// A read is held for credentials and for nothing else, because the
+    /// document's other areas are about changes. Reading a migration or a CI
+    /// file is work an agent does all day; reading a key is how the key leaves.
+    #[test]
+    fn strict_holds_a_read_only_where_the_read_is_the_sensitive_act() {
+        let cases = [
+            (".env", true),
+            ("secrets/prod.yaml", true),
+            ("id_rsa", true),
+            ("certs/server.pem", true),
+            ("C:\\Users\\dev\\project\\.env", true),
+            ("migrations/0001_init.sql", false),
+            (".github/workflows/ci.yml", false),
+            ("sure.yaml", false),
+            ("src/lib.rs", false),
+        ];
+        let inspect = ExecutionPermissions::inspect_only();
+        for (path, held) in cases {
+            let under_strict = decide_cursor_tool(
+                &ToolRequest::at("Read", path),
+                ExecutionMode::InspectOnly,
+                &inspect,
+                ProtectionMode::Strict,
+            );
+            assert_eq!(
+                under_strict.decision == ProtectionDecisionKind::Block,
+                held,
+                "strict and the document disagree about a read of {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_change_that_names_a_whole_location_is_held_under_strict() {
+        for path in ["", ".", "..", "src/", "C:\\", "**/*", "src/*.rs"] {
+            let decision = decide_cursor_tool(
+                &ToolRequest::at("Delete", path),
+                ExecutionMode::HostConfirmed,
+                &writer(),
+                ProtectionMode::Strict,
+            );
+            assert_eq!(
+                decision.decision,
+                ProtectionDecisionKind::Block,
+                "strict let a whole-location change through: {path:?}"
+            );
+        }
+    }
+
+    /// A request that names no path at all is not evidence of anything, so a
+    /// read without one is not held; a change without one is held, because SURE
+    /// cannot bound what it would touch.
+    #[test]
+    fn a_request_that_names_no_path_is_answered_by_what_it_would_do() {
+        let inspect = ExecutionPermissions::inspect_only();
+        let read = decide_cursor_tool(
+            &ToolRequest::of("Read"),
+            ExecutionMode::InspectOnly,
+            &inspect,
+            ProtectionMode::Strict,
+        );
+        assert_eq!(read.decision, ProtectionDecisionKind::Allow);
+
+        let change = decide_claude_code_tool(
+            &ToolRequest::of("Delete"),
+            ExecutionMode::HostConfirmed,
+            &writer(),
+            ProtectionMode::Strict,
+        );
+        assert_eq!(change.decision, ProtectionDecisionKind::Block);
+    }
+
+    /// A rule whose answer changed with the file system under it would be a
+    /// rule two machines could disagree about, so separator and case are folded
+    /// on every platform rather than only on Windows.
+    #[test]
+    fn paths_are_matched_without_regard_to_separator_or_case() {
+        let inspect = ExecutionPermissions::inspect_only();
+        for path in [
+            ".env",
+            "C:\\Users\\dev\\project\\.env",
+            "SECRETS/PROD.YAML",
+            "c:/Users/dev/project/Id_Rsa",
+            "Certs/Server.PEM",
+        ] {
+            let decision = decide_cursor_tool(
+                &ToolRequest::at("Read", path),
+                ExecutionMode::InspectOnly,
+                &inspect,
+                ProtectionMode::Strict,
+            );
+            assert_eq!(
+                decision.decision,
+                ProtectionDecisionKind::Block,
+                "strict missed a credential path: {path}"
+            );
+        }
+    }
+
+    /// The mode asks its question only after the engine has answered, and never
+    /// weakens an answer it was given.
+    #[test]
+    fn a_refusal_from_the_execution_mode_is_not_diluted_or_respelled() {
+        let inspect = ExecutionPermissions::inspect_only();
+        let denied = decide_cursor_tool(
+            &ToolRequest::at("Write", ".env"),
+            ExecutionMode::InspectOnly,
+            &inspect,
+            ProtectionMode::Strict,
+        );
+        assert_eq!(denied.decision, ProtectionDecisionKind::Block);
+        assert_eq!(
+            denied.reason.as_deref(),
+            Some("The current execution mode does not permit this action."),
+            "the reason should be the engine's own, not one the mode wrote"
+        );
+    }
+
+    /// `custom` is a mode this release refuses in a file, and the decision path
+    /// is total over the enum: if the value ever arrives at a decision, the
+    /// answer is a refusal with the configuration reader's own words rather
+    /// than an allow nobody chose.
+    #[test]
+    fn custom_is_refused_with_the_settings_readers_own_words() {
+        let decision = decide_cursor_tool(
+            &ToolRequest::at("Read", "src/lib.rs"),
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+            ProtectionMode::Custom,
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        let reason = decision.reason.expect("a refusal says why");
+        assert!(reason.contains(CUSTOM_PROTECTION_EXPLANATION), "{reason}");
+        assert!(reason.contains(CUSTOM_PROTECTION_INSTEAD), "{reason}");
+    }
+
+    #[test]
+    fn every_area_has_a_sentence_for_both_roles() {
+        for area in SensitiveArea::ALL {
+            for role in [PathRole::Read, PathRole::Change] {
+                let sentence = area.consequence(role);
+                assert!(
+                    sentence.len() > 40,
+                    "{area:?} has no real sentence for {role:?}: {sentence}"
+                );
+                assert!(
+                    sentence.ends_with('.'),
+                    "{area:?}/{role:?} is not a sentence: {sentence}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_strict_block_says_what_would_happen_and_what_sure_answers() {
+        for area in SensitiveArea::ALL {
+            let reason = strict_reason(*area, PathRole::Change);
+            assert!(reason.ends_with(STRICT_TAIL), "{reason}");
+            assert!(
+                !reason.contains("protection.mode"),
+                "policy jargon reached a user: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_actions_that_name_a_file_have_a_role() {
+        for kind in ActionKind::ALL {
+            let role = path_role(*kind);
+            let expected = match kind {
+                ActionKind::ReadFile => Some(PathRole::Read),
+                ActionKind::WriteProjectFile | ActionKind::DeleteProjectFile => {
+                    Some(PathRole::Change)
+                }
+                _ => None,
+            };
+            assert_eq!(role, expected, "{kind:?}");
+        }
     }
 }

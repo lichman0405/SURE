@@ -53,13 +53,17 @@ const CLOUD_ENHANCED_INSTEAD: &str = "Use `local_first` to keep evidence here an
      external analysis only where it is configured, or `fully_local` to send nothing out at all.";
 
 /// Why `protection.mode: custom` is refused.
-const CUSTOM_PROTECTION_EXPLANATION: &str = "Custom protection rules need a rule editor \
-     and a rule format, neither of which exists in this release. Accepting the setting would \
-     leave the project believing it had protections that were never applied.";
+///
+/// `pub(crate)` because the decision path says the same thing when the value
+/// reaches it anyway: one value, one explanation, in both places a user can
+/// meet it (`crate::hook_protection`).
+pub(crate) const CUSTOM_PROTECTION_EXPLANATION: &str = "Custom protection rules need a rule \
+     editor and a rule format, neither of which exists in this release. Accepting the setting \
+     would leave the project believing it had protections that were never applied.";
 
 /// What to write instead of `protection.mode: custom`.
-const CUSTOM_PROTECTION_INSTEAD: &str = "Use `standard` or `strict`; both are implemented and are described in \
-     `docs/security/PROTECTION_MODE.md`.";
+pub(crate) const CUSTOM_PROTECTION_INSTEAD: &str = "Use `standard` or `strict`; both are \
+     implemented and are described in `docs/security/PROTECTION_MODE.md`.";
 
 /// Why a provider setting cannot be combined with `provider: disabled`.
 const DISABLED_PROVIDER_EXPLANATION: &str = "No model is consulted when the provider is \

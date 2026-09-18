@@ -43,15 +43,20 @@ neither `Layer` nor `ConsentGrantor` offers a way to name it — a source a call
 can name but never obtain is how a documented feature becomes a believed one.
 
 Read plainly: this layer decides what the two files, together, are allowed to
-mean. **Two things route through it.** Since P7-T010 `sure check` reads its
+mean. **Three things route through it.** Since P7-T010 `sure check` reads its
 settings through `Authority::load`, which is where the arbitrated privacy mode
 and the statement about models come from; since P13-T003 `sure hook ingest` reads
 `Authority::full_recording_retention_days` for the same reason — how long a full
 recording is kept is a restriction, and a restriction resolved anywhere else
-would be a second rule. Wiring it in front of the rest of the check pipeline is
-P13-T009. Until that lands, everything else is built and tested on its own, and a
-report that claimed a project's request had been refused when nothing consulted
-the layer would be describing behaviour that has not run.
+would be a second rule; and since P13-T004 it takes the **protection mode in
+force** from `Authority::protection()` before it decides a pre-action tool
+request, so a project's file can raise the mode and cannot lower the one the
+user set. The execution mode and permissions a hook decides under are still read
+from the project's file alone; that restraint is not yet routed, and it belongs
+to P13-T009 with the rest of the wiring. Wiring the layer in front of the check
+pipeline is also P13-T009. Until that lands, everything else is built and tested
+on its own, and a report that claimed a project's request had been refused when
+nothing consulted the layer would be describing behaviour that has not run.
 
 ## The two answers
 
@@ -137,6 +142,14 @@ One consequence of reading both files is worth naming here: a user settings file
 that cannot be parsed stops a check rather than being ignored, with status 5 and
 a message naming the file. That is the `Authority::load` rule above, seen from the
 command that now depends on it.
+
+`sure hook ingest` is the one caller that does not stop. A hook is a pre-action
+gate on a Tier 1 harness, where a process that refuses to answer leaves the
+harness to fall open; so a settings file it cannot read — unparseable, or naming
+`protection.mode: custom`, which this release refuses — leaves it deciding under
+`strict` rather than under the default. The firmer implemented answer is a real
+answer and the weaker one is not, and which of the two a harness does with it is
+documented per integration (P13-T007).
 
 ## What this deliberately does not do
 

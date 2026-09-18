@@ -39,6 +39,13 @@ Prompt/source/log/secret leaves machine unexpectedly.
 ## T13 — dangerous agent action
 Force push, broad deletion, sensitive read, destructive DB/shell action.
 
+Where a harness offers a pre-action hook, SURE answers a tool request with the
+action it would take and a sentence saying why, and a `strict` protection mode
+holds the sensitive reads and broad changes that
+[PROTECTION_MODE.md](PROTECTION_MODE.md) lists. **The answer is advisory in this
+release**: both integrations are capability tier 1, so what a decision states is
+what SURE would do and not what the harness did — see T18.
+
 ## T14 — repair regression
 Fixing one issue breaks previous behavior.
 

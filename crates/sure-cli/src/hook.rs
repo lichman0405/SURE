@@ -20,13 +20,14 @@ use std::path::Path;
 
 use sure_core::config::Authority;
 use sure_core::config::Config;
+use sure_core::config::ProtectionMode;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::full_recording::{
     self, DEFAULT_FULL_RECORDING_RETENTION_DAYS, FullRecordingConsent,
 };
 use sure_core::harness_event::ingest_event_str;
-use sure_core::hook_protection::{decide_claude_code_tool, decide_cursor_tool};
+use sure_core::hook_protection::{ToolRequest, decide_claude_code_tool, decide_cursor_tool};
 use sure_core::ids::EventId;
 use sure_core::normalizer::{claude_code, codex, cursor};
 use sure_core::paths::Paths;
@@ -171,13 +172,21 @@ fn run_ingest_with_paths(
         event_kind == Some("pre-tool-use") || envelope.event_type == "tool.requested";
 
     if is_pre_tool_use {
-        let tool = envelope
-            .payload
-            .get("tool")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // The tool name and the path are the request's own words — the
+        // normaliser lifts `path` from the payload the harness sent, and
+        // nothing here reads the harness's raw `args`. They are handed to the
+        // rule as data (P13-T004); the rule classifies the path and never
+        // echoes it back inside a sentence SURE writes.
+        let request = ToolRequest {
+            tool: envelope
+                .payload
+                .get("tool")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            path: envelope.payload.get("path").and_then(|v| v.as_str()),
+        };
 
-        let (mode, permissions) = load_execution_config(&project_root);
+        let (mode, permissions, protection) = load_execution_config(&project_root, paths);
 
         let decision = match source {
             // Codex is documented to name its shell tool `Bash` and to match its
@@ -187,10 +196,12 @@ fn run_ingest_with_paths(
             // classifier's unknown branch, which fails closed rather than
             // passing. `integrations/codex/README.md` records that limitation
             // and why the decision is advisory on this harness.
-            Some("claude-code" | "codex") => decide_claude_code_tool(tool, mode, &permissions),
+            Some("claude-code" | "codex") => {
+                decide_claude_code_tool(&request, mode, &permissions, protection)
+            }
             // `Some("cursor")`, and anything else: the match above has already
             // refused a source SURE does not know.
-            _ => decide_cursor_tool(tool, mode, &permissions),
+            _ => decide_cursor_tool(&request, mode, &permissions, protection),
         };
         return Report::HookDecision(decision);
     }
@@ -254,24 +265,50 @@ fn persist_event_with_paths(
     Ok(fingerprint.id)
 }
 
-fn load_execution_config(project_root: &str) -> (ExecutionMode, ExecutionPermissions) {
+/// The settings a decision is made under: execution mode, permissions, and the
+/// protection mode in force.
+///
+/// The protection mode is the **arbitrated** one, through the same
+/// [`Authority::load`] `sure check` reads its settings through and for the same
+/// reason: a restriction resolved from one file would be a second rule, and a
+/// report of what the project's file asked for rather than what the user's
+/// settings permit would be a false statement about the user's own policy. A
+/// project may ask for *more* protection than the user set and is named as the
+/// reason; it may not ask for less. See `docs/architecture/CONFIG_AUTHORITY.md`.
+///
+/// A file that will not parse leaves SURE not knowing what the user set, and
+/// the answer is the firmer one rather than the default: running under
+/// `standard` while the user believes `strict` is in force is the failure the
+/// authority layer exists to prevent. `strict` is the firmest mode this release
+/// implements, and it is still an answer where stopping would be none — a hook
+/// that failed outright would leave a Tier 1 harness to fall open.
+///
+/// The execution settings are still read from the project's file alone. That
+/// gap is `P13-T009`'s, not this function's: the mode a *user* chose is the one
+/// this task had to make reach the decision.
+fn load_execution_config(
+    project_root: &str,
+    paths: &Paths,
+) -> (ExecutionMode, ExecutionPermissions, ProtectionMode) {
     let path = Path::new(project_root);
-    match Config::load(path) {
-        Ok(loaded) => {
-            let config = loaded.config;
+    match Authority::load(path, &paths.user_config_file()) {
+        Ok(authority) => {
+            let config = authority.project();
             let mut permissions = ExecutionPermissions::inspect_only();
             permissions.run_project_code = config.execution.mode.runs_project_code();
             permissions.install_dependencies = config.execution.allow_dependency_install;
             permissions.network = config.execution.allow_network;
-            (config.execution.mode, permissions)
-        }
-        Err(_) => {
-            // Invalid config file: fall back to the safest defaults.
             (
-                ExecutionMode::InspectOnly,
-                ExecutionPermissions::inspect_only(),
+                config.execution.mode,
+                permissions,
+                authority.protection().value,
             )
         }
+        Err(_) => (
+            ExecutionMode::InspectOnly,
+            ExecutionPermissions::inspect_only(),
+            ProtectionMode::Strict,
+        ),
     }
 }
 
@@ -1258,5 +1295,171 @@ mod tests {
             .events_for_session(sessions[0].row_id)
             .expect("query events");
         assert_eq!(stored.len(), 1, "and one event");
+    }
+
+    // --- the protection mode, through the command a harness runs ---------------
+
+    /// A project with its own `sure.yaml`, and locations of SURE's own that this
+    /// test may write to.
+    ///
+    /// The user's layer is the point of the second return value: on this machine
+    /// it is `%APPDATA%\SURE\sure.yaml`, which belongs to the person running the
+    /// suite and is not a test's to write. [`Paths::from_roots`] puts it inside
+    /// the scratch directory instead, so the arbitration below can be tested
+    /// without touching, or depending on, anybody's real settings.
+    fn a_project_with(name: &str, project_yaml: &str) -> (std::path::PathBuf, Paths) {
+        let tmp = scratch_hook_dir(name);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        std::fs::write(project.join("sure.yaml"), project_yaml).expect("write project config");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+        (project, paths)
+    }
+
+    /// A Cursor `preToolUse` event naming one tool and, when it names one, one
+    /// path: the request the rule is asked about, in the shape the harness sends.
+    fn cursor_request_at(project: &std::path::Path, tool: &str, path: Option<&str>) -> String {
+        serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": "p13t004",
+            "project_root": project.to_string_lossy(),
+            "tool": tool,
+            "path": path,
+            "timestamp_utc": "2026-09-19T09:00:00Z",
+            "source": "cursor",
+        })
+        .to_string()
+    }
+
+    /// Run `sure hook ingest` for one request and hand back the action SURE
+    /// would take and the sentence it gives for it.
+    fn run_cursor_request(
+        project: &std::path::Path,
+        paths: &Paths,
+        tool: &str,
+        path: Option<&str>,
+    ) -> (ProtectionDecisionKind, String) {
+        let text = cursor_request_at(project, tool, path);
+        let report = run_ingest_with_paths(Some("cursor"), Some("pre-tool-use"), &text, paths);
+        match &report {
+            Report::HookDecision(decision) => (
+                decision.decision,
+                decision
+                    .reason
+                    .clone()
+                    .expect("the rule answers a request with an action and a reason"),
+            ),
+            other => panic!("expected HookDecision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_same_read_is_allowed_under_standard_and_held_under_strict() {
+        // A read of a secret is the operation from `PROTECTION_MODE.md`'s own
+        // list — "secret/config areas" — that reaches the rule through the
+        // command a harness actually runs, and it is the pair the criterion is
+        // about: same request, same execution mode, two protection modes.
+        let (standard_project, standard_paths) =
+            a_project_with("p13t004-standard-read", "protection:\n  mode: standard\n");
+        let (action, reason) =
+            run_cursor_request(&standard_project, &standard_paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+        assert!(
+            !reason.is_empty(),
+            "an allow the rule reached says what it looked at"
+        );
+
+        let (strict_project, strict_paths) =
+            a_project_with("p13t004-strict-read", "protection:\n  mode: strict\n");
+        let (action, reason) =
+            run_cursor_request(&strict_project, &strict_paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("credentials"),
+            "the reason says what the file is, not which setting asked: {reason}"
+        );
+        assert!(
+            !reason.contains("protection.mode"),
+            "the reason is about the user's work, not about policy jargon: {reason}"
+        );
+    }
+
+    #[test]
+    fn strict_holds_only_what_the_document_names() {
+        // The other half of the pair: strict must not invent a rule. An ordinary
+        // read is allowed under both modes, so the mode's difference is the
+        // categories the document names and nothing else.
+        let (project, paths) =
+            a_project_with("p13t004-strict-ordinary", "protection:\n  mode: strict\n");
+        let (action, _) = run_cursor_request(&project, &paths, "Read", Some("src/lib.rs"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn the_default_mode_is_standard_and_the_project_file_reaches_the_rule() {
+        // No `sure.yaml` at all: the documented default is standard, and a read
+        // of a secret is allowed under it. That is what makes the strict case
+        // above attributable to the file rather than to the absence of one.
+        let tmp = scratch_hook_dir("p13t004-no-project-config");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+
+        let (action, _) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn a_project_file_cannot_lower_the_mode_the_user_set() {
+        // The user's own settings file says strict; the project's file says
+        // standard. Restrictions take the stricter of the two layers
+        // (`config/authority.rs`), so the answer is the user's, and the reason
+        // must be the one the user's policy produces.
+        let (project, paths) =
+            a_project_with("p13t004-arbitrated", "protection:\n  mode: standard\n");
+        let user_config = paths.user_config_file();
+        std::fs::create_dir_all(
+            user_config
+                .parent()
+                .expect("the settings file lives in a directory"),
+        )
+        .expect("create settings directory");
+        std::fs::write(&user_config, "protection:\n  mode: strict\n")
+            .expect("write the user's own settings");
+
+        let (action, reason) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "a project file cannot loosen what the user set"
+        );
+        assert!(reason.contains("credentials"), "{reason}");
+
+        // And the project's own `standard` is what governs once the user's layer
+        // is gone — so the block above is the user's line, not a project file
+        // that was ignored.
+        std::fs::remove_file(&user_config).expect("remove the user's settings");
+        let (action, _) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn a_refused_protection_mode_falls_to_the_firmest_one_this_build_has() {
+        // `custom` is refused by the settings reader — this release has no rule
+        // editor — so the hook never decides under it. What it does instead is
+        // the firmer implemented mode rather than the default: a settings file
+        // SURE cannot read must not leave the user with less protection than
+        // they asked for. The assertion below is the one that tells those two
+        // apart, because `standard` would allow this read.
+        let (project, paths) = a_project_with("p13t004-custom", "protection:\n  mode: custom\n");
+        let (action, reason) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "a refused mode may not resolve to the default"
+        );
+        assert!(reason.contains("credentials"), "{reason}");
     }
 }

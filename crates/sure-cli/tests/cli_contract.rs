@@ -1836,6 +1836,141 @@ fn hook_ingest_reads_standard_input_and_evaluates_protection() {
     assert_untouched(&machine, "by an ingest that named a store");
 }
 
+/// One `preToolUse` read, from Cursor, aimed at `path` in `project`, run in
+/// `store`.
+///
+/// The payload is what a harness sends, and it is built with `serde_json` rather
+/// than with a `format!` string because the one field that is a Windows path
+/// would otherwise have to be escaped by hand — and a path escaped wrongly is a
+/// test about a project that does not exist.
+fn ingest_a_read(store: &Path, project: &Path, path: &str) -> Run {
+    let payload = serde_json::json!({
+        "event": "preToolUse",
+        "harness_session_id": "p13t004-mode",
+        "project_root": project.to_string_lossy(),
+        "tool": "Read",
+        "path": path,
+        "timestamp_utc": "2026-09-19T09:00:00Z",
+        "source": "cursor",
+    })
+    .to_string();
+
+    let mut command = sure_in_a_store(store);
+    command.args([
+        "--format",
+        "json",
+        "hook",
+        "ingest",
+        "--source",
+        "cursor",
+        "pre-tool-use",
+    ]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a child process");
+    let mut stdin = child.stdin.take().expect("the pipe");
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
+    drop(stdin);
+    Run::of(&child.wait_with_output().expect("the child exits"))
+}
+
+#[test]
+fn the_protection_mode_a_project_names_is_the_one_sure_decides_under() {
+    // P13-T004, at the process level and through the command a harness runs:
+    // one read, run twice, differing only in the mode the project's own
+    // `sure.yaml` names. `docs/security/PROTECTION_MODE.md` makes secret/config
+    // areas strict's, so a read of `.env` is allowed under standard and held
+    // under strict, and the held one leaves the process with status 1 — which is
+    // what a launcher reads, and what this test is really about.
+    //
+    // Both runs name a store of this test's own, and the machine's store is
+    // compared before and after.
+    //
+    // The mode is resolved from two layers and the other one is the user's own
+    // settings file, which no test may write. Rather than assume it holds
+    // nothing, the precondition is stated: if this machine has one, the runs
+    // below are not the experiment they say they are.
+    let user_settings = Paths::discover()
+        .expect("this machine reports a per-user location for SURE's files")
+        .user_config_file();
+    assert!(
+        !user_settings.is_file(),
+        "this machine has a user settings file at {}, and a protection mode in it would be \
+         answering instead of the project's own file. These runs are about the project layer: on a \
+         machine with user settings, read what they hold before believing the standard case below.",
+        user_settings.display()
+    );
+
+    let machine = the_store_on_this_machine();
+    let store = a_store_of_our_own();
+
+    // Standard: the read goes through, and the answer says so out loud.
+    let standard = a_project_of_our_own();
+    std::fs::write(
+        standard.join("sure.yaml"),
+        "protection:\n  mode: standard\n",
+    )
+    .expect("write the project's settings");
+    let run = ingest_a_read(&store, &standard, ".env");
+    assert!(
+        run.succeeded(),
+        "standard lets this read through, so the process exits 0: status {} and output {}",
+        run.status,
+        run.stdout
+    );
+    let frame: serde_json::Value = serde_json::from_str(run.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", run.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("allow"), "{frame}");
+    assert!(
+        frame["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()),
+        "an allow the rule reached carries the reason it reached it with: {frame}"
+    );
+
+    // Strict: the same request is held, with status 1 and a sentence about what
+    // the file is.
+    let strict = a_project_of_our_own();
+    std::fs::write(strict.join("sure.yaml"), "protection:\n  mode: strict\n")
+        .expect("write the project's settings");
+    let run = ingest_a_read(&store, &strict, ".env");
+    assert_eq!(
+        run.status, 1,
+        "a held request is `not_green`, which is 1: output {}",
+        run.stdout
+    );
+    let frame: serde_json::Value = serde_json::from_str(run.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", run.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
+    let reason = frame["reason"]
+        .as_str()
+        .expect("a held request carries a reason");
+    assert!(
+        reason.contains("credentials"),
+        "the reason says what the file is rather than which setting asked: {reason}"
+    );
+    assert!(
+        !reason.contains("protection.mode"),
+        "the reason is about the user's work, not policy jargon: {reason}"
+    );
+
+    // Strict's other half: it holds what the document names and nothing else, so
+    // the same project lets an ordinary read through.
+    let run = ingest_a_read(&store, &strict, "src/lib.rs");
+    assert!(
+        run.succeeded(),
+        "strict adds a question about the document's categories, not about every read: status {} \
+         and output {}",
+        run.status,
+        run.stdout
+    );
+
+    assert_untouched(&machine, "by ingests that named a store");
+}
+
 #[test]
 fn a_named_store_directory_is_the_one_a_real_run_writes_to() {
     // Acceptance 1 and the writing half of acceptance 2, at the process level

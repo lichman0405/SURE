@@ -42,7 +42,7 @@ process's argument vector and from nowhere else.
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | works, except `export`: the sessions this machine has recorded, one session's events, and the delete |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
-| `sure hook ingest` | record one event from a coding harness | works |
+| `sure hook ingest` | record one event from a coding harness | works; for a pre-action event it also answers with the action SURE would take and a sentence saying why |
 | `sure explain [ID]` | explain one recorded result in plain language | recognised, not implemented |
 | `sure mcp serve` | answer a coding harness that speaks the Model Context Protocol | works; each tool it exposes runs one command in this table and returns that command's own answer |
 | `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
@@ -551,8 +551,8 @@ configuration and its own record, not a report of traffic.
 
 | Status | Meaning | Who returns it |
 | --- | --- | --- |
-| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version` |
-| 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean |
+| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version`; `hook ingest` when the action it answered with is allow or warn, so a launcher is not stopped |
+| 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean; `hook ingest` when the action it answered with is a block, which is the answer a launcher relays |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
 | 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
@@ -616,6 +616,7 @@ anything about output or status: both are SURE's, and both have one home.
 | A doctor report's status, outcome and problems agree | same file, `a_doctor_report_is_an_answer_however_it_turns_out` |
 | No module outside `output.rs` writes to a stream | same file, `only_the_output_module_writes_to_a_stream` |
 | `sure hook ingest` reads the event from standard input and answers a protection decision | same file, `hook_ingest_reads_standard_input_and_evaluates_protection` |
+| The mode a decision is made under is the arbitrated one, and `strict` holds an operation `standard` allows | `crates/sure-cli/tests/cli_contract.rs`, `the_protection_mode_a_project_names_is_the_one_sure_decides_under`; `crates/sure-cli/src/hook.rs`, `a_project_file_cannot_lower_the_mode_the_user_set` and `the_same_read_is_allowed_under_standard_and_held_under_strict` |
 | The grammar is the list in this document | `crates/sure-cli/src/main.rs`, `the_grammar_is_the_one_docs_architecture_cli_md_lists` |
 | Every MCP tool answers with what the command line behind it answers | `crates/sure-cli/tests/mcp_protocol.rs`, `every_tool_answers_what_the_command_line_behind_it_answers` |
 | No MCP tool reports success for a project that was never checked | same file, `no_tool_reports_success_for_a_project_that_was_never_checked` |

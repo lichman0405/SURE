@@ -1,0 +1,61 @@
+{
+  "id": "rust-tests-pass",
+  "release_blocking": false,
+  "description": "A Rust project whose own tests pass: `total_cents` takes the discount off the subtotal, all three of its tests pass, and `cargo test` exits zero. It ships byte for byte the same project files as `rust-tests-fail` — `Cargo.toml`, `src/main.rs`, `rustfmt.toml` and `clippy.toml` — and its `src/lib.rs` differs from that half's by exactly one line, `saturating_sub` in place of `saturating_add`. It exists so that the failing half's verdict is a measurement rather than a checker that refuses every Rust project.",
+  "entry_points": {
+    "start": "cargo run",
+    "test": "cargo test"
+  },
+  "defect_files": [],
+  "required_outcomes": [
+    {
+      "kind": "status",
+      "family": "rust_checks",
+      "surface": "rust_checks",
+      "module": "crates/sure-core/src/checks/rust.rs",
+      "detector": "RustChecks::proposed with both rustfmt.toml and clippy.toml present, then the four CHECKS rows run to completion",
+      "title": "all four checks proposed and none of them not checked",
+      "status": "reported",
+      "assessment": "confirmed",
+      "evidence_class": "observed_fact",
+      "why": "This half ships `rustfmt.toml` and `clippy.toml`, which is how a Rust project asks for all four checks, so anything short of four proposed checks is a missing row rather than a project that did not ask for it. All four then pass: `cargo fmt --check` because the source is formatted, `cargo check --all-targets` because it compiles, `cargo clippy --all-targets` because it is lint-clean, and `cargo test` because the discount is subtracted. crates/sure-core/tests/rust_fixture_apps.rs asserts all four from a real run of SURE's own process runner."
+    },
+    {
+      "kind": "status",
+      "family": "rust_checks",
+      "surface": "project_verdict",
+      "module": "crates/sure-core/src/project_verdict.rs",
+      "detector": "build_verdict + render_summary; AggregateSeverity::Green",
+      "title": "everything that could be checked passed",
+      "status": "reported",
+      "assessment": "confirmed",
+      "why": "No check failed, none was skipped and none errored, so the frozen aggregation rule reaches Green - and Green is the only severity that says every proposed check actually ran and passed. crates/sure-core/tests/rust_fixture_apps.rs asserts the aggregate, the headline `This project looks ready to hand off.` and the rendered summary for this fixture by running it. Neither this outcome nor the one above carries a `required_severity`, and that is deliberate rather than an omission: a severity is what a finding fires at, nothing in this half fires, and writing one of the vocabulary's words here would claim a finding that is not there. The two halves' files are otherwise the same shape, so a reader comparing them sees exactly which fields exist because something is wrong."
+    },
+    {
+      "kind": "control",
+      "surface": "rust_checks",
+      "module": "crates/sure-core/src/checks/rust.rs",
+      "status": "not_checked",
+      "why": "The control for this half is the shipped fixture `fixtures/adversarial/rust-tests-fail`, the same project with `saturating_add` in place of `saturating_sub`. The two halves must not get the same answer: crates/sure-core/tests/rust_fixture_apps.rs runs both through discovery, SURE's own process runner, the aggregation and the verdict, and asserts that this half is Green and ready while the other half is NotReady and not ready. A checker that answered the same thing to both would fail one of the two."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "This project is reported as green while one of its four checks was skipped, never ran, or errored. Green means everything that could be checked passed; it does not mean nothing visible went wrong, and a skipped row is exactly the shape that must leave the run short of green even here, where the project is in fact fine."
+    },
+    {
+      "kind": "false_green",
+      "description": "This project is called green on evidence that is not the four checks - the README in this directory, the fact that the other half of the pair fails, or `cargo test`'s exit code on its own. The first two are text about the project rather than the project, and the third is one of the four checks, so none of them is a run that passes."
+    },
+    {
+      "kind": "false_positive",
+      "description": "This project is reported as failing, not ready or needing attention. It is the control: if it cannot come back green, the failing half's verdict is worth nothing, because a checker that refuses every Rust project has not detected the defect in the other half."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The two halves are reported as the same project. They differ in `src/lib.rs`, so their fingerprints differ and their verdicts must; a report that collapsed them would be reading the directory name rather than the content."
+    }
+  ],
+  "notes": "There is no case for this fixture in evaluation/acceptance-manifest.json and no id was added there: the manifest's case list is the release contract and P14-T003 was not asked to add a row to it. None of the manifest's twenty ids is a Rust case or a language-generic one, so nothing is claimed to cover this fixture and `release_blocking` is false - a project that passes every check does not block a release. Runnable with `cargo`, which the rest of this repository already requires, and with nothing else: `Cargo.toml` declares no dependencies, so there is nothing to fetch and no network is used. Running the project's own check inside this directory would leave a `Cargo.lock` and a `target/` here, which would show up in `git status`; `scripts/check.ps1` copies the project outside the checkout and runs cargo there, and crates/sure-core/tests/rust_fixture_apps.rs does the same with SURE's own content fingerprint asserting that the copy is this project."
+}

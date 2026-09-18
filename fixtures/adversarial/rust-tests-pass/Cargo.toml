@@ -1,0 +1,22 @@
+[package]
+name = "sure-fixture-rust-order"
+version = "0.1.0"
+edition = "2024"
+
+# An empty `[workspace]` table, and it is load-bearing.
+#
+# This project ships inside SURE's own checkout, and `cargo` refuses to build a
+# package that sits under another package's directory unless it is a member of
+# that workspace or a workspace of its own. Joining the checkout's workspace is
+# the one answer this fixture may not give: the root manifest lists its members
+# explicitly and a deliberately failing project must not be among them, or
+# `cargo test --workspace` in the checkout would build and run it. The empty
+# table is the other answer, and it is the one that leaves the root manifest
+# untouched.
+[workspace]
+
+# No dependencies, and that is part of what makes the fixture runnable with
+# nothing installed: `cargo` has nothing to fetch, so the checks can run with no
+# network and no package install. A name added here would make every command in
+# this project reach the package registry the first time it ran.
+[dependencies]

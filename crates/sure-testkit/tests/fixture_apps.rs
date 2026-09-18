@@ -9,6 +9,11 @@
 //!
 //! > *Missing config/migration/fake integration cases runnable.*
 //!
+//! `P14-T003` added a third, and a fourth:
+//!
+//! > *At least one Rust real-fail/real-pass project exercises
+//! > discovery/execution/reporting.*
+//!
 //! Three words in each sentence are checkable without running SURE at all, and
 //! this file checks them:
 //!
@@ -18,7 +23,9 @@
 //!   `python <file>`, which is the interpreter name the fixtures are recorded
 //!   against — `python3` is not on `PATH` on the machines this ships to, so
 //!   an entry point that uses it is refused here rather than discovered by a
-//!   reviewer whose shell answers with a Microsoft Store stub;
+//!   reviewer whose shell answers with a Microsoft Store stub; the Rust half
+//!   runs `cargo`, which every machine that builds this repository already has,
+//!   from a PowerShell script, and its manifest declares nothing to fetch;
 //! - **expected outcomes** — the fixture carries a `scenario.json` that parses
 //!   and satisfies `schemas/fixture-expectation.schema.json`, and, where the
 //!   release manifest has a case for it, that agrees with
@@ -26,21 +33,31 @@
 //! - **the false-green rule** — a release-blocking fixture says, in machine
 //!   readable form, that "passing" is an outcome SURE must not produce.
 //!
-//! # The one fixture with no manifest case
+//! # The fixtures with no manifest case
 //!
-//! `missing-config` is a `P14-T002` fixture that `evaluation/acceptance-manifest.json`
-//! has no case for, and that file is the release contract rather than a place
-//! to add rows. [`FIXTURES_WITHOUT_A_MANIFEST_CASE`] names it once, with the
-//! reason, and
-//! `the_only_fixture_without_a_manifest_case_is_the_one_named_here` proves the
-//! exemption is still true — an entry there for a case the manifest *does*
+//! Three of these fixtures have no case in `evaluation/acceptance-manifest.json`,
+//! and that file is the release contract rather than a place to add rows.
+//! [`FIXTURES_WITHOUT_A_MANIFEST_CASE`] names each of them once, with the
+//! reason, and `every_fixture_without_a_manifest_case_is_one_named_here` proves
+//! the exemptions are still true — an entry there for a case the manifest *does*
 //! have fails, so the list cannot silently widen and let a graded fixture out
 //! of the severity agreement above.
+//!
+//! Two of the three are the `P14-T003` pair, and the reason they are exempt is
+//! the same for both and worth stating here: the manifest's twenty cases do not
+//! include any Rust or language-generic case, so there is no row whose severity
+//! either half could be said to implement. Renaming a fixture to the nearest
+//! case by name — `tests-not-run`, which is a project whose tests were never run
+//! rather than one whose tests ran and failed — would make that row grade a
+//! different defect from the one it was written for.
 //!
 //! What is deliberately **not** here: whether the defect is actually detected.
 //! That claim needs SURE's scanners, which this crate cannot see, and it lives
 //! in `crates/sure-core/tests/adversarial_fixture_detection.rs` where the
-//! scanners are reachable.
+//! scanners are reachable. For the Rust pair it is stronger than a scan and
+//! lives one crate closer: `crates/sure-core/tests/rust_fixture_apps.rs` runs
+//! both halves through discovery, SURE's own process runner, the aggregation and
+//! the verdict, and asserts that the two answers differ.
 //!
 //! # Why the checkers are functions rather than assertions inlined in the tests
 //!
@@ -50,7 +67,8 @@
 //! fed a hand-built case that it **must** reject. A checker that returned no
 //! violations for everything would fail those cases, so it cannot pass by being
 //! vacuous. `the_python_runnable_checker_rejects_a_project_that_is_not_stdlib_only`
-//! is the Python half of that rule.
+//! and `the_rust_runnable_checker_rejects_a_project_that_would_fetch_or_write`
+//! are that rule held for two of the three languages.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -74,21 +92,45 @@ const TYPESCRIPT_FIXTURES: &[&str] = &[
 /// The `P14-T002` fixtures, named for the same reason as the list above.
 const PYTHON_FIXTURES: &[&str] = &["missing-migration", "external-unverified", "missing-config"];
 
+/// The `P14-T003` fixtures: one Rust project whose own check fails, and the same
+/// project with one line corrected.
+///
+/// The pair is one entry in this file's terms — the pass half is the failing
+/// half's control, and the test that runs them is
+/// `crates/sure-core/tests/rust_fixture_apps.rs`, where SURE's own discovery,
+/// runner, aggregation and verdict are reachable.
+const RUST_FIXTURES: &[&str] = &["rust-tests-fail", "rust-tests-pass"];
+
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
 ///
 /// An entry here is a claim that the release contract does not grade this
-/// fixture, and `the_only_fixture_without_a_manifest_case_is_the_one_named_here`
+/// fixture, and `every_fixture_without_a_manifest_case_is_one_named_here`
 /// checks the claim against the manifest rather than trusting it. Nothing else
 /// in this file reads this list as an exemption: a fixture named here is still
 /// checked for the schema, the false-green rule and runnability, and only the
 /// severity agreement is waived — because there is no manifest row to agree
 /// with.
-const FIXTURES_WITHOUT_A_MANIFEST_CASE: &[(&str, &str)] = &[(
-    "missing-config",
-    "the manifest's case list is the release contract and P14-T002 was not asked to add a row to it; \
-     the nearest case, `external-unverified`, is a different defect and is not claimed to cover this one",
-)];
+const FIXTURES_WITHOUT_A_MANIFEST_CASE: &[(&str, &str)] = &[
+    (
+        "missing-config",
+        "the manifest's case list is the release contract and P14-T002 was not asked to add a row to it; \
+         the nearest case, `external-unverified`, is a different defect and is not claimed to cover this one",
+    ),
+    (
+        "rust-tests-fail",
+        "the manifest has no Rust case and no language-generic one, so no row's trap is this fixture's: \
+         a Rust project whose own tests ran and failed. `tests-not-run`, the nearest by name, is the \
+         opposite defect — a project whose tests were never run — and renaming this fixture after that \
+         case would make its row grade something it was not written for",
+    ),
+    (
+        "rust-tests-pass",
+        "the same as `rust-tests-fail`, whose control this half is: it exists so that the failing half's \
+         verdict is a measurement rather than a checker that refuses every Rust project, and the manifest \
+         has no case for a project that is meant to come back green",
+    ),
+];
 
 /// The marker the task graph leaves on a fixture that is still a stub.
 const NOT_IMPLEMENTED: &str = "to_be_implemented_by_task_graph";
@@ -110,6 +152,14 @@ const ALLOWED_PYTHON_MODULES: &[&str] = &["dataclasses", "os", "pathlib", "sqlit
 /// point spelled that way is not runnable there even though it reads as though
 /// it is.
 const PYTHON: &str = "python ";
+
+/// The tool the Rust fixtures are recorded against, and the prefix every one of
+/// their entry points has to carry.
+///
+/// `cargo` rather than a path to a toolchain: a fixture that pinned one would be
+/// describing the machine it was written on. It is already required to build
+/// this repository, so a reviewer has it.
+const CARGO: &str = "cargo ";
 
 fn root() -> PathBuf {
     sure_testkit::repository_root()
@@ -180,7 +230,11 @@ fn shipped_fixture_ids() -> Vec<String> {
 /// language: the schema, the false-green rule, the check module and the
 /// directory all apply to a Python fixture exactly as they apply to a Node one.
 fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
-    TYPESCRIPT_FIXTURES.iter().chain(PYTHON_FIXTURES).copied()
+    TYPESCRIPT_FIXTURES
+        .iter()
+        .chain(PYTHON_FIXTURES)
+        .chain(RUST_FIXTURES)
+        .copied()
 }
 
 /// Why this fixture does not have to agree with the release manifest, if it
@@ -464,7 +518,7 @@ fn python_runnable_violations(dir: &Path) -> Vec<String> {
         }
     }
 
-    let entry_points = python_entry_points(dir);
+    let entry_points = declared_entry_points(dir);
     if entry_points.is_empty() {
         violations.push("scenario.json declares no entry point to run".to_owned());
     }
@@ -500,9 +554,12 @@ fn python_runnable_violations(dir: &Path) -> Vec<String> {
     violations
 }
 
-/// The commands a Python fixture's `scenario.json` says a reviewer runs, in the
-/// order the file spells them.
-fn python_entry_points(dir: &Path) -> Vec<(String, String)> {
+/// The commands a fixture's `scenario.json` says a reviewer runs, in the order
+/// the file spells them.
+///
+/// Read out of the same document the reviewers and the eval runner read, so the
+/// command each language's checker holds to is the command those readers run.
+fn declared_entry_points(dir: &Path) -> Vec<(String, String)> {
     let path = dir.join("scenario.json");
     if !path.is_file() {
         return Vec::new();
@@ -621,6 +678,72 @@ fn local_python_modules(dir: &Path) -> Vec<String> {
     names
 }
 
+/// Every reason a Rust fixture is not runnable with nothing installed.
+///
+/// The Rust half of [`python_runnable_violations`], and the differences are the
+/// language's rather than this file's. `cargo` is the one tool and it is already
+/// required to build this repository, so there is no interpreter name to pin and
+/// no module list to compare; what has to hold instead is that the manifest
+/// declares nothing to fetch, that the project is a workspace of its own — or
+/// `cargo` refuses to build a package sitting under another manifest's directory,
+/// which is exactly where these fixtures sit — and that the reviewer's entry
+/// point is a script. The script rather than `cargo test` in the fixture's own
+/// directory, because `cargo` writes `Cargo.lock` and `target/` next to the
+/// manifest it reads and the repository's `.gitignore` entry for `target/` is
+/// anchored at the root: the script copies the project somewhere else first.
+fn rust_runnable_violations(dir: &Path) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    let manifest = dir.join("Cargo.toml");
+    if !manifest.is_file() {
+        violations.push("there is no Cargo.toml".to_owned());
+        return violations;
+    }
+    let text = std::fs::read_to_string(&manifest).unwrap_or_default();
+
+    // A name under `[dependencies]` is something `cargo` fetches the first time a
+    // check runs, and these fixtures run with no network.
+    let mut under_dependencies = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            under_dependencies = line == "[dependencies]";
+            continue;
+        }
+        if under_dependencies && !line.is_empty() && !line.starts_with('#') {
+            violations.push(format!(
+                "Cargo.toml declares a dependency, so the fixture is not runnable without a fetch: `{line}`"
+            ));
+        }
+    }
+
+    if !text.lines().any(|line| line.trim() == "[workspace]") {
+        violations.push(
+            "Cargo.toml does not declare a workspace of its own, so cargo would refuse to build a \
+             package that sits under this checkout's manifest"
+                .to_owned(),
+        );
+    }
+
+    if !dir.join("scripts").join("check.ps1").is_file() {
+        violations.push("there is no scripts/check.ps1 for a reviewer to run".to_owned());
+    }
+
+    let entry_points = declared_entry_points(dir);
+    if entry_points.is_empty() {
+        violations.push("scenario.json declares no entry point to run".to_owned());
+    }
+    for (role, command) in entry_points {
+        if !command.starts_with(CARGO) {
+            violations.push(format!(
+                "the {role} command must run `cargo` directly, and it says `{command}`"
+            ));
+        }
+    }
+
+    violations
+}
+
 // --- the fixtures --------------------------------------------------------
 
 #[test]
@@ -672,10 +795,10 @@ fn no_fixture_this_task_implemented_is_still_marked_as_waiting_for_the_task_grap
 fn every_shipped_fixture_directory_corresponds_to_a_manifest_case() {
     // The other direction of the check below, and the one that catches a
     // fixture nobody grades: a directory with no manifest entry is a test whose
-    // result nothing reads. The one exemption is named, with its reason, in
+    // result nothing reads. The exemptions are named, each with its reason, in
     // `FIXTURES_WITHOUT_A_MANIFEST_CASE`, and
-    // `the_only_fixture_without_a_manifest_case_is_the_one_named_here` checks
-    // the exemption against the manifest rather than taking it on trust.
+    // `every_fixture_without_a_manifest_case_is_one_named_here` checks them
+    // against the manifest rather than taking them on trust.
     let manifest = manifest();
     let cases = manifest["cases"]
         .as_array()
@@ -693,7 +816,7 @@ fn every_shipped_fixture_directory_corresponds_to_a_manifest_case() {
 }
 
 #[test]
-fn the_only_fixture_without_a_manifest_case_is_the_one_named_here() {
+fn every_fixture_without_a_manifest_case_is_one_named_here() {
     // Both directions, so the list can neither widen nor go stale. An entry for
     // an id the manifest *does* grade would be a graded fixture excused from
     // the severity agreement below, and an entry that is not a shipped fixture
@@ -778,13 +901,16 @@ fn every_runnable_fixture_directory_is_named_in_this_file() {
     // (P14-T003 and the ones after them) fill in with their own language. A
     // directory that ships a `package.json` is a Node application and this file
     // owns those; one that ships a `pyproject.toml` or a `requirements.txt` is
-    // a Python application, and PYTHON_FIXTURES is where those are named. If
-    // one appears that is not named in either list, add it, so its entry point,
-    // its schema and its false-green rule are checked here too.
+    // a Python application, and PYTHON_FIXTURES is where those are named; one
+    // that ships a `Cargo.toml` is a Rust application, and RUST_FIXTURES is
+    // where those are named. If one appears that is not named in any list, add
+    // it, so its entry point, its schema and its false-green rule are checked
+    // here too.
     for id in shipped_fixture_ids() {
         let dir = fixture_dir(&id);
         let node = dir.join("package.json").is_file();
         let python = dir.join("pyproject.toml").is_file() || dir.join("requirements.txt").is_file();
+        let rust = dir.join("Cargo.toml").is_file();
         if node {
             assert!(
                 TYPESCRIPT_FIXTURES.contains(&id.as_str()),
@@ -795,6 +921,12 @@ fn every_runnable_fixture_directory_is_named_in_this_file() {
             assert!(
                 PYTHON_FIXTURES.contains(&id.as_str()),
                 "fixtures/adversarial/{id} is a runnable Python fixture that PYTHON_FIXTURES does not name"
+            );
+        }
+        if rust {
+            assert!(
+                RUST_FIXTURES.contains(&id.as_str()),
+                "fixtures/adversarial/{id} is a runnable Rust fixture that RUST_FIXTURES does not name"
             );
         }
     }
@@ -842,6 +974,50 @@ fn every_python_fixture_is_a_directory_this_repository_ships() {
         assert!(
             !PYTHON_FIXTURES.contains(id),
             "{id} is in both lists, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn every_rust_fixture_is_runnable_with_nothing_installed_but_cargo() {
+    for id in RUST_FIXTURES {
+        let violations = rust_runnable_violations(&fixture_dir(id));
+        assert!(
+            violations.is_empty(),
+            "{id} is not runnable as shipped:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+}
+
+#[test]
+fn every_rust_fixture_is_a_directory_this_repository_ships() {
+    for id in RUST_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md for a non-programmer to read"
+        );
+    }
+    // The pair is the point of this task's fixture: one half is the other's
+    // control, and the test that runs both is
+    // `crates/sure-core/tests/rust_fixture_apps.rs`. A third Rust fixture would
+    // need that test's control claim read again, which is why the count is held
+    // here rather than assumed.
+    assert_eq!(
+        RUST_FIXTURES.len(),
+        2,
+        "the Rust fixtures are a fail/pass pair, and this file's claim is about exactly two"
+    );
+    for id in RUST_FIXTURES {
+        assert!(
+            !TYPESCRIPT_FIXTURES.contains(id) && !PYTHON_FIXTURES.contains(id),
+            "{id} is in two lists, so one of the two halves is misdescribed"
         );
     }
 }
@@ -1102,6 +1278,74 @@ fn the_python_runnable_checker_rejects_a_project_that_is_not_stdlib_only() {
         python_runnable_violations(&scratch).is_empty(),
         "a stdlib-only project with a real entry point must pass: {:?}",
         python_runnable_violations(&scratch)
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn the_rust_runnable_checker_rejects_a_project_that_would_fetch_or_write() {
+    let scratch = root()
+        .join("target")
+        .join("tmp")
+        .join("fixture-apps-rust-checker");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("src")).unwrap();
+    std::fs::write(scratch.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+
+    // A manifest with something to fetch, no workspace of its own, and an entry
+    // point that is not cargo — and no script for a reviewer to run.
+    std::fs::write(
+        scratch.join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("scenario.json"),
+        "{\n  \"id\": \"x\",\n  \"required_outcomes\": [],\n  \"entry_points\": { \"test\": \"python scripts/check.py\" }\n}\n",
+    )
+    .unwrap();
+
+    let violations = rust_runnable_violations(&scratch);
+    assert!(
+        violations.iter().any(|v| v.contains("serde")),
+        "a declared dependency must be refused: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("workspace of its own")),
+        "a package that is not a workspace of its own must be refused: {violations:?}"
+    );
+    assert!(
+        violations.iter().any(|v| v.contains("check.ps1")),
+        "a fixture with no script for a reviewer must be refused: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("must run `cargo` directly")),
+        "an entry point that is not cargo must be refused: {violations:?}"
+    );
+
+    // And the same project, fixed, passes — so the checker is not refusing
+    // everything it is shown.
+    std::fs::create_dir_all(scratch.join("scripts")).unwrap();
+    std::fs::write(scratch.join("scripts").join("check.ps1"), "# a check\n").unwrap();
+    std::fs::write(
+        scratch.join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n\n[dependencies]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("scenario.json"),
+        "{\n  \"id\": \"x\",\n  \"required_outcomes\": [],\n  \"entry_points\": { \"test\": \"cargo test\" }\n}\n",
+    )
+    .unwrap();
+    assert!(
+        rust_runnable_violations(&scratch).is_empty(),
+        "a dependency-free project with a script and a cargo entry point must pass: {:?}",
+        rust_runnable_violations(&scratch)
     );
 
     let _ = std::fs::remove_dir_all(&scratch);

@@ -1,0 +1,71 @@
+{
+  "id": "rust-tests-fail",
+  "expected_severity": "must_fix",
+  "release_blocking": true,
+  "description": "A Rust project whose own tests fail: `total_cents` adds the discount instead of subtracting it, so two of its three tests fail and `cargo test` exits non-zero. The project builds, is formatted and is lint-clean, so a report that only asked whether it compiles would call it fine. Its control is `rust-tests-pass`, the same project with that one line corrected.",
+  "entry_points": {
+    "start": "cargo run",
+    "test": "cargo test"
+  },
+  "defect_files": [
+    "src/lib.rs"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "rust_checks",
+      "surface": "rust_checks",
+      "module": "crates/sure-core/src/checks/rust.rs",
+      "detector": "CHECKS row CommandRole::Test; the command is CheckReason::DeclaredCommand's own string, and the result is the run's exit code",
+      "title": "run the tests",
+      "anchor": "Cargo.toml",
+      "status": "reported",
+      "assessment": "confirmed",
+      "evidence_class": "observed_fact",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "`cargo test` in this project exits non-zero: 2 of the 3 tests in src/lib.rs fail, and their output names the line. That is the Test row of CHECKS, whose severity is MustFix and whose `critical` is true, so a run that reports it as failed is `NotReady` and the summary says the project is not ready to hand off. The other three rows pass, which is what makes the failing row the thing being detected rather than the state of the whole project."
+    },
+    {
+      "kind": "status",
+      "surface": "project_verdict",
+      "module": "crates/sure-core/src/project_verdict.rs",
+      "detector": "build_verdict + render_summary; AggregateSeverity::NotReady",
+      "status": "reported",
+      "assessment": "confirmed",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "One critical check failed, so the frozen rule in crates/sure-domain/src/status.rs aggregates the run to NotReady and the headline is `This is not ready to hand off yet.` crates/sure-core/tests/rust_fixture_apps.rs asserts that severity, that headline and the rendered summary for this fixture by running it, not by reading this file."
+    },
+    {
+      "kind": "control",
+      "surface": "rust_checks",
+      "module": "crates/sure-core/src/checks/rust.rs",
+      "status": "not_checked",
+      "why": "The same project with `saturating_sub` in place of `saturating_add` must come back green. The control is the shipped fixture `fixtures/adversarial/rust-tests-pass`, not a project built inside a test, so a check that answered NotReady to every Rust project cannot pass this fixture's tests: crates/sure-core/tests/rust_fixture_apps.rs runs both halves through discovery, SURE's own process runner, the aggregation and the verdict, and asserts that the two answers differ."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The project is reported as green, passing or ready to hand off while `cargo test` fails. The project's own check is the failing one, and it is the check SURE runs, so a green here would mean the failing exit code never reached the verdict."
+    },
+    {
+      "kind": "false_green",
+      "description": "The run aggregates to green because the test check was reported as skipped rather than as failed. A skipped critical check is not a pass, and it must leave the run short of green: the fixture ships both `rustfmt.toml` and `clippy.toml` so that all four checks are proposed, which means a skipped row here is a runner that dropped one rather than a project that did not ask for it."
+    },
+    {
+      "kind": "false_green",
+      "description": "The two halves are distinguished by anything other than the one line. If the fixture pair differed in `Cargo.toml` or in the source files around the defect, a green control would say nothing about the failing half, and a red failing half would say nothing about the control."
+    },
+    {
+      "kind": "silent",
+      "description": "The failing tests are not reported at all, so the project is handed over with a total that is too high and nobody is told which check found it."
+    },
+    {
+      "kind": "false_positive",
+      "description": "A Rust project whose tests pass is reported as failing. `fixtures/adversarial/rust-tests-pass` is that project and it must come back green."
+    }
+  ],
+  "notes": "There is no case for this fixture in evaluation/acceptance-manifest.json and no id was added there: the manifest's case list is the release contract and P14-T003 was not asked to add a row to it. None of the manifest's twenty ids is a Rust case or a language-generic one, and none is claimed to cover this fixture — `tests-not-run` is the nearest by name and is a different defect, a project whose tests were never run rather than one whose tests ran and failed. `expected_severity` here is therefore a record of what SURE produces rather than an agreement with a manifest row, and crates/sure-core/tests/rust_fixture_apps.rs asserts it against a real run so the two cannot drift apart. Runnable with `cargo` and nothing else, no network and no package install: `Cargo.toml` declares no dependencies, so there is nothing to fetch. Nothing about this project is staged. The tests fail because the code is wrong, in the ordinary way, and the README points at the one line. The three commands that pass are asserted as passing, so a reader cannot take the failing verdict as a statement about the build."
+}

@@ -3,6 +3,27 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** nothing, as of this paragraph. `P13-T009` (route the execution
+mode, the permission set and the recording consent through `Authority`) was
+dispatched from base commit `4fadd00` — the `P13-T007` acceptance — with its
+brief at `target/tmp/brief-p13t009.md`, handed back as `cbcc0be`, verified
+independently and **accepted** as that same commit; "What `P13-T009` added" and
+"Validation of `P13-T009`" below carry the numbers. CI run `35404199036` on the
+hand-back is green on all five jobs, attempt 1 — the second run in this
+repository's history on which the Unix arm of the launcher tests executed. **It
+closed the last path by which a project's own `sure.yaml` could decide something
+about the machine it was opened on**: the execution mode, the permission set
+`decide` is asked under and whether a full recording is written at all now come
+from `Authority`, so a repository the user merely opened can no longer ask for
+its own code to be run or for the user's activity to be recorded. That left the
+hole this acceptance minted **`P15-T022`** for, and the two have to be read
+together: the grant now belongs to the user's own file, and nothing in this build
+writes that file — measured, `%APPDATA%\SURE\sure.yaml` does not exist and no
+command creates it. **The next dispatch is `P13-T008`** — "Privacy/security
+integration suite", whose first acceptance line is *"Full recording off by
+default"* and whose dependencies include `P13-T009`, which is why accepting this
+task is what put it at the front of the READY list. Its brief is not written yet.
+
 **In flight:** nothing, as of this paragraph. `P13-T007` (implement hook
 failure semantics tests) was dispatched from base commit `f14f715` — the
 `P15-T017` acceptance — with its brief at `target/tmp/brief-p13t007.md`, handed
@@ -1272,6 +1293,23 @@ tree is or is not intact would be reading a claim the file does not make.
     it, or stop producing counts by hand* — rather than written down a fourth
     time here.
 
+    **The premise sentence above needed a correction of precision one task
+    later, and re-measuring it found more than the correction expected.** *"The
+    instrument is in no clone of this repository: `grep -rn measure-run` outside
+    `target/` returns this file, which is prose about it"* was written before
+    `P15-T021` was minted, and it was true then. The same command now returns
+    **three** files, not the two the correction predicted: `progress/HANDOFF.md`
+    (7 occurrences, prose), `tasks/tasks.json` (2, `P15-T021`'s own text) and
+    `progress/state.json` (4, `P13-T007`'s evidence and `P15-T021`'s own entry) —
+    the third already matched when the sentence was written, so the original
+    reading missed a file that was there and the correction missed one too.
+    **Neither committed line was edited to match a later tree**: a measurement
+    that is rewritten to agree with a newer one is worth nothing, and this file's
+    convention is to say when a number is a reading taken at a moment. Nothing
+    about the finding changes — none of the three files runs the instrument, and
+    the reason `P15-T021` exists is exactly that the only thing standing between a
+    contributor and a wrong count is a script in `target/`.
+
 The READY list, recomputed on 2026-09-19 from `tasks/tasks.json` against the
 `progress/state.json` that `P15-T017`'s acceptance stages — the predicate
 `scripts/taskctl.mjs` implements, applied to the two committed files rather than
@@ -1628,6 +1666,190 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T009` added
+
+**The last path by which a project's own `sure.yaml` could decide something about
+the machine it was opened on is closed.** The acceptance is criterion 1 — *a
+project's own configuration cannot decide the execution mode, the permission set
+or whether a recording is made* — at the three call sites that answered those
+questions from configuration, and before this commit every one of them read the
+**project's** file. `load_execution_config` (`hook.rs`) did it in four lines that
+are visible in the diff as removals: `let config = authority.project();`, then
+`permissions.run_project_code = config.execution.mode.runs_project_code();`,
+with `install_dependencies` and `network` copied from the same file and the mode
+returned from it — so a repository containing `execution.mode: host_confirmed`
+put the hook in host-confirmed mode. `persist_event_with_paths` took the
+recording consent from `Config::load(project_path)`. The check pipeline built its
+permission set in a local `permissions_for` from `config.execution`. **The three
+call sites are the whole of the fix; there was no fourth**, checked by searching
+the workspace for every place a permission set is built rather than by trusting
+the hand-back's list.
+
+**One value for the mode and the permissions, deliberately.** `ExecutionSettings`
+(`sure-core/src/config/authority.rs`) pairs an `ExecutionMode` with an
+`ExecutionPermissions`, and `Authority::execution()` is the only constructor the
+product paths use, so `sure_domain::execution::decide` cannot be handed a mode
+from one file and a permission set from another. `ExecutionSettings::inspect_only()`
+is a named constructor and the type has no `Default`, so no caller gets a pair by
+omission. `Authority::execution_mode()` and `Authority::full_recording()` are the
+two answers a hook or a check reports, and both are read from outside the process
+by the new tests.
+
+**The mode resolves by a rule of its own, and the reason is the shape of the
+setting rather than caution.** A project cannot move the mode in either
+direction: the mode in force is the user's own, and only when the user's file
+named one that runs project code. `resolve()` returns the default unless
+`rank(value) > rank(default)` — and here the default **is** the strictest value
+there is (`ExecutionConfig::default()` is `inspect_only`), so a "stricter of the
+two wins" rule would return `inspect_only` unconditionally and no user grant
+could ever take effect. **The contrast is in the same commit and it is what makes
+this a rule rather than an exception**: for the recording retention, whose
+default is not the strictest value, the same layer still prefers the stricter
+layer's answer — `a_project_file_cannot_outlast_the_users_retention` writes a user
+file naming three days and a project naming thirty and asserts the row is kept
+for three, with a comment saying a build that silently kept three while
+reporting thirty would pass a test that only read the setting. A project asking
+for `host_confirmed` is still recorded as a refused
+`ProjectRequest::RunProjectCode`, so a report can say what was asked for.
+`CONFIG_AUTHORITY.md` now states the rule, the reason and what a project's ask
+leaves on the record.
+
+**What is observed, and how.** At process level, `cli_contract.rs` gains three
+tests: `a_projects_execution_settings_do_not_move_the_mode_a_check_reports`
+compares the mode two checks report, `a_projects_execution_settings_do_not_move_a_hook_decision`
+compares two hook frames field by field against the store's rows, and
+`a_project_cannot_write_its_own_answer_into_the_cache_directory` asks the same
+project the same shell request and the same `check --goal` before and after a
+hand-written `.sure/` appears in it. In-process, `hook.rs` observes the refusal
+and the grant through the real decision path, `check.rs` observes the plan under
+a project asking for everything and under a user file granting host-confirmed
+execution, and `authority.rs` has the rules as unit tests. **One half could not
+be observed at process level and is not claimed**: `Paths::discover_at` builds the
+settings directory from `dirs::config_dir()` unconditionally, so no flag and no
+environment variable can point a test at a user settings file — the brief's
+assumption that both files can be written at process level does not hold — and
+the user's half is an in-process observation through `Paths::from_roots`, whose
+own comment says so.
+
+**It also had to retire two tests whose premise it inverted, and it did so in
+place rather than by deletion.** `full_recording_is_stored_when_opted_in` became
+`full_recording_is_stored_when_the_user_opted_in`, and
+`a_project_that_shortens_the_recording_retention_is_what_the_recording_says` —
+which asserted the behaviour this task removes — is replaced by
+`a_project_that_asks_for_full_recording_does_not_get_one` in the same position.
+The retention property it also covered moved to the hook test named above, where
+it is asserted in the stricter direction.
+
+## Validation of `P13-T009`
+
+**The gates, run by the supervisor from native PowerShell on `cbcc0be`, the
+hand-back, not taken from the report**: `cargo fmt --all -- --check` exit 0;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0;
+`cargo test --workspace --all-features --no-fail-fast` exit 0 with **64 cargo
+headers (59 `Running` + 5 `Doc-tests`) against 74 `test result:` lines, 2528
+passed by the parent rule, 0 failed, 8 ignored**; `node scripts/validate-bootstrap.mjs`
+exit 0; `node scripts/taskctl.mjs validate` exit 0; the sixth gate exit 0 over
+both Unix targets with its usual `--- NOT CHECKED ---` section. The raw sum over
+the 74 lines is 2538, and **the hand-back's message quotes 2538 as "passed" while
+the number of tests is 2528** — item 103's rule, for the third time in a
+hand-back and the second time recorded rather than corrected, since `grep -rn
+2538` over the tree returns nothing. The message's "74 binaries" is the same
+slip: 74 is the number of `test result:` lines and there are 64 test and
+doc-test targets.
+
+**The delta closes exactly, which is the cross-check that nothing was dropped.**
+Base is 2515 parents on the same instrument, read by the supervisor over the
+`P13-T007` tree and by CI on both `b808e42` and `4fadd00`; head is 2528, so
+**+13**. Comparing the `#[test]`-adjacent function names between the two commits
+gives `hook.rs` 34 → 38 (5 added, 1 renamed), `check.rs` 29 → 31, `authority.rs`
+24 → 28 and `cli_contract.rs` 37 → 40 (4 added, 1 replaced), which is +14 added
+`#[test]` attributes against 1 removed — the +13. **The one test this acceptance
+re-ran instead of reading**: the defect was restored by hand in the working tree
+and the three new process-level tests were run against it
+(`target/tmp/mutation-check.txt`) — the two project-influence tests **FAILED**,
+the mode test with the same `"inspect_only" then "host_confirmed"` pair the
+hand-back reported from its own base run, and the cache-directory test **passed**,
+which is what the hand-back said it would do and why the delivered tree describes
+it as a regression guard. The tree was restored with `git checkout --` and
+`git status --short` was empty before anything else ran.
+
+**CI, run `35404199036` on `cbcc0be`: green on all five jobs at attempt 1**, and
+the three rust job logs measured with the parent rule give **2528 / 2519 / 2520
+passed** against raw sums 2538 / 2529 / 2530, 0 failed and 0 `Text file busy` on
+any platform. The Windows figure is the supervisor's own figure exactly, and the
+Unix figures are what the platform-gated tests account for. **All three platforms
+were required before accepting**, which is the `P13-T007` lesson: a setup defect
+that only fails off Windows costs a send-back, and the check is cheaper than the
+round trip. `gh run list` read by hand rather than incremented: this is the 12th
+consecutive green `ci` run and the 11th in a row on the first attempt.
+
+**The one departure from the brief was adjudicated rather than accepted on the
+worker's word, and the worker's argument turned out to be understated.** The
+brief said a project may be more restrictive than the user; the worker made the
+execution mode the user's alone and flagged the departure. Because the default
+for this setting *is* the strictest value, "the stricter of the two" would have
+returned `inspect_only` unconditionally — voiding the user's grant even with no
+project file present at all, not merely when one exists, which is how the
+hand-back put it. The rule as implemented is the only one available without a
+"was this field named" signal this configuration deliberately lacks, and the
+retention test above shows the same layer still arbitrates where arbitrating is
+possible. Accepted.
+
+**What could not be confirmed is written as such.** Criterion 2's store-location
+half is confirmed and untouched by this task; its project-root half is **`cannot
+confirm` at process level**, and the reason was verified in `paths/mod.rs` rather
+than taken from the report. The worker's honest bound is recorded with it: a
+payload whose root *contains* the named store makes the record fail while the
+decision stands — a hostile root can deny SURE a record; it cannot move evidence
+into the tree. Criterion 3 is covered by the cache-directory test and, where the
+rule lives, by three named tests in `sure-core`; the rest of it is not reachable
+at process level because a `Write` under `.sure/` needs `WriteProject`, which no
+configuration file can grant.
+
+**The manifest carried a stale line into this acceptance, and regenerating it is
+how that was found.** `target/tmp/regen-sums.mjs --write`, run by the acceptance
+over the tree this commit contains, reported 4 of its 184 paths stale and rewrote
+them — the three this acceptance rewrites by construction, and
+`docs/architecture/CONFIG_AUTHORITY.md`, which the hand-back `cbcc0be` changed and
+no acceptance had hashed since. Measured directly: the digest committed at HEAD
+for that path is `7616aff3…` and the file's own digest at `cbcc0be` is `88abbc88…`.
+The interval between a hand-back and its acceptance is where a manifest
+regenerated only at acceptance goes stale, and the gates exit 0 over it — which is
+`P15-T020`'s premise, now observed rather than constructed, and recorded on that
+task as an instance rather than fixed here.
+
+**Two things the brief got wrong, corrected here.** It named
+`docs/security/EXECUTION_SAFETY.md`, which does not exist — the file is
+`docs/architecture/EXECUTION_SAFETY.md` — and its §4.2 claim that a project file
+and a user file can both be written at process level, which the `Paths` finding
+above falsifies.
+
+**`P15-T015` fired a second time, and worse than the first.** The worker could not
+run `cargo test` at all until it deleted 3,641 directories under
+`target/tmp/sure cli contract`; at `P13-T004` one test had failed and said so.
+The pool as measured afterwards is 920 directories, `store-0` … `store-795` and
+`project-0` … `project-726`, and reading the allocator says the binding number is
+the highest index for the busiest prefix rather than the total — so `P15-T015`'s
+"about eight runs" should not be reused, and its notes now carry the measurement
+and the correction. **No second task was minted beside it.** What *was* minted is
+**`P15-T022`**, because this task moved the grants to a file that has no writer:
+after `cbcc0be` a full recording is off for every user of this build, including
+one who wants it, unless they hand-write YAML at a path the product names only in
+Rust. `tasks/tasks.json` is 181 tasks and `progress/state.json` 181 entries.
+
+**Owed by the previous acceptance and discharged here**: runs `35401092094`
+(`b808e42`) and `35401152572` (`4fadd00`), all five jobs green at attempt 1 on
+both, 2515 / 2506 / 2507 parents against 2525 / 2516 / 2517 raw, 0 `Text file
+busy` — **and the first of them is the first run in this repository's history on
+which the Unix arm of `hook_failure_semantics.rs` executed**, all five of its
+tests read by name in both Unix job logs, which is what the `P13-T007` send-back
+was about. Also discharged: the correction owed to `P15-T021`'s premise. That
+premise reads "exactly one file, `progress/HANDOFF.md`" and re-measuring it now
+returns **three** — the second is `tasks/tasks.json`, which is that task's own
+text, and the third is `progress/state.json`, which already matched when the line
+was written and was missed. Neither committed line was edited to match a later
+tree; the finding is unchanged, since none of the three runs the instrument.
 
 ## What `P13-T007` added
 
@@ -15806,6 +16028,38 @@ section above that carries its detail, and writing them from memory of work this
 session did not read is a worse artefact than a heading with a stated hole in
 it. **Whoever closes this should close it with the command, not with a
 paragraph** — the one the section below gives is what returned 48.
+
+- `cbcc0be` **`P13-T009`** (accepted by the progress-only commit that carries this
+  entry) — *"Route execution settings and recording consent through Authority"*.
+  **The task's own detail is the section above**; what belongs here is the shape.
+  Nine files, all under `crates/` and `docs/architecture/`: the two configuration
+  readers on the hook path (`hook.rs`, `check.rs`), one pipeline struct
+  (`pipeline.rs`), one new type and its rules (`authority.rs` — `ExecutionSettings`,
+  one value for a mode and a permission set so `decide` cannot be handed one file's
+  mode with another's permissions), and the two pages that state the resolution
+  rule (`CONFIG_AUTHORITY.md`, `CONFIG_REFERENCE.md`). **The first delivery on this
+  branch whose evidence is a subtraction**: the fix appears in the diff as removed
+  lines — four in `load_execution_config` built a permission set out of the
+  *project's* `sure.yaml`, and the pipeline's local `permissions_for` is gone
+  entirely — so the claim is about a path that no longer exists rather than about
+  code that was added. It **retired two tests in place** whose premise it inverted
+  rather than deleting them, and it is the task after which **full recording is off
+  for every user of this build**, including one who wants it, because the grant
+  moved to a file nothing writes — which is `P15-T022`, minted at this acceptance.
+
+**The check was run at this acceptance and it returns three numbers, which is
+itself the finding.** The sentence above says the accepted set is **136** and that
+48 ids appear nowhere below this heading; the tree it describes has **137** accepted
+ids — that figure was read before the acceptance that wrote it, the same shape as
+any count read before the write that changes it. And the two readings of "below
+this heading" disagree: to the end of the file it is **48**, which is how that
+sentence was measured, while the committed command — which stops at the next `## `
+heading, the section the list actually occupies — returns **79**. The 31 ids in
+between appear only in the prose sections *after* the list, which is exactly what
+the check exists to catch: a mention is not an entry. **For the tree this commit
+creates: 137 accepted, 79 of them absent from the list, 48 absent from everything
+below the heading.** The list is still not rebuilt, for the reason given above;
+what changes here is that the number now says which of the two readings it is.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all

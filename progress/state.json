@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P13",
-  "last_updated": "2026-09-18T22:19:39.064Z",
+  "last_updated": "2026-09-18T22:20:39.301Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1708,13 +1708,13 @@
       "notes": ""
     },
     "P13-T009": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T22:20:39.301Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "b808e42",
       "head_sha": null,
       "evidence": [],
-      "notes": " Finding recorded 2026-09-18 by the supervisor, from P1-T012's verification, and it is squarely this task's subject. `crates/sure-cli/src/hook.rs` takes the project root from the event payload: `let project_root = envelope.project_root.clone().unwrap_or_else(current_dir);`, and that string is not merely a label. It is what `Store::open(paths, project_path)` hands to `Paths::ensure_outside`, so the check that authoritative evidence is kept outside the checked tree is only as good as the payload's claim about which tree that is; and it is what the execution config and the user config are loaded against, so the mode and the permissions the protection decision reads come from whatever directory the payload named. P1-T012 closed the adjacent hole — the store's *location* is now `--store-dir` and cannot be set by any file or environment variable — which makes this one the remaining way a checked project can influence where its own evidence goes and what policy is applied to it. This task's second acceptance line, \"authoritative evidence is stored outside the checked working tree\", is exactly what a payload-chosen root defeats. What a hook may trust is a decision, not a bug fix: a payload that names a root outside its own process's working directory should at least be refused or recorded, rather than silently believed."
+      "notes": ""
     },
     "P14-T001": {
       "status": "accepted",

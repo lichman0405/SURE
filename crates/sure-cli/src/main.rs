@@ -13,6 +13,7 @@
 //! | what `sure doctor` says, in both forms | [`doctor`] |
 //! | what `sure check --goal` stores, and what it refuses to claim | [`check`] |
 //! | which stream, and which of the two paths | [`output`] |
+//! | where this run's store goes, and the default | `sure_core::paths` |
 //! | the exit status | `report::Report::exit_code` |
 //!
 //! `docs/architecture/CLI.md` is the contract a user reads.
@@ -47,7 +48,11 @@ fn main() -> ExitCode {
 
 /// Run the parsed command and return the status to exit with.
 fn run(cli: &Cli) -> u8 {
-    let report = cli.command.report();
+    // The one place the store's location is read out of the command line, and
+    // the only thing passed down with a command. It is a value in this process's
+    // argument vector: no file the checked project can write and no environment
+    // variable can reach it — see `sure_core::paths`.
+    let report = cli.command.report(cli.store_dir.as_deref());
     match cli.format.emit(&report) {
         Ok(()) => report.exit_code(),
         Err(error) => {

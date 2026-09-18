@@ -38,6 +38,59 @@ What is regenerable is the project cache, and that is `project_cache_dir`, a
 separate function from `Paths` so a caller cannot reach for the trusted location
 by accident.
 
+### A store location the caller names
+
+A caller may keep a run's store somewhere else: `sure --store-dir <DIR>`, a
+global option accepted before or after the command name. It is
+`Paths::discover_at(Some(dir))`, the directory the store lives in — `sure.db`
+goes inside it — and it is the directory only. The user-level settings are not
+moved with it, because a caller who points the store somewhere has not asked SURE
+to read a different configuration.
+
+**The mechanism is not project-controlled, and the shape of it is the reason.**
+The location comes from exactly one place: the process's own argument vector.
+
+- Nothing in the project is read for it. Not `.sure/config`, not a manifest
+  field, not a file beside the sources. A checked project may be edited by the
+  agent whose work SURE is evaluating, so a location its own file could name is a
+  location it could point at a directory it can write to — and the history a
+  verdict is read from would then be the history the judged thing writes.
+- There is deliberately **no environment variable**. A variable would be the same
+  hole under a different name: a checked project's own harness configuration can
+  set the environment of the processes it starts (Claude Code's
+  `.claude/settings.json` has an `env` block, for one), so `SURE_STORE_DIR` would
+  be settable from inside the project being checked. This is also why the default
+  is not a fallback chain — not "`SURE_DATA_DIR`, else `%LOCALAPPDATA%`, else
+  `dirs`": `%LOCALAPPDATA%` is exactly the variable the section above explains
+  must not be hand-rolled, and a chain is where a redirect nobody asked for
+  hides.
+- The default is unchanged. A caller who names nothing gets the platform's own
+  per-user location through `Paths::discover`, which is `discover_at(None)`.
+
+Two facts keep it checkable rather than merely stated.
+`crates/sure-cli/tests/cli_contract.rs::nothing_a_project_can_write_decides_where_the_store_goes`
+scans the modules that decide the location for any read of the environment, and
+`every_command_is_reached_by_the_location_the_caller_named` scans every crate's
+shipped code for a call to the no-argument `Paths::discover()`, which is the
+shape a command that ignored its caller's location would take — `hook ingest`
+writing to a different store than the verdict reads would be worse than no
+mechanism at all.
+
+A named location does not have to exist; the first write creates it, as the
+platform's own location would. It is held to every other rule: relative and empty
+paths are refused at the command line (status 2, a wrong command line) rather
+than resolved against whatever directory SURE happened to start in, and a
+directory inside the project being checked is refused by `Paths::ensure_outside`
+(status 5, a run that tried and did not finish) — the same refusal the `--goal`
+path already used. Nothing falls back to the default silently: a location that
+cannot be used is an error, never a quiet write somewhere else.
+
+`sure doctor` reports which of the two the location is — the platform's own, or
+one named for this run — in `store location` in the human report and in
+`details.places.store_location` (`"platform"` or `"caller"`) in the frame. A path
+alone cannot say this, and a caller who cannot tell a redirect that worked from
+one that was ignored will debug the wrong thing.
+
 Expose:
 
 ```text

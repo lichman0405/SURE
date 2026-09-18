@@ -110,7 +110,7 @@
 //! and every tool result without a process and without a pipe.
 
 use std::io::{self, BufRead, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
@@ -196,9 +196,16 @@ const POLICY: &str = "Execution mode, privacy settings and protection policy com
 /// One arm, because there is one thing `sure mcp` can be asked to do: a bare
 /// `sure mcp` is a wrong command line, refused by the grammar before this is
 /// reached.
-pub fn run(action: &McpAction) -> Report {
+///
+/// `store` is the store directory the caller named on the command line, or
+/// `None` for the platform's own per-user location. A session is long-lived and
+/// answers many tool calls, so the location is resolved once, here, and every
+/// command in the session goes through the dispatch with that one value: a
+/// bridge that let one tool call read a store and the next write another would
+/// be answering about two different histories.
+pub fn run(action: &McpAction, store: Option<&Path>) -> Report {
     match action {
-        McpAction::Serve => serve(),
+        McpAction::Serve => serve(store),
     }
 }
 
@@ -224,10 +231,10 @@ pub fn run(action: &McpAction) -> Report {
 /// given nothing but the command. So the choice is this wart or a
 /// `--format json` run that silently writes nothing, and a silent nothing is
 /// the worse of the two.
-fn serve() -> Report {
+fn serve(store: Option<&Path>) -> Report {
     let stdin = io::stdin();
     let mut input = stdin.lock();
-    match converse(&mut input) {
+    match converse(&mut input, store) {
         Ok(session) => Report::McpSession(Box::new(session.summary())),
         // The only other way a session ends. Not a refusal and not a closed
         // pipe the user caused: the stream itself failed, which is why this is
@@ -242,8 +249,8 @@ fn serve() -> Report {
 }
 
 /// Read messages, decide, write what was decided.
-fn converse(input: &mut impl BufRead) -> io::Result<Session> {
-    let mut session = Session::default();
+fn converse(input: &mut impl BufRead, store: Option<&Path>) -> io::Result<Session> {
+    let mut session = Session::at(store);
     loop {
         match read_message(input)? {
             Incoming::End => return Ok(session),
@@ -355,6 +362,15 @@ fn drain_to_newline(input: &mut impl BufRead) -> io::Result<()> {
 /// changed in one place per fact.
 #[derive(Debug, Default)]
 struct Session {
+    /// The store every command in this session runs against — the directory the
+    /// caller named on the command line, or `None` for the platform's own
+    /// location.
+    ///
+    /// Here rather than looked up per tool call so that the whole session is
+    /// about one store, and so that the only value it can hold is one the
+    /// caller's own argument vector carried: a tool call cannot name a store,
+    /// and neither can the project it names.
+    store: Option<PathBuf>,
     /// Whether `initialize` has been answered. Set when the answer is built,
     /// which is what makes the rest of the session reachable.
     initialized: bool,
@@ -374,6 +390,19 @@ struct Session {
 }
 
 impl Session {
+    /// A session whose commands run against the store the caller named, if they
+    /// named one.
+    ///
+    /// A constructor rather than a struct literal at the call site so that the
+    /// handshake's counters and this are set in one place, and so that a test
+    /// can start a session with a store of its own.
+    fn at(store: Option<&Path>) -> Self {
+        Self {
+            store: store.map(Path::to_path_buf),
+            ..Self::default()
+        }
+    }
+
     /// The summary a finished session reports.
     fn summary(&self) -> McpSession {
         McpSession {
@@ -686,8 +715,9 @@ impl Session {
 
         // The one line that does any work, and it does none of its own: the
         // command the caller's request corresponds to goes through the same
-        // dispatch a person's command line goes through.
-        let report = (tool.command)(project).report();
+        // dispatch a person's command line goes through, with the store this
+        // session was started with and no way for the request to change it.
+        let report = (tool.command)(project).report(self.store.as_deref());
         Self::reply(id, tool_result(&tool, &report))
     }
 
@@ -994,9 +1024,40 @@ mod tests {
         session.handle(frame.to_string().as_bytes())
     }
 
+    /// A session that has completed the handshake, writing to a store of its
+    /// own.
+    ///
+    /// The store matters here even though this is a unit test of the bridge: a
+    /// tool call is a real `Command::report`, and `sure_check` over a project
+    /// writes what it found to the store. Reading or writing the store on the
+    /// machine running the suite is the defect `--store-dir` exists to remove,
+    /// so every session here names one, under the workspace's git-ignored
+    /// `target/tmp`. Made unique by `create_dir` rather than by the name, so
+    /// that two sessions in one process cannot share a store and see each
+    /// other's records.
+    fn a_store_of_our_own() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let base = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("sure mcp");
+        std::fs::create_dir_all(&base)
+            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
+        for _ in 0..1_000 {
+            let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
+            }
+        }
+        panic!("no free store directory under {}", base.display());
+    }
+
     /// A session that has completed the handshake.
     fn started() -> Session {
-        let mut session = Session::default();
+        let mut session = Session::at(Some(&a_store_of_our_own()));
         let answer = ask(
             &mut session,
             json!({
@@ -1488,7 +1549,9 @@ mod tests {
             path: Some(PathBuf::from("somewhere")),
             goal: None,
         }
-        .report()
+        // The same store the session is using, because the frame is what the
+        // command answered and a store the session named is part of that.
+        .report(session.store.as_deref())
         .frame();
         assert_eq!(&message["result"]["structuredContent"]["sure"], &expected);
     }

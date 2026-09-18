@@ -19,7 +19,7 @@
 //! SURE understood them when it did not, and the user has no way to tell.
 //! Arguments arrive with the phase that can act on them.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -49,9 +49,41 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = Format::Human, global = true)]
     pub format: Format,
 
+    /// Keep this run's record store in DIR instead of the platform's per-user
+    /// location. DIR must be an absolute path.
+    ///
+    /// Global, and named only on a command line: this is how a test, a script or
+    /// a user keeps a run's evidence away from the machine's own store. SURE
+    /// reads no file and no environment variable for it — a checked project's
+    /// own configuration could set either, and a store a project can point
+    /// somewhere is a store a project can point at a place it can write. See
+    /// `sure_core::paths`'s module documentation, and `sure doctor`, which
+    /// reports which location this run used.
+    ///
+    /// The location is checked like any other: a directory inside the project
+    /// being checked is refused, and a relative or empty path is refused before
+    /// SURE runs anything at all.
+    #[arg(long, value_name = "DIR", global = true, value_parser = a_store_directory)]
+    pub store_dir: Option<PathBuf>,
+
     /// The command to run.
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// A store directory as a caller names it: absolute, or refused here.
+///
+/// Refused at the grammar rather than later because a relative path is a wrong
+/// command line, not a run that failed: whether such a path was inside the
+/// project would depend on which directory SURE happened to be started in, and
+/// the answer to a question like that is not a verdict. The rule is
+/// [`sure_core::paths::store_directory`]'s — one implementation, called from the
+/// run-time resolution as well — and the message is [`sure_core::paths::PathError`]'s
+/// own, so the reason is stated in the same words wherever it is refused. The
+/// status for it is the wrong-command-line status, not a status that says SURE
+/// tried something.
+fn a_store_directory(text: &str) -> Result<PathBuf, String> {
+    sure_core::paths::store_directory(Path::new(text)).map_err(|error| error.to_string())
 }
 
 /// Every command SURE accepts.

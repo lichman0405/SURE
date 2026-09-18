@@ -20,6 +20,31 @@
 //! regenerable cache. [`Paths::ensure_outside`] is what makes that a rule rather
 //! than a convention, and [`project_cache_dir`] marks the other side of the
 //! boundary so a caller cannot reach for it by accident.
+//!
+//! **The store's location can be named by the caller, and by nothing else.** A
+//! run may keep its store somewhere the person running SURE chose, which is what
+//! [`Paths::discover_at`] and `sure --store-dir` are for, and that value comes
+//! from exactly one place: the process's own argument vector. Nothing is read
+//! from the project — no `.sure/config`, no field in a manifest, no file beside
+//! the sources — because a location a checked project's own file could name is a
+//! location a checked project could point at a directory it can write to, and
+//! then the history a verdict is read from would be the history the judged thing
+//! writes. There is deliberately no environment variable either: a checked
+//! project's harness configuration can set the environment of the processes it
+//! starts, so a variable would be the same hole with a different name. The
+//! default is not a fallback chain — it is the platform's own per-user location
+//! through [`Paths::discover`], unchanged, and a caller who names nothing gets
+//! it. Tests in `crates/sure-cli/tests/cli_contract.rs` keep this true rather
+//! than merely stated: `nothing_a_project_can_write_decides_where_the_store_goes`
+//! scans the modules that decide the location for the shape that would break it
+//! (a read of the environment), `every_command_is_reached_by_the_location_the_caller_named`
+//! scans every crate's shipped code for a call to the no-argument
+//! [`Paths::discover`] that would ignore what the caller named,
+//! `a_named_store_directory_is_the_one_a_real_run_writes_to` and
+//! `a_doctor_report_says_which_store_location_the_run_is_using` drive a real
+//! binary to a named location and to the default one respectively, and
+//! `a_store_inside_the_project_is_refused_before_anything_is_recorded` holds the
+//! refusal to [`Paths::ensure_outside`].
 
 pub mod compare;
 
@@ -119,6 +144,26 @@ impl fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
+/// Where a run's store location came from.
+///
+/// The two answers are the two ways a location comes to exist, and they are what
+/// `sure doctor` prints so that a caller can tell a requested location from the
+/// platform's own: a redirect that was ignored and a redirect that worked look
+/// identical in a path, and the reader would debug the wrong thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The platform's own per-user location, resolved through `dirs`.
+    ///
+    /// The default, and the only thing a caller who names nothing gets.
+    Platform,
+    /// A directory a caller named rather than discovered.
+    ///
+    /// Named by [`Paths::discover_at`]'s argument — which `sure` takes from
+    /// `--store-dir` and from nowhere else — or by [`Paths::from_roots`], the
+    /// injection point for callers that keep their own locations.
+    Caller,
+}
+
 /// The user-level directories SURE stores things in.
 ///
 /// There is no separate cache root. On Windows the cache directory is the same
@@ -129,10 +174,15 @@ impl std::error::Error for PathError {}
 pub struct Paths {
     data: PathBuf,
     config: PathBuf,
+    origin: Origin,
 }
 
 impl Paths {
     /// Where SURE stores things for the user running it.
+    ///
+    /// The default, and the whole of it: a caller who names nothing gets the
+    /// platform's own per-user locations, and this is the function every
+    /// undocumented path in SURE goes through to get them.
     ///
     /// # Errors
     ///
@@ -140,13 +190,45 @@ impl Paths {
     /// per-user location for the data or configuration directory. That is rare,
     /// and it is not recoverable by guessing — see the variant's own message.
     pub fn discover() -> Result<Self, PathError> {
-        let data = dirs::data_local_dir().ok_or(PathError::Unavailable {
-            what: "its evidence and history",
-        })?;
-        let config = dirs::config_dir().ok_or(PathError::Unavailable {
-            what: "its user-level settings",
-        })?;
-        Self::from_roots(data.join(APP_DIR), config.join(APP_DIR))
+        Self::discover_at(None)
+    }
+
+    /// The same, with the store's directory named by the caller if they named
+    /// one.
+    ///
+    /// `named` is the directory the store lives in for this run — `sure.db` goes
+    /// inside it — and it is the caller's own word: `sure` fills it from
+    /// `--store-dir`, an option in the process's argument vector, and from
+    /// nowhere else. See the module documentation for why no file and no
+    /// environment variable can stand in for it.
+    ///
+    /// The user-level *settings* directory is not moved. Only the store — the
+    /// evidence and history — can be relocated, because that is the thing a
+    /// caller has a reason to point at a location of their own, and moving the
+    /// settings as well would silently change which configuration is in force.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PathError::NotAbsolute`] for a relative or empty `named`, before
+    /// anything else can happen: a relative path is resolved against the current
+    /// directory, so whether it landed inside the project would depend on where
+    /// SURE was started. Returns [`PathError::Unavailable`] if the platform
+    /// reports no configuration location.
+    pub fn discover_at(named: Option<&Path>) -> Result<Self, PathError> {
+        let config = dirs::config_dir()
+            .ok_or(PathError::Unavailable {
+                what: "its user-level settings",
+            })?
+            .join(APP_DIR);
+        match named {
+            None => {
+                let data = dirs::data_local_dir().ok_or(PathError::Unavailable {
+                    what: "its evidence and history",
+                })?;
+                Self::validated(data.join(APP_DIR), config, Origin::Platform)
+            }
+            Some(directory) => Self::validated(store_directory(directory)?, config, Origin::Caller),
+        }
     }
 
     /// The same, from locations given rather than discovered.
@@ -162,11 +244,26 @@ impl Paths {
     /// [`PathError::Unavailable`] for an empty one. A relative data directory is
     /// resolved against the current directory, which for a check is the project.
     pub fn from_roots(data: PathBuf, config: PathBuf) -> Result<Self, PathError> {
+        Self::validated(data, config, Origin::Caller)
+    }
+
+    /// Where this run's store location came from.
+    #[must_use]
+    pub fn origin(&self) -> Origin {
+        self.origin
+    }
+
+    /// Check locations once, so that every constructor above is the same rule.
+    fn validated(data: PathBuf, config: PathBuf, origin: Origin) -> Result<Self, PathError> {
         absolute("The evidence and history directory", data)
             .and_then(|data| {
                 absolute("The user-level settings directory", config).map(|config| (data, config))
             })
-            .map(|(data, config)| Self { data, config })
+            .map(|(data, config)| Self {
+                data,
+                config,
+                origin,
+            })
     }
 
     /// Where durable evidence and history belong.
@@ -226,6 +323,21 @@ impl Paths {
         }
         Ok(())
     }
+}
+
+/// Accept a store directory a caller named, in the caller's own words.
+///
+/// The one rule for the `named` argument of [`Paths::discover_at`], exposed so
+/// that a command line can refuse a relative location *before* it runs anything,
+/// with the same implementation the run-time resolution uses rather than a
+/// second copy of the rule that could drift from it. The text of
+/// [`PathError::NotAbsolute`] is what both report.
+///
+/// # Errors
+///
+/// Returns [`PathError::NotAbsolute`] if `named` is relative or empty.
+pub fn store_directory(named: &Path) -> Result<PathBuf, PathError> {
+    absolute("The store directory", named.to_path_buf())
 }
 
 /// The directory a project may keep regenerable state in: `<project>/.sure`.
@@ -325,6 +437,73 @@ mod tests {
         match error {
             PathError::NotAbsolute { path, .. } => assert_eq!(path, Path::new(".sure")),
             other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_named_store_directory_replaces_the_platforms_and_is_marked_as_the_callers() {
+        // The two halves of the mechanism in one test, because they are one
+        // fact: a caller who names a directory gets *that* directory and the
+        // report can say so, and a caller who names nothing gets the platform's
+        // own — which is checked here against `dirs` rather than against a
+        // second call to the same function.
+        let named = rooted(&["work", "store"]);
+        let paths = Paths::discover_at(Some(&named)).expect("an absolute store directory");
+
+        assert_eq!(paths.data_dir(), named);
+        assert_eq!(paths.store_file(), named.join(STORE_FILE));
+        assert_eq!(paths.origin(), Origin::Caller);
+
+        // The settings do not move with it. A caller who points the store
+        // somewhere else has not asked SURE to read a different configuration.
+        let platform = Paths::discover().expect("this machine reports per-user locations");
+        assert_eq!(paths.config_dir(), platform.config_dir());
+        assert_eq!(paths.user_config_file(), platform.user_config_file());
+
+        // And naming nothing is still the platform's own location, marked as
+        // such: this is what `sure doctor` with no `--store-dir` reports.
+        assert_eq!(Paths::discover_at(None).unwrap(), platform);
+        assert_eq!(platform.origin(), Origin::Platform);
+        assert_eq!(
+            platform.data_dir(),
+            dirs::data_local_dir()
+                .expect("this machine reports a local data directory")
+                .join(APP_DIR)
+        );
+        assert_eq!(
+            platform.config_dir(),
+            dirs::config_dir()
+                .expect("this machine reports a configuration directory")
+                .join(APP_DIR)
+        );
+    }
+
+    #[test]
+    fn a_named_store_directory_is_held_to_the_same_rule_as_a_discovered_one() {
+        // A location the caller chose is not privileged: the reason the store
+        // may not be inside the project is that the judged thing can edit it,
+        // which is just as true of a directory the caller named.
+        let project = rooted(&["work", "project"]);
+        let paths = Paths::discover_at(Some(&project.join(PROJECT_CACHE_DIR)))
+            .expect("an absolute store directory");
+
+        assert!(matches!(
+            paths.ensure_outside(&project),
+            Err(PathError::InsideProject { .. })
+        ));
+    }
+
+    #[test]
+    fn a_named_store_directory_that_is_relative_or_empty_is_refused() {
+        // Same rule as the roots: an empty location is what an unfilled field
+        // looks like, and a relative one would be resolved against whatever
+        // directory SURE happened to be started in.
+        for text in [".sure", "", "."] {
+            let error = Paths::discover_at(Some(Path::new(text))).unwrap_err();
+            assert!(
+                matches!(error, PathError::NotAbsolute { .. }),
+                "{text:?} was accepted as a store directory"
+            );
         }
     }
 

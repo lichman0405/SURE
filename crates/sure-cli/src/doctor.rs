@@ -21,6 +21,7 @@ use std::io::{self, Write};
 
 use serde_json::{Value, json};
 use sure_core::doctor::{DoctorReport, Places, Presence, Problem, StoreState, Tool};
+use sure_core::paths::Origin;
 
 /// The column a value begins in: two spaces of indent, the label, then a gap.
 ///
@@ -160,6 +161,11 @@ fn places_in_words(places: &Places, out: &mut impl Write) -> io::Result<()> {
                 "record store",
                 &locations.store_file.path.display().to_string(),
             )?;
+            row(
+                out,
+                "store location",
+                &origin_in_words(locations.store_origin),
+            )?;
         }
         Places::Unknown { what, detail } => {
             // The one thing this command must never do is print a path it
@@ -172,6 +178,19 @@ fn places_in_words(places: &Places, out: &mut impl Write) -> io::Result<()> {
         }
     }
     writeln!(out)
+}
+
+/// Where the store's location came from, in the words a person reads.
+///
+/// A path alone cannot say this, and the two cases are the two things a caller
+/// debugging a redirect needs told apart: a location they named that was
+/// honoured, and the platform's own location that was used because nothing was
+/// named.
+fn origin_in_words(origin: Origin) -> String {
+    match origin {
+        Origin::Platform => "the platform's own location for this user".to_owned(),
+        Origin::Caller => "named for this run, not the platform's own".to_owned(),
+    }
 }
 
 /// A label and its value, in the column layout.
@@ -243,12 +262,25 @@ fn places_machine(places: &Places) -> Value {
             "config_dir": place_machine(&locations.config_dir.path, &locations.config_dir.presence),
             "settings_file": place_machine(&locations.settings_file.path, &locations.settings_file.presence),
             "store_file": place_machine(&locations.store_file.path, &locations.store_file.presence),
+            // Which of the two the store's location is: "platform" for the
+            // per-user location SURE discovered, "caller" for one a caller
+            // named — `sure --store-dir`. A script that has to know whether the
+            // store it is about to read is the one its caller meant must not
+            // have to compare paths to find out.
+            "store_location": origin_name(locations.store_origin),
         }),
         Places::Unknown { what, detail } => json!({
             "state": "unknown",
             "what": what,
             "detail": detail,
         }),
+    }
+}
+
+fn origin_name(origin: Origin) -> &'static str {
+    match origin {
+        Origin::Platform => "platform",
+        Origin::Caller => "caller",
     }
 }
 
@@ -327,6 +359,7 @@ mod tests {
                     Presence::Absent,
                 ),
                 store_file: a_place(r"C:\Users\a\AppData\Local\SURE\sure.db", Presence::Present),
+                store_origin: Origin::Platform,
             })),
             store: StoreState::Open(StoreFacts {
                 journal_mode: "wal".to_owned(),
@@ -377,6 +410,7 @@ mod tests {
             "settings",
             "settings file",
             "record store",
+            "store location",
             "git",
             "not-installed",
         ];
@@ -465,6 +499,35 @@ mod tests {
         let text = rendered(&a_healthy_report());
         assert!(text.contains("not found on PATH"), "{text}");
         assert!(text.contains("found at"), "{text}");
+    }
+
+    #[test]
+    fn which_location_the_store_is_says_which_it_is_in_both_forms() {
+        // The report has to distinguish a location the caller named from the
+        // platform's own, in both forms and in the same words each time: a
+        // caller who cannot tell a redirect that worked from one that was
+        // ignored will go and debug the wrong thing. The two cases are checked
+        // against one fixture so that the only difference between them is the
+        // origin.
+        let platform = a_healthy_report();
+        let text = rendered(&platform);
+        assert!(
+            text.contains("the platform's own location for this user"),
+            "the human form does not say where the location came from:\n{text}"
+        );
+        assert_eq!(machine(&platform)["places"]["store_location"], "platform");
+
+        let mut named = a_healthy_report();
+        let Places::Known(locations) = &mut named.places else {
+            panic!("the fixture names its locations");
+        };
+        locations.store_origin = Origin::Caller;
+        let text = rendered(&named);
+        assert!(
+            text.contains("named for this run"),
+            "the human form does not say the location was the caller's:\n{text}"
+        );
+        assert_eq!(machine(&named)["places"]["store_location"], "caller");
     }
 
     #[test]

@@ -100,20 +100,29 @@ const RECORDED_AND_UNCHECKED: &str = "The goal was recorded, and nothing was che
 const RECORDED_WITHOUT_A_ROW: &str =
     "The goal was recorded, and SURE cannot say which record holds it.";
 
-/// `sure check`, `sure recheck` or `sure repair`, discovering where SURE keeps
+/// `sure check`, `sure recheck` or `sure repair`, resolving where SURE keeps
 /// its files.
+///
+/// `store` is the store directory the caller named on the command line, or
+/// `None` for the platform's own per-user location. See
+/// [`sure_core::paths::Paths::discover_at`].
 ///
 /// # Errors
 ///
 /// None: a failure is a [`Report::Failed`], because a command that could not
 /// finish still has to answer in the shape a caller reads.
 #[must_use]
-pub fn run(purpose: Purpose, project: Option<&Path>, goal: Option<&str>) -> Report {
+pub fn run(
+    purpose: Purpose,
+    project: Option<&Path>,
+    goal: Option<&str>,
+    store: Option<&Path>,
+) -> Report {
     let project = match project_of(project) {
         Ok(project) => project,
         Err(detail) => return failed(purpose, NOTHING_RECORDED, detail),
     };
-    match Paths::discover() {
+    match Paths::discover_at(store) {
         Ok(paths) => run_with(purpose, &paths, &project, goal),
         // Not `Unavailable`: SURE has somewhere to keep its files or it does
         // not, and a machine where it does not is a machine to fix rather than a
@@ -156,6 +165,11 @@ fn project_of(project: Option<&Path>) -> Result<PathBuf, String> {
 /// A test that ran the real path would be adding an invented requirement to the
 /// history of the machine it ran on, and it would look exactly like a passing
 /// test.
+///
+/// `run` reaches this with locations that came from `--store-dir` or from the
+/// platform, which is the same rule from the other side: a caller who names a
+/// store gets *that* store, and a test that names one cannot reach the machine's
+/// own. Nothing about a project is consulted either way.
 #[must_use]
 pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&str>) -> Report {
     // The goal first, and in one piece: the words, the project path, the state

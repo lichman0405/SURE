@@ -358,7 +358,12 @@ this package's to write.
   written for Windows; the Codex-side locations (`$HOME/.agents/skills`,
   `~/.codex/config.toml`, `~/.codex/hooks.json`) are the documented user-scoped
   ones and should be identical elsewhere.
-- **`sure hook ingest` has no way to point its store elsewhere.** Running it
-  writes `%LOCALAPPDATA%\SURE\sure.db` (`crates/sure-core/src/paths.rs`, gap
-  `P1-T012`). The package's own tests avoid this by using a scratch store; the
-  one process-level run recorded above did write the real one.
+- **`sure hook ingest` writes to the store the platform's own location names unless
+  the caller says otherwise, and a hook launcher does not say otherwise.**
+  Running it as recorded above wrote `%LOCALAPPDATA%\SURE\sure.db`. `--store-dir
+  DIR` (P1-T012) is the way to point it at a store of your own, and this is what
+  the tests that need one use: `crates/sure-cli/tests/cli_contract.rs` runs a real
+  ingest against a scratch store under `target/tmp/` and asserts the machine's own
+  store is byte-identical afterwards. The launcher scripts here deliberately do
+  **not** pass it: a hook whose events landed in a scratch store would be a hook
+  whose events the verdict never reads.

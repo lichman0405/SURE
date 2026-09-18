@@ -48,6 +48,8 @@
 //! the session to [`crate::mcp`], which decides what every message in it
 //! answers. What it must never do is answer a tool call itself.
 
+use std::path::Path;
+
 use sure_core::pipeline::Purpose;
 
 use crate::cli::{Command, HistoryAction};
@@ -89,15 +91,24 @@ pub const IMPLEMENTED: &[&str] = &[
 /// name here is in [`IMPLEMENTED`], that every other name in it *is* driven,
 /// and that each of these is a command the grammar really has.
 ///
-/// `check`, `recheck` and `repair` read and bring up to date the record store of
-/// the machine running the suite, and `check --goal` writes to it. See
-/// `every_command` in the tests below.
+/// `check`, `recheck` and `repair` each run the whole pipeline over a project,
+/// and the project is the whole of their answer: a run of one here would check
+/// this crate's own directory, which is what none of these tests is about. They
+/// are driven instead by `tests/cli_contract.rs`, against a project it makes.
+/// See `every_command` in the tests below.
 pub const NOT_ASKED_HERE: &[&str] = &["check", "recheck", "repair"];
 
 impl Command {
     /// What SURE does about this command, in this build.
+    ///
+    /// `store` is the store directory the caller named on the command line, or
+    /// `None` for the platform's own per-user location. It comes from
+    /// [`crate::cli::Cli::store_dir`] and from nowhere else, it means what
+    /// [`sure_core::paths::Paths::discover_at`] says it means, and it is passed
+    /// down rather than discovered again here so that one run cannot read one
+    /// store and write another.
     #[must_use]
-    pub fn report(&self) -> Report {
+    pub fn report(&self, store: Option<&Path>) -> Report {
         match self {
             // The three this build can answer. All three are questions about
             // SURE or about this machine rather than about a project, which is
@@ -115,7 +126,9 @@ impl Command {
             // The examination happens here rather than in `Report`, so that the
             // report stays a value — something a test can build and a renderer
             // can read — instead of a thing that goes and looks.
-            Self::Doctor => Report::Doctor(Box::new(sure_core::doctor::examine_this_machine())),
+            Self::Doctor => {
+                Report::Doctor(Box::new(sure_core::doctor::examine_this_machine(store)))
+            }
 
             // The three commands that put a project through the check pipeline.
             // One arm each rather than one arm matching all three, because the
@@ -129,10 +142,14 @@ impl Command {
             // history before the check runs. That decision is `crate::check`'s,
             // and it is written down there.
             Self::Check { path, goal } => {
-                crate::check::run(Purpose::Check, path.as_deref(), goal.as_deref())
+                crate::check::run(Purpose::Check, path.as_deref(), goal.as_deref(), store)
             }
-            Self::Recheck { path } => crate::check::run(Purpose::Recheck, path.as_deref(), None),
-            Self::Repair { path } => crate::check::run(Purpose::Repair, path.as_deref(), None),
+            Self::Recheck { path } => {
+                crate::check::run(Purpose::Recheck, path.as_deref(), None, store)
+            }
+            Self::Repair { path } => {
+                crate::check::run(Purpose::Repair, path.as_deref(), None, store)
+            }
 
             // Everything below is a real command with a real job and no
             // implementation yet.
@@ -146,7 +163,7 @@ impl Command {
                 "show the settings in effect and which layer each one came from",
                 "No configuration was read.",
             ),
-            Self::Hook { action } => crate::hook::run(action),
+            Self::Hook { action } => crate::hook::run(action, store),
 
             // A command this build carries out, and the first one that runs for
             // as long as its caller wants it to rather than until it has an
@@ -166,7 +183,7 @@ impl Command {
             // [`Self::Doctor`]'s reason: the match holds a report, and the work
             // belongs one level in. What comes back is a summary of the session,
             // not a claim about any project.
-            Self::Mcp { action } => crate::mcp::run(action),
+            Self::Mcp { action } => crate::mcp::run(action, store),
             Self::Explain { .. } => not_yet(
                 self,
                 "explain one recorded result in plain language",
@@ -203,8 +220,38 @@ fn history_name(action: &Option<HistoryAction>) -> &'static str {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
     use super::*;
     use crate::cli::{ConfigAction, HookAction, McpAction};
+
+    /// A store directory this test names, so that nothing below reads or writes
+    /// the store the machine running the suite really uses.
+    ///
+    /// Under the workspace's git-ignored `target/tmp`, made unique by
+    /// `create_dir` rather than by the name, so that two processes given the same
+    /// id cannot collide — the same pattern the other test modules in this crate
+    /// use. Nothing is created inside it: a store SURE has never written looks
+    /// exactly like that, and `sure doctor` reports it rather than creating it.
+    fn a_store_of_our_own() -> PathBuf {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let base = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("sure commands");
+        std::fs::create_dir_all(&base)
+            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
+        for _ in 0..1_000 {
+            let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
+            }
+        }
+        panic!("no free store directory under {}", base.display());
+    }
 
     /// Every invocation the grammar accepts, built by hand.
     ///
@@ -212,28 +259,32 @@ mod tests {
     /// the list of *commands* and a list derived from the parser would share a
     /// source of truth with the thing it checks.
     ///
+    /// # Where these run
+    ///
+    /// Every report below is asked with [`a_store_of_our_own`], so nothing in
+    /// this file reads or writes the store the machine running the suite really
+    /// uses. That used to be impossible — on Windows the data directory comes
+    /// from `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`, so there was no
+    /// environment variable a test could set — and it is what `--store-dir` is
+    /// for: a location the caller names on the command line, which a checked
+    /// project cannot set. See `sure_core::paths`.
+    ///
     /// # What is deliberately not in this list
     ///
-    /// The commands that read this machine rather than a project. `check`,
-    /// `recheck` and `repair` all reach the pipeline, and a pipeline run reads
-    /// the store **this machine really uses**: SURE's history, brought up to
-    /// date by the open, on the machine running the suite. There is no
-    /// environment variable that could point it somewhere else — on Windows the
-    /// data directory comes from `SHGetKnownFolderPath`, which ignores
-    /// `LOCALAPPDATA` — and a test that ran the real path would be reading (and
-    /// migrating) the history of whoever ran the suite, which would look exactly
-    /// like a passing test. `crate::check`'s tests drive the same code against
-    /// locations they name.
+    /// `Check`, `Recheck` and `Repair`. Each runs the whole pipeline over a
+    /// project, and the project would be this crate's own directory, which is
+    /// what none of these tests is about; they are driven against a project
+    /// `tests/cli_contract.rs` makes. They are named in [`NOT_ASKED_HERE`], and
+    /// the test below subtracts them rather than assuming them: a command that
+    /// stopped being implemented while staying out of this list would be caught
+    /// there, and one that is implemented and *not* in that list has to appear
+    /// here.
     ///
-    /// `Check` with a goal that has words in it belongs to that same reason
-    /// twice over: `sure check --goal "…"` writes to the store this machine
-    /// really uses, so a test that added it here would be putting an invented
-    /// requirement into somebody's history.
-    ///
-    /// These four are named in [`NOT_ASKED_HERE`], and the test below subtracts
-    /// them rather than assuming them: a command that stopped being implemented
-    /// while staying out of this list would be caught there, and one that is
-    /// implemented and *not* in that list has to appear here.
+    /// `Check` with a goal that has words in it belongs to that same reason: a
+    /// goal goes into the store before the check runs, so a test that added it
+    /// here would be putting an invented requirement into somebody's history.
+    /// The goal path is driven against a store the test names, in
+    /// `crate::check`'s tests and in `tests/cli_contract.rs`.
     ///
     /// `Mcp`. Every command in this list is asked once and answers, but
     /// `sure mcp serve` reads standard input until its caller closes it — in a
@@ -293,8 +344,9 @@ mod tests {
         // The load-bearing test of this task. A command that reached a user as
         // a success without doing anything is SURE's own false green, and SURE
         // is the program that exists to find those.
+        let store = a_store_of_our_own();
         for command in every_command() {
-            let report = command.report();
+            let report = command.report(Some(&store));
             match &report {
                 Report::Unavailable(not_yet) => {
                     assert_eq!(
@@ -360,8 +412,10 @@ mod tests {
         // The one way this file can exercise the `--goal` path at all — see
         // `every_command` for why a goal with words in it is not here. A goal
         // with no words in it is refused before SURE looks for its store, so this
-        // run leaves the machine as it found it, and it still goes through the
-        // dispatch: the grammar's variant, the arm, and `crate::check`.
+        // run leaves the machine as it found it — and the store it is given is
+        // one this test named, so the machine's own is not read either — and it
+        // still goes through the dispatch: the grammar's variant, the arm, and
+        // `crate::check`.
         //
         // Status 5, not 2 and not 3. 2 would mean SURE did not accept the command
         // line, and it did: `--goal ""` is a goal, and an empty one. 3 would mean
@@ -372,7 +426,7 @@ mod tests {
             path: None,
             goal: Some(String::new()),
         }
-        .report();
+        .report(Some(&a_store_of_our_own()));
 
         let failure = match &report {
             Report::Failed(failure) => failure,
@@ -409,9 +463,10 @@ mod tests {
         // joined it. It is left alone because `progress/DECISIONS.md` names it
         // and `progress/` is not this task's to edit — but a reader should take
         // the list below, not the number in the name, as the claim.
+        let store = a_store_of_our_own();
         let mut implemented: Vec<&str> = every_command()
             .iter()
-            .filter(|command| !matches!(command.report(), Report::Unavailable(_)))
+            .filter(|command| !matches!(command.report(Some(&store)), Report::Unavailable(_)))
             .map(Command::name)
             .collect();
         implemented.sort_unstable();
@@ -508,9 +563,10 @@ mod tests {
         // answers as "history delete", because the subcommand is part of what
         // the user asked for and a refusal that dropped it would be answering
         // about the wrong thing. See [`history_name`].
+        let store = a_store_of_our_own();
         for command in every_command() {
             assert_eq!(
-                command.report().command().split(' ').next(),
+                command.report(Some(&store)).command().split(' ').next(),
                 Some(command.name()),
                 "{command:?} answers under a different name than it was asked by"
             );
@@ -521,8 +577,10 @@ mod tests {
     fn a_doctor_that_found_a_problem_does_not_exit_zero() {
         // The false-green rule applied to this machine's own state. The core
         // decides what a problem is; what this asserts is that the CLI cannot
-        // turn one into a success on the way out.
-        let report = Command::Doctor.report();
+        // turn one into a success on the way out. The store is one this test
+        // names, so the answer does not depend on — and does not read — the
+        // installation of whoever is running the suite.
+        let report = Command::Doctor.report(Some(&a_store_of_our_own()));
         let Report::Doctor(doctor) = &report else {
             panic!("sure doctor is implemented");
         };
@@ -552,7 +610,7 @@ mod tests {
             let report = Command::Protocol {
                 speaks: Some(caller),
             }
-            .report();
+            .report(Some(&a_store_of_our_own()));
             let Report::Handshake(handshake) = &report else {
                 panic!("`sure protocol --speaks {caller}` did not answer with a handshake");
             };
@@ -579,7 +637,7 @@ mod tests {
         // The two forms of one command: `--speaks` is what turns a statement
         // into a negotiation, and asking for neither must not become a
         // handshake against a version nobody named.
-        let report = Command::Protocol { speaks: None }.report();
+        let report = Command::Protocol { speaks: None }.report(Some(&a_store_of_our_own()));
         assert_eq!(report, Report::Protocol);
         assert_eq!(report.exit_code(), crate::report::exit::OK);
     }
@@ -606,7 +664,7 @@ mod tests {
         let deleting = Command::History {
             action: Some(HistoryAction::Delete),
         };
-        let refusal = match deleting.report() {
+        let refusal = match deleting.report(Some(&a_store_of_our_own())) {
             Report::Unavailable(not_yet) => not_yet,
             other => panic!("expected a refusal, got {other:?}"),
         };

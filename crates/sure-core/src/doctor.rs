@@ -45,7 +45,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::paths::{PathError, Paths};
+use crate::paths::{Origin, PathError, Paths};
 use crate::store::{HistoryFilter, LATEST_SCHEMA_VERSION, Store, StoreError};
 
 /// The external program this build calls, and what for.
@@ -128,6 +128,13 @@ pub struct Locations {
     pub settings_file: Place,
     /// The local record store.
     pub store_file: Place,
+    /// Where the store's location came from.
+    ///
+    /// Reported because a caller who named a store and a caller who did not get
+    /// the same shape of report, and a redirect that was ignored looks exactly
+    /// like one that worked until the location is asked for. See
+    /// [`sure_core::paths::Origin`].
+    pub store_origin: Origin,
 }
 
 /// Where SURE keeps things, or why it cannot say.
@@ -287,9 +294,19 @@ impl DoctorReport {
 }
 
 /// Examine this machine, as the platform reports it.
+///
+/// `store` is the directory the caller named for the store, or `None` for the
+/// platform's own location. It is [`Paths::discover_at`]'s argument and it means
+/// what that function's documentation says it means: `sure` fills it from
+/// `--store-dir`, which is a value in this process's argument vector and not
+/// something a project can set.
+///
+/// The location this run used is reported, with its [`Origin`], in `places` —
+/// a caller who cannot tell a named location from the platform's own will debug
+/// the wrong thing when a redirect appears to have been ignored.
 #[must_use]
-pub fn examine_this_machine() -> DoctorReport {
-    examine(Paths::discover())
+pub fn examine_this_machine(store: Option<&Path>) -> DoctorReport {
+    examine(Paths::discover_at(store))
 }
 
 /// Examine an installation whose locations are already decided.
@@ -372,6 +389,7 @@ fn locations(paths: &Paths) -> Locations {
         config_dir: place(paths.config_dir().to_path_buf()),
         settings_file: place(paths.user_config_file()),
         store_file: place(paths.store_file()),
+        store_origin: paths.origin(),
     }
 }
 

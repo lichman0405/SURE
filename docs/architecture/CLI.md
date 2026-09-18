@@ -27,6 +27,11 @@ changes something the output does not contain, so it has its own section below �
 and since P7-T010 the recorded goal is also what the run resolves its intent
 from, so the run does not stop there.
 
+P1-T012 added the surface's one global option that changes where something is
+written: `--store-dir DIR` says which directory this run's record store lives in.
+Its section below is short because the design is: the value comes from the
+process's argument vector and from nowhere else.
+
 ## The commands
 
 | Command | What it will do | In this build |
@@ -42,6 +47,15 @@ from, so the run does not stop there.
 | `sure mcp serve` | answer a coding harness that speaks the Model Context Protocol | works; each tool it exposes runs one command in this table and returns that command's own answer |
 | `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
 | `sure version` | print the version of this build | works |
+
+Two options are global — accepted before or after the command name, because they
+describe the run rather than the command: `--format human|json`, which the last
+section of this document is about, and `--store-dir DIR`, which says where the
+run's record store goes. A command line may name a store location whether or not
+the command in it writes to the store: a location that is wrong is a wrong
+command line, and finding that out only when a command happens to write would
+make the same mistake a usage error in one invocation and a silent success in
+another.
 
 "Recognised, not implemented" is not a euphemism for a stub. The command parses
 its arguments, decides it cannot do its job, **exits with status 3**, and says in
@@ -80,11 +94,22 @@ The first command whose answer depends on what it found, and therefore the first
 place where the status carries news rather than the fact that SURE ran.
 
 It reports the four paths SURE uses on this machine — evidence and history, the
-settings directory, the settings file, and the record store — what is at each of
-them, what is in the store if there is one, whether `git` is on `PATH`, and
-everything wrong that it found. It also prints **what it did not check**, always,
-because a report that stops at what it found invites the reader to assume it
-looked everywhere.
+settings directory, the settings file, and the record store — which of the two
+store locations this run is using, what is at each of them, what is in the store
+if there is one, whether `git` is on `PATH`, and everything wrong that it found.
+It also prints **what it did not check**, always, because a report that stops at
+what it found invites the reader to assume it looked everywhere.
+
+The store location is one line, `store location`, because a path alone cannot say
+whether the run is using the platform's own location or one a caller named — and
+a caller who cannot tell a redirect that worked from one that was ignored will
+debug the wrong thing. The two sentences are "the platform's own location for
+this user" and "named for this run, not the platform's own"; the machine form
+carries `details.places.store_location` as `"platform"` or `"caller"` and puts the
+file itself in `details.places.store_file.path`. The other three paths are always
+the platform's; naming a store directory moves the store and nothing else,
+because a caller who points the store somewhere has not asked SURE to read a
+different configuration.
 
 Three things it deliberately does not do, each of which is what makes the report
 safe to paste into a bug report:
@@ -254,6 +279,54 @@ record. That is why the source is `explicit_user_goal` and remains a claim about
 provenance rather than a proof of it, and why a goal is never turned into a
 finding by being stored. `docs/architecture/PROJECT_INTENT.md` states the limit
 in full.
+
+## `--store-dir DIR`
+
+Where this run's record store goes, as a directory: `sure.db` is written inside
+it. It is global, so it is accepted before or after the command name, and it is
+the only thing on this surface that changes where SURE writes something.
+
+**The value comes from the process's argument vector and from nowhere else**, and
+that is the whole of the design rather than a detail of it. It is not read from
+`.sure/config`, from a manifest field, or from a file beside the sources: the
+project being checked may be edited by the agent whose work SURE is evaluating,
+so a location its own file could name is a location it could point at a directory
+it can write to — and the history a verdict is read from would then be the
+history the judged thing writes. There is deliberately **no environment
+variable** either, for the same reason one step out: a checked project's harness
+configuration can set the environment of the processes it starts, so
+`SURE_STORE_DIR` would be settable from inside the checked project.
+`docs/architecture/STORAGE_AND_DATA_PATHS.md` carries the full reasoning, and two
+tests in `crates/sure-cli/tests/cli_contract.rs` hold it to it rather than
+stating it: `nothing_a_project_can_write_decides_where_the_store_goes` reads the
+modules that decide the location and fails if one of them reads the environment,
+and `every_command_is_reached_by_the_location_the_caller_named` reads every
+crate's shipped code and fails if a command calls the no-argument
+`Paths::discover()` — the shape a command that ignored its caller would take.
+
+**The default is unchanged, and it is not a fallback chain.** A caller who names
+nothing gets the platform's own per-user location through `sure_core::paths`,
+exactly as before this flag existed. Nothing tries the platform location first
+and falls back to a named one, or the reverse: a location that cannot be used is
+an error rather than a quiet write somewhere else.
+
+**What a wrong location does.** A path that is relative — including the empty
+string — is refused by the parser, status 2, because a relative path resolves
+against whatever directory SURE happened to be started in and whether it was
+inside the project would then depend on that. A location the run cannot write to
+is status 5: it tried and did not finish, which is the same status every other
+unusable store gets. A location that does not exist yet is not an error:
+`doctor` reports it as not created yet, the first write creates it, and `doctor`
+still does not create it.
+
+**A location inside the project being checked is refused**, by the same
+`Paths::ensure_outside` rule the `--goal` path already used, and in the same
+shape: status 5, a message that says what it did and did not do, and no store
+directory created. The check refuses before it opens the store, so the refusal
+leaves the machine as it found it.
+
+`sure doctor` says which of the two locations a run is using, so a caller who is
+not sure whether their redirect took effect can ask instead of guessing.
 
 ## Two output paths, and no third
 
@@ -464,6 +537,11 @@ anything about output or status: both are SURE's, and both have one home.
 | A check with no goal creates no store on a machine that has none | same file, `a_check_with_no_goal_on_a_machine_with_no_history_writes_nothing` |
 | The store may not be inside the project it records a goal for | same file, `the_store_may_not_be_inside_the_project_it_records_a_goal_for` |
 | Every refusal says what did not happen | same file, `every_refusal_in_this_module_says_what_did_not_happen` |
+| A run writes to the store location the caller named | `crates/sure-cli/tests/cli_contract.rs`, `a_named_store_directory_is_the_one_a_real_run_writes_to` |
+| A store location inside the checked project is refused, and nothing is written | same file, `a_store_inside_the_project_is_refused_before_anything_is_recorded` |
+| `sure doctor` says whether the location is the platform's or the caller's | same file, `a_doctor_report_says_which_store_location_the_run_is_using` |
+| Nothing a project can write decides where the store goes | same file, `nothing_a_project_can_write_decides_where_the_store_goes` |
+| Every command is reached by the location the caller named | same file, `every_command_is_reached_by_the_location_the_caller_named` |
 | A new command cannot ship with no answer about whether it works | the exhaustiveness of `Command::report` — see below |
 
 The last row has no test, because it does not need one: `Command::report` and
@@ -471,46 +549,54 @@ The last row has no test, because it does not need one: `Command::report` and
 command to the grammar stops the build until somebody decides. That was checked
 by adding one and watching the build fail in both places, not argued.
 
-### The one gap in that table, and why it is one
+### The gap that was here, and how it closed
 
-`cli_contract.rs` runs the binary as a process, and it deliberately never runs
-`sure check --goal` with a goal that has words in it. Such a run writes to the
-store **the developer's own machine really uses** — on Windows the data
-directory comes from `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`, so no
-environment variable can point it at a scratch directory. A test that did it
-would put an invented requirement into somebody's history and look exactly like a
-green test.
+Until P1-T012 this section recorded a gap rather than a test. `cli_contract.rs`
+runs the binary as a process, and it deliberately never ran `sure check --goal`
+with a goal that had words in it: such a run writes to the store **the
+developer's own machine really uses** — on Windows the data directory comes from
+`SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`, so no environment variable
+could point it at a scratch directory. A test that did it would put an invented
+requirement into somebody's history and look exactly like a green test.
 
-**That is not hypothetical, and the instance is worth keeping.** During
+**That was not hypothetical, and the instance is worth keeping.** During
 `P2-T010`'s mutation run the mutation that deletes the empty-goal refusal — the
 first mutation in `target/tmp/mutate12.py` — made exactly that happen: the
 process-level test ran the real binary, the refusal was gone, and six empty-text
 `project-intent` rows were written to the developer's store. The unmutated suite
-was then measured around a single run and leaves that store byte-identical, so
-this is a coverage gap rather than active pollution. But the margin is a refusal
-in the module under test, not a boundary around the store, and
-`progress/HANDOFF.md` records the rows and what removing them would take.
+was then measured around a single run and left that store byte-identical, so it
+was a coverage gap rather than active pollution. But the margin was a refusal in
+the module under test, not a boundary around the store, and the whole of the
+flag's process-level coverage was the refusal rather than the write.
 
-So `a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line` is the whole
-of the flag's process-level coverage, and it is the refusal rather than the
-write. The happy path is covered by `crates/sure-cli/src/check.rs`, which drives
-the same code against store locations it names itself, and by
-`crates/sure-core/tests/project_intent_ingest.rs`. What no test in this
-repository yet covers is the *combination*: the process writing a real goal to a
-real location. That arrives with the phase that gives SURE a store location a
-caller can choose.
+`--store-dir` is what closes it, and it closes both halves:
 
-The check itself has no such gap, and it is worth being exact about why.
-`cli_contract.rs`'s three pipeline tests and `mcp_protocol.rs`'s routes run real
-checks against a real project with **no goal**, so no row is written; that path
-opens the user's store when there is one and creates nothing when there is not.
-An open applies any pending migration, so it is a write in principle and not in
-practice on a machine whose store is current: measured with `Get-FileHash`
-around one `sure check`, the store on the author's machine was byte-identical
-afterwards, with no `-wal` and no `-journal` beside it. The margin is the same as
-the one above — the command is the thing under test and the store is not fenced
-off from it — and the same phase that gives tests a store location of their own
-removes it.
+- **The write is covered by a process test.**
+  `cli_contract.rs::a_named_store_directory_is_the_one_a_real_run_writes_to` runs
+  a real `sure check --goal` with words in it against a store the test names, and
+  asserts the file appeared *there* and that the store the machine really uses is
+  byte-identical afterwards. The happy path is no longer only reachable by
+  `crates/sure-cli/src/check.rs`'s in-process tests.
+- **The store the machine uses is now fenced off rather than relied upon.**
+  Every run in `cli_contract.rs` and `mcp_protocol.rs` that could write names a
+  store under `target/tmp/`, and the two tests that specifically must not name one
+  — the bare `sure doctor` in
+  `a_doctor_report_says_which_store_location_the_run_is_using` and the hook
+  ingest — assert the machine's store is unchanged around them.
+  `hook_ingest_reads_standard_input_and_evaluates_protection` is the one that
+  used to write: it drove a real `sure hook ingest`, and that process opened and
+  wrote `%LOCALAPPDATA%\SURE\sure.db` (measured: 4096 bytes added by one isolated
+  run).
+
+**What that test can and cannot see.** `assert_untouched` in `cli_contract.rs`
+compares the store file's bytes before and after the runs it makes, and its
+failure message names the outside writers it cannot rule out — another test
+binary, a `sure` process somebody started, or a harness hook. It cannot see a
+write from a test binary that has not run yet; it sees the runs made in this
+file, in the order this file makes them. What covers the rest is the full
+`cargo test --workspace`, watched from outside with the file hashed immediately
+before and after, which is a measurement rather than a test and is recorded in
+`progress/` by whoever runs it rather than asserted here.
 
 ## What this document does not cover
 

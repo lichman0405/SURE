@@ -21,6 +21,19 @@
 //! newline-delimited JSON to its standard input and reads lines back from its
 //! standard output. Every read has a deadline, so a server that stopped
 //! answering fails this test instead of hanging it.
+//!
+//! # Where the sessions keep their evidence
+//!
+//! Every session and every command line here names a store with `--store-dir`,
+//! in a directory of its own under `target/tmp` — see [`a_store_of_our_own`].
+//! `sure_check` routes through `check::run`, so a session that named no store
+//! would read the store of whoever ran the suite; a check with no goal does not
+//! write one, but a test that read the machine's history would still be a test
+//! whose result depends on it, and one test here did exactly that —
+//! `sure_status_answers_about_this_build_and_never_about_a_project` compared a
+//! record count read from the developer's store, and failed whenever anything
+//! else on the machine wrote a row while it ran. Both ends are fixed: the count
+//! now comes from a store this file made, and nothing here reaches the other.
 
 // The workspace forbids `unwrap`, `expect` and `panic` in shipped code, because
 // a panic is a message nobody chose. A test is the one place they are the point:
@@ -28,7 +41,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -38,6 +53,45 @@ use sure_cli::mcp::{MAX_MESSAGE_BYTES, PROTOCOL_VERSION};
 
 /// The binary this package builds, as cargo hands it to its integration tests.
 const SURE: &str = env!("CARGO_BIN_EXE_sure");
+
+/// A store directory for one session or one command line to use.
+///
+/// **Everything this file starts names one.** A session that named no store
+/// would hand every `sure_check` the store of the person running the suite: a
+/// check with no goal does not write to it, but a test whose answer depends on
+/// somebody else's history is the same defect as a test that writes it, and this
+/// file had one of each.
+///
+/// Under the workspace's git-ignored `target/tmp`, made unique by `create_dir`
+/// rather than by the name, never cleared, and created empty: a store SURE has
+/// never written looks like exactly that.
+fn a_store_of_our_own() -> PathBuf {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("target")
+        .join("tmp")
+        .join("sure mcp protocol");
+    std::fs::create_dir_all(&base)
+        .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
+    for _ in 0..1_000 {
+        let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return candidate,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("cannot create {}: {error}", candidate.display()),
+        }
+    }
+    panic!("no free store directory under {}", base.display());
+}
+
+/// The binary, with a store named on its command line.
+fn sure_in_a_store(store: &Path) -> Command {
+    let mut command = Command::new(SURE);
+    command.arg("--store-dir").arg(store);
+    command
+}
 
 /// How long one answer may take before the test calls it a hang.
 ///
@@ -64,8 +118,18 @@ struct Finished {
 }
 
 impl Session {
+    /// A server in a store of this test's own.
     fn open(args: &[&str]) -> Session {
-        let mut child = Command::new(SURE)
+        Session::open_in(&a_store_of_our_own(), args)
+    }
+
+    /// The same, in a store the caller named.
+    ///
+    /// A caller that wants the session and a command line to be about the same
+    /// store — the comparison `sure_status` makes — passes the same directory to
+    /// both.
+    fn open_in(store: &Path, args: &[&str]) -> Session {
+        let mut child = sure_in_a_store(store)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -211,7 +275,12 @@ struct Run {
 }
 
 fn run(args: &[&str]) -> Run {
-    let output = Command::new(SURE)
+    run_in(&a_store_of_our_own(), args)
+}
+
+/// The same, in a store the caller named.
+fn run_in(store: &Path, args: &[&str]) -> Run {
+    let output = sure_in_a_store(store)
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -225,9 +294,14 @@ fn run(args: &[&str]) -> Run {
 
 /// The frame the command line prints for one command, as a value.
 fn frame_of(args: &[&str]) -> Value {
+    frame_of_in(&a_store_of_our_own(), args)
+}
+
+/// The same, in a store the caller named.
+fn frame_of_in(store: &Path, args: &[&str]) -> Value {
     let mut with_format = vec!["--format", "json"];
     with_format.extend_from_slice(args);
-    let run = run(&with_format);
+    let run = run_in(store, &with_format);
     serde_json::from_str(&run.stdout).unwrap_or_else(|error| {
         panic!(
             "`sure {}` did not print one frame ({error}): {}",
@@ -557,7 +631,13 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
 
 #[test]
 fn sure_status_answers_about_this_build_and_never_about_a_project() {
-    let mut session = Session::serve();
+    // One store for the session and for the command line it is compared with.
+    // The report this test reads carries the store's path and how many records
+    // are in it, so two runs in two stores could not be compared — and reading
+    // the number out of the developer's own store is what made this test fail
+    // whenever anything else on the machine wrote a row while it ran.
+    let store = a_store_of_our_own();
+    let mut session = Session::open_in(&store, &["mcp", "serve"]);
     session.start();
     let answer = session.ask(call(20, "sure_status", json!({})));
     let result = result_of(&answer).clone();
@@ -573,7 +653,7 @@ fn sure_status_answers_about_this_build_and_never_about_a_project() {
     );
     // Agreement with the command line, on the fields a doctor report cannot
     // change between two runs of the same build on the same machine.
-    let frame = frame_of(&["doctor"]);
+    let frame = frame_of_in(&store, &["doctor"]);
     for field in ["command", "outcome", "exit_code"] {
         assert_eq!(
             result["structuredContent"]["sure"][field], frame[field],
@@ -581,7 +661,7 @@ fn sure_status_answers_about_this_build_and_never_about_a_project() {
         );
     }
     // And the words are doctor's own.
-    assert_eq!(text_of(&result), run(&["doctor"]).stdout);
+    assert_eq!(text_of(&result), run_in(&store, &["doctor"]).stdout);
     assert_eq!(session.finish().status, 0);
 }
 

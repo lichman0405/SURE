@@ -34,8 +34,14 @@ use crate::cli::HookAction;
 use crate::report::{Failed, Report};
 
 /// Run a hook action and produce a report.
+///
+/// `store` is the store directory the caller named on the command line, or
+/// `None` for the platform's own per-user location — see
+/// [`sure_core::paths::Paths::discover_at`]. A harness launcher that wants a
+/// hook's events to land somewhere other than the user's own store names it
+/// there, in the command it runs; nothing in the project can.
 #[must_use]
-pub fn run(action: &HookAction) -> Report {
+pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
     match action {
         HookAction::Ingest { source, event_kind } => {
             let mut stdin = String::new();
@@ -51,7 +57,7 @@ pub fn run(action: &HookAction) -> Report {
                 );
             }
 
-            run_ingest(source.as_deref(), event_kind.as_deref(), event_text)
+            run_ingest(source.as_deref(), event_kind.as_deref(), event_text, store)
         }
     }
 }
@@ -71,8 +77,13 @@ fn without_byte_order_mark(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
-fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Report {
-    let paths = match Paths::discover() {
+fn run_ingest(
+    source: Option<&str>,
+    event_kind: Option<&str>,
+    stdin: &str,
+    store: Option<&Path>,
+) -> Report {
+    let paths = match Paths::discover_at(store) {
         Ok(p) => p,
         Err(error) => {
             return failed(
@@ -275,10 +286,30 @@ mod tests {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
     }
 
+    /// Locations for an event this test ingests, so that the row it produces
+    /// lands in a store this test named rather than in the store on the machine
+    /// running the suite.
+    ///
+    /// `sure hook ingest` takes the same thing as `--store-dir`, on the command
+    /// line; a unit test reaches it as the named roots of [`Paths::from_roots`].
+    /// The events below are the fixtures under `integrations/`, so a row written
+    /// to the real store would be an event from a fixture added to somebody's
+    /// history, for as long as that machine lives.
+    fn store_of_our_own(name: &str) -> Paths {
+        let root = scratch_hook_dir(name);
+        Paths::from_roots(root.join("data"), root.join("config"))
+            .expect("the scratch locations are absolute")
+    }
+
     #[test]
     fn cursor_pre_tool_use_returns_decision() {
         let text = fixture("pre-tool-use.json");
-        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), &text);
+        let report = run_ingest_with_paths(
+            Some("cursor"),
+            Some("pre-tool-use"),
+            &text,
+            &store_of_our_own("cursor-pre-tool-use"),
+        );
         let decision = match &report {
             Report::HookDecision(d) => d,
             other => panic!("expected HookDecision, got {other:?}"),
@@ -294,7 +325,12 @@ mod tests {
     #[test]
     fn cursor_session_start_allows_without_decision() {
         let text = fixture("session-start.json");
-        let report = run_ingest(Some("cursor"), Some("session-start"), &text);
+        let report = run_ingest_with_paths(
+            Some("cursor"),
+            Some("session-start"),
+            &text,
+            &store_of_our_own("cursor-session-start"),
+        );
         let decision = match &report {
             Report::HookDecision(d) => d,
             other => panic!("expected HookDecision, got {other:?}"),
@@ -307,7 +343,11 @@ mod tests {
 
     #[test]
     fn missing_source_fails() {
-        let report = run_ingest(None, Some("pre-tool-use"), "{}");
+        // The four refusals below happen before SURE reaches a store at all —
+        // there is nothing to read, nothing to normalise, nothing to record — so
+        // they name none, which is also the honest statement that the store is
+        // not what they are about.
+        let report = run_ingest(None, Some("pre-tool-use"), "{}", None);
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -316,7 +356,7 @@ mod tests {
 
     #[test]
     fn unsupported_source_fails() {
-        let report = run_ingest(Some("unknown"), Some("pre-tool-use"), "{}");
+        let report = run_ingest(Some("unknown"), Some("pre-tool-use"), "{}", None);
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -325,7 +365,7 @@ mod tests {
 
     #[test]
     fn invalid_json_fails() {
-        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "{not json");
+        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "{not json", None);
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -334,7 +374,7 @@ mod tests {
 
     #[test]
     fn empty_stdin_fails() {
-        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "");
+        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "", None);
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -344,7 +384,12 @@ mod tests {
     #[test]
     fn claude_code_session_start_allows_without_decision() {
         let text = claude_fixture("session-start.json");
-        let report = run_ingest(Some("claude-code"), Some("session-start"), &text);
+        let report = run_ingest_with_paths(
+            Some("claude-code"),
+            Some("session-start"),
+            &text,
+            &store_of_our_own("claude-code-session-start"),
+        );
         let decision = match &report {
             Report::HookDecision(d) => d,
             other => panic!("expected HookDecision, got {other:?}"),
@@ -358,7 +403,12 @@ mod tests {
     #[test]
     fn claude_code_pre_tool_use_uses_protection_decision() {
         let text = claude_fixture("pre-tool-use.json");
-        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), &text);
+        let report = run_ingest_with_paths(
+            Some("claude-code"),
+            Some("pre-tool-use"),
+            &text,
+            &store_of_our_own("claude-code-pre-tool-use"),
+        );
         let decision = match &report {
             Report::HookDecision(d) => d,
             other => panic!("expected HookDecision, got {other:?}"),
@@ -380,7 +430,7 @@ mod tests {
 
     #[test]
     fn claude_code_invalid_json_fails() {
-        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), "{not json");
+        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), "{not json", None);
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -908,10 +958,12 @@ mod tests {
     //
     // Every test here runs through `run_ingest_with_paths` with a scratch
     // `Paths`, like the two round trips above, so none of them open or write
-    // the machine's real store. `sure hook ingest` has no way to point its
-    // store elsewhere (`P1-T012`), which is why the process-level run in
-    // `integrations/codex/README.md` is a documented manual step rather than a
-    // test: it is the one thing here that writes `%LOCALAPPDATA%\SURE\sure.db`.
+    // the machine's real store. That is no longer the only way to keep them off
+    // it: `sure hook ingest --store-dir DIR` names the store on the command
+    // line, which is what `tests/cli_contract.rs` drives against a real process
+    // and a store it names. Both are the same mechanism from two sides, and the
+    // process that has none of it — a hook a harness starts with no argument —
+    // gets the platform's own location, which is where a user's history belongs.
 
     fn codex_fixture(name: &str) -> String {
         let path = repository_root()

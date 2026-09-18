@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sure_core::doctor::{self, Places, Presence, StoreState};
-use sure_core::paths::Paths;
+use sure_core::paths::{Origin, Paths};
 
 /// A scratch directory under `target/tmp`, which is git-ignored and on the same
 /// volume as the checkout, as the store tests use.
@@ -121,6 +121,36 @@ fn the_diagnostic_names_the_files_the_store_actually_uses() {
     assert_eq!(locations.settings_file.path, paths.user_config_file());
     assert_eq!(locations.data_dir.path, paths.data_dir());
     assert_eq!(locations.config_dir.path, paths.config_dir());
+    // And where it came from, which is the one thing a path alone cannot say.
+    assert_eq!(locations.store_origin, Origin::Caller);
+}
+
+#[test]
+fn a_store_the_caller_named_is_reported_as_theirs_rather_than_as_the_platforms() {
+    // The report has to distinguish "you named this" from "this is the
+    // platform's own", because those are the two things a caller who cannot see
+    // the difference will debug in the wrong place. Nothing is created here: the
+    // location is named and the report is about what is *at* it, which is
+    // nothing.
+    let root = scratch("named_store");
+    let named = root.join("somewhere else with spaces");
+    let report = doctor::examine_this_machine(Some(&named));
+
+    let Places::Known(locations) = &report.places else {
+        panic!("a location was named: {:?}", report.places);
+    };
+    assert_eq!(locations.store_file.path, named.join("sure.db"));
+    assert_eq!(locations.data_dir.path, named);
+    assert_eq!(locations.store_origin, Origin::Caller);
+    assert!(
+        !named.exists(),
+        "sure doctor created the location it was asked about"
+    );
+
+    // Not silently replaced by the platform's own location, and not silently
+    // reported as if the caller had said nothing.
+    let platform = Paths::discover().expect("this machine reports per-user locations");
+    assert_ne!(locations.store_file.path, platform.store_file());
 }
 
 #[test]
@@ -178,7 +208,11 @@ fn the_report_names_this_build_by_its_number_alone() {
     // holding the name as well is how the human form first read
     // `SURE SURE 0.0.0-bootstrap`, and the check that it cannot come back is
     // that the number does not contain the name.
-    let report = doctor::examine_this_machine();
+    // A store this test names rather than the one this machine uses. The facts
+    // asserted below are about the build, not about the installation, so
+    // reading the machine's own store would only put this test's result at the
+    // mercy of whatever is in it.
+    let report = doctor::examine_this_machine(Some(&scratch("build_name").join("data")));
 
     assert_eq!(report.build.version, sure_core::VERSION);
     assert!(
@@ -198,7 +232,10 @@ fn the_report_always_says_what_it_did_not_look_at() {
     // boundary invites the reader to assume it covered everything. An empty list
     // would read as "nothing was skipped", which is never true of a program that
     // has no process runner.
-    let report = doctor::examine_this_machine();
+    // Named for the same reason as above: this is a claim about the list of
+    // things SURE says it did not look at, and it must not depend on — or reach
+    // — the store on the machine running the suite.
+    let report = doctor::examine_this_machine(Some(&scratch("not_checked").join("data")));
 
     assert!(
         !report.not_checked.is_empty(),

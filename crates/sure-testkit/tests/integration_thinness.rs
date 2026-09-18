@@ -490,3 +490,216 @@ fn cursor_command_files_exist_and_are_thin() {
         );
     }
 }
+
+#[test]
+fn cursor_install_script_exists_and_has_required_contract() {
+    let script = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("install.ps1");
+
+    assert!(script.is_file(), "cursor install.ps1 must exist");
+
+    let text = std::fs::read_to_string(&script).expect("install.ps1 readable");
+
+    assert!(
+        text.contains("SURE_BIN"),
+        "cursor install.ps1 must reference SURE_BIN for binary resolution"
+    );
+    assert!(
+        text.contains("LOCALAPPDATA"),
+        "cursor install.ps1 must reference LOCALAPPDATA for per-user fallback"
+    );
+    assert!(
+        text.contains("Copy-Item") || text.to_ascii_lowercase().contains("copy"),
+        "cursor install.ps1 must support copy fallback"
+    );
+    assert!(
+        text.contains("ForceCopy")
+            || text.contains("{{SURE_BIN}}")
+            || text.contains("{{PLUGIN_ROOT}}"),
+        "cursor install.ps1 must have a copy/render fallback or force-copy switch"
+    );
+}
+
+#[test]
+fn cursor_uninstall_script_exists() {
+    let script = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("uninstall.ps1");
+
+    assert!(script.is_file(), "cursor uninstall.ps1 must exist");
+
+    let text = std::fs::read_to_string(&script).expect("uninstall.ps1 readable");
+
+    assert!(
+        text.contains("CURSOR_PLUGIN_DIR") || text.contains("APPDATA"),
+        "cursor uninstall.ps1 must know where to remove the plugin from"
+    );
+}
+
+#[test]
+fn cursor_install_script_does_not_require_symlinks_unconditionally() {
+    let script = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("install.ps1");
+
+    let text = std::fs::read_to_string(&script).expect("install.ps1 readable");
+
+    // The script must not unconditionally use New-Item -ItemType SymbolicLink;
+    // it should have a copy fallback or a ForceCopy switch.
+    let has_symlink = text.contains("SymbolicLink");
+    let has_fallback = text.contains("ForceCopy") || text.contains("Copy-Item");
+    assert!(
+        !has_symlink || has_fallback,
+        "cursor install.ps1 must not require symlink privileges unconditionally; it needs a copy fallback"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn cursor_install_script_runs_into_temp_directory() {
+    let repo = sure_testkit::repository_root();
+    let install_script = repo
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("install.ps1");
+
+    let temp =
+        std::env::temp_dir().join(format!("sure-cursor-install-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).expect("temp dir");
+
+    let plugin_dir = temp.join("cursor-plugins");
+    let sure_bin = temp.join("sure.exe");
+    std::fs::write(&sure_bin, "dummy").expect("write dummy sure.exe");
+
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &install_script.to_string_lossy(),
+        ])
+        .env("CURSOR_PLUGIN_DIR", &plugin_dir)
+        .env("SURE_BIN", &sure_bin)
+        .output()
+        .expect("spawn install.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "install.ps1 failed: stdout={stdout}, stderr={stderr}"
+    );
+
+    let installed = plugin_dir.join("sure");
+    assert!(
+        installed.is_dir(),
+        "plugin directory should be created at {installed:?}"
+    );
+    assert!(
+        installed.join("hooks").join("hooks.json").is_file(),
+        "hooks.json should be present in installed plugin"
+    );
+    assert!(
+        installed
+            .join(".cursor-plugin")
+            .join("plugin.json")
+            .is_file(),
+        "plugin.json should be present in installed plugin"
+    );
+
+    // Verify that placeholders were rendered in copied files.
+    // (If Developer Mode created a symlink, placeholders are not rendered;
+    // this assertion only matters for the copy path.)
+    if !installed.is_symlink() {
+        let hook = std::fs::read_to_string(installed.join("scripts").join("sure-hook.ps1"))
+            .expect("read installed hook");
+        // The original contains the literal placeholder; a rendered copy would
+        // have it replaced. Since the dummy sure_bin path does not contain the
+        // placeholder string, we can check it was processed by looking for the
+        // original placeholder absence in any file that had it. In practice none
+        // of the current files contain placeholders, so we just verify the copy
+        // succeeded and the directory structure is intact.
+        assert!(
+            hook.contains("hook ingest --source cursor"),
+            "installed hook should still forward to the SURE core"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+#[cfg(windows)]
+#[test]
+fn cursor_uninstall_script_removes_installed_plugin() {
+    let repo = sure_testkit::repository_root();
+    let uninstall_script = repo
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("uninstall.ps1");
+
+    let temp =
+        std::env::temp_dir().join(format!("sure-cursor-uninstall-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).expect("temp dir");
+
+    let plugin_dir = temp.join("cursor-plugins");
+    let installed = plugin_dir.join("sure");
+    std::fs::create_dir_all(&installed).expect("create fake plugin dir");
+    std::fs::write(installed.join("dummy.txt"), "hello").expect("write dummy file");
+
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &uninstall_script.to_string_lossy(),
+        ])
+        .env("CURSOR_PLUGIN_DIR", &plugin_dir)
+        .output()
+        .expect("spawn uninstall.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "uninstall.ps1 failed: stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("Uninstalled"),
+        "uninstall.ps1 should report removal when plugin was present: {stdout}"
+    );
+    assert!(
+        !installed.exists(),
+        "plugin directory should be removed after uninstall"
+    );
+
+    // Run again against empty directory; should report not present.
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &uninstall_script.to_string_lossy(),
+        ])
+        .env("CURSOR_PLUGIN_DIR", &plugin_dir)
+        .output()
+        .expect("spawn uninstall.ps1 again");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("not installed"),
+        "uninstall.ps1 should report not-installed when plugin is absent: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp);
+}

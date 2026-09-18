@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P11",
-  "last_updated": "2026-09-18T07:47:09.177Z",
+  "last_updated": "2026-09-18T07:48:53.812Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1297,8 +1297,8 @@
       "notes": "Supervisor review: worker implemented Cursor protection where supported in commit 7959b89; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T007": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T07:48:53.811Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

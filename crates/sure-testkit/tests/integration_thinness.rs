@@ -332,6 +332,66 @@ fn cursor_launcher_contract_fixtures_are_valid_json() {
 }
 
 #[test]
+fn claude_code_launcher_contract_fixtures_are_valid_json() {
+    let launcher = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("fixtures")
+        .join("launcher");
+    assert!(
+        launcher.is_dir(),
+        "claude-code launcher fixtures directory must exist"
+    );
+
+    let entries = std::fs::read_dir(&launcher).expect("launcher fixtures directory is readable");
+    let mut count = 0;
+    for entry in entries {
+        let entry = entry.expect("launcher fixture entry readable");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        count += 1;
+        let text = std::fs::read_to_string(&path).expect("launcher fixture file readable");
+        let _: serde_json::Value =
+            serde_json::from_str(&text).expect("launcher fixture must be valid JSON");
+    }
+    assert!(
+        count >= 3,
+        "expected at least three claude-code launcher contract fixtures, found {count}"
+    );
+
+    // The launcher script must resolve SURE from the override, PATH, and the
+    // per-user install location, and must not fabricate evidence when missing.
+    let script = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("scripts")
+        .join("sure-hook.ps1");
+    let text = std::fs::read_to_string(&script).expect("claude-code launcher script readable");
+    assert!(
+        text.contains("SURE_BIN"),
+        "claude-code launcher must honour SURE_BIN override"
+    );
+    assert!(
+        text.contains("Get-Command sure"),
+        "claude-code launcher must look for sure on PATH"
+    );
+    assert!(
+        text.contains("LOCALAPPDATA"),
+        "claude-code launcher must fall back to per-user install location"
+    );
+    assert!(
+        text.contains("SURE binary not found"),
+        "claude-code launcher must fail safely when SURE is missing"
+    );
+    assert!(
+        text.contains("hook ingest --source claude-code"),
+        "claude-code launcher must forward to the SURE core"
+    );
+}
+
+#[test]
 fn cursor_command_files_exist_and_are_thin() {
     let commands_dir = sure_testkit::repository_root()
         .join("integrations")

@@ -1,0 +1,8 @@
+{
+  "description": "Claude Code hook launcher exit-code semantics.",
+  "semantics": {
+    "0": "Hook completed; Claude Code may proceed (default fail-open when SURE is missing).",
+    "non_zero": "SURE returned a non-zero status; Claude Code should treat this as a signal to review or block the action when the hook has decision authority."
+  },
+  "note": "The launcher itself never fabricates evidence. When the SURE binary is missing it exits 0 so the agent is not blocked by a missing local tool."
+}

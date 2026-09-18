@@ -1,0 +1,6 @@
+{
+  "acknowledged": false,
+  "reason": "SURE binary not found",
+  "decision": "allow",
+  "source": "claude-code"
+}

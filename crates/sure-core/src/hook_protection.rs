@@ -104,9 +104,9 @@ pub fn decide_cursor_tool(
 
     match decide(action_kind, mode, permissions) {
         ExecutionDecision::Allowed => ProtectionDecision::allow(),
-        ExecutionDecision::NeedsConsent => {
-            ProtectionDecision::warn("This action needs explicit approval before it can run.")
-        }
+        ExecutionDecision::NeedsConsent => ProtectionDecision::block(
+            "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+        ),
         ExecutionDecision::Denied => {
             ProtectionDecision::block("The current execution mode does not permit this action.")
         }
@@ -183,9 +183,9 @@ mod tests {
         let mut permissions = ExecutionPermissions::inspect_only();
         permissions.run_project_code = true;
         let decision = decide_cursor_tool("Shell", ExecutionMode::HostConfirmed, &permissions);
-        // ArbitraryCommand always returns NeedsConsent when the permission
-        // is granted, which maps to Warn.
-        assert_eq!(decision.decision, ProtectionDecisionKind::Warn);
+        // ArbitraryCommand always returns NeedsConsent. A hook that cannot ask
+        // for consent must fail closed, so it maps to Block rather than Warn.
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
         assert!(decision.reason.is_some());
     }
 

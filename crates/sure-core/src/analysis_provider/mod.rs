@@ -561,6 +561,45 @@ mod tests {
         }
     }
 
+    /// A program that prints the arguments it is given, in the one form each
+    /// platform starts by itself.
+    ///
+    /// [`echo_command`] is a command *line* and begins with `cmd /c` on Windows.
+    /// `ClaudeCliAnalyzer` takes a program, not a command line, and SURE's
+    /// process runner completes a bare name to `.exe` and nothing else — so
+    /// there is no `echo` to name on Windows, where echoing is a command
+    /// interpreter builtin rather than a program. Naming one anyway is how the
+    /// two tests below came to pass under a shell that had `echo.exe` on `PATH`
+    /// (Git Bash) and fail under one that did not (PowerShell): a green result
+    /// that depended on which shell ran the suite.
+    ///
+    /// So those tests write the smallest real program each platform does start —
+    /// a batch file on Windows, a shell script elsewhere — under the workspace's
+    /// git-ignored `target/tmp`, and name it by its full path.
+    fn echoing_program() -> PathBuf {
+        let directory = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("claude-cli-analyzer");
+        std::fs::create_dir_all(&directory).expect("the scratch directory");
+
+        #[cfg(windows)]
+        let (program, contents) = (directory.join("echo.cmd"), "@echo off\r\necho %*\r\n");
+        #[cfg(not(windows))]
+        let (program, contents) = (directory.join("echo"), "#!/bin/sh\necho \"$@\"\n");
+
+        std::fs::write(&program, contents).expect("the echoing program");
+
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+                .expect("the echoing program is executable");
+        }
+
+        program
+    }
+
     /// A command that exits with a non-zero code, portable across Windows and Unix.
     fn failing_command() -> Vec<String> {
         if cfg!(windows) {
@@ -684,8 +723,9 @@ mod tests {
 
     #[test]
     fn claude_cli_analyzer_runs_program_and_returns_stdout() {
-        let temp = std::env::temp_dir();
-        let analyzer = ClaudeCliAnalyzer::with_program("echo", &temp);
+        let program = echoing_program();
+        let analyzer =
+            ClaudeCliAnalyzer::with_program(&program, program.parent().expect("a parent"));
 
         let response = analyzer.analyze(request("hello from claude")).unwrap();
 
@@ -694,8 +734,9 @@ mod tests {
 
     #[test]
     fn claude_cli_analyzer_redacts_prompt_before_passing_it() {
-        let temp = std::env::temp_dir();
-        let analyzer = ClaudeCliAnalyzer::with_program("echo", &temp);
+        let program = echoing_program();
+        let analyzer =
+            ClaudeCliAnalyzer::with_program(&program, program.parent().expect("a parent"));
 
         let response = analyzer
             .analyze(request("token sk-abcdefghijklmnopqrstuvwxyz01"))

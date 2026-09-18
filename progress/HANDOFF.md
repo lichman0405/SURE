@@ -3,15 +3,16 @@
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
 
-**Nothing is in flight:** `P1-T012` (give the store a location a caller can
-choose), `P7-T011` (severity calibration) and `P12-T007` (Codex evidence bridge)
-are all accepted — "What `P1-T012` added", "Validation of `P1-T012`", "What
-`P7-T011` added", "Validation of `P7-T011`", "What `P12-T007` added" and
-"Validation of `P12-T007`" below carry the numbers. The tree is clean and the
-next dispatch is the next READY task, `P12-T010`. `P1-T012` closed the privacy
-defect this file carried since item 74: `cargo test --workspace` no longer
-writes the developer's real store, measured before and after a full run rather
-than asserted.
+**In flight:** `P12-T010` (wire the MCP bridge into the Claude Code, Cursor and
+Agent plugin packages) is dispatched as of `0af2874` and is `in_progress`. The
+lowest-numbered READY task before that dispatch was `P1-T012` (give the store a
+location a caller can choose), and it, `P7-T011` (severity calibration) and
+`P12-T007` (Codex evidence bridge) are all accepted — "What `P1-T012` added",
+"Validation of `P1-T012`", "What `P7-T011` added", "Validation of `P7-T011`",
+"What `P12-T007` added" and "Validation of `P12-T007`" below carry the numbers.
+`P1-T012` closed the privacy defect this file carried since item 74: `cargo test
+--workspace` no longer writes the developer's real store, measured before and
+after a full run rather than asserted.
 Progress: 128 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
@@ -659,17 +660,35 @@ tree is or is not intact would be reading a claim the file does not make.
     was released") and could not reproduce it in one full-suite run and six
     isolated runs; recorded against `P16-T001`, which has to trust this gate, and
     noted at `P5-T004`, whose file it is.
+81. `P12-T010` — *Wire MCP bridge into Claude/Cursor/Agent plugin packages* — was
+    dispatched as the first READY task. Its brief needed two corrections before it
+    went out, and both are worth recording because they are the same mistake in
+    two forms. First, it carried the sentence "Another worker holds `fixtures/**`
+    and `crates/sure-core/**`" — copy-pasted from an earlier brief written while a
+    worker really did hold them. Nothing is in flight, so that sentence was false,
+    and a worker told a phantom colleague holds the tree is a worker with a
+    ready-made explanation for any red gate it meets. The brief now says no other
+    worker is in flight and that a gate failing in a file the worker did not edit
+    is a finding about this tree. Second, the brief predated `P1-T012`, so it did
+    not know `--store-dir` exists — and this task adds tests that spawn the real
+    binary. A worker following the old brief would have written the developer's
+    real store from a test, which is precisely the defect `P1-T012` was created to
+    remove, reintroduced one task later by the supervisor's own paperwork. The
+    brief now requires `--store-dir` at a scratch directory for every test and
+    every manual run, and says why it does not apply to the manifests themselves:
+    those launch `sure mcp serve` exactly as a user would. Both corrections were
+    made before dispatch and the worker has not yet reported.
 
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-18 after `P7-T011` and `P12-T007`
-were accepted, is `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`,
-`P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`,
-`P1-T012`, `P7-T012`, `P14-T013`, `P7-T013`; nothing is `in_progress`. The
-next dispatch is the first READY task, `P12-T010` (wire the MCP bridge into the
-plugin packages), whose brief carries the `--format json mcp serve` deviation
-recorded below. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and both
-`P7-T011` and `P1-T012` are accepted; `P14-T013` joined the list when `P7-T011`
-gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
+`node scripts/taskctl.mjs ready` on 2026-09-18 after `P1-T012` was accepted, is
+`P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`,
+`P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`,
+`P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them. `P12-T010`
+(wire the MCP bridge into the plugin packages) is the first of those and is the
+one now in flight; its brief carries the `--format json mcp serve` deviation
+recorded below. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+both are accepted along with `P1-T012`; `P14-T013` joined the list when
+`P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task

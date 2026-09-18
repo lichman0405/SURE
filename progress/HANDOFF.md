@@ -3,9 +3,22 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T006` (implement protection audit history), the first READY
-task, being dispatched from base commit `64dd7da` — the `P13-T005` acceptance
-commit. `P13-T005` (implement dangerous shell/file/Git detectors) was dispatched
+**In flight:** `P15-T016` (make the ubuntu and macos jobs green again, and keep
+them read), dispatched from base commit `7e021ae`. **This is the first time this
+loop has deliberately reordered its own work**: the two previous insertions
+(`P15-T015`, `P13-T010`) were placed after the last task of their phase precisely
+so that §14 would still hand the next dispatch to the lowest-numbered READY task,
+and `P15-T016` is instead placed immediately before `P13-T006` so that it *is*
+the next dispatch. The reason is a stop-the-line condition and not a preference,
+and it is recorded as item 99 below: the `ci` workflow has failed on 78
+consecutive runs, the run table in this file stops *before* the last green run,
+and on Linux and macOS the test step does not execute at all because clippy
+aborts the job first — so every acceptance since `717fc0ad` has recorded five
+green Windows gates over an unstated caveat on two of the three platforms that
+`CLAUDE.md` requires the core to stay portable to. `P13-T006` (implement
+protection audit history) is next after it and its brief is already written at
+`target/tmp/brief-p13t006.md`; the map it rests on is the supervisor's own,
+re-checked in the tree. `P13-T005` (implement dangerous shell/file/Git detectors) was dispatched
 from `56d2e63`, has been verified and accepted at commit `64dd7da`, and "What
 `P13-T005` added" and "Validation of `P13-T005`" below carry the numbers. It
 delivered all three named dangers and a one-time override for each, driven end to
@@ -49,7 +62,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 133 / 174 tasks accepted (counted from `progress/state.json` against
+Progress: 133 / 175 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -61,12 +74,14 @@ recorded events never reach the verdict's capability tier (item 77), and from
 tests' scratch allocator had exhausted its fixed pool and made the five gates
 unreproducible (item 93), and from 173 to 174 on 2026-09-19 when `P13-T005`'s
 verification found that `sure hook allow-once` reports success for an allowance
-the project's own settings make unspendable (item 97)). **Phase
+the project's own settings make unspendable (item 97), and from 174 to 175 on the
+same day when a check of the branch's own CI runs found that two of the three
+platforms had been failing unread for 78 runs (item 99)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 15; Phase P16
+at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 16; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -934,14 +949,48 @@ tree is or is not intact would be reading a claim the file does not make.
     that cries wolf on five good commits is worth as little as one that passes a
     bad one.
 
+99. **The branch's own CI has been failing unread for 78 consecutive runs, and
+    this file's run table is why nobody noticed.** Checked on 2026-09-19 while
+    confirming a push: the last green `ci` run is `35193436468` (`6d69c51b`,
+    2026-09-17T07:13Z) and every run since `35196110213` (`717fc0ad`,
+    2026-09-17T07:45Z) has failed — 78 of them. The run table under
+    "Continuous integration, and why this section exists" stops at
+    `35174114907`, which is *before* the last green run, so the streak appears
+    nowhere in this file and the loop has been reporting five green Windows
+    gates as though they were the whole story. Three distinct causes were read
+    out of the logs: three `browser_driver.rs` tests failing on
+    `rust (windows-latest)` because a browser was found and could not be driven
+    — the product's own false-green discipline reporting correctly, and green
+    today, so environmental or intermittent; `candidate_context::tests::windows_separators_work`
+    and `recording_projection::tests::file_write_event_is_projected` failing on
+    `rust (ubuntu-latest)`, which are one root cause and not merely a test
+    problem, because `classify_path` walks `path.components()` and so classifies
+    a Windows-style path differently on Unix than on Windows while
+    `hook_protection.rs:1015`'s `folded` deliberately normalises backslashes on
+    every platform — two incompatible answers in one codebase; and the current
+    shape, `cargo clippy` failing on ubuntu and macos from `752489c`
+    (`P12-T010`) onward, where three helpers in
+    `crates/sure-testkit/tests/integration_thinness.rs` are live only on
+    Windows. Because clippy runs before the tests, **the test step has not run
+    on Unix since `752489c`**, so the current status of the second cause is
+    unknown. All three are the class of defect a Windows-primary machine cannot
+    see, which is the class `CLAUDE.md` requires CI to catch. Given an owner,
+    `P15-T016`, and placed **first** in the array so §14 dispatches it next —
+    the first deliberate reordering this loop has made, and the reasoning is
+    that an acceptance recorded while two of three platforms are unverified is
+    itself the kind of claim this project exists to refuse. The record-keeping
+    half is the supervisor's: the run table below is to be brought up to date
+    rather than left as it stands.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T005` was accepted and
-after `P13-T010` joined the graph, is `P13-T006`, `P13-T007`, `P13-T009`,
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P15-T016` was inserted
+ahead of `P13-T006`, is `P15-T016`, `P13-T006`, `P13-T007`, `P13-T009`,
 `P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
 `P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`, `P7-T013`, in the order
-`tasks/tasks.json` lists them. `P13-T006` (implement protection audit history) is
-the first of those and is in flight; its base commit is the `P13-T005` acceptance
-commit `64dd7da`. `P15-T015` does not appear in that list
+`tasks/tasks.json` lists them. `P15-T016` (make the ubuntu and macos jobs green
+again, and keep them read) is the first of those and is in flight; its base
+commit is `7e021ae`. `P13-T006` (implement protection audit history) is next and
+its brief is written. `P15-T015` does not appear in that list
 because it is queued behind work that precedes it in the array — it is
 deliberately placed in the P15 block rather than at the front, so the READY
 order stays the file's order and the task that fixes the gates is dispatched on

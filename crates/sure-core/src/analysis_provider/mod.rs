@@ -13,6 +13,7 @@
 
 use std::ffi::OsString;
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -70,8 +71,11 @@ pub enum AnalysisError {
         /// What went wrong, in plain words.
         message: String,
     },
-    /// The OpenAI-compatible provider is not implemented in this release.
-    OpenAiCompatibleNotImplemented,
+    /// The OpenAI-compatible provider could not complete the request.
+    OpenAiCompatibleFailed {
+        /// What went wrong, in plain words.
+        message: String,
+    },
 }
 
 impl fmt::Display for AnalysisError {
@@ -88,10 +92,9 @@ impl fmt::Display for AnalysisError {
             Self::ClaudeCliFailed { message } => {
                 write!(f, "The Claude CLI provider failed: {message}")
             }
-            Self::OpenAiCompatibleNotImplemented => write!(
-                f,
-                "The OpenAI-compatible provider is not implemented in this release."
-            ),
+            Self::OpenAiCompatibleFailed { message } => {
+                write!(f, "The OpenAI-compatible provider failed: {message}")
+            }
         }
     }
 }
@@ -293,29 +296,193 @@ fn claude_cli_response(outcome: Outcome) -> Result<AnalysisResponse, AnalysisErr
     }
 }
 
-/// Placeholder for the OpenAI-compatible provider.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// How long the OpenAI-compatible provider waits for a response.
+const OPENAI_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many bytes the OpenAI-compatible provider reads from a response.
+const OPENAI_RESPONSE_BYTES: usize = 64 * 1024;
+
+/// Environment variable that holds the API key for the OpenAI-compatible provider.
+const OPENAI_API_KEY_VAR: &str = "SURE_OPENAI_API_KEY";
+
+/// Provider that calls a user-configured OpenAI-compatible endpoint directly.
+///
+/// SURE does not proxy the request: it is sent from this machine to the endpoint
+/// the user configured. The prompt is redacted before it leaves SURE, and the
+/// API key is read from an environment variable rather than from any project-
+/// controlled file.
+#[cfg_attr(not(test), derive(Clone, PartialEq, Eq))]
 pub struct OpenAiCompatibleAnalyzer {
-    /// The endpoint the config named, kept for the real implementation.
-    #[allow(dead_code)]
     endpoint: String,
-    /// The model the config named, kept for the real implementation.
-    #[allow(dead_code)]
     model: Option<String>,
+    /// An optional API key used in tests so that `std::env::set_var`, which is
+    /// `unsafe` in edition 2024 and forbidden in this workspace, is not needed.
+    api_key: Option<String>,
+    #[cfg(test)]
+    transport: Option<Box<TransportFn>>,
+}
+
+#[cfg(test)]
+type TransportFn =
+    dyn Fn(&str, &str, &str, &str) -> Result<(u16, String), AnalysisError> + Send + Sync;
+
+impl fmt::Debug for OpenAiCompatibleAnalyzer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenAiCompatibleAnalyzer")
+            .field("endpoint", &self.endpoint)
+            .field("model", &self.model)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 impl OpenAiCompatibleAnalyzer {
-    /// Build a placeholder from the endpoint and model the user configured.
+    /// Build a provider that calls `endpoint` with the configured `model`.
+    ///
+    /// The API key is read from [`OPENAI_API_KEY_VAR`] when the provider runs.
     #[must_use]
     pub fn new(endpoint: String, model: Option<String>) -> Self {
-        Self { endpoint, model }
+        Self {
+            endpoint,
+            model,
+            api_key: None,
+            #[cfg(test)]
+            transport: None,
+        }
+    }
+
+    /// Build a provider with an injected transport for tests.
+    #[cfg(test)]
+    fn with_transport(
+        endpoint: String,
+        model: Option<String>,
+        api_key: String,
+        transport: impl Fn(&str, &str, &str, &str) -> Result<(u16, String), AnalysisError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self {
+            endpoint,
+            model,
+            api_key: Some(api_key),
+            transport: Some(Box::new(transport)),
+        }
+    }
+
+    fn send_request(
+        &self,
+        model: &str,
+        api_key: &str,
+        prompt: &str,
+    ) -> Result<(u16, String), AnalysisError> {
+        #[cfg(test)]
+        if let Some(transport) = &self.transport {
+            return transport(&self.endpoint, model, api_key, prompt);
+        }
+        send_openai_request(&self.endpoint, model, api_key, prompt)
     }
 }
 
 impl Analyzer for OpenAiCompatibleAnalyzer {
-    fn analyze(&self, _request: AnalysisRequest<'_>) -> Result<AnalysisResponse, AnalysisError> {
-        Err(AnalysisError::OpenAiCompatibleNotImplemented)
+    fn analyze(&self, request: AnalysisRequest<'_>) -> Result<AnalysisResponse, AnalysisError> {
+        if self.endpoint.is_empty() {
+            return Err(openai_failed("endpoint is not configured"));
+        }
+        let Some(model) = self.model.as_ref() else {
+            return Err(openai_failed("model is not configured"));
+        };
+        let api_key = self
+            .api_key
+            .clone()
+            .or_else(|| std::env::var(OPENAI_API_KEY_VAR).ok())
+            .ok_or_else(|| openai_failed("API key is not configured"))?;
+        let prompt = prepare_prompt(request.prompt);
+
+        let (status, body) = self
+            .send_request(model, &api_key, &prompt)
+            .map_err(redact_openai_error)?;
+
+        if !(200..300).contains(&status) {
+            return Err(openai_failed(format!("server returned HTTP {status}")));
+        }
+
+        parse_openai_response(&body).map(AnalysisResponse::new)
     }
+}
+
+/// Build an [`AnalysisError::OpenAiCompatibleFailed`] with a redacted message.
+fn openai_failed(message: impl Into<String>) -> AnalysisError {
+    AnalysisError::OpenAiCompatibleFailed {
+        message: crate::redact::redact_for_diagnostic(&message.into()),
+    }
+}
+
+/// Redact a provider error before it leaves this module.
+fn redact_openai_error(error: AnalysisError) -> AnalysisError {
+    match error {
+        AnalysisError::OpenAiCompatibleFailed { message } => openai_failed(message),
+        other => other,
+    }
+}
+
+/// Send a chat-completions request to an OpenAI-compatible endpoint.
+fn send_openai_request(
+    endpoint: &str,
+    model: &str,
+    api_key: &str,
+    prompt: &str,
+) -> Result<(u16, String), AnalysisError> {
+    let request_body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let agent = ureq::AgentBuilder::new().timeout(OPENAI_TIMEOUT).build();
+
+    match agent
+        .post(endpoint)
+        .set("Authorization", &format!("Bearer {api_key}"))
+        .set("Content-Type", "application/json")
+        .send_json(&request_body)
+    {
+        Ok(response) => {
+            let status = response.status();
+            let body = read_limited_body(response)?;
+            Ok((status, body))
+        }
+        Err(ureq::Error::Status(code, _)) => Ok((code, String::new())),
+        Err(ureq::Error::Transport(error)) => {
+            Err(openai_failed(format!("request failed: {error}")))
+        }
+    }
+}
+
+/// Read up to [`OPENAI_RESPONSE_BYTES`] from `response`.
+fn read_limited_body(response: ureq::Response) -> Result<String, AnalysisError> {
+    let reader = response.into_reader();
+    let mut limited = reader.take(OPENAI_RESPONSE_BYTES as u64);
+    let mut body = Vec::new();
+    limited
+        .read_to_end(&mut body)
+        .map_err(|error| openai_failed(format!("could not read response: {error}")))?;
+    String::from_utf8(body)
+        .map_err(|error| openai_failed(format!("response was not valid UTF-8: {error}")))
+}
+
+/// Extract the assistant message content from an OpenAI-compatible response body.
+fn parse_openai_response(body: &str) -> Result<String, AnalysisError> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| openai_failed(format!("response was not valid JSON: {error}")))?;
+    let content = value
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| openai_failed("response did not contain assistant content"))?;
+    Ok(content.to_owned())
 }
 
 /// Build the analyzer described by `config`.
@@ -539,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn build_dispatches_to_openai_compatible_placeholder() {
+    fn build_dispatches_to_openai_compatible() {
         let config = AnalysisConfig {
             provider: AnalysisProvider::OpenAiCompatible,
             endpoint: Some("https://models.example.com/v1".to_owned()),
@@ -548,8 +715,190 @@ mod tests {
         };
         let root = temp_root();
         let analyzer = require_analyzer(build(&config, &root));
+        // Without the env-var credential and without a test transport, the
+        // provider cannot succeed. The important thing is that `build` returns
+        // the OpenAI-compatible analyzer and that it reports provider-specific
+        // failures rather than a placeholder.
         let error = analyzer.analyze(request("x")).unwrap_err();
-        assert_eq!(error, AnalysisError::OpenAiCompatibleNotImplemented);
+        assert!(
+            matches!(error, AnalysisError::OpenAiCompatibleFailed { .. }),
+            "expected OpenAiCompatibleFailed, got {error}"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_returns_assistant_content() {
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+            "sk-fake12345678901234567890".to_owned(),
+            |_endpoint, model, api_key, prompt| {
+                assert_eq!(model, "test-model");
+                assert_eq!(api_key, "sk-fake12345678901234567890");
+                assert_eq!(prompt, "hello");
+                Ok((
+                    200,
+                    r#"{"choices":[{"message":{"role":"assistant","content":"hi there"}}]}"#
+                        .to_owned(),
+                ))
+            },
+        );
+
+        let response = analyzer.analyze(request("hello")).unwrap();
+
+        assert_eq!(response.text, "hi there");
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_redacts_prompt_before_sending() {
+        let secret_prompt = "token sk-abcdefghijklmnopqrstuvwxyz01";
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+            "sk-fake".to_owned(),
+            |_endpoint, _model, _api_key, prompt| {
+                assert!(
+                    !prompt.contains("sk-abcdefghijklmnopqrstuvwxyz01"),
+                    "prompt was not redacted: {prompt}"
+                );
+                assert!(
+                    prompt.contains("***"),
+                    "prompt should show redaction: {prompt}"
+                );
+                Ok((
+                    200,
+                    r#"{"choices":[{"message":{"role":"assistant","content":"ok"}}]}"#.to_owned(),
+                ))
+            },
+        );
+
+        let response = analyzer.analyze(request(secret_prompt)).unwrap();
+
+        assert_eq!(response.text, "ok");
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_does_not_leak_api_key() {
+        let secret_key = "sk-fake12345678901234567890";
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+            secret_key.to_owned(),
+            move |_endpoint, _model, api_key, _prompt| {
+                assert_eq!(api_key, secret_key);
+                Ok((
+                    200,
+                    r#"{"choices":[{"message":{"role":"assistant","content":"acknowledged"}}]}"#
+                        .to_owned(),
+                ))
+            },
+        );
+
+        let response = analyzer.analyze(request("hello")).unwrap();
+
+        assert!(!response.text.contains(secret_key));
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_redacts_api_key_in_error_messages() {
+        let secret_key = "sk-fake12345678901234567890";
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+            secret_key.to_owned(),
+            move |_endpoint, _model, _api_key, _prompt| {
+                Err(AnalysisError::OpenAiCompatibleFailed {
+                    message: format!("server rejected key {secret_key}"),
+                })
+            },
+        );
+
+        let error = analyzer.analyze(request("hello")).unwrap_err();
+
+        let message = error.to_string();
+        assert!(
+            matches!(error, AnalysisError::OpenAiCompatibleFailed { .. }),
+            "{message}"
+        );
+        assert!(!message.contains(secret_key), "key leaked: {message}");
+        assert!(
+            message.contains("***"),
+            "message should be redacted: {message}"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_reports_non_2xx_as_failed() {
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+            "sk-fake".to_owned(),
+            |_endpoint, _model, _api_key, _prompt| Ok((503, String::new())),
+        );
+
+        let error = analyzer.analyze(request("x")).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AnalysisError::OpenAiCompatibleFailed { .. }
+        ));
+        assert!(error.to_string().contains("503"), "{error}");
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_reports_missing_api_key() {
+        let analyzer = OpenAiCompatibleAnalyzer::new(
+            "https://models.example.com/v1".to_owned(),
+            Some("test-model".to_owned()),
+        );
+
+        let error = analyzer.analyze(request("x")).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AnalysisError::OpenAiCompatibleFailed { .. }
+        ));
+        assert!(error.to_string().contains("API key"), "{error}");
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_reports_missing_model() {
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            "https://models.example.com/v1".to_owned(),
+            None,
+            "sk-fake".to_owned(),
+            |_endpoint, _model, _api_key, _prompt| {
+                panic!("transport should not be called without a model")
+            },
+        );
+
+        let error = analyzer.analyze(request("x")).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AnalysisError::OpenAiCompatibleFailed { .. }
+        ));
+        assert!(error.to_string().contains("model"), "{error}");
+    }
+
+    #[test]
+    fn openai_compatible_analyzer_reports_missing_endpoint() {
+        let analyzer = OpenAiCompatibleAnalyzer::with_transport(
+            String::new(),
+            Some("test-model".to_owned()),
+            "sk-fake".to_owned(),
+            |_endpoint, _model, _api_key, _prompt| {
+                panic!("transport should not be called without an endpoint")
+            },
+        );
+
+        let error = analyzer.analyze(request("x")).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AnalysisError::OpenAiCompatibleFailed { .. }
+        ));
+        assert!(error.to_string().contains("endpoint"), "{error}");
     }
 
     #[test]

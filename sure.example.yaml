@@ -19,8 +19,11 @@ analysis:
   #
   # The endpoint must be an http(s) URL, and must NOT carry a password. A
   # project file is not a safe place for a credential — SURE refuses one here
-  # and never prints it. Keep credentials in your user-level SURE configuration
-  # or an environment variable.
+  # and never prints it.
+  #
+  # For `provider: openai_compatible`, also set the API key in the environment
+  # variable `SURE_OPENAI_API_KEY`. SURE sends the request directly to the
+  # endpoint you configure; it does not proxy the call through any SURE service.
   endpoint: null
   model: null
   # For `provider: local_command`, the command to run. The first element is the

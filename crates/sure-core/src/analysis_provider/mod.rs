@@ -236,10 +236,7 @@ impl ClaudeCliAnalyzer {
     }
 
     #[cfg(test)]
-    fn with_program(
-        program: impl Into<OsString>,
-        working_directory: impl Into<PathBuf>,
-    ) -> Self {
+    fn with_program(program: impl Into<OsString>, working_directory: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
             working_directory: working_directory.into(),
@@ -533,7 +530,9 @@ mod tests {
         let temp = std::env::temp_dir();
         let analyzer = ClaudeCliAnalyzer::with_program("echo", &temp);
 
-        let response = analyzer.analyze(request("token sk-abcdefghijklmnopqrstuvwxyz01")).unwrap();
+        let response = analyzer
+            .analyze(request("token sk-abcdefghijklmnopqrstuvwxyz01"))
+            .unwrap();
 
         assert!(!response.text.contains("sk-abcdefghijklmnopqrstuvwxyz01"));
         assert!(response.text.contains("***"));

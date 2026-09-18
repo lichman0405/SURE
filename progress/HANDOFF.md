@@ -59,6 +59,19 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
 `P7-T011` is accepted as commit `80e98b2`. `P12-T007` is accepted as commit
 `d41d085`.
 
+**How to read `progress/state.json`.** The per-task `evidence` array is empty for
+88 of the 127 accepted tasks (counted 2026-09-18). That is not a gap in the
+verification, it is where the verification was written down: `MASTER_PROMPT.md`
+step 11 says "mark task accepted with evidence/note", and in this repository the
+note is what carries it — every acceptance since `P7-T010` has its gate output,
+digests, file lists and stated limits in that task's `notes` string and in the
+matching "Validation of `…`" section of this file. An empty `evidence` array next
+to a non-empty `notes` means *read the note*, not *nothing was checked*. The
+`base_sha` and `head_sha` fields are likewise null throughout and always have
+been; the commit a task landed in is named in its note. Reading `evidence: []`
+as "accepted without evidence" would be wrong, and the fields being vestigial is
+itself worth knowing before anyone builds a report on them.
+
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
    cancellation* — as commit `a6dbf98`. The supervisor verified all quality gates

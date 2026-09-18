@@ -283,9 +283,9 @@ fn claim_reason(claim: &sure_core::vocabulary::Claim) -> String {
         sure_core::evidence::ClaimAssessment::Contradicted => {
             String::from("A recorded harness event contradicts this claim.")
         }
-        sure_core::evidence::ClaimAssessment::CannotConfirm => String::from(
-            "SURE has no recorded event that supports or contradicts this claim.",
-        ),
+        sure_core::evidence::ClaimAssessment::CannotConfirm => {
+            String::from("SURE has no recorded event that supports or contradicts this claim.")
+        }
         sure_core::evidence::ClaimAssessment::NotCheckable => {
             if claim.claim_type.is_empty() {
                 String::from("SURE does not know how to check this kind of claim.")

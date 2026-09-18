@@ -66,6 +66,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "sessions",
         sql: include_str!("sql/0002_sessions.sql"),
     },
+    Migration {
+        version: 3,
+        name: "sessions_unique",
+        sql: include_str!("sql/0003_sessions_unique.sql"),
+    },
 ];
 
 /// The version this build migrates a database to.

@@ -226,30 +226,18 @@ impl<'a> SessionEventStore<'a> {
                 capability_tier,
             )?;
 
-            // The record document is the envelope itself, which matches the
-            // Event schema (schema_version, source, event_type, timestamp, ...).
-            let document =
-                serde_json::to_value(envelope).map_err(|error| SessionEventStoreError::Store {
-                    message: format!("could not serialize event: {error}"),
-                })?;
-
-            // Insert into records.
-            let record_id = self.insert_record_in_tx(
-                connection,
-                RecordKind::Document(DocumentKind::Event),
-                &document,
-                project_root,
-                fingerprint,
-            )?;
-
-            // Insert into session_events.
+            // Insert into session_events first. `INSERT OR IGNORE` is the last
+            // line of defense against a duplicate event id: if another hook
+            // process committed the same event id while this one was waiting for
+            // the write lock, the insert is ignored and the store is left
+            // unchanged.
             let now_ms = Self::now_ms();
             let event_retention = event_retention_days(capability_tier);
             let event_retained_until = retention_deadline_ms(now_ms, event_retention);
 
-            connection
+            let inserted = connection
                 .execute(
-                    "INSERT INTO session_events \
+                    "INSERT OR IGNORE INTO session_events \
                      (event_id, session_row_id, event_type, timestamp, timestamp_ms, \
                       capability_tier, payload, project_root, project_fingerprint, \
                       retention_days, retained_until_ms, record_row_id) \
@@ -266,8 +254,37 @@ impl<'a> SessionEventStore<'a> {
                         fingerprint.as_str(),
                         event_retention,
                         event_retained_until,
-                        record_id,
+                        None::<i64>,
                     ],
+                )
+                .map_err(|error| self.write_error(error))?;
+
+            if inserted == 0 {
+                return Ok(PersistResult::AlreadyExists);
+            }
+
+            let event_row_id = connection.last_insert_rowid();
+
+            // The record document is the envelope itself, which matches the
+            // Event schema (schema_version, source, event_type, timestamp, ...).
+            let document =
+                serde_json::to_value(envelope).map_err(|error| SessionEventStoreError::Store {
+                    message: format!("could not serialize event: {error}"),
+                })?;
+
+            // Insert into records and link the event row to it.
+            let record_id = self.insert_record_in_tx(
+                connection,
+                RecordKind::Document(DocumentKind::Event),
+                &document,
+                project_root,
+                fingerprint,
+            )?;
+
+            connection
+                .execute(
+                    "UPDATE session_events SET record_row_id = ?1 WHERE id = ?2",
+                    rusqlite::params![record_id, event_row_id],
                 )
                 .map_err(|error| self.write_error(error))?;
 
@@ -443,46 +460,30 @@ impl<'a> SessionEventStore<'a> {
         capability_tier: Option<CapabilityTier>,
     ) -> Result<StoredSession, SessionEventStoreError> {
         // Try to find an existing session by harness session id + project + source.
-        if let Some(ref harness_session_id) = envelope.session_id {
-            let existing = connection.query_row(
-                "SELECT id, harness_session_id, sure_session_id, project_root, \
-                 project_fingerprint, harness_source, capability_tier, started_at, \
-                 retention_days, retained_until_ms \
-                 FROM sessions \
-                 WHERE harness_session_id = ?1 AND project_root = ?2 AND harness_source = ?3",
-                rusqlite::params![harness_session_id, project_root, envelope.source],
-                |row| {
-                    Ok(StoredSession {
-                        row_id: row.get(0)?,
-                        harness_session_id: row.get(1)?,
-                        sure_session_id: parse_session_id(row.get::<_, String>(2)?)?,
-                        project_root: row.get(3)?,
-                        project_fingerprint: row.get(4)?,
-                        harness_source: row.get(5)?,
-                        capability_tier: row
-                            .get::<_, Option<i64>>(6)?
-                            .and_then(|n| CapabilityTier::from_number(n as u8)),
-                        started_at: row.get(7)?,
-                        retention_days: row.get(8)?,
-                        retained_until_ms: row.get(9)?,
-                    })
-                },
-            );
-            if let Ok(session) = existing {
-                return Ok(session);
-            }
+        if let Some(ref harness_session_id) = envelope.session_id
+            && let Ok(session) = self.find_session_by_harness(
+                connection,
+                harness_session_id,
+                project_root,
+                &envelope.source,
+            )
+        {
+            return Ok(session);
         }
 
-        // Create a new session.
+        // Create a new session. `INSERT OR IGNORE` plus a re-query is what makes
+        // concurrent hook writes deterministic: if another short-lived process
+        // created the same session while this one was reading, the insert is
+        // ignored and the existing row is returned instead of failing.
         let sure_session_id = SessionId::generate();
         let started_at = envelope.timestamp.clone();
         let now_ms = Self::now_ms();
         let session_retention = session_retention_days(capability_tier);
         let retained_until = retention_deadline_ms(now_ms, session_retention);
 
-        connection
+        let inserted = connection
             .execute(
-                "INSERT INTO sessions \
+                "INSERT OR IGNORE INTO sessions \
                  (harness_session_id, sure_session_id, project_root, project_fingerprint, \
                   harness_source, capability_tier, started_at, retention_days, retained_until_ms) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -500,19 +501,72 @@ impl<'a> SessionEventStore<'a> {
             )
             .map_err(|error| self.write_error(error))?;
 
-        let row_id = connection.last_insert_rowid();
-        Ok(StoredSession {
-            row_id,
-            harness_session_id: envelope.session_id.clone(),
-            sure_session_id,
-            project_root: project_root.to_owned(),
-            project_fingerprint: fingerprint.as_str().to_owned(),
-            harness_source: envelope.source.clone(),
-            capability_tier,
-            started_at,
-            retention_days: session_retention,
-            retained_until_ms: retained_until,
+        if inserted > 0 {
+            let row_id = connection.last_insert_rowid();
+            return Ok(StoredSession {
+                row_id,
+                harness_session_id: envelope.session_id.clone(),
+                sure_session_id,
+                project_root: project_root.to_owned(),
+                project_fingerprint: fingerprint.as_str().to_owned(),
+                harness_source: envelope.source.clone(),
+                capability_tier,
+                started_at,
+                retention_days: session_retention,
+                retained_until_ms: retained_until,
+            });
+        }
+
+        // Another process won the race. Re-query and return the row it wrote.
+        if let Some(ref harness_session_id) = envelope.session_id
+            && let Ok(session) = self.find_session_by_harness(
+                connection,
+                harness_session_id,
+                project_root,
+                &envelope.source,
+            )
+        {
+            return Ok(session);
+        }
+
+        Err(SessionEventStoreError::Store {
+            message: String::from(
+                "SURE could not find or create the session this event belongs to.",
+            ),
         })
+    }
+
+    fn find_session_by_harness(
+        &self,
+        connection: &Connection,
+        harness_session_id: &str,
+        project_root: &str,
+        harness_source: &str,
+    ) -> Result<StoredSession, rusqlite::Error> {
+        connection.query_row(
+            "SELECT id, harness_session_id, sure_session_id, project_root, \
+             project_fingerprint, harness_source, capability_tier, started_at, \
+             retention_days, retained_until_ms \
+             FROM sessions \
+             WHERE harness_session_id = ?1 AND project_root = ?2 AND harness_source = ?3",
+            rusqlite::params![harness_session_id, project_root, harness_source],
+            |row| {
+                Ok(StoredSession {
+                    row_id: row.get(0)?,
+                    harness_session_id: row.get(1)?,
+                    sure_session_id: parse_session_id(row.get::<_, String>(2)?)?,
+                    project_root: row.get(3)?,
+                    project_fingerprint: row.get(4)?,
+                    harness_source: row.get(5)?,
+                    capability_tier: row
+                        .get::<_, Option<i64>>(6)?
+                        .and_then(|n| CapabilityTier::from_number(n as u8)),
+                    started_at: row.get(7)?,
+                    retention_days: row.get(8)?,
+                    retained_until_ms: row.get(9)?,
+                })
+            },
+        )
     }
 
     fn event_exists(&self, event_id: &EventId) -> Result<bool, SessionEventStoreError> {
@@ -607,6 +661,8 @@ mod tests {
     use sure_protocol::event::EventEnvelope;
 
     use crate::store::{HistoryFilter, Store};
+    use std::sync::mpsc;
+    use std::thread;
 
     fn scratch(name: &str) -> std::path::PathBuf {
         crate::store::scratch_root().join(format!("{name}-{}", std::process::id()))
@@ -904,6 +960,177 @@ mod tests {
             !text.contains('\n'),
             "message contains a real newline: {text}"
         );
+    }
+
+    #[test]
+    fn events_without_session_id_get_distinct_sessions() {
+        // A missing harness session id means SURE has no basis for correlation.
+        // The unique index is on the harness id, so NULLs remain distinct and
+        // every event gets its own session.
+        let store = store_in("no_session_id");
+        let ses = SessionEventStore::new(&store);
+        let fingerprint = FingerprintId::generate();
+        let mut envelope = valid_envelope("tool.completed");
+        envelope.session_id = None;
+        let ingested = IngestedEvent {
+            envelope,
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        };
+
+        let event1 = EventId::generate();
+        let event2 = EventId::generate();
+        ses.persist(&ingested, "C:\\work\\my project", &fingerprint, &event1)
+            .unwrap();
+        ses.persist(&ingested, "C:\\work\\my project", &fingerprint, &event2)
+            .unwrap();
+
+        let sessions = ses.sessions_past_retention(i64::MAX).unwrap();
+        assert_eq!(
+            sessions.len(),
+            2,
+            "events with no harness session id should not share a session"
+        );
+    }
+
+    #[test]
+    fn concurrent_duplicate_event_id_is_idempotent() {
+        // Two hook processes ingesting the same event id at the same time must
+        // not create two authoritative event rows. One wins, the other gets
+        // AlreadyExists, and the database ends with exactly one event.
+        let dir = scratch("concurrent_duplicate_event_id");
+        let database = dir.join("sure.db");
+
+        let fingerprint = FingerprintId::generate();
+        let envelope = valid_envelope("tool.completed");
+        let ingested = IngestedEvent {
+            envelope,
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        };
+        let event_id = EventId::generate();
+
+        let (tx1, rx1) = mpsc::channel();
+        let (tx2, rx2) = mpsc::channel();
+
+        let ingested1 = ingested.clone();
+        let path1 = database.clone();
+        let fp1 = fingerprint.clone();
+        let id1 = event_id.clone();
+        let handle1 = thread::spawn(move || {
+            let store = Store::open_at(&path1).expect("the store opens");
+            let result = SessionEventStore::new(&store)
+                .persist(&ingested1, "C:\\work\\my project", &fp1, &id1)
+                .expect("persist does not error");
+            tx1.send(result).expect("result sent");
+        });
+
+        let ingested2 = ingested.clone();
+        let path2 = database.clone();
+        let fp2 = fingerprint.clone();
+        let id2 = event_id.clone();
+        let handle2 = thread::spawn(move || {
+            let store = Store::open_at(&path2).expect("the store opens");
+            let result = SessionEventStore::new(&store)
+                .persist(&ingested2, "C:\\work\\my project", &fp2, &id2)
+                .expect("persist does not error");
+            tx2.send(result).expect("result sent");
+        });
+
+        handle1.join().expect("thread one finishes");
+        handle2.join().expect("thread two finishes");
+
+        let results = vec![rx1.recv().unwrap(), rx2.recv().unwrap()];
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| **r == PersistResult::Stored)
+                .count(),
+            1,
+            "exactly one concurrent ingest should store the event: {results:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| **r == PersistResult::AlreadyExists)
+                .count(),
+            1,
+            "exactly one concurrent ingest should find the event already exists: {results:?}"
+        );
+
+        let store = Store::open_at(&database).expect("the store reopens");
+        let ses = SessionEventStore::new(&store);
+        let sessions = ses.sessions_past_retention(i64::MAX).unwrap();
+        assert_eq!(sessions.len(), 1);
+        let events = ses.events_for_session(sessions[0].row_id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id, event_id);
+    }
+
+    #[test]
+    fn concurrent_session_creation_reuses_one_session_row() {
+        // Two events for the same harness session arriving at once must not
+        // create two session rows. The unique index and INSERT OR IGNORE path
+        // make the second writer find the row the first wrote.
+        let dir = scratch("concurrent_session_creation");
+        let database = dir.join("sure.db");
+
+        let fingerprint = FingerprintId::generate();
+        let base_envelope = valid_envelope("tool.completed");
+        let event1_id = EventId::generate();
+        let event2_id = EventId::generate();
+
+        let (tx1, rx1) = mpsc::channel();
+        let (tx2, rx2) = mpsc::channel();
+
+        let path1 = database.clone();
+        let fp1 = fingerprint.clone();
+        let env1 = base_envelope.clone();
+        let handle1 = thread::spawn(move || {
+            let store = Store::open_at(&path1).expect("the store opens");
+            let ingested = IngestedEvent {
+                envelope: env1,
+                protocol_version: PROTOCOL_VERSION,
+                document_kind: DocumentKind::Event,
+            };
+            let result = SessionEventStore::new(&store)
+                .persist(&ingested, "C:\\work\\my project", &fp1, &event1_id)
+                .expect("persist does not error");
+            tx1.send(result).expect("result sent");
+        });
+
+        let path2 = database.clone();
+        let fp2 = fingerprint.clone();
+        let env2 = base_envelope.clone();
+        let handle2 = thread::spawn(move || {
+            let store = Store::open_at(&path2).expect("the store opens");
+            let ingested = IngestedEvent {
+                envelope: env2,
+                protocol_version: PROTOCOL_VERSION,
+                document_kind: DocumentKind::Event,
+            };
+            let result = SessionEventStore::new(&store)
+                .persist(&ingested, "C:\\work\\my project", &fp2, &event2_id)
+                .expect("persist does not error");
+            tx2.send(result).expect("result sent");
+        });
+
+        handle1.join().expect("thread one finishes");
+        handle2.join().expect("thread two finishes");
+
+        assert_eq!(rx1.recv().unwrap(), PersistResult::Stored);
+        assert_eq!(rx2.recv().unwrap(), PersistResult::Stored);
+
+        let store = Store::open_at(&database).expect("the store reopens");
+        let ses = SessionEventStore::new(&store);
+        let sessions = ses.sessions_past_retention(i64::MAX).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "two events for the same harness session should create one session row"
+        );
+        let events = ses.events_for_session(sessions[0].row_id).unwrap();
+        assert_eq!(events.len(), 2);
     }
 
     #[test]

@@ -74,7 +74,17 @@ does not provide. The refusal names what to write instead — the local-only
 alternative of `local_first` or `fully_local`.
 
 `full_recording` and `telemetry` are opt-in. Both are reported as requests, and
-neither takes effect without higher-authority approval.
+neither is meant to take effect without higher-authority approval: a project file
+asking for either produces a refusal in `Authority::privileges()` rather than a
+grant.
+
+`telemetry` cannot take effect at all in this release, because nothing implements
+it. **`full_recording` can, and one step short of that rule is where it is
+enforced today:** `sure hook ingest` decides whether to write a recording from
+the project's own file alone (`crates/sure-cli/src/hook.rs`), so a repository the
+user merely opened turns recording on. The *duration* named below is arbitrated
+properly between the two files; putting the consent itself through `Authority`
+is `P13-T009`.
 
 `full_recording_retention_days` is how long the raw content a full recording
 kept is kept for. It is an integer number of days, `0` means "until the moment

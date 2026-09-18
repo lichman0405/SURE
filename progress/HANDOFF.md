@@ -3,10 +3,15 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T003` (implement recording retention/deletion controls) is
-dispatched as of `d2f4065` and is `in_progress`, with its brief at
-`target/tmp/brief-p13t003.md`. `P13-T002` (implement privacy modes) is accepted
-as commit `2439c6f`, verified at that sha — "What `P13-T002` added" and
+**In flight:** nothing at this commit — `P13-T003` was dispatched from `d2f4065`
+and has been verified and accepted as `acbc425`, and `P13-T004` (implement
+protection rule engine) is dispatched in the commit after this one, with its
+brief at `target/tmp/brief-p13t004.md`. `P13-T003` (implement recording
+retention/deletion controls) is accepted as commit `acbc425`, verified at that
+sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry the
+numbers for it, and they include one sentence of shipped documentation that was
+false and was corrected at acceptance. `P13-T002` (implement privacy modes) is
+accepted as commit `2439c6f`, verified at that sha — "What `P13-T002` added" and
 "Validation of `P13-T002`" below carry the numbers. It found and recorded one
 defect in its own deliverable, a citation
 `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md` attributes to `CLI.md` that
@@ -25,7 +30,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 130 / 172 tasks accepted (counted from `progress/state.json` against
+Progress: 131 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -37,7 +42,7 @@ P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phas
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 2 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
+at 3 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -926,6 +931,139 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T003` added
+
+The retention mechanism existed and nothing had ever acted on it, and the whole
+`sure history` group refused. `sessions` and `session_events` had carried
+`retention_days` and `retained_until_ms`, with an index on each, since P8-T002,
+and the schema's own comment said the metadata was there "so that pruning can be
+done later without re-computing policy" — but the only `DELETE` in the product
+was `DELETE FROM records`, so a user who ran SURE for a year kept every session
+forever regardless of what the stored date said. `sessions_past_retention` was
+written, indexed and unreached, with all five of its call sites inside test
+modules.
+
+**A user can now read and remove what SURE recorded.** `sure history` lists the
+sessions this machine has recorded, newest first, with the project and harness
+each came from and how long it is kept and until when; an empty store says it is
+empty rather than printing a blank table, and creates no file doing it.
+`sure history show ID` prints one session and the events in it, each with the
+record that event owns. `sure history delete --all|--session ID|--project ROOT`
+removes the rows the scope names — sessions, the events in them, the records
+those events own, and any full recording written for one of them — in one
+transaction, and reports four counts rather than one, because "the transcript is
+gone too" is a different claim from "the session row is gone".
+
+**The scope on the command line is the consent, and nothing prompts.** Exactly
+one of the three scopes is required; none or two is a usage error at status 2
+rather than a default, so a delete with no scope can never be read as a delete of
+everything. A scope that matched nothing exits 0 and says it removed nothing,
+which is a fact about the store rather than a failure of the command; an id that
+is not in the store is a different case, and it is `sure history show` on one
+that exits 5. `sure history export` is refused at status 3 and names
+`sure --format json history` instead, so work not done and work that succeeded
+never look alike to a script.
+
+**The duration became a setting, and a project may only shorten it.**
+`privacy.full_recording_retention_days` is arbitrated through the same two-layer
+rule as every other restriction, and the asymmetry is the point: the user's own
+file may name any number of days, including one longer than SURE's default,
+because how long a person keeps their own machine's records is their decision;
+a project file may only shorten it, and asking for longer leaves a refused
+`ProjectRequest::ExtendedRetention` on the record rather than raising the number
+or silently keeping the shorter one while reporting the longer. This is the same
+rule as `full_recording` one step along — recording more is not running more, and
+keeping it longer is recording more. `DEFAULT_FULL_RECORDING_RETENTION_DAYS = 3`
+is now the absent-value default rather than the only number, and `by: None` says
+nothing beyond SURE's own default chose it.
+
+**One sentence of shipped documentation was false and was corrected at
+acceptance.** `CONFIG_REFERENCE.md` said `full_recording` and `telemetry`
+"neither takes effect without higher-authority approval". For `telemetry` that is
+true because nothing implements it. For `full_recording` it is not: `sure hook
+ingest` decides whether to write a recording from the project's own file alone
+(`crates/sure-cli/src/hook.rs`, `Config::load(project_path)`), so a repository
+the user merely opened turns recording on, while `authority.rs` treats a
+project-only `FullRecording` request as a refused escalation. The discrepancy is
+pre-existing — `git diff d2f4065 acbc425 -- crates/sure-cli/src/hook.rs` shows
+this commit added only the retention lines — and the worker reported it and left
+it, which was right on scope. The supervisor measured it rather than reading it
+(a project file alone wrote a recording row with no user file on this machine)
+and corrected the document to state the rule, say which half is enforced, and
+name `P13-T009`, whose first acceptance criterion is exactly "Project sure.yaml
+cannot weaken user-level safety/privacy policy".
+
+## Validation of `P13-T003`
+
+Accepted at `acbc425` after independent verification, dispatched from `90d30a4`.
+Five gates from PowerShell at that sha, all exit 0: fmt; clippy; `cargo test
+--workspace --all-features --no-fail-fast` with 73 targets, **2452 passed, 0
+failed, 12 ignored** (the previous accepted tip measured 2435, so +17); the five
+`0 passed` lines are `sure_testkit`'s unit tests and four doc-test binaries,
+matched by the `Running`/`Doc-tests` header each result sits under rather than
+assumed; validate-bootstrap "17 phases, 172 tasks"; taskctl validate "state OK:
+172 tasks". The developer's real store is byte-identical before and after, at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes,
+and every probe and test spawn named `--store-dir` at a scratch path outside the
+repository.
+
+Both criteria were driven through the shipped binary rather than read from the
+diff. Criterion 1, into a scratch store: the empty answer at status 0 creating no
+file; two ingested events listed newest-first; `show` printing the session, its
+event and the record that event owns; `delete --session` reporting four counts
+with the listing re-read from the store going 2 → 1 and then to 0 after
+`--project`. Statuses measured from redirection to files rather than through a
+pipeline: no scope 2, two scopes 2, `export` 3, `show` on a missing id 5. The
+JSON frames carry `removed: false` beside the four zero counts, so "removed
+nothing" and "removed something" are distinguishable without parsing prose.
+
+Criterion 2, measured independently of the worker's own test, which names zero
+days and is therefore machine-independent but cannot show that an arbitrary
+number is honoured. Five projects, each read back from the `records` table with
+sqlite3: `0` gave now + 113 ms; `2` gave two days exactly; **`99999` gave three
+days** — the escalation refused and the ceiling used, not 99999 days; naming no
+duration gave the same three days with nothing recorded as choosing it; and
+`full_recording: false` with a duration beside it wrote no recording at all,
+which is the two settings being different quantities rather than one read twice.
+The escalation direction is the one the worker could not reach at process level,
+because `--store-dir` is still the only global path flag and `Paths::from_roots`
+the only injection point; the user-stricter direction stays unit-tested in
+`authority.rs`, and the developer's real `%APPDATA%\SURE\sure.yaml` does not
+exist and was not created.
+
+The guard was proven able to fail by a mutation the worker did not use: the
+ceiling treated "the user named nothing" as "no ceiling" (`unwrap_or(i64::MAX)`),
+which failed `a_project_cannot_extend_the_retention_and_is_refused_rather_than_
+clamped` and `a_project_file_cannot_grant_itself_anything` by name, and — driven
+through the rebuilt binary rather than left at unit level — turned the same
+99999-day project into **99999 days, a date 8639913601306 ms out**, instead of
+three. Restored, mtime touched, hash back to
+`F40BA876F8B38A3BA564CDDC217F0CE3FC74B3F803BCD00A90AD069E301446E1`, tree clean,
+module green at 24 passed, probe back to three days.
+
+The hand-back carried one claim that is false about the shipped binary and it is
+recorded here so it is not propagated: its §4 says a session id that is not there
+exits 5, and `history delete --session no-such-session` exits 0 with "Nothing was
+deleted". It is `history show` on a missing id that exits 5. The shipped document
+says both things separately and correctly (`CLI.md:158-163`), so the artefact is
+consistent and only the hand-back's prose compressed two sentences into one wrong
+one — the same shape as `P13-T002`'s invented quotation. The supervisor's own
+first probe run measured nothing at all for the same kind of reason: a helper
+function had a parameter named `$args`, which is PowerShell's reserved automatic
+variable, so all seventeen invocations reached the binary with no arguments and
+every one was a clap status-2 usage error. The 1292 bytes of usage text on stderr
+in all seventeen was what gave it away. Fixing the parameter name and re-running
+produced the measurements above.
+
+Three findings belong to other tasks and are recorded rather than fixed:
+`P13-T009` owns the `full_recording` consent wiring above. The Claude Code smoke
+test still tells the reader to run `sure init` (a status-2 unrecognised
+subcommand) and to write `execution.mode: InspectOnly` for a spelling the domain
+accepts as `inspect_only`. And `cli_contract.rs`'s `a_directory_of_our_own`
+searches `store-0..store-999`, which was exhausted by its own leftovers after
+2264 scratch directories; `runtime_start` has now failed twice on separate
+parallel full-suite runs under port pressure, passing alone and on re-run.
 
 ## What `P13-T002` added
 

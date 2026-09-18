@@ -1,0 +1,15 @@
+{
+  "event": "PostToolUse",
+  "harness_session_id": "claude-session-001",
+  "tool": "Bash",
+  "args": {
+    "command": "npm run deploy",
+    "workdir": "C:\\Users\\dev\\sample-project"
+  },
+  "error": {
+    "exit_code": 1,
+    "message": "command not found"
+  },
+  "timestamp_utc": "2026-09-18T12:02:00Z",
+  "source": "claude-code"
+}

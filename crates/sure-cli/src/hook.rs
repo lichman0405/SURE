@@ -24,7 +24,7 @@ use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::decide_cursor_tool;
 use sure_core::ids::EventId;
-use sure_core::normalizer::cursor;
+use sure_core::normalizer::{claude_code, cursor};
 use sure_core::paths::Paths;
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::Store;
@@ -58,6 +58,10 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
     // Normalise based on source.
     let envelope = match source {
         Some("cursor") => match cursor::normalize(stdin) {
+            Ok(envelope) => envelope,
+            Err(error) => return failed("The event could not be normalised.", error.to_string()),
+        },
+        Some("claude-code") => match claude_code::normalize(stdin) {
             Ok(envelope) => envelope,
             Err(error) => return failed("The event could not be normalised.", error.to_string()),
         },
@@ -101,6 +105,12 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
     // Best-effort persistence. The harness cares most about the decision for
     // pre-tool-use; a store failure should not block the operation.
     let _ = persist_event(&ingested, &project_root);
+
+    // For now, Claude Code events do not need a protection decision (P10-T006).
+    // Return allow so the operation proceeds while evidence is recorded.
+    if source == Some("claude-code") {
+        return Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow());
+    }
 
     // Evaluate protection for pre-tool-use events.
     let is_pre_tool_use =
@@ -190,6 +200,15 @@ mod tests {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
     }
 
+    fn claude_fixture(name: &str) -> String {
+        let path = repository_root()
+            .join("integrations")
+            .join("claude-code")
+            .join("fixtures")
+            .join(name);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    }
+
     #[test]
     fn cursor_pre_tool_use_returns_decision() {
         let text = fixture("pre-tool-use.json");
@@ -250,6 +269,43 @@ mod tests {
     #[test]
     fn empty_stdin_fails() {
         let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "");
+        assert!(
+            matches!(report, Report::Failed(_)),
+            "expected Failed, got {report:?}"
+        );
+    }
+
+    #[test]
+    fn claude_code_session_start_allows_without_decision() {
+        let text = claude_fixture("session-start.json");
+        let report = run_ingest(Some("claude-code"), Some("session-start"), &text);
+        let decision = match &report {
+            Report::HookDecision(d) => d,
+            other => panic!("expected HookDecision, got {other:?}"),
+        };
+        assert_eq!(
+            decision.decision,
+            sure_core::hook_protection::ProtectionDecisionKind::Allow
+        );
+    }
+
+    #[test]
+    fn claude_code_pre_tool_use_allows_without_decision() {
+        let text = claude_fixture("pre-tool-use.json");
+        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), &text);
+        let decision = match &report {
+            Report::HookDecision(d) => d,
+            other => panic!("expected HookDecision, got {other:?}"),
+        };
+        assert_eq!(
+            decision.decision,
+            sure_core::hook_protection::ProtectionDecisionKind::Allow
+        );
+    }
+
+    #[test]
+    fn claude_code_invalid_json_fails() {
+        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), "{not json");
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"

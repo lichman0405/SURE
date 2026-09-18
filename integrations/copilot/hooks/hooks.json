@@ -1,0 +1,79 @@
+{
+  "description": "SURE evidence/protection hooks for GitHub Copilot — placeholder template. Replace Copilot-specific event names and response handling once Copilot's hook contract is documented.",
+  "hooks": {
+    "sessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "terminal|shell|Read|readFile|Write|writeFile|Edit|applyEdit|Delete|deleteFile",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "postToolUse": [
+      {
+        "matcher": "terminal|shell|Read|readFile|Write|writeFile|Edit|applyEdit|Delete|deleteFile",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-failure",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 after-file-edit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

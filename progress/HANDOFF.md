@@ -3,15 +3,15 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing. `P13-T002` (implement privacy modes) is accepted as
-commit `2439c6f`, verified at that sha — "What `P13-T002` added" and "Validation
-of `P13-T002`" below carry the numbers. It found and recorded one defect in its
-own deliverable, a citation `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`
-attributes to `CLI.md` that `CLI.md` does not contain; the supervisor corrected
-it at acceptance rather than accepting a true claim propped up by an invented
-quotation. The next READY task is `P13-T003` (implement recording
-retention/deletion controls), whose brief is already written and sits at
-`target/tmp/brief-p13t003.md`. `P12-T010`
+**In flight:** `P13-T003` (implement recording retention/deletion controls) is
+dispatched as of `d2f4065` and is `in_progress`, with its brief at
+`target/tmp/brief-p13t003.md`. `P13-T002` (implement privacy modes) is accepted
+as commit `2439c6f`, verified at that sha — "What `P13-T002` added" and
+"Validation of `P13-T002`" below carry the numbers. It found and recorded one
+defect in its own deliverable, a citation
+`docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md` attributes to `CLI.md` that
+`CLI.md` does not contain; the supervisor corrected it at acceptance rather than
+accepting a true claim propped up by an invented quotation. `P12-T010`
 (wire the MCP bridge into the Claude Code, Cursor and Agent plugin packages) is
 accepted as commit `752489c` — "What
 `P12-T010` added" and "Validation of `P12-T010`" below carry the numbers. Before

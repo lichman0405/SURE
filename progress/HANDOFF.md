@@ -3,10 +3,10 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing at this commit — `P13-T003` was dispatched from `d2f4065`
-and has been verified and accepted as `acbc425`, and `P13-T004` (implement
-protection rule engine) is dispatched in the commit after this one, with its
-brief at `target/tmp/brief-p13t004.md`. `P13-T003` (implement recording
+**In flight:** `P13-T004` (implement protection rule engine) is dispatched from
+`93bef58` and is `in_progress`, with its brief at `target/tmp/brief-p13t004.md`.
+`P13-T003` was dispatched from `d2f4065`, has been verified and accepted, and its
+acceptance is commit `93bef58`. `P13-T003` (implement recording
 retention/deletion controls) is accepted as commit `acbc425`, verified at that
 sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry the
 numbers for it, and they include one sentence of shipped documentation that was

@@ -51,6 +51,7 @@ pub mod project_verdict;
 pub mod recording_projection;
 pub mod redact;
 pub mod references;
+pub mod repair_impact;
 pub mod route_consistency;
 pub mod runtime_probes;
 pub mod runtime_start;

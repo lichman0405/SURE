@@ -392,6 +392,39 @@ fn claude_code_launcher_contract_fixtures_are_valid_json() {
 }
 
 #[test]
+fn claude_code_check_command_exists_and_is_thin() {
+    let check_md = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("commands")
+        .join("check.md");
+
+    assert!(
+        check_md.is_file(),
+        "claude-code check.md command file must exist"
+    );
+
+    let text = std::fs::read_to_string(&check_md).expect("check.md readable");
+
+    // It must reference the local SURE invocation path or concept.
+    let reaches_core =
+        text.contains("SURE_BIN") || text.contains("sure.exe") || text.contains("sure check");
+    assert!(
+        reaches_core,
+        "check.md must reference local SURE invocation (SURE_BIN, sure.exe, or sure check)"
+    );
+
+    // It must not copy the frozen no-trusted-intent limitation sentence.
+    let normalised = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let frozen = sure_domain::status::NO_TRUSTED_INTENT_LIMITATION;
+    let frozen_normalised = frozen.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !normalised.contains(&frozen_normalised),
+        "check.md must not copy the frozen no-trusted-intent limitation sentence; the core owns that wording"
+    );
+}
+
+#[test]
 fn cursor_command_files_exist_and_are_thin() {
     let commands_dir = sure_testkit::repository_root()
         .join("integrations")

@@ -3,6 +3,36 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P13-T008` — "Privacy/security integration suite" — dispatched
+from base commit `fe012f0` (the `P13-T009` acceptance) with its brief at
+`target/tmp/brief-p13t008.md`. Its two acceptance lines are *"Full recording off
+by default"* and *"Mandatory secret/protection fixtures pass"*, and the second is
+the interesting one, because a read of the tree at `fe012f0` says **there is
+nothing for it to pass against**: no `fixtures/` or `testdata/` directory exists
+under `crates/`, `fixtures/adversarial/` holds 18 directories and not one of them
+is a secret or a redaction case, and while `docs/testing/ADVERSARIAL_FIXTURES.md`
+("Mandatory scenarios", "A mandatory false green blocks release"),
+`docs/product/DEFINITION_OF_DONE.md` ("secret-redaction fixtures pass") and
+`docs/product/PRODUCT_EVALS.md` ("secret redaction mandatory fixtures: 100%") all
+score a mandatory fixture set, nothing in `crates/` binds that word to any list.
+The `evaluation/acceptance-manifest.json` cases `dangerous-delete`, `force-push`
+and `sensitive-read` are each `release_blocking: true` and each has no directory.
+The first acceptance line is in the same condition one level down: the *name* of
+the default case does not exist. The behaviour is covered — the two round-trip
+tests at `crates/sure-cli/src/hook.rs:1046` and `:1243` run with no settings file
+of any kind and assert `recordings.is_empty()` at `:1235` and `:1462` — but no
+test is *named* for it, and the one that looks as if it is
+(`full_recording_is_not_stored_when_not_opted_in`, `hook.rs:1012`) supplies an
+explicit `privacy: full_recording: false` project file, which is a different case
+from having no file at all. The seam with `P14-T008` ("Implement dangerous-action
+fixtures", acceptance "Delete/force-push/sensitive-read expected protection
+behavior tested") is named in the brief and is the worker's to state rather than
+to assume. **The `P13-T009` acceptance run is `35405022369`, green on all five
+jobs at attempt 1**, its three Rust logs measuring **2528 / 2519 / 2520 parents**
+against 2538 / 2529 / 2530 raw, 0 failed, 0 `Text file busy` — windows unmoved
+from `cbcc0be`, which is what a commit touching only `progress/`, `tasks/` and
+`SHA256SUMS.txt` should produce.
+
 **In flight:** nothing, as of this paragraph. `P13-T009` (route the execution
 mode, the permission set and the recording consent through `Authority`) was
 dispatched from base commit `4fadd00` — the `P13-T007` acceptance — with its

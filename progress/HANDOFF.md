@@ -3,30 +3,28 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T005` (implement dangerous shell/file/Git detectors), the
-first READY task, dispatched from base commit `56d2e63` — the `P13-T004`
-acceptance commit — with its brief at `target/tmp/brief-p13t005.md`. The brief
-carries a map of the existing detection machinery the supervisor verified in the
-tree rather than inferred: `safety.rs` already detects force push (`:756`) and
-destructive delete (`:1053-1062`), but `safety::classify`'s only shipping caller
-is `consent.rs:258` and `PermissionPlan::new` has no shipping caller at all, so
-none of it reaches a user; the hook never reads a command line
-(`hook.rs:175-179`) although both normalisers carry `args.command` straight to
-that point; and no one-time override exists anywhere in the repository. The
-brief names the four things that make the task hard, including the one that must
-not be solved by accident — turning a shell string into program-plus-argv is the
-act `safety.rs:240-247` refuses to perform. `P13-T004` (implement protection rule
-engine) was dispatched from `93bef58`, has been verified and accepted at commit
-`56d2e63`, and "What `P13-T004` added" and "Validation of `P13-T004`" below carry
-the numbers — including a defect that is not that task's: the contract tests'
-scratch allocator had exhausted its fixed 1,000-name pool, so the five gates were
-no longer reproducible on this machine until the pool was cleared. That defect
-now has an owner, `P15-T015` (added 2026-09-19, after `P15-T014`), which is why
-the graph is 173 tasks rather than 172; `P15-T015` is deliberately **not** the
-next dispatch — the READY order is `tasks/tasks.json`'s order and `P13-T005`
-comes first — and the exact diagnosis is in `P13-T005`'s brief so that a worker
-who hits the panic clears the scratch pool instead of editing product code
-around it. `P13-T003` was dispatched from `d2f4065`, has been verified and
+**In flight:** `P13-T006` (implement protection audit history), the first READY
+task, being dispatched from base commit `64dd7da` — the `P13-T005` acceptance
+commit. `P13-T005` (implement dangerous shell/file/Git detectors) was dispatched
+from `56d2e63`, has been verified and accepted at commit `64dd7da`, and "What
+`P13-T005` added" and "Validation of `P13-T005`" below carry the numbers. It
+delivered all three named dangers and a one-time override for each, driven end to
+end through `target\debug\sure.exe` rather than argued from the diff, and it
+found one defect that is not its own — `sure hook allow-once` reports success for
+an allowance a project's settings make unspendable — which now has an owner,
+`P13-T010` (added 2026-09-19, after `P13-T009`), which is why the graph is 174
+tasks rather than 173. `P13-T010` is deliberately **not** the next dispatch: the
+READY order is `tasks/tasks.json`'s order, and `P13-T010` was inserted after the
+last `P13` task so that `P13-T006` still comes first. The other defect recorded
+during `P13-T005`'s verification is the contract tests' scratch allocator
+exhausting its fixed 1,000-name pool, which had made the five gates
+unreproducible on this machine until the pool was cleared; that one is
+`P15-T015` (added 2026-09-19, after `P15-T014`), and its exact diagnosis is in
+`target/tmp/brief-p13t005.md` so that a worker who hits the panic clears the
+scratch pool instead of editing product code around it. `P13-T004` (implement
+protection rule engine) was dispatched from `93bef58`, has been verified and
+accepted at commit `56d2e63`, and "What `P13-T004` added" and "Validation of
+`P13-T004`" below carry the numbers. `P13-T003` was dispatched from `d2f4065`, has been verified and
 accepted, and its acceptance is commit `93bef58`. `P13-T003` (implement
 recording retention/deletion controls) is accepted as commit `acbc425`, verified
 at that sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry
@@ -51,7 +49,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 132 / 173 tasks accepted (counted from `progress/state.json` against
+Progress: 133 / 174 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -61,12 +59,14 @@ owner (item 75), and from 171 to 172 when `P12-T007`'s verification found that
 recorded events never reach the verdict's capability tier (item 77), and from
 172 to 173 on 2026-09-19 when `P13-T004`'s verification found that the contract
 tests' scratch allocator had exhausted its fixed pool and made the five gates
-unreproducible (item 93)). **Phase
+unreproducible (item 93), and from 173 to 174 on 2026-09-19 when `P13-T005`'s
+verification found that `sure hook allow-once` reports success for an allowance
+the project's own settings make unspendable (item 97)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 4 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 15; Phase P16
+at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 15; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -856,14 +856,74 @@ tree is or is not intact would be reading a claim the file does not make.
     obligation to make the un-dispatched hazard non-misleading for whoever meets
     it first.
 
+94. `P13-T005`'s acceptance is the first one in this project where the three
+    deliverables were driven end to end through the shipped binary before the
+    diff was read, and the order is worth keeping: the mapping pass had already
+    established that the *detectors* existed and nothing reached a user, so the
+    only question the acceptance could turn on was whether a person can now see
+    SURE name the danger and let one through. Block, grant, allow, block — twice
+    for each of the three dangers, once with a second held request interleaved
+    to prove the allowances do not leak. A probe that reads the diff can confirm
+    every one of those facts and still be wrong about the product, which is what
+    happened twice here.
+
+95. `P13-T005`'s verification produced two instrument errors, both of which
+    first returned a confident and wrong answer, and the first is the most
+    expensive kind this loop has made. The probe wrote its payloads in the
+    *Claude Code* shape, with `project_root` and `path` inside `args`; Cursor
+    carries both at the top level (`normalizer/cursor.rs:20`, `:30`) and passes
+    `args` through untouched, so the request's root fell back to the process's
+    current directory, no project configuration or allowance could match, and
+    the probe reported — in complete, well-formed, entirely plausible sentences
+    — that the feature did not work at all. Nothing in the output looked like a
+    failure; it looked like a product that blocks everything and never lets
+    anything through, which is a *safe* shape and therefore an easy one to
+    believe. The correction was to read the normaliser rather than to re-run.
+    The second was smaller and already recorded: the gate script attributed the
+    `0 passed` results to the wrong header because `-match` is case-insensitive,
+    which item 92's family had already written down.
+
+96. The first gate run for `P13-T005` was launched from Git Bash via
+    `pwsh -File` and came back with 6 failures, two of them on tests that spawn
+    `powershell.exe`: the child inherited a `PSModulePath` without the Windows
+    PowerShell module directories, so `Microsoft.PowerShell.Security` could not
+    autoload and the tests read a GBK-encoded `about_Execution_Policies` error
+    instead of the stream they expected. Re-run from native PowerShell the same
+    script at the same commit is green, with `PSModulePath` correctly carrying
+    `C:\Program Files\WindowsPowerShell\Modules` and
+    `C:\Windows\system32\WindowsPowerShell\v1.0\Modules`. This is the sixth
+    variant of "the shell lied about the child" and the first caused by *which
+    shell the gates were launched from*, and it is the one that would have been
+    written into this file as a product failure. The rule it adds: a gate result
+    is a fact about the environment the gates were launched from as well as
+    about the tree, so when a run is red and the diff does not explain it,
+    re-run it from the environment the project documents before believing it.
+
+97. `P13-T005`'s verification found a defect that is not `P13-T005`'s:
+    `sure hook allow-once` reports success for an allowance the project's own
+    settings make unspendable. In a project whose `sure.yaml` says
+    `execution: mode: inspect_only` — the default — the command records a grant,
+    exits 0, and prints "SURE recorded a one-time allowance…" followed by "SURE
+    would then let that one request through, if SURE names it as…", while the
+    request it was recorded for stays blocked with "The current execution mode
+    does not permit this action." however many times it is sent. The refusal is
+    deliberate and documented; what is wrong is only what the person is told
+    when they record it. The safe direction holds, so this is a false
+    reassurance and a silent no-op rather than a false green — which is why it
+    is a task (`P13-T010`) and not a stop-the-line. It was inserted after the
+    last `P13` task, so §14 still hands the next dispatch to `P13-T006`, and by
+    item 93's rule the hazard is made non-misleading where it can be: the task's
+    own notes carry the exact transcript and the three citations that explain
+    the cause.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T004` was accepted and
-after `P15-T015` joined the graph, is `P13-T005`, `P13-T006`, `P13-T007`,
-`P13-T009`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T005` was accepted and
+after `P13-T010` joined the graph, is `P13-T006`, `P13-T007`, `P13-T009`,
+`P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
 `P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`, `P7-T013`, in the order
-`tasks/tasks.json` lists them. `P13-T005` (implement dangerous shell/file/Git
-detectors) is the first of those and is in flight; its base commit is the
-`P13-T004` acceptance commit `56d2e63`. `P15-T015` does not appear in that list
+`tasks/tasks.json` lists them. `P13-T006` (implement protection audit history) is
+the first of those and is in flight; its base commit is the `P13-T005` acceptance
+commit `64dd7da`. `P15-T015` does not appear in that list
 because it is queued behind work that precedes it in the array — it is
 deliberately placed in the P15 block rather than at the front, so the READY
 order stays the file's order and the task that fixes the gates is dispatched on
@@ -1027,6 +1087,119 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T005` added
+
+Three dangers a person can now see, and an override for each. The detection half
+already existed and was unreachable: `safety::classify` detects force push and
+destructive delete, but its only shipping caller was `consent.rs:258` inside
+`PlannedCommand::new`, whose only shipping caller was `PermissionPlan::add`, and
+`PermissionPlan::new` had no shipping caller at all — every site was a `#[cfg(test)]`
+module or a file under `crates/sure-core/tests/`. `approval.rs` was unreachable
+from the CLI entirely, and durable by construction: `authorise` takes `&ConsentRequest`
+and `&HostConsent`, so a single-use token is not expressible through its
+signature, and its module doc says a consent that lives only as long as the
+process "is not auditable". A case-insensitive count of `one[- _]time|allow
+once|allow_once|allowonce` over the repository found exactly three hits — the
+`PROTECTION_MODE.md:29` mock-up, this task's own acceptance string, and an
+unrelated line in `probe.rs`. So the acceptance was never "add three detectors".
+
+What the commit added is a path from a harness request to a sentence a person
+reads. `hook_protection::assess_request` reads a danger **only** for
+`NeedsConsent` (`:426-429`), through `claimed_danger` → `command_danger`
+(`:641-684`), which takes a danger only when `safety::classify`'s
+`classification.source()` is `Source::Rule` — so an unknown program or an
+unreadable line names nothing rather than being reported as SURE's own failure to
+classify. `safety::read_simple_command` is the new reader: it **refuses the whole
+line first** (any of `" ' \ $ ` ; & | < > ( ) { } ! # % ^` or CR/LF/NUL) and
+only then splits on ASCII whitespace. The direction is the safe one — `None` is
+the pre-existing state, and the reading can only widen what a person may spend an
+allowance on, never what SURE allows — and `~ * ? [ ]` are deliberately kept,
+because `rm -rf *` reads as `["rm","-rf","*"]`, `rm` is unconditionally
+destructive, and `*` makes the whole-location test fire. The cost is stated in
+the code: a Windows-style path inside a shell line contains `\`, so that line is
+not read, not named, and not offerable.
+
+`crates/sure-core/src/allowance.rs` (new, 485 lines) is the record of a grant:
+`Grant { tool, subject, granted_at_ms, not_after_ms }`, `Spent`,
+`AllowanceRecord`, `read_back`, `outstanding`, `record`, and a window bounded to
+1..=1440 minutes with a 30-minute default. It contains **no command name** — a
+grep for `rm`, `git`, `del`, `curl`, `chmod`, `sudo`, `bash`, `sh` in it returns
+nothing — and never calls `classify`; every dangerous label comes from the one
+existing engine. The atomicity is in the store, not in this module:
+`Store::spend_allowance` (`store/mod.rs:569-611`) reads, decides and writes
+inside `self.transaction(...)`, and `transaction` (`:903-923`) is
+`execute_batch("BEGIN IMMEDIATE")`, which takes the write lock now rather than at
+the first write — a deferred transaction would have let two racing hooks both
+read "outstanding" and both spend. The worker split `insert` into `insert`
+(`:841-861`, which still validates, takes the timestamp and opens the transaction)
+and `write_row` (`:870`, the bare INSERT) so that `spend_allowance` can nest;
+that split is behaviour-preserving. `RecordKind::Allowance` is a fourth kind
+rather than a reuse of `Approval`, because `approvals()` filters on that kind
+exactly and `is_approval()` is `matches!(self, Self::Approval)` — a second
+document shape under that name would have made the approval trail stop reading.
+No migration is needed: `store/sql/0001_records.sql:16` constrains the column
+only with `CHECK (kind <> '')`.
+
+The user-facing half is `sure hook allow-once` in `crates/sure-cli/src/hook.rs`,
+and the sentence a person reads says what was recorded, that this use spends it,
+and that no further request with these words would be allowed — never that
+something ran.
+
+## Validation of `P13-T005`
+
+Verified at `64dd7da` by the supervisor, in the tree and through the shipped
+binary, not from the worker's report. The commit is 14 files, 1662 insertions,
+25 deletions, with no path under `progress/` and no change to `SHA256SUMS.txt`.
+
+The gates were run from native PowerShell, each redirected to its own file:
+`cargo fmt --all -- --check` exit 0 with 0 bytes of output; `cargo clippy
+--workspace --all-targets --all-features -- -D warnings` exit 0; `cargo test
+--workspace --all-features --no-fail-fast` exit 0 with **73 `test result:`
+lines, 2501 passed, 0 failed, 12 ignored, 0 not-ok** (the previous accepted tip
+was 2469, so the suite grew by 32 and nothing was removed); `node
+scripts/validate-bootstrap.mjs` "SURE bootstrap validation OK: 17 phases, 173
+tasks"; `node scripts/taskctl.mjs validate` "state OK: 173 tasks". The five
+`0 passed` results were attributed by their headers with `-cmatch` — `sure_testkit`'s
+unit tests and the `Doc-tests` binaries for sure_cli, sure_domain, sure_protocol
+and sure_testkit, the same set as at `1454c8e`, so no suite silently ran nothing.
+The scratch pool from item 91 was cleared before the run, which is what made it
+reproducible.
+
+All three dangers were driven end to end through `target\debug\sure.exe`, with
+payloads the supervisor wrote, into a scratch store under `%TEMP%` and a scratch
+project outside the repository. **Broad delete**, in a project whose `sure.yaml`
+says `execution: mode: host_confirmed`: `rm -rf build/` → block, exit 1, "This
+names a whole location rather than one file… A harness hook cannot ask you about
+this, so SURE does not allow it."; `hook allow-once --tool Shell --command "rm
+-rf build/"` → exit 0; the same request → **allow, exit 0**, "…You recorded a
+one-time allowance for this exact request, and this use spends it, so SURE would
+let this one through. No further request with these words would be allowed."; the
+same request again → **block, exit 1**. **Force push**: `git push --force origin
+main` → block/1, "This would replace commits that were already published…"; with
+its own grant → allow/0; and the delete, whose grant was already spent, still
+blocked afterwards — so a grant is spent exactly once and leaks to no other
+request. **Sensitive read**, in a project also saying `protection: mode: strict`:
+a `Read` of `.env` → block/1 with the P13-T004 credentials sentence; with its own
+grant → allow/0; again → block/1. A line SURE refuses to read (`rm -rf "my dir"`,
+`cargo test && rm -rf .`) → block/1 with the plain consent sentence and **no
+danger named**, so it is not offerable at all — the fail-closed direction. A
+window it will not record (`--minutes 20000`, `--minutes 0`) → exit 5 with the
+1..1440 bound in the detail.
+
+Two instrument errors of the supervisor's own are recorded at items 95 and 96;
+the first of them reported a working feature as broken in fluent prose. A defect
+found while verifying, which is not this task's, is recorded at item 97 and given
+an owner, `P13-T010`. The honest limit is that the override is reachable only
+where the project's own configuration requests running project code: under the
+default `inspect_only` a destructive shell request is `Denied` rather than
+`NeedsConsent`, so no danger is named and no allowance can be spent. That refusal
+is deliberate and documented, and the command that `host_confirmed` is read from
+is the project's own file with no user arbitration — the gap already owned by
+`P13-T009`. The developer's store was touched by nothing: it is byte-identical
+before the probes, after the probes and after the full suite, at sha256
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes,
+and the directory holds `sure.db` and nothing else.
 
 ## What `P13-T004` added
 

@@ -2060,6 +2060,24 @@
     "notes": ""
   },
   {
+    "id": "P13-T010",
+    "phase": "P13",
+    "title": "Tell a person when a recorded allowance cannot be spent",
+    "required": true,
+    "depends_on": [
+      "P13-T005"
+    ],
+    "acceptance": [
+      "Recording an allowance in a project whose settings make every matching request unanswerable by that allowance does not end in a plain success: the command either refuses and says why, or records and says what will actually happen — observed by running it in such a project and reading what it writes, not by reading the code.",
+      "The reason is stated in the user’s terms and names the setting that causes it, so a person can change that setting or stop expecting the allowance to work; it does not name the internal mode value alone.",
+      "The confirmation a user reads when an allowance *can* be spent no longer promises an outcome the settings make unreachable, and the confirmation for one that cannot is a different sentence rather than the same sentence plus a caveat.",
+      "Whatever is chosen, the store is left consistent with it: an allowance that is refused is not written, and one that is written is one a matching request can actually spend. Proved by reading the store back after both cases.",
+      "The command still records an allowance for every project where one can be spent, so the fix does not narrow what P13-T005 delivered."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-19 by the supervisor, from P13-T005's verification. Driven through target/debug/sure.exe against a scratch project outside the repository, with the payload the supervisor wrote: a project whose sure.yaml says `execution: mode: inspect_only`, then `hook allow-once --project <that project> --tool Shell --command \"rm -rf build/\"` exits 0 and prints \"SURE recorded a one-time allowance for tool 'Shell', for the request 'rm -rf build/'.\" followed by \"SURE would then let that one request through, if SURE names it as deleting a whole location, overwriting published commits, or reading a file of credentials.\" The request it was recorded for is then still blocked, unchanged, with \"The current execution mode does not permit this action.\" — and it stays blocked however many times it is sent. The cause is not a bug in the spend path: under a mode that does not run project code, `consent::decide_for` answers an arbitrary command `Denied` rather than `NeedsConsent` (`crates/sure-core/src/consent.rs:491-501`, because `CommandClass::Destructive.required_permission()` is `None` at `crates/sure-domain/src/execution.rs:631`), and `hook_protection::assess_request` reads a danger only for `NeedsConsent` (`crates/sure-core/src/hook_protection.rs:426-429`), so no danger is ever named and `with_any_allowance` returns at its first line (`crates/sure-cli/src/hook.rs:416-418`). That refusal is deliberate and correct — `docs/security/PROTECTION_MODE.md` states that a request held for any other reason cannot be let through by an allowance, and \"an allowance is not a way to run under settings the user did not change\". What is wrong is only what the user is told at the moment they record the grant: the command has `--project`, could read the mode, and instead reports a success and a promise that this project's settings make unreachable. The safe direction holds throughout — nothing dangerous is allowed — so this is a false reassurance and a silent no-op, not a false green. Related but distinct: `docs/security/PROTECTION_MODE.md` says the *subject* is deliberately not checked at write time, because there is no request to read then, and a grant no request ever matches is spent by nothing and expires; that stays as it is and this task does not ask for it. The mode, unlike the subject, is knowable at write time."
+  },
+  {
     "id": "P14-T001",
     "phase": "P14",
     "title": "Implement TypeScript adversarial fixture apps",

@@ -59,10 +59,18 @@ both are what Windows editors write by default.
 where it is separately configured. `fully_local` sends nothing out at all, and
 cannot be combined with an external analysis provider.
 
+This file and the user's own file outside the project are read together, and the
+mode in effect is the stricter of the two — see
+[CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins).
+A project may ask for more privacy than the user configured; it may not ask for
+less. What each mode means, and where a run states which one it was under, is
+`docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`.
+
 `cloud_enhanced` is described in the privacy documentation as a future mode and
 is **refused** rather than accepted. Nothing in this release implements it, and
 accepting the setting would let a project file claim a privacy arrangement SURE
-does not provide.
+does not provide. The refusal names what to write instead — the local-only
+alternative of `local_first` or `fully_local`.
 
 `full_recording` and `telemetry` are opt-in. Both are reported as requests, and
 neither takes effect without higher-authority approval.

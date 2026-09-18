@@ -66,11 +66,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use sure_core::config::Config;
+use sure_core::config::Authority;
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::intent::IntentSource;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome, Stage, StageOutcome};
+use sure_core::privacy::{ModelUse, PrivacyStatement};
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
 use sure_core::status::NotCheckedReason;
 use sure_core::store::{Store, StoreError};
@@ -191,8 +192,15 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
     // the user typed is theirs whether or not the project's file can be read.
     // They decide the execution mode every dynamic check is authorised under, so
     // a run that could not read them has nothing to check with.
-    let loaded = match Config::load(project) {
-        Ok(loaded) => loaded,
+    //
+    // Read through the authority rather than through `Config::load`, because the
+    // project's file is not the only settings file there is. The user's own file
+    // outside the project is what decides whether the project's file may have
+    // what it asks for (`docs/architecture/CONFIG_AUTHORITY.md`), and the privacy
+    // mode this run is under is the arbitrated one — see `sure_core::privacy`.
+    // Reading one file would let a run report a policy the user had overridden.
+    let authority = match Authority::load(project, &paths.user_config_file()) {
+        Ok(authority) => authority,
         Err(error) => {
             let what = if recorded.is_some() {
                 RECORDED_AND_UNCHECKED
@@ -202,6 +210,8 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
             return failed(purpose, what, error.to_string());
         }
     };
+    let loaded = authority.project_file();
+    let privacy = PrivacyStatement::of(&authority);
 
     // The history, when there is one — see the module comment for why nothing is
     // created here.
@@ -220,11 +230,16 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         goal,
     }
     .run();
+    // Read after the run, because it is the run's own record of the one stage
+    // that would ask a model — not a second opinion about the configuration.
+    let model_use = ModelUse::of(privacy.provider, &run);
 
     Report::Check(Box::new(CheckReport {
         command: purpose.as_str(),
         project: project.display().to_string(),
         run,
+        privacy,
+        model_use,
         recorded_goal: recorded,
     }))
 }
@@ -384,6 +399,7 @@ fn finished(
     writeln!(out)?;
 
     stages(outcome, out)?;
+    privacy(&report.privacy, report.model_use, out)?;
     if let Some(recorded) = &report.recorded_goal {
         what_was_recorded(recorded, out)?;
     }
@@ -475,6 +491,11 @@ fn stopped(report: &CheckReport, out: &mut impl Write) -> io::Result<()> {
         "No verdict was produced, so this is not a statement about your project: SURE did not \
          get far enough to make one."
     )?;
+    writeln!(out)?;
+    // A run that stopped still has settings, and the user is still owed the
+    // answer about what this run was allowed to send. Saying nothing here would
+    // be the one shape of silence that reads as "nothing left the machine".
+    privacy(&report.privacy, report.model_use, out)?;
     if let Some(recorded) = &report.recorded_goal {
         what_was_recorded(recorded, out)?;
     }
@@ -485,6 +506,60 @@ fn stopped(report: &CheckReport, out: &mut impl Write) -> io::Result<()> {
          wrong command line.",
         exit::FAILED
     )
+}
+
+/// What this run was allowed to send, and whether it sent anything.
+///
+/// The section exists because the answer to "which privacy mode is running" is
+/// not derivable by a user from anything else SURE prints, and because
+/// `docs/security/PRIVACY.md` states that the report says when external analysis
+/// was used. Silence would read both as "nothing left this machine" and as "SURE
+/// did not look", and only one of those is true.
+///
+/// Both values come from `sure_core::privacy`, which is where the reasons live:
+/// the mode is the arbitrated one and not the one a file names, and whether a
+/// model was consulted is read from the run's own stage log rather than from a
+/// sentence written once and left to rot.
+fn privacy(
+    statement: &PrivacyStatement,
+    model_use: ModelUse,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    writeln!(out, "Privacy and model use")?;
+    writeln!(out)?;
+    writeln!(out, "  Mode in effect: {}", statement.mode.as_str())?;
+    writeln!(out, "    {}", statement.mode_set_by_plain_words())?;
+    writeln!(out, "    {}", statement.mode_plain_words())?;
+    if statement.project_settings_differ() {
+        writeln!(
+            out,
+            "    This project's own settings come to {}, and a project's file cannot loosen \
+             yours: the stricter of the two is the one in effect.",
+            statement.project_mode.as_str()
+        )?;
+    }
+    // The one combination a user cannot see any other way, and the one the
+    // privacy mode exists for. `config/mod.rs` refuses it inside a single file,
+    // so the only way to be in this state is for the two files to disagree — and
+    // a report that said nothing here would leave a user reading "fully_local"
+    // directly above a named external provider with no explanation.
+    //
+    // What it says is a fact about the configuration and not a promise about
+    // traffic: `allows_external_analysis` is enforced at the file boundary, and
+    // nothing on the send path consults it. Saying "nothing may be sent" would
+    // be a guarantee this build does not implement.
+    if !statement.allows_external_analysis() && statement.provider.is_external() {
+        writeln!(
+            out,
+            "    This mode permits no external analysis, and the `{}` provider is external. A \
+             single settings file naming both is refused; they are in effect together because \
+             they came from different files.",
+            statement.provider.as_str()
+        )?;
+    }
+    writeln!(out, "  Analysis provider: {}", statement.provider.as_str())?;
+    writeln!(out, "  {}", model_use.plain_explanation())?;
+    writeln!(out)
 }
 
 /// The stage log, in order, with the gaps marked.
@@ -554,6 +629,25 @@ pub fn machine(report: &CheckReport) -> Value {
         "stopped_at": outcome.stopped_at.map(Stage::as_str),
         "stages": outcome.stages.iter().map(stage_machine).collect::<Vec<Value>>(),
         "recorded_goal": report.recorded_goal.as_ref().map(goal_machine),
+        // Facts, not prose: the sentence a person reads is in the human form,
+        // where it can say why. A script switching on `mode` gets the arbitrated
+        // value, and `mode_set_by` says which layer decided it.
+        "privacy": {
+            "mode": report.privacy.mode.as_str(),
+            "mode_set_by": report.privacy.mode_set_by.map(sure_core::config::Layer::as_str),
+            "project_mode": report.privacy.project_mode.as_str(),
+            "external_analysis_allowed": report.privacy.allows_external_analysis(),
+            "analysis_provider": report.privacy.provider.as_str(),
+        },
+        // One field, and it is the state rather than a boolean: `false` would
+        // have to stand for both "a model was not consulted" and "this run
+        // cannot say", and a script reading the reassuring half of an ambiguous
+        // field is how "nothing was sent" gets asserted about a run that never
+        // reached the stage.
+        "model_use": {
+            "state": report.model_use.as_str(),
+            "provider": report.model_use.provider().as_str(),
+        },
     });
 
     match &outcome.run {
@@ -710,6 +804,23 @@ mod tests {
         fn paths(&self) -> Paths {
             Paths::from_roots(self.root.join("data"), self.root.join("config"))
                 .expect("the scratch locations are absolute")
+        }
+
+        /// The user's own settings file, outside the project.
+        ///
+        /// Written under the fixture's own config root rather than at the
+        /// machine's real one, which is the whole reason [`Paths::from_roots`]
+        /// exists: the real user configuration directory cannot be moved by a
+        /// flag or an environment variable, so a test that read it would be a
+        /// test of whoever's machine it ran on.
+        fn write_user_config(&self, contents: &str) {
+            let path = self.paths().user_config_file();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .unwrap_or_else(|error| panic!("cannot create {}: {error}", parent.display()));
+            }
+            std::fs::write(&path, contents)
+                .unwrap_or_else(|error| panic!("cannot write {}: {error}", path.display()));
         }
     }
 
@@ -1077,6 +1188,310 @@ mod tests {
             stage["reason"],
             json!("analysis_provider_disabled"),
             "the frame does not carry the vocabulary's own reason: {stage}"
+        );
+    }
+
+    // --- privacy and model use ---------------------------------------------
+
+    #[test]
+    fn the_mode_in_a_report_is_the_arbitrated_one_and_not_the_one_a_file_names() {
+        // The criterion "local-first / fully-local / cloud-enhanced semantics
+        // explicit", measured where it can be got wrong: a run has two settings
+        // files and only one of them may decide. A project's file cannot loosen
+        // the user's (`docs/architecture/CONFIG_AUTHORITY.md`), so a report that
+        // named the project's mode would be a false statement about the user's
+        // own policy — see `sure_core::privacy`.
+        let fixture = Fixture::new("privacy-arbitrated");
+        a_project(&fixture);
+        let paths = fixture.paths();
+
+        // The project asks for `local_first`; the user's own file says
+        // `fully_local`. The project's file is read first by the pipeline and
+        // would be the easy thing to report.
+        fixture.write("sure.yaml", "privacy:\n  mode: local_first\n");
+        fixture.write_user_config("privacy:\n  mode: fully_local\n");
+        let report = run_with(Purpose::Check, &paths, &fixture.project(), None);
+
+        let check = checked(&report);
+        assert_eq!(
+            check.privacy.mode,
+            sure_core::config::PrivacyMode::FullyLocal,
+            "the report names the mode the project asked for, not the mode in effect"
+        );
+        assert_eq!(
+            check.privacy.mode_set_by,
+            Some(sure_core::config::Layer::User)
+        );
+        assert_eq!(
+            check.privacy.project_mode,
+            sure_core::config::PrivacyMode::LocalFirst
+        );
+        assert!(!check.privacy.allows_external_analysis());
+        assert!(check.privacy.project_settings_differ());
+
+        // Both renderings, because a user reads one and a script reads the other.
+        let written = report.human_text();
+        assert!(written.contains("Mode in effect: fully_local"), "{written}");
+        assert!(written.contains("cannot loosen yours"), "{written}");
+        let machine = machine_of(&report);
+        assert_eq!(machine["privacy"]["mode"], json!("fully_local"));
+        assert_eq!(machine["privacy"]["mode_set_by"], json!("user"));
+        assert_eq!(machine["privacy"]["project_mode"], json!("local_first"));
+        assert_eq!(
+            machine["privacy"]["external_analysis_allowed"],
+            json!(false)
+        );
+
+        // The other direction, and the reason both are worth having: a project
+        // asking for more privacy than the user configured becomes the mode in
+        // effect, and is named as the one that set it. It is not escalation —
+        // the mode is a maximum — so it cannot raise what a run may do.
+        let other = Fixture::new("privacy-project-decides");
+        a_project(&other);
+        other.write("sure.yaml", "privacy:\n  mode: fully_local\n");
+        let report = run_with(Purpose::Check, &other.paths(), &other.project(), None);
+        let check = checked(&report);
+        assert_eq!(
+            check.privacy.mode,
+            sure_core::config::PrivacyMode::FullyLocal
+        );
+        assert_eq!(
+            check.privacy.mode_set_by,
+            Some(sure_core::config::Layer::Project)
+        );
+        assert!(!check.privacy.project_settings_differ());
+        assert!(report.human_text().contains("Mode in effect: fully_local"));
+    }
+
+    #[test]
+    fn a_project_cannot_lower_the_mode_the_users_own_settings_set() {
+        // The rule from the other side, as a run rather than as a value: the same
+        // project file, byte for byte, is checked under two different user
+        // settings, and the run's own report differs. This is the case the brief
+        // asks for and the one a single-file reader must fail.
+        let fixture = Fixture::new("privacy-not-lowerable");
+        a_project(&fixture);
+        fixture.write("sure.yaml", "privacy:\n  mode: local_first\n");
+        let paths = fixture.paths();
+        let project = fixture.project();
+
+        let before = run_with(Purpose::Check, &paths, &project, None);
+        assert_eq!(
+            checked(&before).privacy.mode,
+            sure_core::config::PrivacyMode::LocalFirst
+        );
+
+        fixture.write_user_config("privacy:\n  mode: fully_local\n");
+        let after = run_with(Purpose::Check, &paths, &project, None);
+        assert_eq!(
+            checked(&after).privacy.mode,
+            sure_core::config::PrivacyMode::FullyLocal,
+            "the same project file reported the same mode under stricter user settings, so the \
+             reported mode is not the arbitrated one"
+        );
+        assert!(!checked(&after).privacy.allows_external_analysis());
+    }
+
+    #[test]
+    fn a_user_settings_file_that_cannot_be_read_stops_the_run_rather_than_being_ignored() {
+        // `Authority::load`'s rule: one bad file stops the read, because running
+        // with defaults while the user believes their settings are in force is
+        // the failure both readers exist to prevent. It is a visible error —
+        // status 5 and a sentence — and never a green run under a policy nobody
+        // chose. This is a behaviour change this task makes: before it, `sure
+        // check` never opened the user's file at all.
+        let fixture = Fixture::new("privacy-bad-user-file");
+        a_project(&fixture);
+        fixture.write_user_config("privacy:\n  mode: no_such_mode\n");
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let failure = failure(&report);
+        assert_eq!(failure.what, NOTHING_RECORDED);
+        assert_eq!(report.exit_code(), exit::FAILED);
+        assert_ne!(report.exit_code(), exit::OK);
+        assert_ne!(report.exit_code(), exit::UNAVAILABLE);
+        // The message names the file that could not be read, so a user can find
+        // it: this is a file outside the project, which nothing else in SURE
+        // would ever have mentioned.
+        assert!(
+            failure.detail.contains("sure.yaml"),
+            "the failure does not name the file: {}",
+            failure.detail
+        );
+    }
+
+    #[test]
+    fn an_external_provider_under_local_first_is_named_and_nothing_is_sent() {
+        // The other acceptance criterion's sharp edge: an external provider is
+        // configured, so the report has to say so, say which one, and say what
+        // happened — which in this build is that nothing was asked of it.
+        let fixture = Fixture::new("privacy-external-provider");
+        a_project(&fixture);
+        fixture.write("sure.yaml", "analysis:\n  provider: claude_cli\n");
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let check = checked(&report);
+        assert_eq!(
+            check.privacy.provider,
+            sure_core::config::AnalysisProvider::ClaudeCli
+        );
+        assert!(check.privacy.provider.is_external());
+        // `local_first` permits it, so the run goes ahead and the disclosure is
+        // about this run rather than about a refusal.
+        assert_eq!(
+            check.privacy.mode,
+            sure_core::config::PrivacyMode::LocalFirst
+        );
+        assert!(check.privacy.allows_external_analysis());
+        assert_eq!(
+            check.model_use,
+            ModelUse::NothingAsked {
+                provider: sure_core::config::AnalysisProvider::ClaudeCli
+            },
+            "the run did not record what it did about the provider it was given"
+        );
+
+        let written = report.human_text();
+        assert!(
+            written.contains("Analysis provider: claude_cli"),
+            "{written}"
+        );
+        assert!(written.contains("No model was consulted"), "{written}");
+        assert!(written.contains("claude_cli"), "{written}");
+        let machine = machine_of(&report);
+        assert_eq!(machine["privacy"]["analysis_provider"], json!("claude_cli"));
+        assert_eq!(machine["privacy"]["external_analysis_allowed"], json!(true));
+        assert_eq!(machine["model_use"]["state"], json!("nothing_asked"));
+        assert_eq!(machine["model_use"]["provider"], json!("claude_cli"));
+    }
+
+    #[test]
+    fn fully_local_and_an_external_provider_are_refused_in_one_file() {
+        // Not a guarantee this task adds: `config/mod.rs` has refused this pair
+        // since before it, and the point of asserting it here is that the refusal
+        // is what a user meets — status 5 and a message naming both settings —
+        // rather than a report that said `fully_local` while an external provider
+        // sat under it.
+        let fixture = Fixture::new("privacy-fully-local-external");
+        a_project(&fixture);
+        fixture.write(
+            "sure.yaml",
+            "privacy:\n  mode: fully_local\nanalysis:\n  provider: claude_cli\n",
+        );
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let failure = failure(&report);
+        assert_eq!(report.exit_code(), exit::FAILED);
+        // The message names both settings and says which one it is about, so the
+        // user knows what to change. It names the keys rather than the values —
+        // `privacy.mode` and `analysis.provider`, not `fully_local` and
+        // `claude_cli` — which is enough to act on and is `config/error.rs`'s
+        // wording rather than this task's to change.
+        assert!(
+            failure.detail.contains("privacy.mode") && failure.detail.contains("analysis.provider"),
+            "the refusal does not name both settings: {}",
+            failure.detail
+        );
+        assert!(
+            failure.detail.contains("fully-local") || failure.detail.contains("Fully-local"),
+            "the refusal does not say what fully-local means: {}",
+            failure.detail
+        );
+        assert!(
+            !fixture.paths().store_file().exists(),
+            "a refused configuration left a history behind"
+        );
+    }
+
+    #[test]
+    fn the_same_pair_split_across_two_files_is_not_refused_and_says_so() {
+        // The honest half of the rule above, and the reason the report has a line
+        // for this state at all: each file is validated on its own, so two files
+        // can put `fully_local` and an external provider in effect together. The
+        // report states the fact about the configuration, and states it as a fact:
+        // `allows_external_analysis` is enforced at the file boundary and nothing
+        // on the send path consults it, so a sentence promising that nothing
+        // *could* be sent would be a guarantee this build does not implement.
+        let fixture = Fixture::new("privacy-split-files");
+        a_project(&fixture);
+        fixture.write_user_config("privacy:\n  mode: fully_local\n");
+        fixture.write("sure.yaml", "analysis:\n  provider: openai_compatible\n");
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let check = checked(&report);
+        assert_eq!(
+            check.privacy.mode,
+            sure_core::config::PrivacyMode::FullyLocal
+        );
+        assert_eq!(
+            check.privacy.provider,
+            sure_core::config::AnalysisProvider::OpenAiCompatible
+        );
+        assert!(!check.privacy.allows_external_analysis());
+        assert!(machine_of(&report)["model_use"]["state"] != json!("consulted"));
+
+        let written = report.human_text();
+        assert!(
+            written.contains("came from different files"),
+            "the report does not explain a state no single file can be in:\n{written}"
+        );
+    }
+
+    #[test]
+    fn no_run_in_this_build_can_say_a_model_was_consulted() {
+        // The honest limit, as a test that will fail the day it stops being one.
+        // No check in this build asks for model-backed analysis, and stage 8 says
+        // so in its own words; so `consulted` is unreachable, and the states a
+        // run can be in are the four that mean no model was consulted or that
+        // SURE cannot say. If a later build adds a check that asks for analysis,
+        // this test fails and the person reading it has to decide what the report
+        // should now say — which is the point, and is why the state is read from
+        // the run rather than written as a constant.
+        let fixture = Fixture::new("privacy-honest-limit");
+        a_project(&fixture);
+        fixture.write("sure.yaml", "analysis:\n  provider: claude_cli\n");
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let check = checked(&report);
+        assert!(
+            !check.model_use.a_model_was_consulted(),
+            "this build claims a model was consulted: {:?}",
+            check.model_use
+        );
+        assert_ne!(
+            check.model_use.as_str(),
+            "consulted",
+            "no check in this build asks for model-backed analysis, so a run cannot report one"
+        );
+        assert!(
+            !check.run.stage(Stage::ModelAssessment).outcome.is_a_gap(),
+            "a configured provider is not part of this run's work rather than a gap"
+        );
+    }
+
+    #[test]
+    fn a_run_that_stopped_still_says_what_it_was_allowed_to_send() {
+        // A stopped run is the one shape of silence that reads as "nothing left
+        // the machine". It has settings — they were read before the pipeline ran
+        // — so it can answer, and it does.
+        let fixture = Fixture::new("privacy-stopped");
+        let report = run_with(
+            Purpose::Check,
+            &fixture.paths(),
+            &fixture.root.join("not-a-directory"),
+            None,
+        );
+        assert!(!checked(&report).run.finished());
+        let written = report.human_text();
+        assert!(written.contains("Privacy and model use"), "{written}");
+        assert!(written.contains("Mode in effect: local_first"), "{written}");
+        assert!(
+            written.contains("No model was consulted"),
+            "a stopped run does not say what it did about models:\n{written}"
+        );
+        assert_eq!(
+            machine_of(&report)["model_use"]["state"],
+            json!("no_provider")
         );
     }
 

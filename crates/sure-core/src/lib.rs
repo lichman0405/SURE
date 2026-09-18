@@ -49,6 +49,7 @@ pub mod normalizer;
 pub mod paths;
 pub mod pipeline;
 pub mod plain_language_finding;
+pub mod privacy;
 pub mod probe;
 pub mod process;
 pub mod project_intent;

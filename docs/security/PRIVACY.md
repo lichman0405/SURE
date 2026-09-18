@@ -29,12 +29,29 @@ Explicit opt-in may store:
 
 ## External analysis
 
-Modes:
-- Local-first — external analysis only when configured, with bounded context.
-- Fully local — no source code sent to external model services.
-- Cloud-enhanced — explicitly enabled external analysis/sync features in future.
+Three modes, named in `sure.yaml` as `privacy.mode`. What each one permits,
+forbids, and what to write instead of the one this release does not implement, is
+frozen in `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`; this section is the
+requirement those were built against.
 
-The report states when external analysis was used.
+- Local-first (`local_first`, the default) — external analysis only when
+  configured, with bounded context.
+- Fully local (`fully_local`) — no source code sent to external model services.
+  A settings file naming this mode and an external provider is refused.
+- Cloud-enhanced (`cloud_enhanced`) — explicitly enabled external analysis/sync
+  features in future. **Not implemented:** the setting is refused rather than
+  accepted, so no project can claim an arrangement SURE does not provide.
+
+The mode in effect is the stricter of the two settings files — the project's
+`sure.yaml` and the user's own file outside the project — so a project cannot
+loosen what the user set.
+
+**The report states which mode was in effect and whether a model was
+consulted**, on every run that reads settings, including a run that stopped. The
+no-model case is stated rather than omitted: silence would read both as "nothing
+left this machine" and as "SURE did not look". In this release no check asks for
+model-backed analysis, so the answer is always that no model was consulted — and
+a run that cannot support even that says so instead.
 
 ## Deletion
 

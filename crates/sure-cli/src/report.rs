@@ -206,6 +206,20 @@ pub struct CheckReport {
     pub project: String,
     /// What the twelve stages did, in order.
     pub run: sure_core::pipeline::PipelineOutcome,
+    /// The privacy mode this run was under, where it came from, and the provider
+    /// its configuration names.
+    ///
+    /// Held on the report rather than re-derived by each renderer, because the
+    /// value has to be the *arbitrated* one (`sure_core::config::authority`) and
+    /// a renderer that read a file itself would report one layer's answer as
+    /// though it were the user's policy. See `sure_core::privacy`.
+    pub privacy: sure_core::privacy::PrivacyStatement,
+    /// Whether a model was consulted, as this run's own record says.
+    ///
+    /// Read from the run rather than from a constant: see
+    /// `sure_core::privacy::ModelUse` for why a build that later asks a model
+    /// something would otherwise keep saying the reassuring thing.
+    pub model_use: sure_core::privacy::ModelUse,
     /// The goal this run recorded, when the user gave one on the command line.
     ///
     /// `Some` only when `--goal` was passed, and `Some` means the row exists:
@@ -1085,6 +1099,8 @@ mod tests {
                 run: Some(a_check_run(false)),
                 stopped_at: None,
             },
+            privacy: no_settings_file(),
+            model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: Some(a_recorded_goal()),
         }))
     }
@@ -1100,6 +1116,8 @@ mod tests {
                 run: Some(a_check_run(true)),
                 stopped_at: None,
             },
+            privacy: no_settings_file(),
+            model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: None,
         }))
     }
@@ -1124,8 +1142,28 @@ mod tests {
                 run: None,
                 stopped_at: Some(stopped),
             },
+            privacy: no_settings_file(),
+            model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: None,
         }))
+    }
+
+    /// The statement for a run whose machine has no settings file at all.
+    ///
+    /// The fields are written out here rather than read through
+    /// `PrivacyStatement::of`, because there is no file for these fixtures to
+    /// read: what they need is the value a machine that has never been
+    /// configured produces, and writing it as the default is the same value
+    /// without a filesystem. The arbitration itself is tested where it lives —
+    /// `crates/sure-core/src/privacy.rs` — rather than a second time here.
+    fn no_settings_file() -> sure_core::privacy::PrivacyStatement {
+        use sure_core::config::{AnalysisProvider, PrivacyMode};
+        sure_core::privacy::PrivacyStatement {
+            mode: PrivacyMode::default(),
+            mode_set_by: None,
+            project_mode: PrivacyMode::default(),
+            provider: AnalysisProvider::default(),
+        }
     }
 
     /// A command that tried and did not finish.

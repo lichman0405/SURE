@@ -784,6 +784,110 @@ fn a_check_of_a_real_project_answers_with_a_verdict_and_never_with_status_three(
 }
 
 #[test]
+fn a_run_says_which_privacy_mode_it_was_under_and_what_it_did_about_models() {
+    // P13-T002, at the process: the two things a user could not find out before
+    // it. Which privacy mode is running, and whether a model was consulted.
+    //
+    // Everything asserted here is a *membership* in a closed set rather than a
+    // value, and that is deliberate. A real process reads the user's own settings
+    // file outside the project, and that directory cannot be moved by a flag or
+    // an environment variable, so a test demanding `local_first` here would be a
+    // claim about the machine it ran on. The values themselves — including the
+    // arbitration between the project's file and the user's — are tested where
+    // they can be set: `crates/sure-cli/src/check.rs` and
+    // `crates/sure-core/src/privacy.rs`.
+    let human = run(&["check"]);
+    let machine = run(&["--format", "json", "check"]);
+    let frame: serde_json::Value =
+        serde_json::from_str(machine.stdout.trim()).expect("one frame on one line");
+
+    let mode = frame["details"]["privacy"]["mode"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the frame does not say which mode was in effect: {frame}"));
+    assert!(
+        ["local_first", "fully_local"].contains(&mode),
+        "the run reports a mode this release does not implement: {mode}"
+    );
+    assert_ne!(
+        mode, "cloud_enhanced",
+        "a mode that is refused at the settings file was reported as in effect"
+    );
+    assert!(
+        frame["details"]["privacy"]["mode_set_by"].is_null()
+            || ["user", "project"].contains(
+                &frame["details"]["privacy"]["mode_set_by"]
+                    .as_str()
+                    .unwrap_or("")
+            ),
+        "the frame names a layer that cannot have set anything: {frame}"
+    );
+    let provider = frame["details"]["privacy"]["analysis_provider"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the frame does not name a provider: {frame}"));
+    assert!(
+        [
+            "disabled",
+            "local_command",
+            "claude_cli",
+            "openai_compatible"
+        ]
+        .contains(&provider),
+        "the frame names a provider this release does not have: {provider}"
+    );
+
+    // The human form says the same thing, in a sentence: a person who never
+    // passes `--format json` is the one who most needs to know.
+    assert!(
+        human.stdout.contains("Privacy and model use"),
+        "the report has no privacy section:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains(&format!("Mode in effect: {mode}")),
+        "the two renderings disagree about the mode in effect ({mode}):\n{}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains(&format!("Analysis provider: {provider}")),
+        "the two renderings disagree about the provider ({provider}):\n{}",
+        human.stdout
+    );
+
+    // And the model question is answered rather than omitted. This build has no
+    // check that asks for model-backed analysis, so `consulted` cannot be the
+    // answer — the honest one is that no model was consulted, or that this run
+    // cannot say. Silence is the state this test exists to rule out.
+    let state = frame["details"]["model_use"]["state"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the frame does not say what happened about models: {frame}"));
+    assert!(
+        [
+            "no_provider",
+            "nothing_asked",
+            "provider_unusable",
+            "consulted",
+            "cannot_confirm"
+        ]
+        .contains(&state),
+        "the frame names a model state this build does not have: {state}"
+    );
+    assert_ne!(
+        state, "consulted",
+        "no check in this build asks for model-backed analysis, so no run can report one"
+    );
+    assert!(
+        human.stdout.contains("No model was consulted")
+            || human
+                .stdout
+                .contains("cannot say whether a model was consulted"),
+        "the report neither states that no model was consulted nor that it cannot say:\n{}",
+        human.stdout
+    );
+}
+
+#[test]
 fn the_three_pipeline_commands_are_one_orchestrator_with_three_purposes() {
     // "`sure recheck` and `sure repair` reach the same orchestrator through
     // `Command::report` rather than a second path into the engine." Compared

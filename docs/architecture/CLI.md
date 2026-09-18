@@ -456,6 +456,50 @@ command's frame verbatim under `structuredContent.sure`, which is that same call
 rather than a second renderer agreeing with the first. The trigger for the move is
 a consumer outside this crate needing the shape; a bridge inside it is not one.
 
+### What a run says about privacy and models
+
+A check report carries one more section in each rendering, and it exists because
+neither answer is derivable by a user from anything else SURE prints: which
+privacy mode the run was under, and whether a model was consulted.
+
+```
+Privacy and model use
+
+  Mode in effect: local_first
+    Nothing set this: it is what SURE does when no settings file asks for something stricter.
+    Evidence stays on this machine. External analysis is allowed only where your own settings configure it, and nothing is sent by a check that does not ask for it.
+  Analysis provider: disabled
+  No model was consulted: no analysis provider is configured (`analysis.provider` is `disabled`). The deterministic checks are unaffected.
+```
+
+The machine form carries `details.privacy` (`mode`, `mode_set_by`,
+`project_mode`, `external_analysis_allowed`, `analysis_provider`) and
+`details.model_use` (`state`, `provider`). `model_use.state` is a closed set —
+`no_provider`, `nothing_asked`, `provider_unusable`, `consulted`,
+`cannot_confirm` — and it is deliberately not a boolean: `false` would have to
+stand for both "a model was not consulted" and "this run cannot say", and a
+script reading the reassuring half of an ambiguous field is how "nothing was
+sent" gets asserted about a run that never reached the stage.
+
+Three rules, each of which a test holds:
+
+- **The mode is the arbitrated one.** It is `Authority::privacy_mode()`'s value,
+  not the project's `privacy.mode`, and `mode_set_by` names the layer that
+  decided. A run that reported the project's request as the user's policy would
+  be making a false statement about the user's own settings — see
+  `docs/architecture/CONFIG_AUTHORITY.md`.
+- **The no-model case is stated, never omitted.** Silence reads both as "nothing
+  left this machine" and as "SURE did not look", and only one of those is true.
+- **A stopped run is not a run that sent nothing.** It has settings, so it
+  answers; and because it has no record of the stage that would ask a model, it
+  says it cannot confirm rather than that nothing was used.
+
+`docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md` is the semantics behind all of
+this, and the honest limit of this release: no check in this build asks for
+model-backed analysis, so external model use cannot be observed happening, and
+`consulted` is unreachable. What the run states is a fact about its
+configuration and its own record, not a report of traffic.
+
 ## Exit statuses
 
 | Status | Meaning | Who returns it |
@@ -556,6 +600,12 @@ anything about output or status: both are SURE's, and both have one home.
 | The store may not be inside the project it records a goal for | same file, `the_store_may_not_be_inside_the_project_it_records_a_goal_for` |
 | Every refusal says what did not happen | same file, `every_refusal_in_this_module_says_what_did_not_happen` |
 | A run writes to the store location the caller named | `crates/sure-cli/tests/cli_contract.rs`, `a_named_store_directory_is_the_one_a_real_run_writes_to` |
+| A real process names its privacy mode and answers the model question | same file, `a_run_says_which_privacy_mode_it_was_under_and_what_it_did_about_models` |
+| The mode a report names is the arbitrated one, not the one a file names | `crates/sure-cli/src/check.rs`, `the_mode_in_a_report_is_the_arbitrated_one_and_not_the_one_a_file_names` and `a_project_cannot_lower_the_mode_the_users_own_settings_set` |
+| A stopped run still says what it was allowed to send | same file, `a_run_that_stopped_still_says_what_it_was_allowed_to_send` |
+| No run in this build can say a model was consulted | same file, `no_run_in_this_build_can_say_a_model_was_consulted` |
+| The three modes say what `PRIVACY_AND_MODEL_STRATEGY.md` says they say | `crates/sure-core/src/privacy.rs`, `the_three_modes_say_what_the_document_says_they_say` |
+| The two settings files can only differ in one direction | same file, `the_two_settings_can_only_differ_in_one_direction` |
 | A store location inside the checked project is refused, and nothing is written | same file, `a_store_inside_the_project_is_refused_before_anything_is_recorded` |
 | `sure doctor` says whether the location is the platform's or the caller's | same file, `a_doctor_report_says_which_store_location_the_run_is_using` |
 | Nothing a project can write decides where the store goes | same file, `nothing_a_project_can_write_decides_where_the_store_goes` |

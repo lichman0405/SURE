@@ -92,6 +92,20 @@ A layer that asked for nothing is `by: None`, which means "nothing beyond the
 default" and not "SURE did not work it out". A report that could not tell those
 apart would be unable to say whether it had looked.
 
+`Authority::privacy_mode()` is not only a rule the code enforces; it is what a
+run **reports**. `sure check` reads its settings through `Authority::load`, and
+the mode it prints is the arbitrated one, with `by` named when a file asked for
+something stricter than the default. Reporting the project's own `privacy.mode`
+would be a false statement about the user's policy — worse than reporting
+nothing, because it reads as an answer. The statement a run makes about this, and
+about models, is `crates/sure-core/src/privacy.rs`; where it appears is
+`docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`.
+
+One consequence of reading both files is worth naming here: a user settings file
+that cannot be parsed stops a check rather than being ignored, with status 5 and
+a message naming the file. That is the `Authority::load` rule above, seen from the
+command that now depends on it.
+
 ## What this deliberately does not do
 
 **There is no merged `Config`.** There is no `Authority::effective()`.

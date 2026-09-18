@@ -1369,8 +1369,8 @@
       "notes": "Added agent-plugin/scripts/{install,uninstall}.ps1, updated plugin.json with repository/license/mcpServers/skills, added integration_thinness tests for manifest, MCP, skill, install/uninstall contract, symlink fallback, and actual PowerShell install/uninstall into temp directory. All gates green: cargo fmt --check, clippy -D warnings, cargo test --workspace --all-features --no-fail-fast, validate-bootstrap, taskctl validate."
     },
     "P12-T006": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T12:30:00.000Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

@@ -448,11 +448,10 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     symlink fallback, and actual PowerShell install/uninstall into a temporary
     directory.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** The READY list is now
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P12-T006`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T001`,
 `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
-`P14-T010`. The lowest-numbered READY task is
-`P12-T006`, which is the next concrete action.
+`P14-T010`. `P12-T006` is now `in_progress`.
 
 ## What `P12-T005` added
 

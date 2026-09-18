@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P10",
-  "last_updated": "2026-09-18T08:44:14.606Z",
+  "last_updated": "2026-09-18T08:50:17.315Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1207,13 +1207,13 @@
       "notes": "Supervisor review: worker implemented Claude repair handoff in commit b05825e; re-ran cargo test -p sure-cli hook::tests and cargo test -p sure-testkit, all green. Commit also includes a fail-closed stub for claude-code pre-tool-use events pending P10-T006."
     },
     "P10-T006": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-18T08:40:39.514Z",
-      "finished_at": null,
+      "finished_at": "2026-09-18T08:50:17.314Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Implemented real protection decision path for Claude Code pre-tool-use events: decide_claude_code_tool maps tool names to ActionKind and reuses domain decide(); hook.rs routes claude-code source through it. All quality gates pass."
     },
     "P10-T007": {
       "status": "queued",

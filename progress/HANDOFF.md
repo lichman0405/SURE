@@ -359,12 +359,52 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     checks, and then invoke `sure recheck`. The same commit fail-closes
     `claude-code` `pre-tool-use` hook events in `crates/sure-cli/src/hook.rs`
     until P10-T006 wires the full protection decision path.
+53. The supervisor implemented and accepted `P10-T006` — *Implement Claude Code
+    protection response* — as commit `5e836e0`. `decide_claude_code_tool` maps
+    Claude Code tool names (`Bash`, `Read`, `Write`, `Edit`, `Delete`) to the
+    existing `ActionKind` domain and reuses `decide()`, so no new rule engine is
+    invented. `sure hook ingest --source claude-code` now routes `pre-tool-use`
+    events through this real decision path. Capability tier remains Observed
+    (Tier 1) because the hook manifest does not confirm Claude Code enforces the
+    response.
 
-**Phase P11 is open at 7 of 9; Phase P10 is open at 5 of 8.** The READY list is now
+**Phase P11 is open at 7 of 9; Phase P10 is open at 6 of 8.** The READY list is now
 `P10-T007`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007` and `P14-T010`. `P10-T006` — *"Implement Claude Code protection
-response"* — is in progress; it is the next concrete action.
+`P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P10-T007`, *"Claude Code capability reporting and tier honesty"*, which is the next
+concrete action.
+
+## What `P10-T006` added
+
+- `crates/sure-core/src/hook_protection.rs` — new `decide_claude_code_tool`:
+  - `claude_code_tool_to_action_kind` maps `Bash` → `ArbitraryCommand`, `Read` →
+    `ReadFile`, `Write`/`Edit` → `WriteProjectFile`, `Delete` →
+    `DeleteProjectFile`, unknown tools → `ArbitraryCommand`.
+  - `decide_claude_code_tool` reuses the existing domain `decide()` with the
+    current `ExecutionMode` and `ExecutionPermissions`, exactly like the Cursor
+    path.
+  - Honest capability tier: Claude Code remains **Observed** (Tier 1); the hook
+    manifest wires `PreToolUse` but does not confirm the harness interprets or
+    enforces the response, so the integration cannot claim Protected (Tier 2).
+  - Unit tests cover Bash/Write/Edit/Delete blocked in `InspectOnly`, Read
+    allowed in `InspectOnly`, Write/Edit allowed with `write_project` in
+    `HostConfirmed`, Bash blocked because arbitrary commands need consent, and
+    unknown tools treated as arbitrary commands.
+- `crates/sure-cli/src/hook.rs` — the `claude-code` `pre-tool-use` path now calls
+  `decide_claude_code_tool` instead of returning a hard-coded fail-closed
+  `Block`. The CLI-level test expects `Bash` in `InspectOnly` to be blocked with
+  a reason referencing the execution mode.
+
+## Validation of `P10-T006`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T005` added
 

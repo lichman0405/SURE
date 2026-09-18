@@ -220,8 +220,9 @@ fn a_project_fingerprint_is_serialized_as_its_identifier() {
 #[test]
 fn the_fixture_expectation_schema_has_no_rust_type_yet_and_that_is_recorded() {
     // `docs/architecture/FROZEN_SEMANTICS.md` records this as conformance gap 2:
-    // the schema exists, and the fourteen `fixtures/adversarial/*/scenario.json`
-    // files do not match it. P14-T001–T011 resolves it. This test exists so that
+    // the schema exists, and not every `fixtures/adversarial/*/scenario.json`
+    // file matches it yet — the ones written before `P14-T001` do not.
+    // P14-T001–T011 resolves it. This test exists so that
     // the omission is visible here rather than as a missing row in a table, and
     // so that adding the type means deleting this test deliberately.
     let kind = DocumentKind::FixtureExpectation;

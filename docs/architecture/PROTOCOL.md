@@ -40,9 +40,9 @@ fields to it so that one document could serve both would give the container a
 source it does not have.
 
 **Fixture expectation has no Rust type yet.** `docs/architecture/FROZEN_SEMANTICS.md`
-records this as conformance gap 2: the schema exists, and the fourteen
-`fixtures/adversarial/*/scenario.json` files do not match it. P14-T001–T011
-resolves it. There is a test in `crates/sure-protocol/tests/conformance.rs`
+records this as conformance gap 2: the schema exists, and not every
+`fixtures/adversarial/*/scenario.json` file matches it yet — the ones written
+before `P14-T001` do not. P14-T001–T011 resolves it. There is a test in `crates/sure-protocol/tests/conformance.rs`
 naming the gap, so that adding the type means deleting the test deliberately.
 
 ## Versions

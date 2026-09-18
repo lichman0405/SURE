@@ -339,10 +339,11 @@ named, not by this document.
    and closes the envelope with `additionalProperties: false` so that an adapter
    field SURE does not understand is a visible error rather than silence.
    `docs/architecture/PROTOCOL.md` records the reasoning.
-2. **Fixture metadata vs expectation schema.** The fourteen
-   `fixtures/adversarial/*/scenario.json` files carry
-   `expected_severity`/`description`/`fixture_status`, while
-   `schemas/fixture-expectation.schema.json` requires `required_outcomes`.
+2. **Fixture metadata vs expectation schema.** Not every
+   `fixtures/adversarial/*/scenario.json` file matches it yet: the ones written
+   before `P14-T001` carry `expected_severity`/`description`/`fixture_status`
+   where `schemas/fixture-expectation.schema.json` requires `required_outcomes`,
+   and the fixtures the P14 tasks add are written to the schema.
    `evaluation/acceptance-manifest.json` lists twenty cases, which is the
    authority for the release corpus. Resolved by P14-T001–T011.
 3. **The six stored documents have no version.** Unlike the event envelope, a

@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 123 / 168 tasks accepted (counted from `progress/state.json` against
+Progress: 124 / 168 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why). **Phase P0 complete (9/9), phase P1 complete
@@ -10,7 +10,7 @@ below record why). **Phase P0 complete (9/9), phase P1 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 9 of 11, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 8 of 10; Phase P13 is open
-at 1 of 9; Phase P14 is open at 2 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+at 1 of 9; Phase P14 is open at 3 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -503,6 +503,16 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
     the two deviations the worker disclosed. `sure-cli` is now free, which is
     what `P7-T010` was waiting for, and `P7-T010` was dispatched on this
     acceptance from `target/tmp/brief-p7t010.md`.
+72. A worker agent completed `P14-T003` — *Implement Rust/generic fixture apps*
+    — as commit `2376738`. The supervisor re-ran both test binaries, ran both
+    fixture halves by hand, diffed the one-line claim rather than trusting it,
+    read the manifest-exemption guard in full, and accepted the task;
+    "Validation of `P14-T003`" below carries the numbers. Two things came out of
+    it that are not this task's: the workspace gate now fails on `P7-T010`'s
+    in-flight `crates/sure-core/src/pipeline.rs` (a deliberate guard, reported to
+    that worker rather than worked around here), and three documents that said
+    "the fourteen `fixtures/adversarial/*/scenario.json` files" were corrected to
+    stop naming a count at all.
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P7-T010`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`,
@@ -635,6 +645,83 @@ workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
 
+## What `P14-T003` added
+
+A Rust fixture pair under `fixtures/adversarial/`, plus the test that runs both
+halves through SURE's own modules:
+
+| Fixture | What it is | Its own check |
+| --- | --- | --- |
+| `rust-tests-fail` | an order-total crate whose `total_cents` does `subtotal_cents.saturating_add(discount_cents)` | `cargo test` **FAILS**, exit 101, 2 of 3 tests fail |
+| `rust-tests-pass` | the same crate with `saturating_sub` | `cargo test` **PASSES**, exit 0 |
+
+The pair is the point: two projects that differ by one line and by which one
+SURE must refuse to call ready. Asserted in the test, not just described — the
+project files are byte-identical, `src/lib.rs` differs on exactly one line, and
+the halves differ in `README.md`, `scenario.json` and `scripts/check.ps1` because
+each half has to say which half it is.
+
+`crates/sure-core/tests/rust_fixture_apps.rs` runs each half through
+`discover` → `checks::rust::RustChecks` → `schedule::PlanBuilder` →
+`sure_core::process::run` (the only place in the workspace that starts a program)
+→ `aggregation::aggregate_run` → `project_verdict::build_verdict`. The failing
+half is `NotReady`, blocking on "run the tests", with the failing test's name in
+the captured output; the passing half is `Green` with four passing checks.
+
+`scripts/check.ps1` is the human route: it copies the project to a GUID-named
+directory under `%TEMP%` (because `cargo` writes `Cargo.lock` and `target/` beside
+the manifest it reads), runs `cargo test` there, prints six labelled lines and
+exits with cargo's status. It removes the copy afterwards, so neither fixture
+directory accumulates build output and neither half becomes a member of this
+workspace's build.
+
+Two decisions worth reading before trusting the numbers:
+
+- **Both halves are exempt from the manifest, with a reason each.** The release
+  manifest has twenty cases and no Rust or language-generic one, so no row's trap
+  is "a Rust project whose own tests ran and failed", and the nearest case by
+  name — `tests-not-run` — is the opposite defect. Renaming a fixture after it
+  would make that row grade something it was not written for, so the fixtures are
+  named in `FIXTURES_WITHOUT_A_MANIFEST_CASE` instead and `evaluation/` is
+  untouched. The guard was renamed with the list (see the `P14-T002` note below),
+  and an entry for a case the manifest *does* grade still fails.
+- **The test file stands in as the runner.** The product has no runner of its own
+  yet, so `rust_fixture_apps.rs` composes the modules itself — with SURE's real
+  discovery, proposal layer, `process`, aggregation and verdict — and carries the
+  one production rule no module owned: how a declared command string such as
+  `cargo test` becomes a program and an argument vector. That is a gap with an
+  owner, not a design: see the finding below.
+
+**Handed to `P7-T010`.** `CheckReason::DeclaredCommand` hands a runner a single
+string, and `sure_core::process` takes a program plus an argument vector and
+documents that it splits nothing, so something between the schedule and the
+runner must split it. Today the split lives in the test file; a pipeline that runs
+declared commands needs one written rule, not a second copy. Relayed to that
+worker, which is running now.
+
+**Supervisor correction, 2026-09-18.** `docs/architecture/FROZEN_SEMANTICS.md`,
+`docs/architecture/PROTOCOL.md` and `crates/sure-protocol/tests/conformance.rs`
+all said "the fourteen `fixtures/adversarial/*/scenario.json` files". There are
+now eighteen, of which the eleven the P14 tasks added carry `required_outcomes`
+and the seven older ones do not. All three now say "not every
+`fixtures/adversarial/*/scenario.json` file matches it yet", because a number
+that will change again with `P14-T004` to `P14-T010` was not worth re-stating.
+
+## Validation of `P14-T003`
+
+Verified by the supervisor on 2026-09-18 from the worker's commit `2376738`,
+none of it read from the worker's report:
+
+| Claim | How it was checked |
+| --- | --- |
+| no reserved path touched | `git show --name-only --format= 2376738`: 18 files, none under `progress/`, `tasks/`, `evaluation/`, `integrations/`, `docs/` or `crates/sure-cli/` |
+| the tests pass | `cargo test -p sure-core --test rust_fixture_apps` exit 0, 5 passed; `cargo test -p sure-testkit --test fixture_apps` exit 0, 22 passed |
+| the halves behave as claimed | both `scripts/check.ps1` run by hand: fail half exit **101** with "what cargo test said: FAIL (exit code 101)", pass half exit **0** with "PASS (on purpose)" |
+| the fixtures leave nothing behind | no `sure-rust-tests-*` directory left in `%TEMP%`; no `Cargo.lock` and no `target/` in either fixture directory |
+| the one-line claim | `git diff --no-index` of the two `src/lib.rs`: 1 insertion, 1 deletion — `saturating_add` against `saturating_sub` |
+| the exemption is still a guard | `every_fixture_without_a_manifest_case_is_one_named_here` read in full: reason non-empty, id is a shipped directory, and the manifest does not grade it |
+| the workspace gate | **not green, and not this task's**: `nothing_in_the_product_proposes_a_check_that_is_not_meant_to` fails on `P7-T010`'s untracked `crates/sure-core/src/pipeline.rs`; the guard's own message says to add the file to `MAY_PROPOSE` with a reason, which that worker was told |
+
 ## What `P12-T009` added
 
 - `crates/sure-cli/src/mcp.rs` (new, ~1489 lines with 24 unit tests) — the
@@ -766,7 +853,11 @@ Two decisions worth reading before trusting the numbers:
   `the_only_fixture_without_a_manifest_case_is_the_one_named_here` fails if the
   named id is graded by the manifest, if it is not a shipped directory, or if its
   reason is empty. Only the severity agreement is waived for it; the schema, the
-  false-green rule and runnability are not.
+  false-green rule and runnability are not. (The test was named
+  `the_only_fixture_without_a_manifest_case_is_the_one_named_here` when this was
+  written. `P14-T003` added the second and third exemptions and renamed it to
+  `every_fixture_without_a_manifest_case_is_one_named_here`; the three checks it
+  makes are unchanged, which is why the name changed rather than the body.)
 - **`must_fix` needs `Record::Empty`, not `Record::Absent`.** An Alembic project
   with no `versions/` directory at all is `ShouldFixFirst`. The fixture holds the
   stronger shape by shipping `versions/` present and empty, which needs
@@ -790,7 +881,7 @@ of it read from the worker's report:
 | the tests pass | `cargo test -p sure-core --test adversarial_fixture_detection` 17 passed; `cargo test -p sure-testkit --test fixture_apps` 19 passed |
 | the workspace is green | `cargo test --workspace --all-features --no-fail-fast --exclude sure-cli` from PowerShell: exit 0, 65 test binaries, 2148 tests, 0 failures |
 | the gap was not asserted away | `what_is_detected_is_not_yet_what_the_manifest_requires` read in full: intact, and now also asserts the aggregator files the probe fixture's proposals as style noise |
-| the exemption is a guard | `the_only_fixture_without_a_manifest_case_is_the_one_named_here` read in full; it checks reason, directory and the absence of a manifest row |
+| the exemption is a guard | `the_only_fixture_without_a_manifest_case_is_the_one_named_here` read in full; it checks reason, directory and the absence of a manifest row (renamed by `P14-T003`, see above) |
 | the severity claims | `external_service.rs` grep'd: `ShouldFixFirst` at lines 66, 74, 82 and nothing else; `db_migrations` reaches `MustFix` |
 
 `sure-cli` is excluded from the workspace run because `P12-T009`'s worker holds

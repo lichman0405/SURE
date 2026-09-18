@@ -117,17 +117,22 @@ Two fields every Codex payload lacks, and what SURE does instead:
 
 ## What these commands answer in the current build
 
-Observed on **2026-09-18** by running `target\debug\sure.exe --format json`
-against this repository (an absolute path), from the repository root:
+Re-checked on **2026-09-19** by running `target\debug\sure.exe --format json`
+against this repository (an absolute path), from the repository root, with
+`--store-dir` naming an empty directory under `target/tmp` so that no row
+depends on the store of whoever ran it. The first observation was 2026-09-18 and
+the rows below are the ones that still hold; the `sure recheck` row is the one
+whose wording changed, and it changed because the store it ran against was
+empty.
 
 | Command | What this build answers |
 | --- | --- |
-| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." 0 of 18 planned checks produced a result (14 could not run in `inspect_only`, 4 skipped by the mode). The report's capability line was still "capability tier 0, snapshot". |
+| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." 0 of 18 planned checks produced a result: the 14 static checks "read your project's files and run nothing" and this build has no runner for them, so each is recorded as unknown rather than passed, and the 4 dynamic ones were stopped by `inspect_only`. The report's capability line is still "capability tier 0, snapshot". |
 | `sure repair <abs>` | Exit 1, `not_green`. Stage 11 ran and answered "no check produced a finding, so there is nothing to write instructions for." No repair contract was produced. |
-| `sure recheck <abs>` | Exit 1, `not_green`. Stage 12 ran and answered "no earlier run left anything open for this project." |
-| `sure mcp serve` | Runs and answers: with stdin closed at once it returns `{"command":"mcp",...,"answered":0}`, exit 0. |
+| `sure recheck <abs>` | Exit 1, `not_green`. Stage 12 ran and answered "SURE has no recorded history for this machine, so there is no earlier run to compare this one with." — which is what an empty store produces; with history in the store the sentence names what the earlier run left open. |
+| `sure mcp serve` | Runs and answers, and says nothing on stdout until it is asked something. With stdin closed at once: **0 bytes on stdout**, the session summary on stderr — one `{"command":"mcp",…,"answered":0,…}` frame under `--format json`, the same summary in words under the default format — and exit 0. |
 | `sure version`, `sure protocol`, `sure doctor` | Exit 0. |
-| `sure check crates` | Refused, exit 5: a relative path "is not an absolute path", and SURE "stopped rather than check it and report the answer as if it meant something". Always pass an absolute path. |
+| `sure check crates` | Refused, exit 5: "SURE was asked to look at "crates", which is not a full path." A short path would be resolved against wherever SURE happened to start, "so the same command would read a different project depending on where it ran". Always pass an absolute path. |
 
 Every artifact here resolves the binary, invokes the command, and reports a
 refusal as a refusal; none of them turns one into a result. `docs/architecture/CLI.md`
@@ -269,9 +274,26 @@ codex mcp add sure -- sure mcp serve
 ```
 
 `sure mcp serve` is the stdio MCP bridge described in
-`docs/architecture/MCP_BRIDGE.md`. It is the same surface the portable Agent
-Plugin declares in `integrations/agent-plugin/mcp.json`. Full MCP wiring and
-tool-surface work is P12-T010; this package only supplies the template.
+`docs/architecture/MCP_BRIDGE.md`, and it is implemented (P12-T009). It is the
+same surface the portable Agent Plugin declares in
+`integrations/agent-plugin/mcp.json`, and the packages were wired to it in
+P12-T010.
+
+**The template's `command = "sure"` is a `PATH` requirement**, which is why the
+comment at the top of `mcp.toml` gives the absolute-path alternative: a Codex
+config is a file a person edits, so it can name either. Use the Codex CLI
+(`codex mcp add sure -- sure mcp serve`) or replace the command with the
+absolute path to the per-user install — `C:\Users\you\AppData\Local\SURE\bin\sure.exe`.
+The resolution order everywhere in this package is `$env:SURE_BIN`, then `sure`
+on `PATH`, then that per-user location.
+
+What a caller sees when the binary is missing or too old, for the packages whose
+manifests SURE controls rather than the user: the Claude Code launcher refuses
+with exit 3 and one paragraph on stderr naming where it looked, and never with an
+empty tool list;
+the decisions are written down in `integrations/claude-code/README.md` and
+`docs/architecture/MCP_BRIDGE.md`. A Codex config that names a binary which is
+not there is Codex's own error to report, since the file is the user's.
 
 ### Uninstall
 

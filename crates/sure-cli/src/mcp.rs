@@ -37,10 +37,16 @@
 //!
 //! Every other number, word and field spelling in this module is one of those
 //! four pages. Where this build deviates on purpose, the deviation is written
-//! down at the place it happens; the two that matter are in
-//! [`tool_result`] (the text block carries the command's own prose rather than
-//! a second copy of the JSON) and in [`serve`] (the session summary follows
-//! `--format`, which is a wart `docs/architecture/MCP_BRIDGE.md` names).
+//! down at the place it happens; the one that matters is in [`tool_result`],
+//! where the text block carries the command's own prose rather than a second
+//! copy of the JSON.
+//!
+//! The specification's stdout rule is not a deviation and has no exception.
+//! The session summary is a [`Report::McpSession`] and
+//! [`Format::emit`](crate::output::Format::emit) writes one of those to stderr
+//! under `--format json` as well as under the default format, so nothing which
+//! is not a protocol message can reach the caller's stream in any mode. That
+//! decision lives in `output.rs`, because this module cannot name a stream.
 //!
 //! # Why every tool runs through `Command::report`
 //!
@@ -216,21 +222,22 @@ pub fn run(action: &McpAction, store: Option<&Path>) -> Report {
 ///
 /// The session summary is a [`Report::McpSession`] and it is written by
 /// `main.rs` like every other report, through the format the user chose. That
-/// is deliberate and it has a visible consequence: with the default
-/// `--format human` the summary is a *complaint* as far as
-/// [`Report::is_an_answer`] is concerned, so it goes to stderr, which is where
-/// the specification's stdout rule requires it to be. With
-/// `sure --format json mcp serve` the summary is one CLI envelope line on
-/// stdout after the last protocol message — the caller asked for the machine
-/// form of everything SURE says, and it gets it. That is a wart, it is named in
-/// `docs/architecture/MCP_BRIDGE.md`, and no harness integration does it.
+/// is deliberate, and the summary does not travel on the protocol channel in
+/// either format: [`Format::emit`](crate::output::Format::emit) sends a
+/// [`Report::McpSession`] to stderr whether the caller asked for `--format
+/// json` or for the default, because the specification's transport page says
+/// the server "MUST NOT write anything to its `stdout` that is not a valid MCP
+/// message" at revision `2025-11-25`. So `sure --format json mcp serve` is a
+/// command line a caller may use: its stdout is a protocol stream and nothing
+/// else, and the envelope saying how the session went is on stderr with the
+/// rest of the diagnostics.
 ///
 /// The alternative — writing the summary here — is not available: this module
 /// cannot name a stream (see the module comment) and it cannot see `--format`
 /// either, because [`Command::report`](crate::commands::Command::report) is
-/// given nothing but the command. So the choice is this wart or a
-/// `--format json` run that silently writes nothing, and a silent nothing is
-/// the worse of the two.
+/// given nothing but the command. Neither is needed: the one decision (a
+/// session summary is not a result) is made once, in `output.rs`, for both
+/// formats.
 fn serve(store: Option<&Path>) -> Report {
     let stdin = io::stdin();
     let mut input = stdin.lock();

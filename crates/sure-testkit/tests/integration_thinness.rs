@@ -175,10 +175,47 @@ fn a_hook_manifest_pointing_at_a_missing_script_is_reported() {
     assert!(
         findings.iter().any(|f| matches!(
             f,
-            ThinnessFinding::HookManifestReferencesMissingFile { referenced, .. }
+            ThinnessFinding::ManifestReferencesMissingFile { referenced, .. }
             if referenced.contains("gone.ps1")
         )),
         "a hook wired to a missing script must be reported: {findings:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_mcp_manifest_pointing_at_a_missing_script_is_reported() {
+    // The same defect as a hook pointing at a missing launcher, on the newer
+    // surface: the harness starts nothing, says nothing, and the session has no
+    // tools. An MCP manifest sits at the package root, so this is also the case
+    // that says the check resolves its references there rather than one
+    // directory up.
+    let dir = std::env::temp_dir().join(format!(
+        "sure-testkit-thinness-mcp-missing-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let manifest = dir.join("mcp.json");
+    std::fs::write(
+        &manifest,
+        r#"{"mcpServers":{"sure":{"command":"powershell","args":["-File","${CLAUDE_PLUGIN_ROOT}/scripts/gone.ps1"]}}}"#,
+    )
+    .expect("write manifest");
+
+    let files = [IntegrationFile {
+        relative: "h/mcp.json".to_owned(),
+        path: manifest,
+        text: std::fs::read_to_string(dir.join("mcp.json")).expect("read back"),
+    }];
+    let findings = integrations::manifest_reference_findings(&dir, &files);
+    assert!(
+        findings.iter().any(|f| matches!(
+            f,
+            ThinnessFinding::ManifestReferencesMissingFile { referenced, .. }
+            if referenced.contains("gone.ps1")
+        )),
+        "an MCP server wired to a missing launcher must be reported: {findings:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -389,6 +426,308 @@ fn claude_code_launcher_contract_fixtures_are_valid_json() {
         text.contains("hook ingest --source claude-code"),
         "claude-code launcher must forward to the SURE core"
     );
+}
+
+// --- the MCP launcher, which fails closed where the hooks fail open --------
+
+/// The PowerShell to run a launcher with.
+///
+/// Named by absolute path when it can be, because one of these tests empties
+/// `PATH` on purpose — that is how it makes `sure` unfindable — and a test that
+/// could not find its own interpreter would fail for the wrong reason.
+fn powershell() -> PathBuf {
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        let candidate = PathBuf::from(root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    PathBuf::from("powershell")
+}
+
+/// An empty scratch directory of this test's own, as the install tests use.
+fn launcher_scratch(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("sure-{label}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch directory");
+    dir
+}
+
+/// The MCP launcher's path, so each test names the same file.
+fn claude_code_mcp_launcher() -> PathBuf {
+    sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("scripts")
+        .join("sure-mcp.ps1")
+}
+
+/// Write a `.cmd` that stands in for a SURE build, and return its path.
+///
+/// A `.cmd` rather than an `.exe` because these tests are about what the
+/// launcher does with the status and the streams of whatever it resolved, and
+/// building a binary to be wrong would test the compiler.
+fn stub_binary(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    let text = format!("@echo off\r\n{body}");
+    std::fs::write(&path, text).expect("write stub binary");
+    path
+}
+
+#[cfg(windows)]
+#[test]
+fn the_claude_code_mcp_launcher_says_where_to_put_sure_when_it_cannot_find_it() {
+    // The failure this task exists for: a harness that cannot start SURE must be
+    // told what to do, and must not be handed anything it could read as a result
+    // — not an empty tool list, and not a session that answers nothing.
+    let script = claude_code_mcp_launcher();
+    let scratch = launcher_scratch("mcp-launcher-missing");
+    let empty_path = scratch.join("empty-path");
+    let local = scratch.join("localappdata");
+    std::fs::create_dir_all(&empty_path).expect("empty PATH directory");
+    std::fs::create_dir_all(&local).expect("per-user directory");
+
+    let output = std::process::Command::new(powershell())
+        .args(["-NoProfile", "-File", &script.to_string_lossy()])
+        .env_remove("SURE_BIN")
+        .env("LOCALAPPDATA", &local)
+        .env("PATH", &empty_path)
+        .output()
+        .expect("spawn sure-mcp.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "the launcher must refuse to start a session it cannot serve: {stderr}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "the launcher wrote to the protocol stream: {stdout}"
+    );
+    // Actionable means it names the three places SURE could have been and what
+    // to do, in SURE's own words rather than the operating system's.
+    for place in ["SURE_BIN", "PATH", "LOCALAPPDATA"] {
+        assert!(
+            stderr.contains(place),
+            "the refusal does not say where SURE was looked for ({place}): {stderr}"
+        );
+    }
+    assert!(
+        stderr.contains("sure.exe"),
+        "the refusal does not name the binary: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_claude_code_mcp_launcher_refuses_a_binary_that_does_not_carry_the_bridge() {
+    // The other half of "missing or incompatible": a build older than the
+    // bridge answers `sure mcp serve --help` with a usage error and exit 2. The
+    // launcher must not hand the session to it and let the caller's first
+    // message be the thing that discovers it.
+    let script = claude_code_mcp_launcher();
+    let scratch = launcher_scratch("mcp-launcher-old");
+    let old = stub_binary(
+        &scratch,
+        "sure-old.cmd",
+        "echo error: unrecognized subcommand 'mcp' 1>&2\r\nexit /b 2\r\n",
+    );
+
+    let output = std::process::Command::new(powershell())
+        .args(["-NoProfile", "-File", &script.to_string_lossy()])
+        .env("SURE_BIN", &old)
+        .output()
+        .expect("spawn sure-mcp.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "an incompatible build must be refused, not started: {stderr}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "the refusal leaked onto the protocol stream: {stdout}"
+    );
+    assert!(
+        stderr.contains(&old.to_string_lossy().to_string()),
+        "the refusal does not say which binary is too old: {stderr}"
+    );
+    assert!(
+        stderr.contains("status 2"),
+        "the refusal does not pass on the status the binary answered with: {stderr}"
+    );
+    assert!(
+        stderr.contains("2025-11-25"),
+        "the refusal does not say which MCP revision this package needs: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_claude_code_mcp_launcher_does_not_invent_a_status_it_was_not_given() {
+    // The third way a binary can be wrong: the path exists and holds something
+    // the operating system will not start, so there is no status to quote. The
+    // refusal has to say that. A sentence with the status left blank would be
+    // the same fault this package exists to avoid, one level down.
+    let script = claude_code_mcp_launcher();
+    let scratch = launcher_scratch("mcp-launcher-unrunnable");
+    let broken = scratch.join("sure-broken.exe");
+    std::fs::write(&broken, "@echo off\r\nexit /b 2\r\n")
+        .expect("write a file that is not a program");
+
+    let output = std::process::Command::new(powershell())
+        .args(["-NoProfile", "-File", &script.to_string_lossy()])
+        .env("SURE_BIN", &broken)
+        .output()
+        .expect("spawn sure-mcp.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "a binary that cannot be started must be refused, not handed the session: {stderr}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "the refusal leaked onto the protocol stream: {stdout}"
+    );
+    assert!(
+        stderr.contains(&broken.to_string_lossy().to_string()),
+        "the refusal does not say which path it tried: {stderr}"
+    );
+    assert!(
+        stderr.contains("2025-11-25"),
+        "the refusal does not say which MCP revision this package needs: {stderr}"
+    );
+    assert!(
+        stderr.contains("could not be run"),
+        "the refusal does not say the binary could not be started: {stderr}"
+    );
+    assert!(
+        !stderr.contains("status )") && !stderr.contains("status ,"),
+        "the refusal printed a status it never received: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_claude_code_mcp_launcher_hands_the_protocol_stream_over_untouched() {
+    // What the launcher may not do to a session that can start: add a line, drop
+    // a line, or lose the status. The stub answers the launcher's own probe with
+    // nothing and then speaks one message, so the probe's silence is part of
+    // what is being checked.
+    let script = claude_code_mcp_launcher();
+    let scratch = launcher_scratch("mcp-launcher-handover");
+    let message = r#"{"jsonrpc":"2.0","id":1,"method":"x"}"#;
+    let stand_in = stub_binary(
+        &scratch,
+        "sure-stand-in.cmd",
+        &format!("if \"%*\"==\"mcp serve --help\" exit /b 0\r\necho {message}\r\nexit /b 7\r\n"),
+    );
+
+    let output = std::process::Command::new(powershell())
+        .args(["-NoProfile", "-File", &script.to_string_lossy()])
+        .env("SURE_BIN", &stand_in)
+        .output()
+        .expect("spawn sure-mcp.ps1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "the server's own status must be the one the caller sees: {stderr}"
+    );
+    assert_eq!(
+        stdout.trim_end(),
+        message,
+        "the protocol stream must carry the server's messages and nothing else: {stdout:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn claude_code_mcp_manifest_names_a_launcher_that_is_there_and_is_a_launcher() {
+    // The manifest is the contract with Claude Code, and the launcher is what
+    // resolves the binary. A manifest naming a file that is not there is the
+    // quiet failure: Claude Code starts nothing and the session has no tools,
+    // so the two halves are checked together.
+    let mcp = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join(".mcp.json");
+    let text = std::fs::read_to_string(&mcp).expect(".mcp.json readable");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&text).expect(".mcp.json must be valid JSON");
+    let sure = manifest
+        .get("mcpServers")
+        .and_then(|v| v.get("sure"))
+        .expect(".mcp.json must declare the sure server");
+    let args: Vec<String> = sure
+        .get("args")
+        .and_then(|v| v.as_array())
+        .expect("the sure server must list args")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(str::to_owned)
+        .collect();
+
+    // `--format json` here would be a defect: the packages launch `sure mcp
+    // serve` and nothing else, and no flag of the launcher's may reach the
+    // session's stream.
+    assert!(
+        !args.iter().any(|a| a == "--format"),
+        "the manifest must not pass output flags into the session: {args:?}"
+    );
+    assert!(
+        args.iter().any(|a| a.contains("sure-mcp.ps1")),
+        "the manifest must name the launcher that resolves the binary: {args:?}"
+    );
+
+    let script = claude_code_mcp_launcher();
+    assert!(
+        script.is_file(),
+        "the manifest names {}, which does not exist",
+        script.display()
+    );
+
+    let launcher = std::fs::read_to_string(&script).expect("launcher readable");
+    assert!(
+        integrations::reaches_core(&launcher),
+        "the MCP launcher must reach the core"
+    );
+    assert!(
+        launcher.lines().count() <= integrations::MAX_LAUNCHER_LINES,
+        "the MCP launcher is {} lines, over the {} -line bound",
+        launcher.lines().count(),
+        integrations::MAX_LAUNCHER_LINES
+    );
+    for part in ["SURE_BIN", "Get-Command sure", "LOCALAPPDATA"] {
+        assert!(
+            launcher.contains(part),
+            "the MCP launcher must resolve the binary the way the hooks do ({part}): {launcher}"
+        );
+    }
 }
 
 #[test]
@@ -976,6 +1315,67 @@ fn agent_plugin_install_script_runs_into_temp_directory() {
     );
 
     let _ = std::fs::remove_dir_all(&temp);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_cursor_and_agent_plugin_installers_say_what_their_mcp_manifest_needs() {
+    // Both packages declare their MCP server as `command: "sure"`, which starts
+    // only where `sure` resolves on PATH — the documented requirement in each
+    // package's README. The installer is the one place SURE can be actionable
+    // about it, so when the binary it resolved is not what PATH would find it
+    // must say so and name the path, rather than installing a manifest that
+    // starts nothing and never says why.
+    for (package, dir_variable) in [
+        ("cursor", "CURSOR_PLUGIN_DIR"),
+        ("agent-plugin", "AGENT_PLUGIN_DIR"),
+    ] {
+        let script = sure_testkit::repository_root()
+            .join("integrations")
+            .join(package)
+            .join("scripts")
+            .join("install.ps1");
+        let scratch = launcher_scratch(&format!("mcp-path-{package}"));
+        let plugin_dir = scratch.join("plugins");
+        let empty_path = scratch.join("empty-path");
+        std::fs::create_dir_all(&empty_path).expect("empty PATH directory");
+        let sure_bin = stub_binary(&scratch, "sure-not-on-path.cmd", "exit /b 0\r\n");
+
+        let output = std::process::Command::new(powershell())
+            .args([
+                "-NoProfile",
+                "-File",
+                &script.to_string_lossy(),
+                "-ForceCopy",
+            ])
+            .env(dir_variable, &plugin_dir)
+            .env("SURE_BIN", &sure_bin)
+            .env("PATH", &empty_path)
+            .output()
+            .unwrap_or_else(|error| panic!("spawn {package} install.ps1: {error}"));
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{package} install.ps1 failed: stdout={stdout}, stderr={stderr}"
+        );
+        assert!(
+            stdout.contains("PATH") && stdout.contains(&sure_bin.to_string_lossy().to_string()),
+            "{package} install.ps1 did not say that its mcp.json starts `sure` from PATH, and \
+             where the binary it found is instead: {stdout}"
+        );
+        // What was installed still names `sure`: the requirement is stated, not
+        // silently rewritten by whoever happened to run the installer.
+        let installed = std::fs::read_to_string(plugin_dir.join("sure").join("mcp.json"))
+            .unwrap_or_else(|error| panic!("{package} mcp.json installed: {error}"));
+        assert!(
+            installed.contains("\"command\": \"sure\""),
+            "{package} mcp.json no longer names `sure`: {installed}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
 }
 
 // --- codex --------------------------------------------------------------

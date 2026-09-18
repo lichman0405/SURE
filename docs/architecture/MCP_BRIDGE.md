@@ -45,6 +45,85 @@ The process is launched by the caller and talks to nobody else. There is no
 socket, no port and no listener anywhere in the bridge; `sure mcp serve` is a
 child process holding two pipes.
 
+### How a harness starts it, and what happens when it cannot
+
+A harness starts the server from a manifest, and `"command": "sure"` works only
+when `sure.exe` is on `PATH`. Whether a package may assume that is decided per
+package and written down in that package's README, because the answer differs
+with what the harness offers:
+
+| Package | What its MCP manifest names | Why |
+| --- | --- | --- |
+| `integrations/claude-code` | `powershell -NoProfile -File <plugin root>/scripts/sure-mcp.ps1` | Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` in `command`, `args` and `env` for a plugin's MCP stdio server, so this package can name a script it bundles; the script then resolves the binary the way the hooks do. Checked 2026-09-19 at `code.claude.com/docs/en/plugins-reference`; `integrations/claude-code/README.md` carries the details and what was not observed. |
+| `integrations/cursor` | `sure` (in `mcp.json`) | The installed manifest names `sure` and requires it on `PATH`, or the absolute path to `%LOCALAPPDATA%\SURE\bin\sure.exe` edited in by hand. `install.ps1` resolves the binary per user and prints which of the two applies, because a plugin installed per user cannot assume a `PATH` entry. |
+| `integrations/agent-plugin` | `sure` (in `mcp.json`) | The same decision as Cursor, for the same reason, and stated in its README. |
+| `integrations/codex` | `sure` (in a `config.toml` block the user pastes) | The user edits the file, so it can name either; the template says so in its own comments. |
+
+The resolution order is the one every launcher and installer here uses:
+`$env:SURE_BIN`, then `sure` on `PATH` (via `Get-Command sure`), then
+`%LOCALAPPDATA%\SURE\bin\sure.exe`, the per-user install location. Nothing in
+this path needs administrator rights, and nothing installs machine-wide.
+
+#### A missing binary refuses; it does not answer
+
+A server that starts without a binary is the worst of the available failures. It
+would answer `tools/list` with an empty list, and a caller would read that as
+SURE having looked at the project and having nothing to say. That is a
+fabricated result, so the MCP path fails closed — the opposite of the hooks,
+which exit 0 with `{"acknowledged":false,"reason":"SURE binary not found",…}` so
+that a missing local tool never blocks a session.
+
+What a caller sees instead, from the Claude Code launcher: **exit 3**, one
+paragraph on stderr naming `SURE_BIN`, `PATH` and
+`%LOCALAPPDATA%\SURE\bin\sure.exe`, and nothing at all on stdout — no tool list,
+no protocol message. The harness reports a server that did not start, which is
+what happened. `integrations/claude-code/fixtures/launcher/mcp-exit-codes.json`
+records the two codes (0 for a session that ended, 3 for a launcher that
+refused), and `crates/sure-testkit/tests/integration_thinness.rs` runs the
+script with its environment rearranged to check each branch: no binary anywhere,
+a `SURE_BIN` that names nothing, a stand-in that is not SURE, and a path the
+operating system will not start at all.
+
+#### An incompatible binary
+
+Two mismatches, and they are not the same failure.
+
+**A build that predates the bridge** has no `mcp` subcommand, and answers one
+with the command line's own usage error and status 2 — the status this CLI
+returns for a command line it does not have
+(`crates/sure-cli/tests/cli_contract.rs`). The launcher asks
+`sure mcp serve --help` before it hands the session over, so a caller gets one
+paragraph naming the binary, the status it answered with, and the revision this
+package needs, instead of a server that dies on the caller's first message. A
+binary the operating system refuses to start is the same refusal with "could not
+be run at all" in place of the status: there is no status to quote, and the
+launcher does not print a blank one
+(`the_claude_code_mcp_launcher_does_not_invent_a_status_it_was_not_given`). The
+probe is checked with a stand-in that exits 2
+(`the_claude_code_mcp_launcher_refuses_a_binary_that_does_not_carry_the_bridge`),
+not against a real pre-bridge build: this tree does not contain one. What the
+probe establishes is that the named command carries the subcommand, not that the
+file is SURE — a different program that accepts `sure mcp serve --help` and exits
+0 passes it, and `where.exe`, which ships with Windows, is one. A `SURE_BIN` is
+the user's own statement of which binary this is.
+
+**A build that speaks another revision** is not detected by the launcher, and it
+does not pretend to be: the revision is settled by the handshake, which is what
+the protocol provides for it. Read at revision `2025-11-25`,
+`.../basic/lifecycle`: "If the server supports the requested protocol version,
+it **MUST** respond with the same version. Otherwise, the server **MUST**
+respond with another protocol version that it supports. This **SHOULD** be the
+latest version supported by the server." SURE supports one revision and answers
+with it, whatever the client asked for, so it never agrees to a revision it does
+not speak: a caller that expects `2025-11-25` and reads a different
+`protocolVersion` in the result knows it must stop, and a caller that ignores
+the field is answered in this build's vocabulary. That is the behaviour
+`a_caller_that_asks_for_another_revision_is_answered_with_sures_own`
+(`crates/sure-cli/src/mcp.rs`) and
+`a_caller_that_asks_for_another_revision_is_still_told_what_sure_speaks`
+(`crates/sure-cli/tests/mcp_protocol.rs`) pin, and the revision the negotiation
+was checked against, `2025-11-25`, is the one in `PROTOCOL_VERSION`.
+
 ### What each tool answers today
 
 Every tool runs the command line behind it, through the same dispatch
@@ -94,16 +173,19 @@ is no argument that sets a goal, a depth, a mode or a target.
 
 ### Streams and limits
 
-stdout carries protocol messages and nothing else: the specification forbids a
-server writing anything else there, and the bridge can only build a protocol
-message, because every message goes out through the same `Report` → `Format`
-path as every other command's output. The session summary is a diagnostic and
-goes to stderr with the default format. One wart, named here because a caller
-has to know it: `sure --format json mcp serve` writes one CLI envelope line to
-stdout after the last protocol message, because `--format json` means
-"everything SURE says goes to stdout as one frame". A caller that reads stdout
-as a protocol stream must not ask for the machine format; the harness
-integrations do not.
+stdout carries protocol messages and nothing else, in every mode: the
+specification forbids a server writing anything else there
+(`.../2025-11-25/basic/transports`: "The server **MUST NOT** write anything to
+its `stdout` that is not a valid MCP message"), and the bridge can only build a
+protocol message, because every message goes out through the same `Report` →
+`Format` path as every other command's output. The session summary is a
+diagnostic and goes to stderr — under `--format json` as well as under the
+default, since an envelope is not an MCP message and there is no flag that makes
+one. Until P12-T010 the machine format put one envelope line on stdout after the
+last message; `Format::emit` in `crates/sure-cli/src/output.rs` is where that
+stopped, and
+`crates/sure-cli/tests/mcp_protocol.rs::no_line_that_is_not_a_protocol_message_reaches_stdout_in_any_mode`
+is what reads the process back and checks.
 
 A message longer than 4 MiB is refused as a parse error and the rest of that
 line is discarded, so the next line is read as a message rather than as the tail

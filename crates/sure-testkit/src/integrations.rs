@@ -99,18 +99,18 @@ pub enum ThinnessFinding {
         /// The extension found.
         extension: String,
     },
-    /// A hook manifest names a script that is not there.
+    /// A hook or MCP manifest names a script that is not there.
     ///
-    /// This is the quiet one: the harness reports nothing, the hook never runs,
-    /// and the session simply has no evidence in it.
-    HookManifestReferencesMissingFile {
+    /// This is the quiet one: the harness reports nothing, the hook or the
+    /// server never runs, and the session simply has no evidence in it.
+    ManifestReferencesMissingFile {
         /// Relative path of the manifest.
         manifest: String,
         /// The missing file, as named by the manifest.
         referenced: String,
     },
-    /// A hook manifest is not valid JSON.
-    UnreadableHookManifest {
+    /// A hook or MCP manifest is not valid JSON.
+    UnreadableManifest {
         /// Relative path of the manifest.
         manifest: String,
         /// What went wrong.
@@ -140,15 +140,15 @@ impl fmt::Display for ThinnessFinding {
                 "{file}: '.{extension}' in an integration package is a second check engine; the \
                  core is the only implementation (ADR 0001)"
             ),
-            Self::HookManifestReferencesMissingFile {
+            Self::ManifestReferencesMissingFile {
                 manifest,
                 referenced,
             } => write!(
                 f,
-                "{manifest}: references '{referenced}', which does not exist; the hook would \
+                "{manifest}: references '{referenced}', which does not exist; what it names would \
                  silently never run and the session would carry no evidence"
             ),
-            Self::UnreadableHookManifest { manifest, detail } => {
+            Self::UnreadableManifest { manifest, detail } => {
                 write!(f, "{manifest}: not valid JSON: {detail}")
             }
         }
@@ -297,7 +297,17 @@ pub fn findings(files: &[IntegrationFile], frozen_sentences: &[&str]) -> Vec<Thi
     found
 }
 
-/// Check that every file a hook manifest points at exists.
+/// The manifests that name a file the harness will run.
+///
+/// A hook manifest names a launcher, and an MCP manifest names the command that
+/// is the server — which is a script in the packages that need one to resolve
+/// the binary. Both are the same defect when the file is not there: the
+/// harness starts nothing and says nothing, and the session has no evidence in
+/// it. `hooks.json` sits in a `hooks/` directory and names files relative to
+/// the package; the MCP manifests sit at the package root.
+pub const MANIFEST_NAMES: &[&str] = &["hooks.json", "mcp.json", ".mcp.json"];
+
+/// Check that every file a hook or MCP manifest points at exists.
 ///
 /// Only path-shaped strings are considered: manifests also carry matchers,
 /// shell names and hook-type words, and treating those as missing files would
@@ -310,25 +320,32 @@ pub fn manifest_reference_findings(
     let mut found = Vec::new();
     for file in files {
         let name = file.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name != "hooks.json" {
+        if !MANIFEST_NAMES.contains(&name) {
             continue;
         }
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(&file.text);
         let value = match parsed {
             Ok(value) => value,
             Err(error) => {
-                found.push(ThinnessFinding::UnreadableHookManifest {
+                found.push(ThinnessFinding::UnreadableManifest {
                     manifest: file.relative.clone(),
                     detail: error.to_string(),
                 });
                 continue;
             }
         };
-        let package_dir = file
-            .path
-            .parent()
-            .and_then(Path::parent)
-            .unwrap_or(integrations_root);
+        // A hook manifest is one directory below the package it names files in;
+        // an MCP manifest is the package's own file. Both name their scripts
+        // relative to the package, which is what `${CLAUDE_PLUGIN_ROOT}` and
+        // `${PLUGIN_ROOT}` are stripped down to below.
+        let package_dir = match name {
+            "hooks.json" => file
+                .path
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or(integrations_root),
+            _ => file.path.parent().unwrap_or(integrations_root),
+        };
         for reference in script_references(&value) {
             let normalised = reference
                 .replace("${CLAUDE_PLUGIN_ROOT}", "")
@@ -351,7 +368,7 @@ pub fn manifest_reference_findings(
                 continue;
             }
             if !package_dir.join(normalised).is_file() {
-                found.push(ThinnessFinding::HookManifestReferencesMissingFile {
+                found.push(ThinnessFinding::ManifestReferencesMissingFile {
                     manifest: file.relative.clone(),
                     referenced: reference,
                 });

@@ -117,6 +117,19 @@ struct Finished {
     stderr: String,
 }
 
+/// The one envelope a finished session leaves, read back from stderr.
+///
+/// The summary of a session is a diagnostic in both formats: the specification's
+/// transport page forbids anything but a protocol message on the caller's
+/// stream, so `--format json` does not change which stream the envelope takes.
+/// A test that wants the summary parses the diagnostic stream — and checks
+/// first that stdout held nothing but the messages it already read.
+fn envelope_of(finished: &Finished) -> Value {
+    let frame = finished.stderr.trim();
+    serde_json::from_str(frame)
+        .unwrap_or_else(|error| panic!("the session summary was not one frame ({error}): {frame}"))
+}
+
 impl Session {
     /// A server in a store of this test's own.
     fn open(args: &[&str]) -> Session {
@@ -152,7 +165,11 @@ impl Session {
         Session::open(&["mcp", "serve"])
     }
 
-    /// A server with the machine format, for the tests that read the envelope.
+    /// A server with the machine format.
+    ///
+    /// The session's envelope still arrives on stderr rather than on stdout, so
+    /// the tests that read it use [`envelope_of`] and check the caller's stream
+    /// is protocol messages only.
     fn serve_json() -> Session {
         Session::open(&["--format", "json", "mcp", "serve"])
     }
@@ -899,14 +916,12 @@ fn a_notification_is_never_answered_and_never_runs_anything() {
     assert_eq!(pong["id"], 9, "{pong}");
     let finished = session.finish();
     assert_eq!(finished.status, 0);
-    let envelope: Value = serde_json::from_str(
-        finished
-            .unread
-            .first()
-            .expect("the session envelope is the only thing left on stdout"),
-    )
-    .expect("the session envelope is one frame");
-    assert_eq!(finished.unread.len(), 1, "{:?}", finished.unread);
+    assert!(
+        finished.unread.is_empty(),
+        "stdout carried something that is not a protocol message: {:?}",
+        finished.unread
+    );
+    let envelope = envelope_of(&finished);
     assert_eq!(envelope["command"], "mcp");
     assert_eq!(envelope["details"]["tool_calls"], 0, "{envelope}");
     assert_eq!(envelope["details"]["notifications"], 2, "{envelope}");
@@ -945,27 +960,186 @@ fn stdout_carries_protocol_messages_and_the_session_summary_goes_to_stderr() {
 }
 
 #[test]
-fn the_machine_format_puts_one_envelope_on_stdout_after_the_last_message() {
-    // A wart, and a deliberate one: `--format json` means "everything SURE says
-    // goes to stdout as one frame". A caller that reads this stream as a
-    // protocol stream must not ask for the machine format.
-    // `docs/architecture/MCP_BRIDGE.md` says so.
+fn the_machine_format_leaves_stdout_to_the_protocol_and_writes_its_envelope_to_stderr() {
+    // This was a wart until P12-T010 and it is not one now: `--format json`
+    // means "everything SURE says goes to stdout as one frame", which put a CLI
+    // envelope on the protocol channel after the last message. The
+    // specification's transport page forbids it — at revision `2025-11-25`,
+    // "The server **MUST NOT** write anything to its `stdout` that is not a
+    // valid MCP message" — so the summary is a diagnostic in this format too,
+    // and a caller may pass the flag without losing the stream.
     let mut session = Session::serve_json();
     session.start();
     let finished = session.finish();
     assert_eq!(finished.status, 0);
-    assert_eq!(finished.unread.len(), 1, "{:?}", finished.unread);
-    let envelope: Value = serde_json::from_str(&finished.unread[0]).expect("one frame");
+    assert!(
+        finished.unread.is_empty(),
+        "stdout carried something that is not a protocol message: {:?}",
+        finished.unread
+    );
+    let envelope = envelope_of(&finished);
     assert_eq!(envelope["command"], "mcp");
     assert_eq!(envelope["outcome"], "ok");
     assert_eq!(envelope["exit_code"], 0);
     assert_eq!(envelope["details"]["answered"], 1, "{envelope}");
-    // The human summary is a diagnostic, so this run's stderr is not a copy of
-    // it: the machine form went to stdout instead.
+}
+
+#[test]
+fn no_line_that_is_not_a_protocol_message_reaches_stdout_in_any_mode() {
+    // The claim `docs/architecture/MCP_BRIDGE.md` makes, read back from the
+    // process: the caller's stream carries protocol messages and nothing else,
+    // whatever format the command line asked for. `--format json` used to be
+    // the exception, with the session's CLI envelope arriving after the last
+    // message; P12-T010 removed it, and this test is what says so for every
+    // mode the grammar accepts rather than for the one that was reported.
+    let modes: [&[&str]; 3] = [
+        &["mcp", "serve"],
+        &["--format", "human", "mcp", "serve"],
+        &["--format", "json", "mcp", "serve"],
+    ];
+    for args in modes {
+        let mut session = Session::open(args);
+        session.start();
+        let _ = session.ask(call(2, "sure_status", json!({})));
+        let finished = session.finish();
+        assert_eq!(finished.status, 0, "{}", finished.stderr);
+        assert!(
+            finished.unread.is_empty(),
+            "{args:?} left something on stdout that is not a protocol message: {:?}",
+            finished.unread
+        );
+    }
+}
+
+/// The PowerShell the packaged manifest names, found the way Windows finds it.
+///
+/// The manifest says `powershell`, which a harness resolves through `PATH`. A
+/// test should not depend on `PATH` any more than the package does, so this asks
+/// the system directory for the same binary — Windows PowerShell, not `pwsh`,
+/// because that is the name a manifest can count on being there.
+#[cfg(windows)]
+fn powershell() -> PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    PathBuf::from(root).join("System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+}
+
+/// The script the packaged Claude Code manifest names as its MCP server.
+#[cfg(windows)]
+fn packaged_launcher() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("integrations")
+        .join("claude-code")
+        .join("scripts")
+        .join("sure-mcp.ps1")
+}
+
+/// Write `input` to a process's standard input, close it, and collect the run.
+#[cfg(windows)]
+fn run_with_stdin(mut command: Command, input: &str) -> Run {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("could not start the session: {error}"));
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(input.as_bytes())
+        .expect("the caller can write");
+    let output = child.wait_with_output().expect("the process exited");
+    Run {
+        status: output.status.code().expect("the process exited on its own"),
+        stdout: String::from_utf8(output.stdout).expect("stdout is utf-8"),
+        stderr: String::from_utf8(output.stderr).expect("stderr is utf-8"),
+    }
+}
+
+/// The acceptance criterion "plugin MCP manifests invoke local sure binary" is a
+/// claim about a package rather than about this crate, so this runs what the
+/// package's manifest names a harness to run: `powershell -NoProfile -File
+/// <package>/scripts/sure-mcp.ps1`, with `SURE_BIN` naming the binary this build
+/// just produced — the resolution a user who set the documented override gets.
+///
+/// What comes back is compared byte for byte with the same three messages sent
+/// straight at `sure --store-dir … mcp serve`, because a launcher between a
+/// caller and a server is exactly where a stream gets decorated, re-encoded or
+/// ended early. The launcher run carries no `--store-dir`, because the manifest
+/// passes none: the three messages are the handshake, the tool list and a ping,
+/// none of which runs a command, so the session opens no store and the store of
+/// whoever runs the suite is not touched.
+#[cfg(windows)]
+#[test]
+fn the_packaged_mcp_launcher_reaches_sure_and_hands_the_stream_over_untouched() {
+    let launcher = packaged_launcher();
     assert!(
-        !finished.stderr.contains("sure_version"),
+        launcher.is_file(),
+        "the manifest names {}, and it is not there",
+        launcher.display()
+    );
+
+    let messages = [
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "mcp_protocol.rs", "version": "0"},
+            },
+        })
+        .to_string(),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).to_string(),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "ping"}).to_string(),
+    ];
+    let stream = format!("{}\n", messages.join("\n"));
+
+    let mut through_the_launcher = Command::new(powershell());
+    through_the_launcher
+        .args(["-NoProfile", "-File"])
+        .arg(&launcher)
+        .env("SURE_BIN", SURE);
+    let through = run_with_stdin(through_the_launcher, &stream);
+
+    let mut direct_command = sure_in_a_store(&a_store_of_our_own());
+    direct_command.args(["mcp", "serve"]);
+    let direct = run_with_stdin(direct_command, &stream);
+
+    assert_eq!(through.status, 0, "{}", through.stderr);
+    assert_eq!(direct.status, 0, "{}", direct.stderr);
+    assert_eq!(
+        through.stdout, direct.stdout,
+        "the launcher changed the protocol stream"
+    );
+    // Every line is a message, and the handshake's own words survived the trip.
+    // The instructions carry an em dash (`SURE — Software Understanding`); a
+    // launcher that read and re-wrote the stream through a legacy code page
+    // would turn it into `?`, and comparing the two runs is what catches that.
+    assert_eq!(
+        through.stdout.lines().count(),
+        3,
+        "{:?}",
+        through.stdout.lines().collect::<Vec<_>>()
+    );
+    for line in through.stdout.lines() {
+        let message: Value = serde_json::from_str(line)
+            .unwrap_or_else(|error| panic!("a line on stdout was not JSON ({error}): {line}"));
+        assert_eq!(message["jsonrpc"], "2.0", "{message}");
+    }
+    assert!(
+        through.stdout.contains('\u{2014}'),
+        "the handshake's own text did not survive the launcher intact: {}",
+        through.stdout
+    );
+    // The session summary is the server's, and it is a diagnostic here too.
+    assert!(
+        through.stderr.contains(PROTOCOL_VERSION),
         "{}",
-        finished.stderr
+        through.stderr
     );
 }
 
@@ -975,7 +1149,7 @@ fn a_caller_that_never_handshakes_gets_a_summary_that_says_so() {
     session.ask(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
     let finished = session.finish();
     assert_eq!(finished.status, 0);
-    let envelope: Value = serde_json::from_str(&finished.unread[0]).expect("one frame");
+    let envelope = envelope_of(&finished);
     assert_eq!(envelope["details"]["initialized"], false, "{envelope}");
     assert_eq!(envelope["details"]["answered"], 1, "{envelope}");
     assert_eq!(envelope["details"]["errors"], 1, "{envelope}");

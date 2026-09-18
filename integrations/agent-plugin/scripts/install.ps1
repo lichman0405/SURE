@@ -31,3 +31,8 @@ else{
     }
     Write-Host "Installed (copy): $install"
 }
+# mcp.json starts `sure` from PATH, and a per-user install cannot assume that
+# entry. Say where SURE is when it is somewhere else: a manifest the harness
+# cannot start is a server that never answers, with an empty tool list.
+$onPath=Get-Command sure -EA SilentlyContinue
+if(-not $onPath -or $onPath.Source -ne $bin){Write-Host "MCP: mcp.json starts 'sure' from PATH; this SURE is at $bin. Add that directory to PATH, or set the server's command in $install\mcp.json to that path."}

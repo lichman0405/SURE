@@ -200,11 +200,19 @@ is refused with a protocol error that says so. A project path is passed to the
 command unchanged, so a relative or unreadable path is refused exactly as the
 command line refuses it.
 
-`stdout` carries protocol messages and nothing else, which is why a caller must
-not ask for `--format json`: that flag means "everything SURE says goes to
-`stdout` as one frame", and the session summary would be written there after the
-last message. The default format puts the summary on `stderr`, where a diagnostic
-belongs.
+`stdout` carries protocol messages and nothing else, in **every** mode,
+`--format json` included. The session summary is one CLI envelope, and the
+session's stream is not the place for it: Model Context Protocol revision
+`2025-11-25` says "The server **MUST NOT** write anything to its `stdout` that is
+not a valid MCP message", and an envelope is not a message. So a session summary
+goes to `stderr` whichever format was asked for — the one report in this
+document that does not follow the rule below — and a caller that reads this
+command's `stdout` as a protocol stream may pass `--format json` like any other
+caller. Until P12-T010 the flag put one unparseable line after the last message,
+which is what the fix removed; `Format::emit` in `crates/sure-cli/src/output.rs`
+is the whole of the exception, and
+`crates/sure-cli/tests/mcp_protocol.rs::no_line_that_is_not_a_protocol_message_reaches_stdout_in_any_mode`
+reads three command lines back from the process to check it.
 
 The process returns 0 when the session ends normally and 5 when the stream it was
 talking on could not be read or written. The statuses of the commands behind the
@@ -333,7 +341,8 @@ not sure whether their redirect took effect can ask instead of guessing.
 | `--format` | Stream | Shape |
 | --- | --- | --- |
 | `human` (default) | stdout for an answer, stderr for a complaint | prose for a person |
-| `json` | always stdout | one object on one line |
+| `json` | stdout, except for the one report row three names | one object on one line |
+| `human` or `json`, `sure mcp serve` | stderr | the session summary, which is not a result |
 
 `--format` is global, so it is accepted before or after the command name.
 
@@ -351,6 +360,14 @@ report.txt` put the report in the file. A complaint goes to stderr, so the same
 redirection leaves it where the person can see it. The machine form always goes
 to stdout, including when the command failed: the object *is* the result, and a
 script that asked for the reason has to be able to read it.
+
+The third row is the one exception, and it is not a judgement about output. A
+session summary is not a result of this program being asked something; it is a
+diagnostic about a conversation SURE is having with a harness on the very stream
+the other two rows would use, and the caller on that stream is parsing messages.
+So it goes to stderr in both formats, and nothing else about the two paths
+changes: `Report::McpSession` is the only report that takes it, and `Format::emit`
+is the only place that decides.
 
 ### The frame
 
@@ -513,6 +530,7 @@ anything about output or status: both are SURE's, and both have one home.
 | No MCP tool reports success for a project that was never checked | same file, `no_tool_reports_success_for_a_project_that_was_never_checked` |
 | No MCP argument can reach the execution, privacy or protection policy | same file, `no_argument_can_reach_the_execution_privacy_or_protection_policy` |
 | The bridge writes protocol messages to stdout and its summary to stderr | same file, `stdout_carries_protocol_messages_and_the_session_summary_goes_to_stderr` |
+| No line that is not a protocol message reaches stdout, in any mode | same file, `no_line_that_is_not_a_protocol_message_reaches_stdout_in_any_mode` and `the_machine_format_leaves_stdout_to_the_protocol_and_writes_its_envelope_to_stderr` |
 | The doctor's labels and values line up | `crates/sure-cli/src/doctor.rs`, `every_label_the_report_prints_is_separated_from_its_value` |
 | `sure doctor` never reads the settings file | `crates/sure-core/tests/doctor.rs`, `the_diagnostic_never_reaches_for_the_settings_module` |
 | `sure doctor` never creates the store | same file, `the_report_never_creates_what_it_reports_on` |

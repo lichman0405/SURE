@@ -1,0 +1,8 @@
+{
+  "description": "Claude Code MCP launcher exit-code semantics.",
+  "semantics": {
+    "0": "The session ended because the caller closed its stream, or because it ended on its own. The server's own status is what the launcher returns.",
+    "3": "The launcher refused to start a session, and said why in one paragraph on stderr: no SURE binary could be resolved, SURE_BIN named something that is not there, or the binary it found is not one it can use (it answered a status other than 0, or the operating system would not start it). stdout carries no protocol message and no tool list."
+  },
+  "note": "This is the opposite of the hook launcher on purpose. A hook exits 0 when SURE is missing so that a missing local tool does not block the agent; an MCP server that started without a binary would answer an empty tool list, and a caller would read that as SURE having looked at the project and found nothing. The launcher fails closed, so the harness reports a server that did not start, which is what happened."
+}

@@ -8,13 +8,18 @@
 //! | Format | Stream | Shape |
 //! | --- | --- | --- |
 //! | `human` | the stream that matches the outcome — see [`Format::emit`] | prose for a person |
-//! | `json` | always stdout | one line, one object |
+//! | `json` | stdout, except for one report — see below | one line, one object |
 //!
 //! The machine path always uses stdout, including when the command failed,
 //! because the JSON *is* the result: a script that asked for the failure reason
 //! has to be able to read it. The human path uses stdout for an answer and
 //! stderr for a complaint, so that `sure check > report.txt` puts the report in
 //! the file and leaves the complaint on the terminal.
+//!
+//! The one exception is [`Report::McpSession`], and it is an exception in both
+//! formats: the summary of a protocol session may not be written to the stream
+//! that session is speaking on. Which stream that is, and why the rule is not
+//! SURE's to weigh, is at the head of [`Format::emit`].
 //!
 //! # Why it is one module
 //!
@@ -57,10 +62,31 @@ impl Format {
     pub fn emit(self, report: &Report) -> io::Result<()> {
         match self {
             Self::Json => {
-                let stdout = io::stdout();
-                let mut out = stdout.lock();
-                report.machine(&mut out)?;
-                writeln!(out)
+                // A protocol session's summary is not a result, in this format
+                // as much as in the other one: it may not be written to the
+                // stream the session speaks on. Model Context Protocol revision
+                // `2025-11-25`, `basic/transports`: "The server **MUST NOT**
+                // write anything to its `stdout` that is not a valid MCP
+                // message", and a CLI response frame is not one. So this is the
+                // one report `--format json` does not put on stdout, because
+                // `sure mcp serve` is the one command whose caller is reading
+                // that stream as a protocol stream — so a caller that asked for
+                // the machine form of everything would otherwise get one line
+                // it cannot parse, on the channel it cannot afford to lose.
+                // `docs/architecture/MCP_BRIDGE.md` states the rule;
+                // `tests/mcp_protocol.rs` reads stdout back and fails if
+                // anything but a message is ever there, in either format.
+                if matches!(report, Report::McpSession(_)) {
+                    let stderr = io::stderr();
+                    let mut err = stderr.lock();
+                    report.machine(&mut err)?;
+                    writeln!(err)
+                } else {
+                    let stdout = io::stdout();
+                    let mut out = stdout.lock();
+                    report.machine(&mut out)?;
+                    writeln!(out)
+                }
             }
             Self::Human => {
                 // An answer belongs on stdout; a complaint belongs on stderr.

@@ -387,12 +387,43 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     session. The document includes prerequisites, step-by-step commands,
     expected outcomes, a failure-triage table, and instructions for recording
     results without making the process a CI requirement.
+57. A worker agent completed `P11-T008` — *Cursor synthetic E2E* — as commit
+    `862602a`. The supervisor re-ran the full gate set and accepted the task.
+    `crates/sure-cli/src/hook.rs` now has a `cursor_check_repair_recheck_round_trip`
+    test that mirrors the Claude Code synthetic E2E: it feeds synthetic Cursor
+    events (session-start, Read pre-tool-use, check/repair/recheck pre/post,
+    stop) through the real ingest path against a temp store, asserts the
+    expected protection decisions, and verifies persisted event types and a
+    consistent session id.
 
-**Phase P11 is open at 7 of 9; Phase P10 is complete at 9 of 9.** The READY list is now
-`P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+**Phase P11 is open at 8 of 9; Phase P10 is complete at 9 of 9.** The READY list is now
+`P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
 `P14-T007`, `P14-T009` and `P14-T010`. The lowest-numbered READY task is
-`P11-T008`, which is the next concrete action.
+`P12-T001`, which is the next concrete action.
+
+## What `P11-T008` added
+
+- `crates/sure-cli/src/hook.rs` — added `cursor_check_repair_recheck_round_trip`
+  integration test.
+  - Creates a temp project + SURE data/config under `target/tmp`.
+  - Feeds eight synthetic `cursor` events through `run_ingest_with_paths`:
+    session-start, a `Read` pre-tool-use, check pre/post (`Shell`), repair
+    pre/post (`Write`), recheck pre/post (`Shell`), and stop.
+  - Asserts `Read` is `Allow` in `InspectOnly`, `Write`/`Shell` are `Block`, and
+    non-pre-tool-use events are `Allow`.
+  - Opens the temp store and verifies all events were persisted with the correct
+    event types and a consistent session id.
+
+## Validation of `P11-T008`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T009` added
 

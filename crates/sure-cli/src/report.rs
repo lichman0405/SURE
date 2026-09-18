@@ -71,10 +71,10 @@ pub mod exit {
     /// The command ran, and the answer is not a clean one.
     ///
     /// `sure doctor` returns this when it finds something wrong with this
-    /// installation, and `sure check` will return it once a project can be
-    /// checked and findings are found. That is one code for two things on
-    /// purpose: what a caller does with it is the same — stop — and the report
-    /// says which it was. What must never be merged is this and
+    /// installation, and `sure check`, `sure recheck` and `sure repair` return
+    /// it when the project was checked and is not clean. That is one code for
+    /// two things on purpose: what a caller does with it is the same — stop —
+    /// and the report says which it was. What must never be merged is this and
     /// [`UNAVAILABLE`]: "the project has problems" and "SURE cannot do that
     /// here" need opposite responses from the person reading them, and one
     /// status for both is how a tool that is broken gets read as a project that
@@ -132,22 +132,23 @@ pub struct NotYet {
     pub instead: &'static str,
 }
 
-/// A goal SURE recorded, in a run that did not get as far as checking anything.
+/// A goal SURE wrote down for the project, as part of a run that went on to
+/// check it.
 ///
-/// # Why this is a result of its own rather than a [`NotYet`]
+/// # Why this is carried rather than reported on its own
 ///
-/// Because something happened. `sure check --goal "…"` writes the goal down, and
-/// a refusal that said only "not implemented in this build" would be true about
-/// the check and false about the run: the user's history changed. A command
-/// whose side effect is invisible is the shape of failure this program exists to
-/// find, so the write is the first thing the report says.
+/// Because something happened that the check's own result does not contain.
+/// `sure check --goal "…"` writes the goal down **and then checks against it**:
+/// it is the one command on this surface whose side effect is not visible in its
+/// output unless the report says so. A run whose output did not mention the
+/// write would leave a user unable to tell whether their words are in the
+/// history, which is the shape of failure this program exists to find.
 ///
-/// # Why it still exits 3
-///
-/// The command the user asked for is `sure check`, and no check ran. Status 3 is
-/// what stops a script that invoked it, and the frame carries the record so a
-/// script can still see what was stored. Reporting success here would make
-/// `sure check` exit 0 in CI while checking nothing.
+/// Until `P7-T010` this was a [`Report`] variant of its own and a run stopped
+/// here with status 3, because there was no pipeline to continue into. Now it is
+/// a field of [`CheckReport`]: the write still happens first, and the run still
+/// says what it wrote, but the command the user asked for now also happens and
+/// its status is the run's own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalRecorded {
     /// The goal, as the user gave it. Not a summary; see `cli.rs`.
@@ -175,6 +176,56 @@ pub struct GoalRecorded {
     pub project_state: sure_core::vocabulary::ProjectFingerprint,
     /// The store row it was written as.
     pub record: i64,
+}
+
+/// What one run of `sure check`, `sure recheck` or `sure repair` found.
+///
+/// # Why the pipeline's own result is the payload
+///
+/// Because the report *is* the run's result. Every field a reader needs —
+/// the findings, what was checked, what was not and why, the overall verdict and
+/// the per-stage record — is in [`sure_core::pipeline::PipelineOutcome`], and a
+/// struct here that restated them would be a second place for them to be wrong.
+/// What this type adds is the two things the pipeline does not know: which
+/// command the user typed, and what that command wrote to their history on the
+/// way.
+///
+/// # Why the three commands share one variant
+///
+/// Because they share one run. `sure recheck` is `sure check` plus a comparison
+/// with the previous run and `sure repair` is `sure check` plus a repair
+/// contract; all three reach the same orchestrator (`P7-T010`'s acceptance asks
+/// for exactly that) and they differ in how far down the twelve stages they go.
+/// Three variants would be three renderings of one result, free to drift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckReport {
+    /// The command the user typed, from the grammar rather than retyped — see
+    /// `Command::name`.
+    pub command: &'static str,
+    /// The project directory the run was about, as SURE resolved it.
+    pub project: String,
+    /// What the twelve stages did, in order.
+    pub run: sure_core::pipeline::PipelineOutcome,
+    /// The goal this run recorded, when the user gave one on the command line.
+    ///
+    /// `Some` only when `--goal` was passed, and `Some` means the row exists:
+    /// a run that could not write it is a [`Report::Failed`] and never reaches
+    /// this type.
+    pub recorded_goal: Option<GoalRecorded>,
+}
+
+impl CheckReport {
+    /// Whether the run finished.
+    #[must_use]
+    pub const fn finished(&self) -> bool {
+        self.run.finished()
+    }
+
+    /// Whether the run finished and found the project clean.
+    #[must_use]
+    pub fn is_green(&self) -> bool {
+        self.run.is_green()
+    }
 }
 
 /// A command that tried and did not finish.
@@ -309,9 +360,9 @@ pub enum Report {
     Handshake(sure_core::Handshake),
     /// `sure doctor`, carrying what it found.
     Doctor(Box<sure_core::doctor::DoctorReport>),
-    /// `sure check --goal`, which recorded the goal and stopped before it could
-    /// check anything.
-    GoalRecorded(Box<GoalRecorded>),
+    /// `sure check`, `sure recheck` or `sure repair`, carrying what the twelve
+    /// stages of `docs/architecture/CHECK_PIPELINE.md` did.
+    Check(Box<CheckReport>),
     /// A command whose work lands in a later phase.
     Unavailable(NotYet),
     /// A command that tried and did not finish.
@@ -369,11 +420,20 @@ impl Report {
                     "not_green"
                 }
             }
-            // The command the user asked for did not happen, which is what
-            // `unavailable` means on this surface. Not `ok`: nothing was checked.
-            // Not `failed`: nothing went wrong, and a record was written that
-            // this outcome tells a script to go looking for under `details`.
-            Self::GoalRecorded(_) => "unavailable",
+            // A run that finished and found the project clean is `ok`, and one
+            // that finished and did not is `not_green` — the same pair `doctor`
+            // uses above, and read off the same kind of predicate, so the outcome
+            // and the status cannot disagree. A run that did not finish is
+            // `failed`: see the arm below.
+            Self::Check(report) => {
+                if !report.finished() {
+                    "failed"
+                } else if report.is_green() {
+                    "ok"
+                } else {
+                    "not_green"
+                }
+            }
             Self::Unavailable(_) => "unavailable",
             // A command that did not finish has not answered, and saying
             // `not_green` would read as "the project has problems" — which is a
@@ -437,11 +497,22 @@ impl Report {
                     exit::NOT_GREEN
                 }
             }
-            // 3, not 0 and not 5. The check is the thing the user asked for and
-            // it did not run — which is what 3 means — and nothing went wrong.
-            // The record the goal was written as is in the report, so a script
-            // is not left thinking the run had no effect.
-            Self::GoalRecorded(_) => exit::UNAVAILABLE,
+            // The three statuses `docs/architecture/CLI.md` gives a check: 0 for
+            // a clean project, 1 for a project that was checked and is not clean,
+            // 5 for a run that tried and did not finish. **1 and 3 are never
+            // merged.** A project with problems is 1 — SURE did its job and the
+            // answer is bad — and 3 stays for a command this build cannot carry
+            // out, which is a different thing to say to a script: 3 means "ask a
+            // newer SURE", and 1 means "look at the project".
+            Self::Check(report) => {
+                if !report.finished() {
+                    exit::FAILED
+                } else if report.is_green() {
+                    exit::OK
+                } else {
+                    exit::NOT_GREEN
+                }
+            }
             Self::Unavailable(_) => exit::UNAVAILABLE,
             Self::Failed(_) => exit::FAILED,
             // 0 for allow/warn so the launcher does not block the operation.
@@ -489,11 +560,14 @@ impl Report {
         match self {
             Self::Version | Self::Protocol | Self::Doctor(_) => true,
             Self::Handshake(handshake) => handshake.is_agreed(),
-            // `sure check --goal > report.txt` has to leave the complaint on the
-            // terminal. The run recorded a goal and checked nothing, which is not
-            // a report about the project, and a file holding only the recording
-            // would read as one.
-            Self::GoalRecorded(_) | Self::Unavailable(_) | Self::Failed(_) => false,
+            // A check that finished is an answer, exactly as a doctor report that
+            // found a problem is one: `sure check > report.txt` has to put the
+            // report in the file and let the exit status carry the bad news. A
+            // check that did **not** finish is a complaint — there is no report
+            // to file, and a person who piped the output meant to read why it
+            // stopped.
+            Self::Check(report) => report.finished(),
+            Self::Unavailable(_) | Self::Failed(_) => false,
             // A hook decision is an answer: the command ran and produced a result.
             Self::HookDecision(_) => true,
             // A protocol message is the session's answer to its caller, and it
@@ -541,46 +615,11 @@ impl Report {
             // way, and the two would then be two explanations of one rule.
             Self::Handshake(handshake) => writeln!(out, "{handshake}"),
             Self::Doctor(report) => crate::doctor::human(report, out),
-            // What happened first, then what did not. A person who ran this has
-            // a record in their history now, and the report opens by saying so
-            // rather than burying it under the refusal.
-            Self::GoalRecorded(recorded) => {
-                writeln!(out, "Your goal was recorded, and nothing was checked.")?;
-                writeln!(out)?;
-                writeln!(out, "  what you asked for  {}", recorded.goal)?;
-                // The domain's own sentence about what this label is worth,
-                // rather than a second wording written here. A renderer that
-                // paraphrased the trust label could weaken it without anything
-                // failing.
-                writeln!(
-                    out,
-                    "  where it came from  {}",
-                    recorded.source.plain_description()
-                )?;
-                writeln!(out, "  project             {}", recorded.project_root)?;
-                writeln!(
-                    out,
-                    "  project state       {} ({} fingerprint)",
-                    recorded.project_state.digest,
-                    recorded.project_state.kind.as_str()
-                )?;
-                writeln!(out, "  record              #{}", recorded.record)?;
-                writeln!(out)?;
-                writeln!(
-                    out,
-                    "SURE read the project only far enough to say which state of it the goal \
-                     was recorded against, because this build cannot check a project yet. Your \
-                     history has the goal in it; the project itself is unchanged."
-                )?;
-                writeln!(out)?;
-                writeln!(
-                    out,
-                    "SURE exited with status {} rather than {}, because work that was not done \
-                     and work that succeeded must never look alike to a script.",
-                    exit::UNAVAILABLE,
-                    exit::OK
-                )
-            }
+            // The command's own module renders it, for the reason `doctor` above
+            // does: the words a user reads for a report of this shape belong with
+            // the command that produced it rather than in the type that carries
+            // it.
+            Self::Check(report) => crate::check::human(report, out),
             Self::Failed(failure) => {
                 writeln!(
                     out,
@@ -783,29 +822,10 @@ impl Report {
                     },
                 });
             }
-            // What was stored, for a script that wants to act on it rather than
-            // only notice it. `source` is the wire name here, not the sentence:
-            // the frame is what a reader switches on, and a switch on prose
-            // breaks when the prose is improved.
-            Self::GoalRecorded(recorded) => {
-                let state = &recorded.project_state;
-                frame["details"] = json!({
-                    "goal": recorded.goal,
-                    "requirement_id": recorded.requirement_id,
-                    "source": recorded.source.as_str(),
-                    "project_root": recorded.project_root,
-                    // Written out field by field rather than by serializing the
-                    // domain type, so that the shape a script reads is decided
-                    // here. A field added to that type must not appear in this
-                    // frame without somebody choosing to put it there.
-                    "project_state": {
-                        "id": state.id.as_str(),
-                        "kind": state.kind.as_str(),
-                        "digest": state.digest,
-                    },
-                    "record": recorded.record,
-                });
-            }
+            // Everything the run found, under the one key, built by the command's
+            // own module so that the shape a script reads is decided beside the
+            // prose a person reads.
+            Self::Check(report) => frame["details"] = crate::check::machine(report),
             // The failure's own words. `what` is a sentence SURE wrote about
             // itself and `detail` is whatever went wrong, kept apart here for
             // the same reason they are apart in the struct: a reader deciding
@@ -859,10 +879,11 @@ impl Report {
             Self::Version => "version",
             Self::Protocol | Self::Handshake(_) => "protocol",
             Self::Doctor(_) => "doctor",
-            // The command the user typed. `sure check --goal "…"` is `check`,
-            // and a frame saying otherwise would name a command that does not
-            // exist on this surface.
-            Self::GoalRecorded(_) => "check",
+            // The command the user typed, taken from the report rather than
+            // fixed here: `sure check`, `sure recheck` and `sure repair` share
+            // this variant, and a frame that said `check` for all three would
+            // name a command the user did not run.
+            Self::Check(report) => report.command,
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
             Self::HookDecision(_) => "hook",
@@ -893,9 +914,9 @@ mod tests {
 
     fn a_refusal() -> NotYet {
         NotYet {
-            command: "check",
-            does: "check a project and report what it found",
-            instead: "Nothing was checked.",
+            command: "history",
+            does: "show what SURE has recorded, on this machine and for this project",
+            instead: "Nothing was read from the history, and nothing was deleted.",
         }
     }
 
@@ -935,15 +956,175 @@ mod tests {
         }
     }
 
-    /// A goal that was recorded in a run that checked nothing.
-    fn a_recorded_goal() -> Report {
-        Report::GoalRecorded(Box::new(GoalRecorded {
+    /// A goal SURE wrote into the user's history at the start of a run.
+    fn a_recorded_goal() -> GoalRecorded {
+        GoalRecorded {
             goal: "make the upload reject a file over 10 MB".to_owned(),
             requirement_id: "goal".to_owned(),
             source: sure_core::intent::IntentSource::ExplicitUserGoal,
             project_root: "C:\\work\\thing".to_owned(),
             project_state: sure_core::vocabulary::ProjectFingerprint::content("2f9c1a04"),
             record: 7,
+        }
+    }
+
+    /// Every stage, recorded as having run.
+    ///
+    /// Built rather than taken from a real run because what these tests decide
+    /// is the frame, the status and the stream — the stage log's own content is
+    /// `sure_core::pipeline`'s subject and `tests/check_pipeline.rs`'s. A stage
+    /// log with nothing in it would make `PipelineOutcome::stage` unreachable,
+    /// which is why it is built from `Stage::ALL` rather than left empty.
+    fn every_stage_ran() -> Vec<sure_core::pipeline::StageRecord> {
+        sure_core::pipeline::Stage::ALL
+            .iter()
+            .map(|&stage| sure_core::pipeline::StageRecord {
+                stage,
+                outcome: sure_core::pipeline::StageOutcome::Ran {
+                    detail: format!("{} did its work.", stage.title()),
+                },
+            })
+            .collect()
+    }
+
+    /// A finished check of a project this build reports as not clean.
+    ///
+    /// `clean` decides whether the run's single planned check passed, which is
+    /// the difference between exit 0 and exit 1. It is the same run either way:
+    /// the schedule, the stage log and the project state are unchanged, because
+    /// the only thing that differs between a clean project and an unclean one is
+    /// what the checks found.
+    fn a_check_run(clean: bool) -> sure_core::pipeline::RunOutcome {
+        use sure_core::evidence::EvidenceClass;
+        use sure_core::execution::{ActionKind, ExecutionMode};
+        use sure_core::schedule::{CheckProposal, CheckReason, PlanBuilder};
+        use sure_core::severity::Severity;
+        use sure_core::status::CheckResult;
+
+        let mode = ExecutionMode::InspectOnly;
+        let mut builder = PlanBuilder::new(mode, mode.baseline_permissions());
+        builder
+            .propose(CheckProposal::new(
+                sure_core::checks::check_id("sure.test", "read-the-manifest"),
+                "Read the project's manifest",
+                Severity::Note,
+                false,
+                EvidenceClass::ObservedFact,
+                CheckReason::FilePresent {
+                    path: "package.json".to_owned(),
+                },
+                &[ActionKind::ReadFile],
+            ))
+            .unwrap();
+        let schedule = builder.build();
+
+        let state = sure_core::vocabulary::ProjectFingerprint::content("2f9c1a04");
+        let id = schedule.checks()[0].proposal().id().clone();
+        let results = if clean {
+            vec![CheckResult::pass(
+                id,
+                "Read the project's manifest",
+                Severity::Note,
+                false,
+                EvidenceClass::ObservedFact,
+                state.id.clone(),
+            )]
+        } else {
+            Vec::new()
+        };
+        let report = sure_core::aggregation::aggregate_run(&schedule, &results, &state.id).unwrap();
+        let capability = sure_core::capability::CapabilityReport::cli();
+        let coverage = sure_core::coverage_summary::summarize(&schedule, &report, &capability);
+        let intent = sure_core::intent::ProjectIntent::empty();
+        let not_checked = if clean {
+            Vec::new()
+        } else {
+            report.results().to_vec()
+        };
+        let verdict = sure_core::project_verdict::build_verdict(
+            state.id.clone(),
+            report.aggregate().clone(),
+            intent.clone(),
+            capability,
+            Vec::new(),
+            not_checked,
+            Vec::new(),
+        );
+
+        sure_core::pipeline::RunOutcome {
+            project_root: "C:\\work\\thing".to_owned(),
+            mode,
+            permissions: mode.baseline_permissions(),
+            project_state: state,
+            support: sure_core::vocabulary::ProjectSupport::new(
+                sure_core::vocabulary::SupportLevel::InspectOnly,
+                "the test fixture is a project SURE can read and cannot run.",
+            ),
+            intent_caveat: intent.caveat(),
+            intent,
+            schedule,
+            report,
+            coverage,
+            verdict,
+            candidates: sure_core::pipeline::Candidates::default(),
+            claims: Vec::new(),
+            repairs: Vec::new(),
+            lifecycle: None,
+        }
+    }
+
+    /// `sure check PATH` over a project that is not clean, with the goal the user
+    /// typed on the command line in it.
+    fn a_check() -> Report {
+        Report::Check(Box::new(CheckReport {
+            command: "check",
+            project: "C:\\work\\thing".to_owned(),
+            run: sure_core::pipeline::PipelineOutcome {
+                purpose: sure_core::pipeline::Purpose::Check,
+                stages: every_stage_ran(),
+                run: Some(a_check_run(false)),
+                stopped_at: None,
+            },
+            recorded_goal: Some(a_recorded_goal()),
+        }))
+    }
+
+    /// `sure check PATH` over a clean project.
+    fn a_clean_check() -> Report {
+        Report::Check(Box::new(CheckReport {
+            command: "check",
+            project: "C:\\work\\thing".to_owned(),
+            run: sure_core::pipeline::PipelineOutcome {
+                purpose: sure_core::pipeline::Purpose::Check,
+                stages: every_stage_ran(),
+                run: Some(a_check_run(true)),
+                stopped_at: None,
+            },
+            recorded_goal: None,
+        }))
+    }
+
+    /// `sure check PATH` over a project SURE could not read.
+    fn a_check_that_did_not_finish() -> Report {
+        let mut stages = every_stage_ran();
+        let stopped = sure_core::pipeline::Stage::Discover;
+        stages.truncate(stopped.number() as usize - 1);
+        stages.push(sure_core::pipeline::StageRecord {
+            stage: stopped,
+            outcome: sure_core::pipeline::StageOutcome::Unfinished {
+                detail: "the directory could not be read".to_owned(),
+            },
+        });
+        Report::Check(Box::new(CheckReport {
+            command: "check",
+            project: "C:\\work\\thing".to_owned(),
+            run: sure_core::pipeline::PipelineOutcome {
+                purpose: sure_core::pipeline::Purpose::Check,
+                stages,
+                run: None,
+                stopped_at: Some(stopped),
+            },
+            recorded_goal: None,
         }))
     }
 
@@ -1033,7 +1214,9 @@ mod tests {
             Report::Handshake(sure_core::negotiate(0)),
             a_doctor_report(Vec::new()),
             a_doctor_report(vec![a_problem()]),
-            a_recorded_goal(),
+            a_clean_check(),
+            a_check(),
+            a_check_that_did_not_finish(),
             a_failure(),
             Report::Unavailable(a_refusal()),
             Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow()),
@@ -1179,7 +1362,7 @@ mod tests {
     fn every_refusal_says_what_sure_did_instead_and_what_it_costs() {
         let written = text(&Report::Unavailable(a_refusal()), false);
         for needed in [
-            "Nothing was checked.",
+            "Nothing was read from the history, and nothing was deleted.",
             "status 3",
             "rather than 0",
             "not implemented in this build",
@@ -1206,41 +1389,67 @@ mod tests {
                 .is_an_answer()
         );
         assert!(!Report::Unavailable(a_refusal()).is_an_answer());
-        // A run that recorded a goal and checked nothing has no report about
-        // the project to put in a file.
-        assert!(!a_recorded_goal().is_an_answer());
+        // A check that ran is an answer whether or not the news is good, and a
+        // check that did not finish is a complaint: there is no report to file.
+        assert!(a_check().is_an_answer());
+        assert!(a_clean_check().is_an_answer());
+        assert!(!a_check_that_did_not_finish().is_an_answer());
         assert!(!a_failure().is_an_answer());
     }
 
     #[test]
-    fn a_recorded_goal_is_a_result_of_its_own_and_not_a_refusal() {
-        // The reason this variant exists. The command did something: the user's
-        // history changed. A report that only said "not implemented in this
-        // build" would be true about the check and false about the run, and the
-        // shape of failure this program exists to find is a side effect nobody
-        // was told about.
-        let report = a_recorded_goal();
+    fn a_project_that_was_checked_and_is_not_clean_exits_one_and_never_three() {
+        // The rule `docs/architecture/CLI.md` states and this test exists to
+        // hold: 1 and 3 are never merged. Status 1 is "SURE did its job and the
+        // answer is bad" and status 3 is "this build cannot carry the command
+        // out". A script that saw 3 for a project with problems would go looking
+        // for a newer SURE instead of at the project.
+        let report = a_check();
 
-        // Still not a success: `sure check` in CI must not exit 0 while
-        // checking nothing.
-        assert_eq!(report.exit_code(), exit::UNAVAILABLE);
+        assert_eq!(report.exit_code(), exit::NOT_GREEN);
+        assert_ne!(report.exit_code(), exit::UNAVAILABLE);
         assert_ne!(report.exit_code(), exit::OK);
-        assert_ne!(
-            report.exit_code(),
-            exit::FAILED,
-            "nothing went wrong, so this is not the status for a failed run"
-        );
-        assert_eq!(report.outcome(), "unavailable");
+        assert_ne!(report.exit_code(), exit::FAILED);
+        assert_eq!(report.outcome(), "not_green");
         assert_eq!(report.command(), "check");
+    }
+
+    #[test]
+    fn a_clean_project_exits_zero() {
+        // The other end of the same rule, and the one a false green would break
+        // first: 0 is reachable, and it is reachable only through the pipeline's
+        // own answer rather than through anything this module decides.
+        let report = a_clean_check();
+
+        assert_eq!(report.exit_code(), exit::OK);
+        assert_eq!(report.outcome(), "ok");
+    }
+
+    #[test]
+    fn a_run_that_tried_and_did_not_finish_exits_five() {
+        // Not 3: this build can carry the command out and something went wrong
+        // trying. Not 1: nothing was established about the project, and saying
+        // "not clean" would be a claim about a project SURE never read.
+        let report = a_check_that_did_not_finish();
+
+        assert_eq!(report.exit_code(), exit::FAILED);
+        assert_ne!(report.exit_code(), exit::UNAVAILABLE);
+        assert_ne!(report.exit_code(), exit::NOT_GREEN);
+        assert_eq!(report.outcome(), "failed");
+    }
+
+    #[test]
+    fn a_goal_recorded_before_the_check_is_in_the_run_s_own_report() {
+        // The one place a command changes something its output would not
+        // otherwise contain. A report that checked the project and said nothing
+        // about the write would leave a user unable to tell whether their words
+        // are in their history.
+        let report = a_check();
 
         let written = text(&report, false);
         assert!(
             written.contains("make the upload reject a file over 10 MB"),
             "the report does not say what was recorded:\n{written}"
-        );
-        assert!(
-            written.contains("recorded") && written.contains("nothing was checked"),
-            "the report buries what happened:\n{written}"
         );
         // The domain's own sentence about the label, not a second wording.
         assert!(
@@ -1249,21 +1458,34 @@ mod tests {
         );
 
         let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
-        let details = &frame["details"];
-        assert_eq!(details["record"], json!(7));
-        assert_eq!(details["requirement_id"], json!("goal"));
+        let goal = &frame["details"]["recorded_goal"];
+        assert_eq!(goal["record"], json!(7));
+        assert_eq!(goal["requirement_id"], json!("goal"));
         // The wire name in the frame, the sentence in the prose: one value, two
         // renderings, and the reader switches on the machine one.
-        assert_eq!(details["source"], json!("explicit_user_goal"));
+        assert_eq!(goal["source"], json!("explicit_user_goal"));
         // Which state, in the two fields that answer it: a digest two runs can
         // compare, and the kind that says how it was computed.
-        assert_eq!(details["project_state"]["digest"], json!("2f9c1a04"));
-        assert_eq!(details["project_state"]["kind"], json!("content"));
+        assert_eq!(goal["project_state"]["digest"], json!("2f9c1a04"));
+        assert_eq!(goal["project_state"]["kind"], json!("content"));
         assert!(
-            details["project_state"]["id"]
+            goal["project_state"]["id"]
                 .as_str()
                 .is_some_and(|id| !id.is_empty()),
-            "the run's own fingerprint identity is missing from the frame: {details}"
+            "the run's own fingerprint identity is missing from the frame: {goal}"
+        );
+    }
+
+    #[test]
+    fn a_check_that_recorded_no_goal_answers_with_null_and_not_a_placeholder() {
+        // The absence of a write is a fact about the run, and a frame that
+        // carried a placeholder goal would read as one that was stored. The key
+        // is present and `null`, which is how this frame spells "did not
+        // happen" everywhere else — `reason` and `stopped_at` are the same.
+        let frame: serde_json::Value = serde_json::from_str(&text(&a_clean_check(), true)).unwrap();
+        assert!(
+            frame["details"]["recorded_goal"].is_null(),
+            "a run with no --goal reported one: {frame}"
         );
     }
 

@@ -237,6 +237,46 @@ fn frame_of(args: &[&str]) -> Value {
     })
 }
 
+/// The frame a tool answered with, and the frame the command line printed,
+/// brought to the same value by replacing the one field that is a property of
+/// the reading rather than of the project.
+///
+/// `details.report.project_fingerprint` is a `FingerprintId`-shaped value —
+/// `crates/sure-protocol/tests/conformance.rs` fixes that spelling — and a
+/// fingerprint id is fresh on every computation so that two results can be told
+/// apart by value, while the digest is what two readings of one state share
+/// (`docs/architecture/FINGERPRINTING.md`, "The `id` is fresh on every
+/// computation"; `ProjectFingerprint::matches` compares the digest and never the
+/// id). The two sides here are exactly that: one reading taken inside the server
+/// process and one taken by a process of its own. Their stages, their check ids
+/// and their verdicts agree; their reading ids cannot, and asking them to would
+/// be asserting that two runs are one run.
+///
+/// Everything else is compared as it stands, so this hides one field and not a
+/// class of them. The field is asserted to be present and to look like a
+/// fingerprint id on the way through, so a frame that stopped carrying one fails
+/// here rather than passing by omission.
+fn frame_without_the_reading_id(frame: &Value) -> Value {
+    const PLACEHOLDER: &str = "<this reading's fingerprint id>";
+    let mut frame = frame.clone();
+    let Some(field) = frame
+        .get_mut("details")
+        .and_then(|details| details.get_mut("report"))
+        .and_then(|report| report.get_mut("project_fingerprint"))
+    else {
+        // A frame with no verdict in it — `sure history list` refuses, and a
+        // refusal is about the command and not about a project state.
+        return frame;
+    };
+    let id = field
+        .as_str()
+        .unwrap_or_else(|| panic!("a project fingerprint is a string: {field}"))
+        .to_owned();
+    assert!(id.starts_with("fp_"), "that is not a fingerprint id: {id}");
+    *field = json!(PLACEHOLDER);
+    frame
+}
+
 /// A tool call, as a harness sends it.
 fn call(id: u32, name: &str, arguments: Value) -> Value {
     json!({
@@ -281,28 +321,37 @@ struct Route {
 ///
 /// `sure_status` is checked on its own, because the two sides run `sure doctor`
 /// at different moments and a doctor report contains the state of this machine.
+///
+/// The project is **this crate**, named absolutely, and that is the point: the
+/// three check commands now run, so a test that pointed them at a path that does
+/// not exist would compare three failures and prove nothing about what a tool
+/// answers when its command has something to say. An absolute path is also what
+/// SURE requires — a relative root is refused rather than resolved against
+/// wherever the process happens to be — and every argument here is a string a
+/// harness could really send.
 fn routes() -> [Route; 4] {
+    const PROJECT: &str = env!("CARGO_MANIFEST_DIR");
     [
         Route {
             tool: "sure_check",
             routes_to: "sure check",
-            arguments: json!({"project": "somewhere"}),
-            command: &["check", "somewhere"],
-            answers_on_stdout: false,
+            arguments: json!({"project": PROJECT}),
+            command: &["check", PROJECT],
+            answers_on_stdout: true,
         },
         Route {
             tool: "sure_recheck",
             routes_to: "sure recheck",
-            arguments: json!({"project": "somewhere"}),
-            command: &["recheck", "somewhere"],
-            answers_on_stdout: false,
+            arguments: json!({"project": PROJECT}),
+            command: &["recheck", PROJECT],
+            answers_on_stdout: true,
         },
         Route {
             tool: "sure_get_repair",
             routes_to: "sure repair",
-            arguments: json!({"project": "somewhere"}),
-            command: &["repair", "somewhere"],
-            answers_on_stdout: false,
+            arguments: json!({"project": PROJECT}),
+            command: &["repair", PROJECT],
+            answers_on_stdout: true,
         },
         Route {
             tool: "sure_get_report",
@@ -312,6 +361,22 @@ fn routes() -> [Route; 4] {
             answers_on_stdout: false,
         },
     ]
+}
+
+/// The command line one tool stands for, by the name of the tool.
+///
+/// The same table [`routes`] carries, for the tests that ask about the tools
+/// without calling them. Kept beside it deliberately: a tool and its command are
+/// one decision, and two lists that could disagree are one list too many.
+fn command_of(tool: &str) -> &'static str {
+    match tool {
+        "sure_check" => "check",
+        "sure_recheck" => "recheck",
+        "sure_get_repair" => "repair",
+        "sure_get_report" => "history",
+        "sure_status" => "doctor",
+        other => panic!("no command is recorded for the tool {other}"),
+    }
 }
 
 #[test]
@@ -409,14 +474,17 @@ fn tools_list_is_the_five_tools_the_bridge_documents_with_closed_schemas() {
                 "a tool exposes an argument that could select a policy: {tool}"
             );
         }
-        // Every tool but `sure_status` runs a command this build refuses, and
-        // says so before it is called.
+        // A tool says its command is missing exactly when it is, and the list
+        // it is read from is the one the command line uses — so the day a
+        // command starts working, every sentence that said it did not stops
+        // saying it, in the handshake and in the tool list together.
+        let name = tool["name"].as_str().expect("a tool has a name");
         let described = tool["description"]
             .as_str()
             .is_some_and(|text| text.contains("does not implement"));
         assert_eq!(
             described,
-            tool["name"] != "sure_status",
+            !sure_cli::commands::IMPLEMENTED.contains(&command_of(name)),
             "a tool's description disagrees with what its command does: {tool}"
         );
     }
@@ -427,8 +495,11 @@ fn tools_list_is_the_five_tools_the_bridge_documents_with_closed_schemas() {
 fn every_tool_answers_what_the_command_line_behind_it_answers() {
     // The single-path test. Not a hardcoded sentence: the tool result is
     // compared with what this same binary prints for the command the tool
-    // stands for, so the day `sure check` runs, this test still holds and the
-    // assertions about refusals below are the only ones that have to change.
+    // stands for. The commands behind the three check tools run now, so the
+    // comparison is a comparison of two real verdicts rather than of two
+    // refusals — and the one field the two readings cannot share, the
+    // fingerprint id of the reading itself, is named and set aside in
+    // `frame_without_the_reading_id` rather than waved at.
     let mut session = Session::serve();
     session.start();
     for (index, route) in routes().iter().enumerate() {
@@ -436,8 +507,8 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
         let result = result_of(&answer).clone();
         let expected = frame_of(route.command);
         assert_eq!(
-            &result["structuredContent"]["sure"],
-            &expected,
+            &frame_without_the_reading_id(&result["structuredContent"]["sure"]),
+            &frame_without_the_reading_id(&expected),
             "{} does not answer with `sure {}`'s frame",
             route.tool,
             route.command.join(" ")
@@ -461,10 +532,23 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
             "{}",
             route.tool
         );
+        // The two paths agree about the status as well as the words, and the
+        // tool's `isError` is the command's own `is_an_answer` turned round: a
+        // command that answered is not an error, however bad the news is, and
+        // what the caller must read is the frame. A harness that took `isError`
+        // for the verdict would be reading the transport as the result.
         assert_eq!(
             human.status,
-            3,
-            "this test compares refusals, and `sure {}` answered",
+            i32::try_from(expected["exit_code"].as_i64().expect("an exit code"))
+                .expect("a status that fits"),
+            "`sure {}` and its own frame disagree about the status",
+            route.command.join(" ")
+        );
+        assert_eq!(
+            result["isError"],
+            json!(!route.answers_on_stdout),
+            "{} disagrees with `sure {}` about whether it answered",
+            route.tool,
             route.command.join(" ")
         );
     }
@@ -511,23 +595,35 @@ fn no_tool_reports_success_for_a_project_that_was_never_checked() {
         let result =
             result_of(&session.ask(call(30 + index as u32, route.tool, route.arguments.clone())))
                 .clone();
-        assert_eq!(
-            result["isError"], true,
-            "{} reported success for work that did not happen: {result}",
+        // `ok` is the word that must never appear. It is the CLI's own word for
+        // "the project is clean", so it is the one a harness would act on, and
+        // it is a claim about the project rather than about the call.
+        assert_ne!(
+            result["structuredContent"]["sure"]["outcome"], "ok",
+            "{} reported a clean project for work that did not happen: {result}",
             route.tool
         );
-        assert!(
-            text_of(&result).contains("is not implemented in this build."),
-            "{}: {}",
-            route.tool,
-            text_of(&result)
+        assert_ne!(
+            result["structuredContent"]["sure"]["exit_code"], 0,
+            "{} exited zero for work that did not happen: {result}",
+            route.tool
         );
-        assert_eq!(
-            result["structuredContent"]["sure"]["outcome"],
-            "unavailable"
-        );
-        assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
-        assert_ne!(result["structuredContent"]["sure"]["outcome"], "ok");
+        // And a tool whose command cannot run at all is still an error, in that
+        // command's own words.
+        if !sure_cli::commands::IMPLEMENTED.contains(&command_of(route.tool)) {
+            assert_eq!(result["isError"], true, "{}: {result}", route.tool);
+            assert!(
+                text_of(&result).contains("is not implemented in this build."),
+                "{}: {}",
+                route.tool,
+                text_of(&result)
+            );
+            assert_eq!(
+                result["structuredContent"]["sure"]["outcome"],
+                "unavailable"
+            );
+            assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
+        }
     }
     assert_eq!(session.finish().status, 0);
 }

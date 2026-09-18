@@ -56,11 +56,19 @@
 //! request corresponds to and asks the dispatch, and what comes back is put in
 //! the tool result unmodified: [`Report::frame`] for a program, and
 //! [`Report::human_text`] for the words, which are the same words the command
-//! line would have printed. That is why `sure_check` today answers with `sure
-//! check is not implemented in this build.` — the refusal comes from the command
-//! that cannot run, not from the bridge, and it is the same sentence a person
-//! typing `sure check` reads. A refusal written here would be a second
-//! explanation of the same missing work, free to drift from the first.
+//! line would have printed. That is why a tool whose command this build cannot
+//! carry out answers with that command's own refusal — `sure config is not
+//! implemented in this build.` — reached through the same dispatch rather than
+//! written here. A refusal written here would be a second explanation of the
+//! same missing work, free to drift from the first.
+//!
+//! `sure_check`, `sure_recheck` and `sure_get_repair` are no longer refusals:
+//! since the check pipeline runs, those three answer with the run's own result —
+//! its verdict, what it checked and what it did not. The rule did not change
+//! with them; the honest answer did. A tool that cannot finish (an unreadable
+//! project, a history it cannot open) answers with that failure and `isError`
+//! true, and a tool that finished answers `isError` false **and carries a
+//! verdict that is not clean**, which is where the caller reads it.
 //!
 //! That has one consequence worth stating plainly, because it is the shape of
 //! every answer this build gives: **the harness is told the same thing the
@@ -1370,33 +1378,88 @@ mod tests {
 
     #[test]
     fn a_command_this_build_cannot_run_answers_as_a_tool_error_in_its_own_words() {
-        // The heart of the honesty rule. `sure check` does not run in this
-        // build, and the tool says so with the same sentence the command line
-        // says, marked as an error — never a result, never an empty object.
+        // The heart of the honesty rule. `sure_get_report` runs `sure history`,
+        // which this build does not implement, and the tool says so with the
+        // same sentence the command line says, marked as an error — never a
+        // result, never an empty object.
+        //
+        // It is the only tool left in that shape: the other four run commands
+        // that this build carries out, and what they answer is checked by
+        // `a_tool_that_ran_carries_its_verdict_and_not_an_error` below. The rule
+        // that links the two is one rule — a tool repeats its command, whichever
+        // shape that command's answer has.
         let mut session = started();
-        for name in ["sure_check", "sure_recheck", "sure_get_repair"] {
-            let message = call(&mut session, name, json!({}));
+        let message = call(&mut session, "sure_get_report", json!({}));
+        let result = &message["result"];
+        assert_eq!(result["isError"], true, "{message}");
+        let text = result["content"][0]["text"]
+            .as_str()
+            .expect("a tool result carries text");
+        assert!(text.contains("is not implemented in this build."), "{text}");
+        assert!(
+            text.contains("history"),
+            "the tool does not name the command it could not run: {text}"
+        );
+        assert_eq!(
+            result["structuredContent"]["sure"]["outcome"],
+            "unavailable"
+        );
+        assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
+    }
+
+    #[test]
+    fn a_tool_that_ran_carries_its_verdict_and_not_an_error() {
+        // The other half of the honesty rule, and the half that matters now
+        // that the check pipeline runs: a tool that answered is not an error,
+        // and what an agent must not read as success is the *verdict* — which
+        // is in the frame, not in `isError`. A `sure_check` that came back
+        // clean in this build would be the false green told to a harness.
+        // An absolute path, because SURE refuses a relative project root rather
+        // than resolving it against wherever the process happens to be — and the
+        // crate this test lives in is a real project with checks to plan. The
+        // three tools are asked about *this* crate rather than about nothing,
+        // which is what makes the answer a verdict rather than a refusal.
+        let project = env!("CARGO_MANIFEST_DIR");
+        let mut session = started();
+        for (name, command) in [
+            ("sure_check", "check"),
+            ("sure_recheck", "recheck"),
+            ("sure_get_repair", "repair"),
+        ] {
+            let message = call(&mut session, name, json!({"project": project}));
             let result = &message["result"];
-            assert_eq!(result["isError"], true, "{name}: {message}");
-            let text = result["content"][0]["text"]
-                .as_str()
-                .expect("a tool result carries text");
-            assert!(
-                text.contains("is not implemented in this build."),
-                "{name}: {text}"
+            assert_eq!(result["isError"], false, "{name}: {message}");
+            let sure = &result["structuredContent"]["sure"];
+            // The name is the command's, not the tool's: a tool answers what the
+            // command line answers, and a caller comparing the two must find them
+            // the same.
+            assert_eq!(sure["command"], command);
+            assert_ne!(
+                sure["outcome"], "ok",
+                "{name} told a harness the project was clean: {message}"
             );
             assert_eq!(
-                result["structuredContent"]["sure"]["outcome"],
-                "unavailable"
+                sure["details"]["green"], false,
+                "{name} reported a run with un-run stages as green: {message}"
             );
-            assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
         }
     }
 
     #[test]
     fn no_tool_result_reports_success_for_a_project_that_was_never_checked() {
         // The failure this program exists to prevent, in its MCP shape: an
-        // agent reads "isError": false and concludes the project is fine.
+        // agent reads a tool result and concludes the project is fine.
+        //
+        // `isError` is not the field that carries that any more — a check that
+        // ran and found the project not clean is a successful *call*. What
+        // carries it is `outcome`, which is the CLI's own vocabulary and can
+        // never be `ok` for a run that did not establish a clean project. So
+        // this asks the stronger question of every tool, including the ones
+        // whose command answered: **does anything here say `ok`?**
+        // `sure_status` is deliberately not in this list, and not because it is
+        // exempt: it answers about this *build*, not about a project (`doctor`
+        // may legitimately be `ok`), and it has a test of its own —
+        // `sure_status_answers_about_this_build_and_never_about_a_project`.
         let mut session = started();
         for name in [
             "sure_check",
@@ -1405,9 +1468,14 @@ mod tests {
             "sure_get_report",
         ] {
             let message = call(&mut session, name, json!({}));
+            let sure = &message["result"]["structuredContent"]["sure"];
             assert_ne!(
-                message["result"]["isError"], false,
+                sure["outcome"], "ok",
                 "{name} reported success for work that did not happen: {message}"
+            );
+            assert_ne!(
+                sure["exit_code"], 0,
+                "{name} exited zero for work that did not happen: {message}"
             );
         }
     }

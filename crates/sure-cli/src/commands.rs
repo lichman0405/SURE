@@ -48,6 +48,8 @@
 //! the session to [`crate::mcp`], which decides what every message in it
 //! answers. What it must never do is answer a tool call itself.
 
+use sure_core::pipeline::Purpose;
+
 use crate::cli::{Command, HistoryAction};
 use crate::report::{NotYet, Report};
 
@@ -73,7 +75,24 @@ use crate::report::{NotYet, Report};
 /// the caller is already speaking to it through this process. It is listed
 /// under the name a user types, which is what a caller comparing this list
 /// against `sure --help` will find there.
-pub const IMPLEMENTED: &[&str] = &["doctor", "hook", "mcp", "protocol", "version"];
+pub const IMPLEMENTED: &[&str] = &[
+    "check", "doctor", "hook", "mcp", "protocol", "recheck", "repair", "version",
+];
+
+/// The implemented commands that this build's own tests must not ask.
+///
+/// Not a second list of what works — [`IMPLEMENTED`] is that, and this is a
+/// subset of it. It is the answer to "why is this name missing from the
+/// invocations the tests drive?", asked once so that a name cannot go missing
+/// for a reason nobody wrote down. The test
+/// `the_commands_this_build_implements_are_exactly_these_three` proves every
+/// name here is in [`IMPLEMENTED`], that every other name in it *is* driven,
+/// and that each of these is a command the grammar really has.
+///
+/// `check`, `recheck` and `repair` read and bring up to date the record store of
+/// the machine running the suite, and `check --goal` writes to it. See
+/// `every_command` in the tests below.
+pub const NOT_ASKED_HERE: &[&str] = &["check", "recheck", "repair"];
 
 impl Command {
     /// What SURE does about this command, in this build.
@@ -98,26 +117,25 @@ impl Command {
             // can read — instead of a thing that goes and looks.
             Self::Doctor => Report::Doctor(Box::new(sure_core::doctor::examine_this_machine())),
 
-            // Asked with `--goal`, this command does something: it records what
-            // the user asked for, and then says that nothing was checked. The
-            // decision is `crate::check`'s, and it is a decision rather than an
-            // implementation detail because this is the only command on the
-            // surface with a side effect a user cannot see in the output — the
-            // goal goes into their history.
-            Self::Check { path, goal } => crate::check::run(self, path.as_deref(), goal.as_deref()),
+            // The three commands that put a project through the check pipeline.
+            // One arm each rather than one arm matching all three, because the
+            // *purpose* is the only thing that differs between them and it is a
+            // value — [`sure_core::pipeline::Purpose`] — so the difference is
+            // stated here, in the shape the orchestrator takes, rather than
+            // depending on a string a renderer would have to interpret.
+            //
+            // `sure check --goal` is the one command on the surface with a side
+            // effect a user cannot see in the output: the goal goes into their
+            // history before the check runs. That decision is `crate::check`'s,
+            // and it is written down there.
+            Self::Check { path, goal } => {
+                crate::check::run(Purpose::Check, path.as_deref(), goal.as_deref())
+            }
+            Self::Recheck { path } => crate::check::run(Purpose::Recheck, path.as_deref(), None),
+            Self::Repair { path } => crate::check::run(Purpose::Repair, path.as_deref(), None),
 
             // Everything below is a real command with a real job and no
             // implementation yet.
-            Self::Recheck { .. } => not_yet(
-                self,
-                "check a project again and compare what it finds with what it found last time",
-                "Nothing was checked, and nothing was compared.",
-            ),
-            Self::Repair { .. } => not_yet(
-                self,
-                "turn what was found into instructions a coding agent can act on",
-                "No repair instructions were produced.",
-            ),
             Self::History { action } => Report::Unavailable(NotYet {
                 command: history_name(action),
                 does: "show what SURE has recorded, on this machine and for this project",
@@ -196,14 +214,26 @@ mod tests {
     ///
     /// # What is deliberately not in this list
     ///
-    /// `Check` with a goal that has words in it. Every command here is asked for
-    /// a report, and `sure check --goal "…"` writes to the store **this machine
-    /// really uses** — so a test that added it here would be putting an invented
-    /// requirement into the history of whoever ran the suite, and it would look
-    /// exactly like a passing test. There is no environment variable that could
-    /// point it somewhere else: on Windows the data directory comes from
-    /// `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`. `crate::check`'s
-    /// tests drive the same code against locations they name.
+    /// The commands that read this machine rather than a project. `check`,
+    /// `recheck` and `repair` all reach the pipeline, and a pipeline run reads
+    /// the store **this machine really uses**: SURE's history, brought up to
+    /// date by the open, on the machine running the suite. There is no
+    /// environment variable that could point it somewhere else — on Windows the
+    /// data directory comes from `SHGetKnownFolderPath`, which ignores
+    /// `LOCALAPPDATA` — and a test that ran the real path would be reading (and
+    /// migrating) the history of whoever ran the suite, which would look exactly
+    /// like a passing test. `crate::check`'s tests drive the same code against
+    /// locations they name.
+    ///
+    /// `Check` with a goal that has words in it belongs to that same reason
+    /// twice over: `sure check --goal "…"` writes to the store this machine
+    /// really uses, so a test that added it here would be putting an invented
+    /// requirement into somebody's history.
+    ///
+    /// These four are named in [`NOT_ASKED_HERE`], and the test below subtracts
+    /// them rather than assuming them: a command that stopped being implemented
+    /// while staying out of this list would be caught there, and one that is
+    /// implemented and *not* in that list has to appear here.
     ///
     /// `Mcp`. Every command in this list is asked once and answers, but
     /// `sure mcp serve` reads standard input until its caller closes it — in a
@@ -215,12 +245,6 @@ mod tests {
     /// [`IMPLEMENTED`] because it is not in this list, and the two must agree.
     fn every_command() -> Vec<Command> {
         vec![
-            Command::Check {
-                path: None,
-                goal: None,
-            },
-            Command::Recheck { path: None },
-            Command::Repair { path: None },
             Command::History { action: None },
             Command::History {
                 action: Some(HistoryAction::List),
@@ -318,13 +342,15 @@ mod tests {
                 // the transport — and it is checked over a pipe rather than in
                 // this list. Reaching this arm would mean a command that is not
                 // `mcp` had answered with the bridge's own report.
-                Report::GoalRecorded(_)
-                | Report::Failed(_)
-                | Report::Mcp(_)
-                | Report::McpSession(_) => panic!(
-                    "{command:?} produced {report:?}, and nothing in this list may have a \
+                // `Check` joins them: it is implemented and it is not in this
+                // list, so a report of that shape here means the list grew an
+                // invocation that reads the store this machine really uses.
+                Report::Check(_) | Report::Failed(_) | Report::Mcp(_) | Report::McpSession(_) => {
+                    panic!(
+                        "{command:?} produced {report:?}, and nothing in this list may have a \
                      side effect or a failure. See `every_command`."
-                ),
+                    )
+                }
             }
         }
     }
@@ -391,31 +417,53 @@ mod tests {
         implemented.sort_unstable();
         implemented.dedup();
 
-        // `mcp` is the one name in [`IMPLEMENTED`] that [`every_command`] cannot
-        // ask about, because a session reads stdin (see its comment) — and the
-        // reason is not incidental to this test: **calling `report()` on it here
-        // would start that session**, so the exception has to be made by name
-        // rather than by asking. What is checked here is that the exception is
-        // real and is exactly one name: the subtraction below proves `mcp` is in
-        // [`IMPLEMENTED`] exactly once, the equality against `expected` proves no
-        // *other* name in the list is one the loop cannot see, and the grammar is
-        // asked for the name so the literal is not a string that nothing ties to
-        // the command. That `sure mcp serve` deserves its place — the session
-        // answers, rather than refusing — is checked over a pipe, in
-        // `tests/mcp_protocol.rs`, which is the only place with a stdin to give
-        // it.
-        let expected: Vec<&str> = IMPLEMENTED
+        // Four names in [`IMPLEMENTED`] are not in [`every_command`], and each is
+        // excepted for a reason that is written where the list is: `mcp`, because
+        // a session reads stdin — **calling `report()` on it here would start
+        // that session** — and `check`, `recheck` and `repair`, because their run
+        // opens the store this machine really uses. An exception made by asking
+        // is no exception, so they are made by name, and what this checks is that
+        // naming them cannot hide anything:
+        //
+        //   * the subtraction proves every name in [`IMPLEMENTED`] is either one
+        //     the test drives or one of the four, exactly once each — so a name
+        //     cannot appear twice, and cannot be missing from both;
+        //   * the equality proves no name the test *does* drive is implemented
+        //     and absent from [`IMPLEMENTED`] — a command that started working
+        //     without the list moving fails here;
+        //   * the names are asked of the grammar, so a literal in either list is
+        //     tied to a command rather than to a string that looks like one.
+        //
+        // What is *not* checked here is that the three pipeline commands really
+        // work: that is `crate::check`'s tests, which drive them against
+        // locations they name, and `tests/cli_contract.rs`, which drives the
+        // built binary. What this test owns is the claim that nothing in
+        // [`IMPLEMENTED`] is there by accident.
+        let mut expected: Vec<&str> = IMPLEMENTED
             .iter()
             .copied()
-            .filter(|name| *name != "mcp")
+            .filter(|name| *name != "mcp" && !NOT_ASKED_HERE.contains(name))
             .collect();
+        expected.sort_unstable();
+        let mut exceptions: Vec<&str> = std::iter::once("mcp")
+            .chain(NOT_ASKED_HERE.iter().copied())
+            .collect();
+        exceptions.sort_unstable();
+
         assert_eq!(
-            expected.len() + 1,
+            exceptions.len() + expected.len(),
             IMPLEMENTED.len(),
-            "the exception above stopped being an exception: `mcp` appears in \
-             IMPLEMENTED a number of times other than once, so the list below is no \
-             longer what it says it is"
+            "a name in IMPLEMENTED is either driven by `every_command` or excepted, \
+             never both and never neither: implemented={IMPLEMENTED:?} \
+             exceptions={exceptions:?} expected={expected:?}"
         );
+        for name in &exceptions {
+            assert!(
+                IMPLEMENTED.contains(name),
+                "{name} is excepted from the tests and is not implemented, so the \
+                 exception has outlived the thing it excepted"
+            );
+        }
         assert_eq!(
             Command::Mcp {
                 action: McpAction::Serve
@@ -424,6 +472,28 @@ mod tests {
             "mcp",
             "the name this test excepts is not the name the command answers under"
         );
+        for (name, command) in [
+            (
+                "check",
+                Command::Check {
+                    path: None,
+                    goal: None,
+                },
+            ),
+            ("recheck", Command::Recheck { path: None }),
+            ("repair", Command::Repair { path: None }),
+        ] {
+            assert!(
+                NOT_ASKED_HERE.contains(&name),
+                "{name} is driven by `every_command` under a name this test does not \
+                 except, so a run of the suite reads this machine's store"
+            );
+            assert_eq!(
+                command.name(),
+                name,
+                "the excepted name is not the name the command answers under"
+            );
+        }
         assert_eq!(implemented, expected);
     }
 

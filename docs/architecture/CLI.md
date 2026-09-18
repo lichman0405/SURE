@@ -9,21 +9,31 @@ P1-T008 built the framework: what SURE accepts, and how a result reaches a
 person and a script. P1-T009 added the first command whose answer depends on
 what it found; P1-T010 made `sure protocol` answer a caller that asks whether
 the two can talk; the harness work added `sure hook ingest`; P12-T009 added
-`sure mcp serve`. Five commands do their work. The rest are recognised, and say
-so.
+`sure mcp serve`; P7-T010 gave `check`, `recheck` and `repair` the pipeline
+behind them. Eight commands do their work. The rest are recognised, and say so.
+
+That pipeline is one orchestrator in `sure-core` — `sure_core::pipeline` —
+running the twelve stages of `docs/architecture/CHECK_PIPELINE.md` in order. It
+is the only path from these three commands into the engine: the CLI renders what
+the orchestrator returns and calls no detector, aggregator or renderer of its
+own. How far down the twelve stages a command goes is the whole of the difference
+between them — `check` performs 1–10, `repair` continues to the repair contract,
+`recheck` to the re-check — and the stages it does not perform are recorded as
+`not part of this run` rather than omitted, so every run shows all twelve.
 
 P2-T010 gave `sure check` its first flag with an effect: `--goal TEXT` records
-what the user asked for and then reports that nothing was checked. It is the one
-place on this surface where a command changes something the output does not
-contain, so it has its own section below.
+what the user asked for. It is the one place on this surface where a command
+changes something the output does not contain, so it has its own section below —
+and since P7-T010 the recorded goal is also what the run resolves its intent
+from, so the run does not stop there.
 
 ## The commands
 
 | Command | What it will do | In this build |
 | --- | --- | --- |
-| `sure check [PATH] [--goal TEXT]` | check a project and report what it found | records `--goal` and checks nothing; a bare `check` is recognised, not implemented |
-| `sure recheck [PATH]` | check again and compare with last time | recognised, not implemented |
-| `sure repair [PATH]` | turn what was found into instructions an agent can act on | recognised, not implemented |
+| `sure check [PATH] [--goal TEXT]` | check a project and report what it found | works: the pipeline, a per-stage record, and a verdict |
+| `sure recheck [PATH]` | check again and compare with last time | works: the same run, carried on to the last stage, which compares it with what an earlier run left open |
+| `sure repair [PATH]` | turn what was found into instructions an agent can act on | checks, and reaches the repair-contract stage; this build cannot perform that stage and says so rather than inventing an acceptance test |
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | recognised, not implemented |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
@@ -36,7 +46,8 @@ contain, so it has its own section below.
 "Recognised, not implemented" is not a euphemism for a stub. The command parses
 its arguments, decides it cannot do its job, **exits with status 3**, and says in
 one sentence what it did not do. Nothing is half-done and nothing is reported as
-done.
+done. `check`, `recheck` and `repair` have left that list; `sure history`,
+`sure config` and `sure explain` are still on it.
 
 Where a command is scheduled is `tasks/tasks.json`. That file is not quoted here
 on purpose: a phase number in a message a user reads is a promise the command
@@ -58,9 +69,10 @@ the command's contract that belongs to the phase implementing it.
 
 `--goal` on `sure check` is the first flag that is honoured rather than carried,
 and it arrived with the phase that could act on it. It is deliberately not
-optional-with-a-default: absent means "check the project", which this build
-cannot do, and that path still exits 3. Adding the flag did not turn any
-existing command line into a different answer.
+optional-with-a-default: absent means "check the project", and present means
+"check it against this". P7-T010 gave both paths their answer — the bare form
+runs the pipeline, and a run with `--goal` records the goal and then runs the
+same pipeline with the goal resolved as intent (stage 2).
 
 ## `sure doctor`
 
@@ -181,10 +193,6 @@ The first place on this surface where a command changes something the output doe
 not contain: the goal goes into the user's record store. Everything below follows
 from having to be honest about that.
 
-**A bare `sure check` is unchanged.** It does nothing, it says so, and it exits 3
-exactly as it did before this flag existed. `--goal` is what makes the command do
-anything at all.
-
 **What a run with `--goal` does.** It writes the text, verbatim, as a project
 intent whose `source` is `explicit_user_goal` — the source the domain marks as a
 user requirement, and the one that asks for no transcript recording. There is no
@@ -192,15 +200,27 @@ session to capture: the words arrived with the command that stored them.
 `docs/architecture/PROJECT_INTENT.md` is the contract; this section is the
 command-line half of it.
 
-**Then the run stops and says so.** No project is checked, and the report is not
-a report about the project. It is `Report::GoalRecorded` — its own result, not a
-`NotYet` — because something *did* happen and a refusal that said only "not
-implemented in this build" would be true about the check and false about the run.
-The status is **3**, so a script that ran `sure check` in CI still stops; the
-frame carries the recorded goal under `details` so a script can see what was
-stored. Reporting 0 here would make `sure check` a green light in CI while
-checking nothing, which is the failure this program exists to find in other
-people's work.
+**Then the check runs against it.** The recorded goal is stage 2's input: the run
+resolves its intent partly from what the user stated, and the verdict says what
+that intent was worth (`must_caveat_requirements`) as it does for a run with no
+goal at all. Reporting a receipt and no check would be the worse of the two
+answers — the user asked for a check.
+
+**The report says what was recorded.** `details.recorded_goal` carries the goal,
+its requirement identifier, the source as the domain's wire name, and the project
+state it was recorded against — the kind and the digest, which is what two runs
+can compare, plus the identifier of the reading itself. The prose prints the same
+facts in words. A run with no `--goal` answers with `null` there rather than a
+placeholder: an empty goal object would be a stored goal no user ever stated, and
+`null` is what this frame says wherever something did not happen — `reason` and
+`stopped_at` in the stage records are the same spelling.
+
+**The status is the run's own.** A run that recorded a goal and checked the
+project returns 0 for a clean project, 1 for a project that was checked and is
+not clean, and 5 for a run that tried and did not finish — the same three
+statuses every other check returns. It is **not** 3. 3 is "this build cannot
+carry that out", whose remedy is a newer build, and this build just carried it
+out.
 
 **The goal is bound to a project state.** The store's only project-aware write
 takes a fingerprint, and the binding is right: a goal recorded with no project is
@@ -210,7 +230,9 @@ kind and the digest of the state it recorded against.
 **The project is read before the store is opened.** Opening a store creates its
 directory and its file. Every refusal in this path therefore leaves the machine
 as it found it, which is a promise a user can check and a failure report can
-stand on.
+stand on. A run with no `--goal` does not create a store either: it opens the
+history only when there is one already, so a check on a machine that has never
+used SURE writes nothing at all.
 
 **A run that could not finish is 5, not 3.** 3 is "this build cannot carry that
 out", whose remedy is a newer build. A run that met an unreadable project or a
@@ -262,13 +284,28 @@ script that asked for the reason has to be able to read it.
 A complaint:
 
 ```json
-{"command":"check","does":"…","exit_code":3,"instead":"…","outcome":"unavailable","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
+{"command":"history","does":"…","exit_code":3,"instead":"…","outcome":"unavailable","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
 ```
 
 A report:
 
 ```json
 {"command":"doctor","details":{"build":{…},"not_checked":[…],"places":{…},"problems":[…],"store":{…},"tools":[…]}},"exit_code":0,"outcome":"ok","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
+```
+
+A run that did not finish is a complaint too, and keeps the envelope:
+
+```json
+{"command":"check","details":{"detail":"…","what":"Nothing was recorded, and nothing was checked."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
+```
+
+A check that finished puts the whole run under `details`, including one entry per
+stage in the order `CHECK_PIPELINE.md` lists them, each with its outcome
+(`ran`, `not_run`, `not_part_of_work`, `unfinished`) and, when it did not run,
+the vocabulary's own reason plus the sentence a person reads:
+
+```json
+{"command":"check","details":{"checked_count":0,"green":false,"has_critical_gaps":true,"mode":"inspect_only","not_checked_count":18,"project":"…","purpose":"check","recorded_goal":null,"report":{…},"stages":[{"detail":"…","number":1,"outcome":"ran","reason":null,"stage":"discover","title":"Find the project's parts"},…,{"detail":"…","number":6,"outcome":"not_run","reason":"execution_not_authorized","reason_explained":"Checking this would have meant running your project's code, and you have not allowed that.","stage":"dynamic-checks","title":"Run the project's own checks"},…],"state":"finished","stopped_at":null,"support":{"letter":"C","level":"inspect_only","reason":"…"}},"exit_code":1,"outcome":"not_green","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
 ```
 
 Five fields are always present: `sure_version` and `protocol_version`, so that a
@@ -284,7 +321,8 @@ to special-case. The status is a fact about every run.
 `outcome` is a closed set: `ok`, `not_green`, `unavailable`, `failed`. It grows
 when a command can end another way, and every reader's switch has to grow with
 it. `failed` arrived with `sure check --goal` (P2-T010), the first command that
-can try and not finish.
+can try and not finish, and a check that stops at a stage it cannot get past —
+an unreadable project, a history it cannot read — ends the same way.
 
 `outcome` and `exit_code` are one decision written twice: `Report::outcome` and
 `Report::exit_code` read the same predicate, so a build where they disagree is
@@ -293,10 +331,11 @@ different things — `outcome` is what a person's script switches on in the body
 and the status is what a caller acts on without parsing anything.
 
 `not_green` says the answer is not a clean one — `sure doctor` on a machine
-where SURE found something wrong with its own files. That is still an *answer*:
-it goes to stdout, so `sure doctor > report.txt` puts the report in the file and
-the exit status carries the bad news on its own. A complaint is SURE saying it
-could not do the thing at all, and that goes to stderr.
+where SURE found something wrong with its own files, or `sure check` on a project
+that was checked and is not clean. That is still an *answer*: it goes to stdout,
+so `sure doctor > report.txt` puts the report in the file and the exit status
+carries the bad news on its own. A complaint is SURE saying it could not do the
+thing at all, and that goes to stderr.
 
 Anything a command found goes under `details`, one key, written by that command's
 own module. The five fields above then keep meaning exactly what this section
@@ -332,11 +371,22 @@ a consumer outside this crate needing the shape; a bridge inside it is not one.
 | Status | Meaning | Who returns it |
 | --- | --- | --- |
 | 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `--help`, `--version` |
-| 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `sure check` once it can check |
+| 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
-| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak; `sure check --goal` after it has recorded the goal and checked nothing |
+| 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
-| 5 | the command tried and did not finish | `sure check --goal` when the project, the store or the goal could not be read or written; anything, including a result that could not be written out |
+| 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written; `mcp serve` when its stream could not be read or written; anything, including a result that could not be written out |
+
+**A check reaches 0 only through the pipeline's own answer**, and in this build
+no run does: a project SURE can plan for has stage 5 recorded as `unknown`
+(there is no runner for a planned check yet) and stage 8 recorded as
+`analysis_provider_disabled` (no model provider is configured), and a project
+with no parts at all still has stage 8 unconfigured. A stage that did not run is
+recorded as such, and a run with one of those is never reported as clean — which
+is what the false-green rule asks for, and it means `sure check` returns 1 for
+every project it can read and 5 for one it cannot. Nothing in this file has to
+change the day a runner lands: the status comes from the verdict, and the verdict
+is what will change.
 
 The whole table is in `crates/sure-cli/src/report.rs` as `report::exit`, and it
 is the only place a status is chosen. `main` handles clap's parse error itself
@@ -396,11 +446,22 @@ anything about output or status: both are SURE's, and both have one home.
 | The doctor names the files the store writes | same file, `the_diagnostic_names_the_files_the_store_actually_uses` |
 | The report always states what it did not check | same file, `the_report_always_says_what_it_did_not_look_at` |
 | A goal with no words in it is a failure, not a wrong command line | `crates/sure-cli/tests/cli_contract.rs`, `a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line`; `crates/sure-cli/src/commands.rs`, `a_goal_with_no_words_reaches_the_check_and_fails_rather_than_being_a_wrong_command_line` |
-| A recorded goal is a result of its own rather than a refusal | `crates/sure-cli/src/report.rs`, `a_recorded_goal_is_a_result_of_its_own_and_not_a_refusal` |
+| A goal recorded before the check is in the run's own report | `crates/sure-cli/src/report.rs`, `a_goal_recorded_before_the_check_is_in_the_run_s_own_report` |
 | A command that did not finish is not a command that cannot be carried out | same file, `a_command_that_did_not_finish_is_not_a_command_that_cannot_be_carried_out` |
+| A project that was checked and is not clean exits 1, never 3 | same file, `a_project_that_was_checked_and_is_not_clean_exits_one_and_never_three` |
+| A run that tried and did not finish exits 5 | same file, `a_run_that_tried_and_did_not_finish_exits_five` |
+| `sure check` on a real project answers with a verdict, never status 3 | `crates/sure-cli/tests/cli_contract.rs`, `a_check_of_a_real_project_answers_with_a_verdict_and_never_with_status_three` |
+| `check`, `recheck` and `repair` are one orchestrator under three purposes | same file, `the_three_pipeline_commands_are_one_orchestrator_with_three_purposes` |
+| A project that cannot be read is status 5, not status 3 | same file, `a_project_that_cannot_be_read_is_status_five_and_not_status_three` |
+| No check this build can run is ever reported as clean | `crates/sure-cli/src/check.rs`, `no_check_this_build_can_run_is_ever_reported_as_clean` |
+| A dynamic check the execution mode did not authorise is not checked and never passed | same file, `a_dynamic_check_the_mode_did_not_authorise_is_not_checked_and_never_passed` |
+| Every stage that did not run cannot aggregate to a clean verdict | same file, `every_stage_that_did_not_run_cannot_aggregate_to_a_clean_verdict` |
+| An unconfigured model provider is a recorded state and not an omission | same file, `an_unconfigured_model_provider_is_a_recorded_state_and_not_an_omission` |
+| `recheck` and `repair` reach the same orchestrator and go further down it | same file, `recheck_and_repair_reach_the_same_orchestrator_and_go_further_down_it` |
 | `--goal` records a goal that reads back as the user stated it | `crates/sure-core/tests/project_intent_ingest.rs` |
-| Recording a goal writes no recording row | same file, and `crates/sure-cli/src/check.rs`, `storing_a_goal_writes_no_recording_and_the_goal_is_not_summarized` |
+| Recording a goal writes no recording row | same file, and `crates/sure-cli/src/check.rs`, `the_goal_is_written_verbatim_and_before_the_check` |
 | Every refusal on the `--goal` path leaves the machine as it found it | `crates/sure-cli/src/check.rs`, `a_goal_with_no_words_is_refused_before_the_store_exists` and `a_project_that_cannot_be_read_leaves_no_store_behind` |
+| A check with no goal creates no store on a machine that has none | same file, `a_check_with_no_goal_on_a_machine_with_no_history_writes_nothing` |
 | The store may not be inside the project it records a goal for | same file, `the_store_may_not_be_inside_the_project_it_records_a_goal_for` |
 | Every refusal says what did not happen | same file, `every_refusal_in_this_module_says_what_did_not_happen` |
 | A new command cannot ship with no answer about whether it works | the exhaustiveness of `Command::report` — see below |
@@ -439,10 +500,24 @@ repository yet covers is the *combination*: the process writing a real goal to a
 real location. That arrives with the phase that gives SURE a store location a
 caller can choose.
 
+The check itself has no such gap, and it is worth being exact about why.
+`cli_contract.rs`'s three pipeline tests and `mcp_protocol.rs`'s routes run real
+checks against a real project with **no goal**, so no row is written; that path
+opens the user's store when there is one and creates nothing when there is not.
+An open applies any pending migration, so it is a write in principle and not in
+practice on a machine whose store is current: measured with `Get-FileHash`
+around one `sure check`, the store on the author's machine was byte-identical
+afterwards, with no `-wal` and no `-journal` beside it. The margin is the same as
+the one above — the command is the thing under test and the store is not fenced
+off from it — and the same phase that gives tests a store location of their own
+removes it.
+
 ## What this document does not cover
 
-- **What a check finds.** `docs/architecture/CHECK_PIPELINE.md` and, when it
-  exists, the report format.
+- **What a check finds, and the twelve stages that find it.**
+  `docs/architecture/CHECK_PIPELINE.md` is the list of stages, and
+  `crates/sure-cli/src/json_report.rs` is the versioned report shape a script
+  reads (`schema_version` 3). What a stage means is that stage's own module.
 - **What a goal becomes once it is stored, and what may be read out of it.**
   `docs/architecture/PROJECT_INTENT.md`. That document owns the trust labels and
   the rule that an unauthenticated statement is never a finding; this one owns

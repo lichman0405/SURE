@@ -56,23 +56,29 @@ about the same project.
 
 | Tool | Runs | Answers today |
 | --- | --- | --- |
-| `sure_check` | `sure check [project]` | `sure check is not implemented in this build.`, as a tool error |
+| `sure_check` | `sure check [project]` | the check's own report: the twelve-stage record, what was checked, what was not and why, and the verdict |
 | `sure_get_report` | `sure history list` | `sure history is not implemented in this build.`, as a tool error |
-| `sure_get_repair` | `sure repair [project]` | `sure repair is not implemented in this build.`, as a tool error |
-| `sure_recheck` | `sure recheck [project]` | `sure recheck is not implemented in this build.`, as a tool error |
+| `sure_get_repair` | `sure repair [project]` | the check's own report, carried on through the repair-contract stage |
+| `sure_recheck` | `sure recheck [project]` | the check's own report, carried on through the re-check stage |
 | `sure_status` | `sure doctor` | the diagnostic report, plus the MCP revision, the server name and version, and which commands this build implements |
 
-A tool error is `"isError": true` in the result, and the refusal carries the
-same status the command line would return (`exit_code` 3). `isError` says
-whether the command answered at all, not what its answer was: `sure_status` is
-`"isError": false` even when `sure doctor` finds something wrong, and the
-verdict is in the frame, under `outcome` and `exit_code`, in the CLI's own
-vocabulary. There is no path in the bridge that turns "this build cannot do
-that" into something an agent reads as success.
+A tool error is `"isError": true` in the result, and a refusal carries the same
+status the command line would return (`exit_code` 3). `isError` says whether the
+command answered at all, not what its answer was. Three of the five tools now
+run real checks, and **a check that ran and found the project not clean is not a
+tool error**: `sure_check` on such a project is `"isError": false` with
+`outcome` `not_green` and `exit_code` 1, exactly as `sure doctor` finding
+something wrong is `"isError": false`. A caller that took `isError` for the
+verdict would read the transport as the result and miss the verdict sitting in
+`structuredContent.sure.outcome`. There is no path in the bridge that turns
+either "this build cannot do that" or "this project is not clean" into something
+an agent reads as success.
 
 The tool descriptions and the handshake instructions are derived from
-`crate::commands::IMPLEMENTED`, so when `sure check` starts working, the
-sentences that say it does not stop appearing without anyone editing them.
+`crate::commands::IMPLEMENTED`, so when a command starts working, the sentences
+that say it does not stop appearing without anyone editing them. That happened in
+`P7-T010`: three of the four refusal rows above became real answers, and no
+description in this table had to be touched for it.
 
 ### Arguments
 

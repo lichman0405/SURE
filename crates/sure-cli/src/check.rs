@@ -1,15 +1,20 @@
-//! `sure check`, and the one thing it can do in this build.
+//! `sure check`, `sure recheck` and `sure repair`: one run of the check
+//! pipeline, and the two ways of writing it down.
 //!
-//! # Why this is a module rather than an arm of `commands.rs`
+//! # What this module is, and what it is not
 //!
-//! [`Command::report`](crate::commands::Command::report) is a match from a
-//! command to a value. Two of its arms look at something — `doctor` at this
-//! machine, this one at a project and at the store — and the rule that keeps the
-//! match readable is that a report *is* a value: something a test can build and a
-//! renderer can read, not a thing that goes and looks. So the looking happens
-//! here and the match holds the answer.
+//! The three commands that reach the engine, and the only place in this crate
+//! that does. It gathers what a run needs — the project, the project's settings,
+//! the history, and the goal the user typed — hands them to
+//! [`sure_core::pipeline::Pipeline`], and renders what comes back. **It runs no
+//! stage itself**: no detector is called here, no result is aggregated here and
+//! no verdict is assembled here. That is what makes "the CLI does not have a
+//! second path into the engine" a fact about the source rather than a promise
+//! about its behaviour, and it is why the three commands are one module: they
+//! differ in how far down the twelve stages they go and in nothing else, so a
+//! second copy of the gathering would be a second place for it to be wrong.
 //!
-//! # What `--goal` does, and what it refuses to claim
+//! # The goal, and why it is written first
 //!
 //! P2-T010's acceptance is that `sure check` can receive and store a trusted
 //! explicit goal **without requiring raw transcript recording**. So a goal typed
@@ -21,136 +26,122 @@
 //! the words were handed to SURE in the same breath as the command that stored
 //! them.
 //!
-//! Then the run stops, and the report says so. This build cannot check a project
-//! yet, so the answer is not a report about the project — but neither is it a
-//! refusal of the kind every other unimplemented command produces, because
-//! something *did* happen: the user's history changed. That is why the status is
-//! 3 and the result is [`Report::GoalRecorded`] rather than a [`NotYet`]. A run
-//! that recorded a goal and checked nothing has to stop a script without being
-//! silent about what it wrote.
+//! It is written **before** the check, which is the property
+//! `docs/architecture/CLI.md` documents, and it feeds stage 2 of the same run:
+//! the pipeline resolves intent from the goal it was handed rather than from
+//! what it happens to find in the history, so a run cannot record one thing and
+//! check against another.
 //!
-//! # Why the goal is bound to a project state
+//! Every step before the write can refuse without having changed anything, which
+//! is why the order is: the words, then the project path, then the fingerprint,
+//! then the store, then the row. A goal with no words in it is refused before
+//! SURE looks for its store, and a project SURE cannot read is refused before it
+//! opens one — opening a store creates its directory and its file, and leaving a
+//! database behind for a run that stored nothing would be a side effect of a
+//! failure.
 //!
-//! The store's only project-aware write takes a fingerprint
-//! ([`Store::append_for`](sure_core::store::Store::append_for)), and the binding
-//! is right: a goal recorded with no project is a row no reader looking for *this
-//! project's* goal can find. So SURE reads the project far enough to know which
-//! state it is recording against, and reports the kind and the digest of that
-//! state — the two fields that answer "which state was this?" for a later run.
-//! The identifier the store is handed is minted per run and is deliberately not
-//! what the report leads with; `docs/architecture/PROJECT_INTENT.md` records the
-//! consequence for a reader.
+//! # What a run writes on a machine that has never used SURE
 //!
-//! # Why the project is read before the store is opened
+//! **Nothing.** The history is opened only when its file is already there: a
+//! bare `sure check` on a machine with no history does not create one, because a
+//! command that created a store in order to report what it had recorded would be
+//! changing the thing it is describing. A run with no history is not a run with
+//! a gap in the project — it is a run that has nothing to compare claims or
+//! earlier findings against, and the pipeline records both stages as scope
+//! limits with that reason.
 //!
-//! Opening a store creates its directory and its file. If the project cannot be
-//! read, SURE has nothing to record the goal against, and leaving a database
-//! behind for a run that stored nothing would be a side effect of a failure.
-//! Ordering the two this way costs nothing and means every refusal in this module
-//! leaves the machine as it found it — which is a claim
-//! `crates/sure-cli/tests/cli_contract.rs` can only make about the one refusal
-//! that runs as a process.
+//! The one exception is `--goal`, which exists to write. A machine with history
+//! has its store opened and read on every check, which is the ordinary cost of
+//! comparing against what was recorded before.
 //!
 //! # Why a failure is status 5 and not 3
 //!
-//! 3 is "this build cannot carry that out", whose remedy is a newer build. This
-//! command *can* carry out what it was asked. A run that met an unreadable
-//! project or a store it could not open tried and did not finish, which is what 5
-//! is for. One status for both is how a broken installation gets read as a build
-//! that has nothing to do.
-//!
-//! # What this build still does not do
-//!
-//! It does not check the project, and it does not compare the goal against
-//! anything. Every report it produces says so in the words a user reads, because
-//! a goal that was recorded and then silently not used is exactly the shape of
-//! failure this program exists to find in other people's work.
+//! 3 is "this build cannot carry that out", whose remedy is a newer build. These
+//! commands *can* carry out what they were asked. A run that met an unreadable
+//! project, settings it could not use or a history it could not open tried and
+//! did not finish, which is what 5 is for. One status for both is how a broken
+//! installation gets read as a build that has nothing to do.
 
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use serde_json::{Value, json};
+use sure_core::config::Config;
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::intent::IntentSource;
 use sure_core::paths::Paths;
+use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome, Stage, StageOutcome};
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
-use sure_core::store::Store;
+use sure_core::status::NotCheckedReason;
+use sure_core::store::{Store, StoreError};
+use sure_core::vocabulary::{ProjectFingerprint, ProjectVerdict};
 
-use crate::cli::Command;
-use crate::report::{Failed, GoalRecorded, NotYet, Report};
+use crate::human_report::{HumanReportSettings, write_verdict};
+use crate::report::{CheckReport, Failed, GoalRecorded, Report, exit};
 
-/// What `sure check` will do, once this build can.
-const DOES: &str = "check a project and report what it found";
-
-/// What a run that was not given a goal did instead.
+/// What a run says when nothing was written and nothing was checked.
 ///
-/// The same sentence this command gave before it could store a goal at all. A
-/// bare `sure check` still does nothing, and it still has to say so.
-const NOTHING_CHECKED: &str = "Nothing was checked.";
-
-/// What every failure in this module did instead.
-///
-/// One sentence for all of them, because it is true of all of them: each refusal
-/// below happens before or instead of the write. The one exception says so in its
-/// own words — see [`RECORDED_WITHOUT_A_ROW`].
+/// One sentence for every failure that happens before the goal is written,
+/// because it is true of all of them: each refusal in this module happens
+/// before or instead of the write.
 const NOTHING_RECORDED: &str = "Nothing was recorded, and nothing was checked.";
+
+/// What a run says when the goal was written and the check did not happen.
+///
+/// The other sentence, for the other reason. A report using
+/// [`NOTHING_RECORDED`] after a successful write would tell the user their
+/// history is unchanged when it is not, and they would have no way to find out.
+const RECORDED_AND_UNCHECKED: &str = "The goal was recorded, and nothing was checked.";
 
 /// What a run says when the goal was written and no row came back for it.
 ///
-/// Separate from [`NOTHING_RECORDED`] because this is the one failure here in
-/// which something *was* written. A report using the other sentence would tell
-/// the user their history is unchanged when it is not, and they would have no way
-/// to find out.
+/// Separate again, because this is the one failure here in which something was
+/// written and SURE cannot say what.
 const RECORDED_WITHOUT_A_ROW: &str =
     "The goal was recorded, and SURE cannot say which record holds it.";
 
-/// `sure check`, discovering where SURE keeps its files.
+/// `sure check`, `sure recheck` or `sure repair`, discovering where SURE keeps
+/// its files.
 ///
 /// # Errors
 ///
 /// None: a failure is a [`Report::Failed`], because a command that could not
 /// finish still has to answer in the shape a caller reads.
 #[must_use]
-pub fn run(command: &Command, project: Option<&Path>, goal: Option<&str>) -> Report {
-    // A bare `sure check` does nothing, so it does not look for anything either.
-    // This is not only an optimisation: a machine where SURE cannot find its own
-    // data directory must not turn a command that does nothing into a *different*
-    // kind of nothing, and that is the branch discovery failing would take.
-    if goal.is_none() {
-        return not_yet(command);
-    }
+pub fn run(purpose: Purpose, project: Option<&Path>, goal: Option<&str>) -> Report {
     let project = match project_of(project) {
         Ok(project) => project,
-        Err(detail) => return failed(command, NOTHING_RECORDED, detail),
+        Err(detail) => return failed(purpose, NOTHING_RECORDED, detail),
     };
     match Paths::discover() {
-        Ok(paths) => run_with(command, &paths, &project, goal),
-        // Not `Unavailable`: SURE has somewhere to keep its files or it does not,
-        // and a machine where it does not is a machine to fix rather than a build
-        // to update.
-        Err(error) => failed(command, NOTHING_RECORDED, error.to_string()),
+        Ok(paths) => run_with(purpose, &paths, &project, goal),
+        // Not `Unavailable`: SURE has somewhere to keep its files or it does
+        // not, and a machine where it does not is a machine to fix rather than a
+        // build to update.
+        Err(error) => failed(purpose, NOTHING_RECORDED, error.to_string()),
     }
 }
 
 /// The project this run is about: the one named, or the one SURE was run from.
 ///
 /// The documented default is the current directory, and it is resolved to an
-/// absolute path here rather than passed along as `.`. SURE refuses to
+/// absolute path here rather than passed along as `.`. `sure_core` refuses to
 /// fingerprint a relative root, and the reason is worth keeping: `.` means
 /// "wherever this process happens to be", so a record naming it can be read
-/// later against a directory the user never meant. Refusing the absolute form of
-/// that mistake is the whole job of the rule, and `.` is the same mistake spelled
-/// shorter.
+/// later against a directory the user never meant.
 ///
 /// A path the user gave is passed through untouched, because SURE does not
-/// silently repair an argument: `sure check not-a-project --goal "…"` has to say
-/// that the root is relative, not quietly check somewhere else.
+/// silently repair an argument: `sure check not-a-project` has to say that the
+/// root is relative, not quietly check somewhere else. What "not a directory" is
+/// worth is decided by the stages — discovery says so at stage 1 and the run
+/// stops there with status 5.
 fn project_of(project: Option<&Path>) -> Result<PathBuf, String> {
     match project {
         Some(path) => Ok(path.to_path_buf()),
         None => std::env::current_dir().map_err(|error| {
             format!(
                 "SURE could not work out which directory it is running in, so it could not \
-                 tell which project this goal is about. Name the project explicitly to \
-                 record the goal anyway: {error}"
+                 tell which project this is about. Name the project explicitly: {error}"
             )
         }),
     }
@@ -158,108 +149,493 @@ fn project_of(project: Option<&Path>) -> Result<PathBuf, String> {
 
 /// The same, with the locations named rather than discovered.
 ///
-/// Separate from [`run`] so that a test can point SURE at a store it made instead
-/// of at the user's own. The alternative was not available: on Windows the
-/// per-user data directory is read through `SHGetKnownFolderPath`, which ignores
-/// `LOCALAPPDATA`, so there is no environment variable a test could set. A test
-/// that ran the real path would be adding an invented requirement to the history
-/// of the machine it ran on, and it would look exactly like a passing test.
+/// Separate from [`run`] so that a test can point SURE at a store it made
+/// instead of at the user's own. The alternative was not available: on Windows
+/// the per-user data directory is read through `SHGetKnownFolderPath`, which
+/// ignores `LOCALAPPDATA`, so there is no environment variable a test could set.
+/// A test that ran the real path would be adding an invented requirement to the
+/// history of the machine it ran on, and it would look exactly like a passing
+/// test.
 #[must_use]
-pub fn run_with(command: &Command, paths: &Paths, project: &Path, goal: Option<&str>) -> Report {
-    let Some(goal) = goal else {
-        return not_yet(command);
+pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&str>) -> Report {
+    // The goal first, and in one piece: the words, the project path, the state
+    // it is about, the store, the row. Every step of it can refuse without
+    // having written anything.
+    let mut recorded = None;
+    let mut store = None;
+    if let Some(goal) = goal {
+        match record_goal(paths, project, goal) {
+            Ok((written, opened)) => {
+                recorded = Some(written);
+                store = Some(opened);
+            }
+            Err(failure) => return failed(purpose, failure.what, failure.detail),
+        }
+    }
+
+    // The project's own settings, read after the goal is in the history: what
+    // the user typed is theirs whether or not the project's file can be read.
+    // They decide the execution mode every dynamic check is authorised under, so
+    // a run that could not read them has nothing to check with.
+    let loaded = match Config::load(project) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            let what = if recorded.is_some() {
+                RECORDED_AND_UNCHECKED
+            } else {
+                NOTHING_RECORDED
+            };
+            return failed(purpose, what, error.to_string());
+        }
     };
 
+    // The history, when there is one — see the module comment for why nothing is
+    // created here.
+    if store.is_none() {
+        match open_existing(paths, project) {
+            Ok(opened) => store = opened,
+            Err(error) => return failed(purpose, NOTHING_RECORDED, error.to_string()),
+        }
+    }
+
+    let run = Pipeline {
+        project,
+        purpose,
+        config: &loaded.config,
+        store: store.as_ref(),
+        goal,
+    }
+    .run();
+
+    Report::Check(Box::new(CheckReport {
+        command: purpose.as_str(),
+        project: project.display().to_string(),
+        run,
+        recorded_goal: recorded,
+    }))
+}
+
+/// Write the user's goal down, and hand back the store it went into.
+///
+/// The order is the promise: nothing is opened until the words and the project
+/// have both been accepted, so a refusal cannot have left a database behind and
+/// a user who typed nothing has no record to clean up.
+fn record_goal(
+    paths: &Paths,
+    project: &Path,
+    goal: &str,
+) -> Result<(GoalRecorded, Store), Failure> {
     // The words first. A goal with no words in it is not a requirement, and
     // finding that out needs nothing opened, nothing read and nothing created.
-    let intent = match explicit_goal(goal) {
-        Ok(intent) => intent,
-        Err(error) => return failed(command, NOTHING_RECORDED, error.to_string()),
-    };
+    let intent =
+        explicit_goal(goal).map_err(|error| Failure::new(NOTHING_RECORDED, error.to_string()))?;
 
     // The project as the store takes it — text — before anything is read. A path
-    // that cannot be written down is one SURE could not name in the record it was
-    // about to write, and the store would have to lose it to proceed.
+    // that cannot be written down is one SURE could not name in the record it
+    // was about to write, and the store would have to lose it to proceed.
     let Some(root) = project.to_str() else {
-        return failed(
-            command,
+        return Err(Failure::new(
             NOTHING_RECORDED,
             format!(
                 "The project path {} is not text SURE can write down, so it could not name \
                  the project this goal is about.",
                 project.display()
             ),
-        );
+        ));
     };
 
     // Which state of the project this is being recorded against, read before the
-    // store is opened — see the module comment.
-    let state = match project_fingerprint(project, &FingerprintOptions::default()) {
-        Ok(state) => state,
-        Err(error) => return failed(command, NOTHING_RECORDED, error.to_string()),
-    };
+    // store is opened. The pipeline takes the fingerprint again at stage 3, and
+    // the two agree because both are the same deterministic read of the same
+    // tree: what this one buys is that a project SURE cannot read leaves no
+    // store behind.
+    let state = project_fingerprint(project, &FingerprintOptions::default())
+        .map_err(|error| Failure::new(NOTHING_RECORDED, error.to_string()))?;
 
-    let store = match Store::open(paths, project) {
-        Ok(store) => store,
-        Err(error) => return failed(command, NOTHING_RECORDED, error.to_string()),
-    };
+    let store = Store::open(paths, project)
+        .map_err(|error| Failure::new(NOTHING_RECORDED, error.to_string()))?;
 
-    let rows = match record(&store, root, &state.id, &intent) {
-        Ok(rows) => rows,
-        Err(error) => return failed(command, NOTHING_RECORDED, error.to_string()),
-    };
+    let rows = record(&store, root, &state.id, &intent)
+        .map_err(|error| Failure::new(NOTHING_RECORDED, error.to_string()))?;
 
-    // One row, because the intent this module builds has one requirement and the
-    // schema stores one requirement per row. Written as a match rather than as
+    // One row, because the intent this builds has one requirement and the schema
+    // stores one requirement per row. Written as a match rather than as
     // `rows[0]` so that a later version of `explicit_goal` producing several is a
     // refusal here rather than a report naming the first of them as *the* record
     // — and so that a store that returned nothing is not reported as record #0.
-    match rows.first().copied() {
-        Some(row) => Report::GoalRecorded(Box::new(GoalRecorded {
+    let Some(row) = rows.first().copied() else {
+        return Err(Failure::new(
+            RECORDED_WITHOUT_A_ROW,
+            "The store accepted the goal and returned no row identifier for it. The goal is in \
+             the history; SURE cannot say which record it is. This is a fault in SURE rather \
+             than in the goal."
+                .to_owned(),
+        ));
+    };
+
+    Ok((
+        GoalRecorded {
             goal: goal.to_owned(),
             requirement_id: EXPLICIT_GOAL_ID.to_owned(),
             source: IntentSource::ExplicitUserGoal,
             project_root: root.to_owned(),
             project_state: state,
             record: row,
-        })),
-        None => failed(
-            command,
-            RECORDED_WITHOUT_A_ROW,
-            "The store accepted the goal and returned no row identifier for it. The goal is \
-             in the history; SURE cannot say which record it is. This is a fault in SURE \
-             rather than in the goal."
-                .to_owned(),
-        ),
+        },
+        store,
+    ))
+}
+
+/// The history, when its file is already there.
+///
+/// Never created: see the module comment. A store that exists and cannot be used
+/// is an error rather than an absent history, because the pipeline's "SURE has
+/// no recorded history for this machine" is a true sentence only when there is
+/// none — a run that said it while a store sat unreadable on the disk would be
+/// describing a machine it never looked at.
+///
+/// # Errors
+///
+/// [`StoreError::Location`] if the store would be inside the project, and
+/// whatever opening it can return.
+fn open_existing(paths: &Paths, project: &Path) -> Result<Option<Store>, StoreError> {
+    if !paths.store_file().exists() {
+        return Ok(None);
+    }
+    Store::open(paths, project).map(Some)
+}
+
+/// One step of [`record_goal`] that did not happen, and what it cost.
+struct Failure {
+    /// The fixed sentence about what did not happen.
+    what: &'static str,
+    /// What went wrong, in the words of the thing that went wrong.
+    detail: String,
+}
+
+impl Failure {
+    fn new(what: &'static str, detail: String) -> Self {
+        Self { what, detail }
     }
 }
 
-/// The refusal for a run that was not asked to record anything.
-fn not_yet(command: &Command) -> Report {
-    Report::Unavailable(NotYet {
-        command: command.name(),
-        does: DOES,
-        instead: NOTHING_CHECKED,
-    })
-}
-
 /// A run that tried and could not finish.
-fn failed(command: &Command, what: &'static str, detail: String) -> Report {
+fn failed(purpose: Purpose, what: &'static str, detail: String) -> Report {
     Report::Failed(Box::new(Failed {
-        command: command.name(),
+        command: purpose.as_str(),
         what,
         detail,
     }))
 }
 
+// --- the human form -----------------------------------------------------
+
+/// Write the human form.
+///
+/// # Errors
+///
+/// Any failure from `out`.
+pub fn human(report: &CheckReport, out: &mut impl Write) -> io::Result<()> {
+    match &report.run.run {
+        Some(run) => finished(report, &report.run, run, out),
+        // No verdict, so no report: this is a complaint, and `Report::is_an_answer`
+        // sends it to standard error where a person piping the report to a file
+        // will still see it.
+        None => stopped(report, out),
+    }
+}
+
+/// The human form of a run that produced a verdict.
+fn finished(
+    report: &CheckReport,
+    outcome: &PipelineOutcome,
+    run: &RunOutcome,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    writeln!(out, "SURE checked {}.", report.project)?;
+    writeln!(out)?;
+
+    // Everything the verdict is made of, in the words this repository already
+    // uses for it. Rendering it here a second time would be a second explanation
+    // of one result, and the two would drift the first time either was improved.
+    write_verdict(
+        &run.verdict,
+        HumanReportSettings {
+            color: false,
+            schedule: Some(&run.schedule),
+            run_report: Some(&run.report),
+        },
+        out,
+    )?;
+    writeln!(out)?;
+
+    stages(outcome, out)?;
+    if let Some(recorded) = &report.recorded_goal {
+        what_was_recorded(recorded, out)?;
+    }
+
+    // The status, named rather than implied. A person who piped this into a file
+    // has lost the exit code, and the two sentences are the difference between
+    // "look at your project" and "this build could not do it".
+    let status = if report.is_green() {
+        writeln!(
+            out,
+            "SURE exited with status {}, and that is the only status it returns for a project \
+             it checked and found clean.",
+            exit::OK
+        )
+    } else {
+        writeln!(
+            out,
+            "SURE exited with status {}. That is what it returns when it checked the project \
+             and did not find it clean — not {}, which would mean this build cannot check a \
+             project at all.",
+            exit::NOT_GREEN,
+            exit::UNAVAILABLE
+        )
+    };
+    status?;
+    not_clean_note(report, outcome, out)
+}
+
+/// One sentence about what a not-clean verdict does and does not mean.
+///
+/// The false green has a mirror image and it is worth naming: a report that
+/// said "this is not clean" while nothing was actually run would be read as a
+/// statement about the project. Where nothing passed, that is not what
+/// happened, and the reader is owed the difference.
+fn not_clean_note(
+    report: &CheckReport,
+    outcome: &PipelineOutcome,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    if report.is_green() {
+        return Ok(());
+    }
+    let Some(run) = &outcome.run else {
+        return Ok(());
+    };
+    if run.coverage.checked_count == 0 {
+        writeln!(
+            out,
+            "No check in this run produced a result about the project, so the status above is \
+             not a finding: it says SURE could not establish enough to call the project clean."
+        )?;
+    } else {
+        writeln!(
+            out,
+            "SURE established something about the project and something else it could not — \
+             every gap is listed above. A run with a stage that did not run is never reported \
+             as clean."
+        )?;
+    }
+    writeln!(out)
+}
+
+/// The human form of a run that stopped before it had a verdict.
+fn stopped(report: &CheckReport, out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "sure {} could not finish.", report.command)?;
+    writeln!(out)?;
+    writeln!(out, "It was checking {}.", report.project)?;
+    writeln!(out)?;
+
+    match report.run.stopped_at {
+        Some(stage) => {
+            writeln!(
+                out,
+                "It stopped at stage {} of {}, {}:",
+                stage.number(),
+                Stage::ALL.len(),
+                stage.title()
+            )?;
+            writeln!(out, "    {}", report.run.stage(stage).outcome.detail())?;
+        }
+        // Unreachable: a run with no outcome stopped somewhere. Written as a
+        // sentence rather than as a panic, because a missing line in a report is
+        // a better failure than a crash in a terminal.
+        None => writeln!(out, "It did not say which stage stopped it.")?,
+    }
+    writeln!(out)?;
+    writeln!(
+        out,
+        "No verdict was produced, so this is not a statement about your project: SURE did not \
+         get far enough to make one."
+    )?;
+    if let Some(recorded) = &report.recorded_goal {
+        what_was_recorded(recorded, out)?;
+    }
+    writeln!(
+        out,
+        "SURE exited with status {}, which is what it returns when it tried and did not finish. \
+         That is not the same as a command this build cannot carry out, and not the same as a \
+         wrong command line.",
+        exit::FAILED
+    )
+}
+
+/// The stage log, in order, with the gaps marked.
+fn stages(outcome: &PipelineOutcome, out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "What the run did, stage by stage")?;
+    for record in &outcome.stages {
+        writeln!(out, "  {}", record.plain_description())?;
+    }
+    writeln!(out)?;
+
+    let gaps = outcome.gaps().count();
+    if gaps > 0 {
+        writeln!(
+            out,
+            "{gaps} of the {} stages did not run, and each is marked NOT CHECKED above. A run \
+             with a stage that did not run is never reported as clean.",
+            Stage::ALL.len()
+        )?;
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+/// What this run wrote to the user's history.
+///
+/// The one place a command changes something its output would not otherwise
+/// contain, so it is said in the words a person reads and not only in the frame.
+fn what_was_recorded(recorded: &GoalRecorded, out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "What SURE recorded")?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "  Your goal was written to the history as record {}, before the check ran:",
+        recorded.record
+    )?;
+    writeln!(out, "      {}", recorded.goal)?;
+    writeln!(out, "  {}", recorded.source.plain_description())?;
+    writeln!(
+        out,
+        "  It is recorded against the {} state {} of {}, so a later run can tell whether it is \
+         still looking at the project you said it about.",
+        recorded.project_state.kind.as_str(),
+        recorded.project_state.digest,
+        recorded.project_root
+    )?;
+    writeln!(out)
+}
+
+// --- the machine form ---------------------------------------------------
+
+/// The `details` object of the response frame.
+///
+/// One object holding everything this run found, so that the frame's five fixed
+/// fields keep meaning what `crate::report` says they mean. Everything that is a
+/// statement about the *project* is under `report`, in the shape
+/// `crate::json_report` already defines and versions for that purpose; what this
+/// function adds is what only a run of the pipeline can say — which stages ran,
+/// how far the run got, and what it wrote on the way.
+#[must_use]
+pub fn machine(report: &CheckReport) -> Value {
+    let outcome = &report.run;
+    let mut details = json!({
+        "project": report.project,
+        "purpose": report.command,
+        "state": if outcome.finished() { "finished" } else { "stopped" },
+        "green": report.is_green(),
+        "stopped_at": outcome.stopped_at.map(Stage::as_str),
+        "stages": outcome.stages.iter().map(stage_machine).collect::<Vec<Value>>(),
+        "recorded_goal": report.recorded_goal.as_ref().map(goal_machine),
+    });
+
+    match &outcome.run {
+        Some(run) => {
+            details["mode"] = json!(run.mode.as_str());
+            details["support"] = support_machine(run);
+            details["report"] = verdict_machine(&run.verdict);
+            details["checked_count"] = json!(run.coverage.checked_count);
+            details["not_checked_count"] = json!(run.coverage.not_checked.len());
+            details["has_critical_gaps"] = json!(run.coverage.has_critical_gaps);
+        }
+        // `null` rather than absent, for the reason every other field here is
+        // unconditional: a reader switching on `state` should not also have to
+        // ask whether a key exists.
+        None => {
+            details["mode"] = Value::Null;
+            details["support"] = Value::Null;
+            details["report"] = Value::Null;
+        }
+    }
+    details
+}
+
+/// One stage, in the shape a script reads.
+fn stage_machine(record: &sure_core::pipeline::StageRecord) -> Value {
+    let (outcome, reason): (&str, Option<NotCheckedReason>) = match &record.outcome {
+        StageOutcome::Ran { .. } => ("ran", None),
+        StageOutcome::NotPartOfWork { .. } => ("not_part_of_work", None),
+        StageOutcome::NotRun { reason, .. } => ("not_run", *reason),
+        StageOutcome::Unfinished { .. } => ("unfinished", None),
+    };
+    json!({
+        "stage": record.stage.as_str(),
+        "number": record.stage.number(),
+        "title": record.stage.title(),
+        "outcome": outcome,
+        // The vocabulary's own wire name, taken from its serde spelling rather
+        // than retyped here: a second list of reasons is a second list to keep in
+        // step, and the day one is added this would be the copy nobody updated.
+        "reason": reason.map(|reason| serde_json::to_value(reason).unwrap_or(Value::Null)),
+        "reason_explained": reason.map(NotCheckedReason::plain_explanation),
+        "detail": record.outcome.detail(),
+    })
+}
+
+/// What SURE could and could not see of the project.
+fn support_machine(run: &RunOutcome) -> Value {
+    json!({
+        "level": run.support.level.as_str(),
+        "letter": run.support.level.letter().to_string(),
+        "reason": run.support.reason,
+    })
+}
+
+/// The verdict, in the shape `crate::json_report` publishes.
+#[allow(
+    clippy::expect_used,
+    reason = "a JsonReport holds only strings, integers and booleans, so serializing it to a \
+              Value cannot fail; `json_report.rs` allows the same call for the same reason"
+)]
+fn verdict_machine(verdict: &ProjectVerdict) -> Value {
+    serde_json::to_value(crate::json_report::build_json_report(verdict))
+        .expect("a JsonReport is made of JSON values")
+}
+
+/// The goal this run wrote, in the shape a script reads.
+fn goal_machine(recorded: &GoalRecorded) -> Value {
+    json!({
+        "goal": recorded.goal,
+        "requirement_id": recorded.requirement_id,
+        // The wire name, so that the field a script switches on and the sentence
+        // a person reads are two renderings of one value rather than two strings
+        // kept in step by hand.
+        "source": recorded.source.as_str(),
+        "project_root": recorded.project_root,
+        "project_state": fingerprint_machine(&recorded.project_state),
+        "record": recorded.record,
+    })
+}
+
+/// The state a goal was recorded against.
+fn fingerprint_machine(state: &ProjectFingerprint) -> Value {
+    json!({
+        "id": state.id.as_str(),
+        "kind": state.kind.as_str(),
+        "digest": state.digest,
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use serde_json::json;
-    use sure_core::store::{HistoryFilter, RecordKind, Store, StoredRecord};
+    use sure_core::store::{HistoryFilter, RecordKind, StoredRecord};
 
     use super::*;
     use crate::report::exit;
@@ -323,12 +699,42 @@ mod tests {
         }
     }
 
-    /// The command a user would have typed to get here.
-    fn check() -> Command {
-        Command::Check {
-            path: None,
-            goal: None,
-        }
+    /// A project SURE can read and cannot run: a Python file and no manifest
+    /// SURE would plan a command from.
+    fn a_project(fixture: &Fixture) {
+        fixture.write("main.py", "def main():\n    print('hello')\n");
+        fixture.write("README.md", "# a small project\n");
+    }
+
+    /// A project SURE can read **and plans checks for**: a Rust crate, which is
+    /// the shape that gives the pipeline something to do.
+    ///
+    /// This is the fixture most of the tests below want, and the reason is worth
+    /// writing down, because a smaller project would hide the rules they are
+    /// about. A crate with a `Cargo.toml` declares `cargo test` and `cargo check
+    /// --all-targets` — two checks that would run the project's own code, and
+    /// under the default execution mode neither is authorised. So the run has:
+    ///
+    /// * planned checks that were refused by the mode, recorded as skipped with
+    ///   [`ExecutionNotAuthorized`](sure_core::status::NotCheckedReason::ExecutionNotAuthorized);
+    /// * planned checks the mode allows that nothing can run, recorded as
+    ///   unknown rather than passed;
+    /// * two stages that could not do their work and must be recorded as gaps.
+    ///
+    /// A Python file with no manifest plans nothing at all, and every stage then
+    /// reports `not part of this run` — which is a true and different answer, and
+    /// one that would let a test of the false-green rule pass without ever
+    /// exercising it.
+    fn a_rust_project(fixture: &Fixture) {
+        fixture.write(
+            "Cargo.toml",
+            "[package]\nname = \"thing\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        fixture.write(
+            "src/lib.rs",
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+        );
+        fixture.write("README.md", "# a small project\n");
     }
 
     /// Everything the store holds, recordings included.
@@ -374,10 +780,11 @@ mod tests {
         intents.remove(0)
     }
 
-    fn recorded(report: &Report) -> &GoalRecorded {
+    /// The run's own report, or a panic naming the report that came back.
+    fn checked(report: &Report) -> &CheckReport {
         match report {
-            Report::GoalRecorded(recorded) => recorded,
-            other => panic!("expected a recorded goal, got {other:?}"),
+            Report::Check(check) => check,
+            other => panic!("expected a check, got {other:?}"),
         }
     }
 
@@ -388,35 +795,421 @@ mod tests {
         }
     }
 
+    fn machine_of(report: &Report) -> Value {
+        report.frame()["details"].clone()
+    }
+
+    // --- the acceptance criteria ----------------------------------------
+
     #[test]
-    fn a_goal_typed_to_sure_is_stored_and_read_back_with_the_project_it_is_about() {
-        // The acceptance, end to end through the entry point the CLI calls. The
-        // store is one this test made, so "read back" is a claim about a file
-        // rather than about a value that never left the process.
+    fn a_check_of_a_real_project_runs_the_stages_and_produces_a_verdict() {
+        // The first acceptance criterion, end to end: one orchestrator runs the
+        // documented stages over a project on disk. What this asserts is that a
+        // real `sure check` reached a verdict at all — the stage log is an
+        // ordered walk of the twelve, and the verdict exists.
+        let fixture = Fixture::new("real-check");
+        a_rust_project(&fixture);
+        let project = fixture.project();
+        let report = run_with(Purpose::Check, &fixture.paths(), &project, None);
+
+        let check = checked(&report);
+        let outcome = &check.run;
+        assert!(outcome.finished(), "the run stopped: {outcome:?}");
+        assert_eq!(
+            outcome.stages.iter().map(|r| r.stage).collect::<Vec<_>>(),
+            Stage::ALL.to_vec(),
+            "the run did not record every stage, in order"
+        );
+        assert_eq!(outcome.purpose, Purpose::Check);
+        assert_eq!(check.command, "check");
+        assert_eq!(
+            check.project,
+            project.display().to_string(),
+            "the report is about a project other than the one it was pointed at"
+        );
+
+        let run = outcome.run.as_ref().expect("a finished run has an outcome");
+        // The pipeline read a real project: its own account of that project says
+        // so, in a fingerprint that names the state the verdict is about.
+        assert!(
+            !run.project_state.digest.is_empty(),
+            "the run does not say which state of the project it is about"
+        );
+        assert_eq!(
+            run.project_state.id, run.verdict.fingerprint,
+            "the run and the verdict disagree about which reading they are about"
+        );
+        // And it had work to do: this fixture plans checks, so the run is about
+        // something and not a walk over an empty plan.
+        assert!(run.schedule.len() >= 2, "nothing was planned to check");
+        // The verdict carries a scope, and it is the run's own: the checks that
+        // produced no result are in it, so a reader can see what was not
+        // established rather than only what was.
+        assert!(
+            run.coverage.checked_count + run.coverage.not_checked.len() > 0,
+            "the report says neither that something was checked nor that something was not"
+        );
+    }
+
+    #[test]
+    fn no_check_this_build_can_run_is_ever_reported_as_clean() {
+        // The false green, over a real project. This build plans checks and runs
+        // none of them, so every stage that had work and did not do it must show
+        // up as a gap, and a run with a gap must never be reported as clean.
+        let fixture = Fixture::new("never-green");
+        a_rust_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+
+        let check = checked(&report);
+        assert!(
+            !check.is_green(),
+            "a build with no runner reported a project as clean: {:?}",
+            check.run
+        );
+        assert_eq!(
+            report.exit_code(),
+            exit::NOT_GREEN,
+            "a project SURE could not check enough of is not status 3"
+        );
+        assert_ne!(report.exit_code(), exit::UNAVAILABLE);
+        assert_ne!(report.exit_code(), exit::OK);
+
+        // And the reason is visible rather than implied: the stages that had
+        // work and could not do it are recorded as gaps, and the run says so in
+        // the report a person reads. The two that always have work and never
+        // finish in this build are the project's own checks and the model
+        // assessment — with no runner and no provider respectively.
+        for stage in [Stage::DynamicChecks, Stage::ModelAssessment] {
+            assert!(
+                check.run.stage(stage).outcome.is_a_gap(),
+                "stage {} is not recorded as a gap: {:?}",
+                stage.number(),
+                check.run.stage(stage)
+            );
+        }
+        let written = report.human_text();
+        assert!(
+            written.contains("NOT CHECKED"),
+            "the human report does not mark the gap:\n{written}"
+        );
+        assert!(
+            written.contains("never reported as clean"),
+            "the human report does not say what a gap costs:\n{written}"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_check_the_mode_did_not_authorise_is_not_checked_and_never_passed() {
+        // The second acceptance criterion's sharp edge. A project whose shape
+        // plans a check that would run its code, under the default execution
+        // mode, must record that check as *not checked* — and no result of it may
+        // be a pass, whatever it was that stopped it.
+        let fixture = Fixture::new("dynamic-refused");
+        a_rust_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+
+        let check = checked(&report);
+        let run = check.run.run.as_ref().expect("a verdict");
+        assert_eq!(
+            run.mode,
+            sure_core::execution::ExecutionMode::InspectOnly,
+            "the default execution mode moved, so this test is checking the wrong rule"
+        );
+
+        // The checks the mode refused, rather than the checks that failed for
+        // some other reason: the two are different states and the report must
+        // not blur them.
+        let refused: Vec<&sure_core::status::CheckResult> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| {
+                result.not_checked_reason
+                    == Some(sure_core::status::NotCheckedReason::ExecutionNotAuthorized)
+            })
+            .collect();
+        assert!(
+            !refused.is_empty(),
+            "no check was refused by the execution mode, so this test is not exercising the \
+             rule: {:?}",
+            run.report.results()
+        );
+        for result in &refused {
+            assert_eq!(
+                result.status,
+                sure_core::status::CheckStatus::Skipped,
+                "{} was refused and is not recorded as not run",
+                result.title
+            );
+            assert_ne!(
+                result.status,
+                sure_core::status::CheckStatus::Pass,
+                "a check that did not run was recorded as passed"
+            );
+            // And it is *not* a scope limit — the distinction the aggregation
+            // rules turn on. A scope limit says "this does not apply to your
+            // project"; this says "SURE was not allowed to find out", which is
+            // exactly the state that must never be reported as clean, so it is
+            // the one reason that cannot be excused as out of scope.
+            assert!(
+                !result
+                    .not_checked_reason
+                    .is_some_and(sure_core::status::NotCheckedReason::is_scope_limit),
+                "{} was refused by the mode and is recorded as not applying to the project",
+                result.title
+            );
+        }
+
+        // Nothing in the run's own account calls those checks done: the refusal
+        // is in the stage log, in the coverage the verdict carries, and in the
+        // frame a script reads.
+        let stage = check.run.stage(Stage::DynamicChecks);
+        assert!(
+            matches!(
+                stage.outcome,
+                StageOutcome::NotRun {
+                    reason: Some(sure_core::status::NotCheckedReason::ExecutionNotAuthorized),
+                    ..
+                }
+            ),
+            "stage 6 does not record the mode's refusal: {stage:?}"
+        );
+        assert_eq!(
+            run.coverage.checked_count, 0,
+            "a run whose checks were all refused counted one as checked"
+        );
+        let machine = machine_of(&report);
+        let not_checked = machine["report"]["not_checked"]
+            .as_array()
+            .expect("the verdict lists what was not checked");
+        assert_eq!(
+            not_checked.len(),
+            refused.len(),
+            "the verdict does not list every check the mode refused: {machine}"
+        );
+        for entry in not_checked {
+            assert!(
+                entry["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("running your project's code")),
+                "a refused check does not say why: {entry}"
+            );
+        }
+        // The reason in the vocabulary's own spelling is on the stage, which is
+        // where a reader switches on it; the report's list carries the sentence.
+        assert_eq!(machine["stages"][5]["outcome"], json!("not_run"));
+        assert_eq!(
+            machine["stages"][5]["reason"],
+            json!("execution_not_authorized")
+        );
+        assert_eq!(machine["green"], json!(false));
+        assert_eq!(machine["checked_count"], json!(0));
+        assert_eq!(machine["has_critical_gaps"], json!(true));
+    }
+
+    #[test]
+    fn every_stage_that_did_not_run_cannot_aggregate_to_a_clean_verdict() {
+        // The rule the whole product rests on, stated over the run's own record:
+        // read the stage log, and if any stage is a gap, the run is not clean —
+        // and the exit status agrees with that reading. This is the criterion
+        // "no stage in that state can aggregate to a clean verdict" made
+        // checkable independently of how the aggregate happens to be computed.
+        let fixture = Fixture::new("stage-gaps");
+        a_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+
+        let check = checked(&report);
+        let any_gap = check.run.gaps().next().is_some();
+        assert!(any_gap, "this fixture was expected to leave a stage un-run");
+        assert!(!check.is_green());
+        assert_eq!(report.outcome(), "not_green");
+        assert_eq!(report.exit_code(), exit::NOT_GREEN);
+    }
+
+    #[test]
+    fn an_unconfigured_model_provider_is_a_recorded_state_and_not_an_omission() {
+        // Stage 8 with nothing configured is a scope limit: recorded, visible,
+        // and not a failure. A run whose log simply stopped at stage 7 would look
+        // exactly the same in a verdict that never mentioned it.
+        let fixture = Fixture::new("no-provider");
+        a_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+
+        let record = checked(&report).run.stage(Stage::ModelAssessment);
+        match &record.outcome {
+            StageOutcome::NotRun { reason, detail } => {
+                assert_eq!(
+                    *reason,
+                    Some(sure_core::status::NotCheckedReason::AnalysisProviderDisabled)
+                );
+                assert!(
+                    detail.contains("not a failure"),
+                    "the run does not say what an unconfigured provider costs: {detail}"
+                );
+            }
+            other => panic!("stage 8 with no provider is {other:?}"),
+        }
+
+        let machine = machine_of(&report);
+        let stage = machine["stages"]
+            .as_array()
+            .expect("the frame lists every stage")
+            .iter()
+            .find(|entry| entry["stage"] == json!("model-assessment"))
+            .cloned()
+            .expect("the frame lists stage 8");
+        assert_eq!(stage["outcome"], json!("not_run"));
+        assert_eq!(
+            stage["reason"],
+            json!("analysis_provider_disabled"),
+            "the frame does not carry the vocabulary's own reason: {stage}"
+        );
+    }
+
+    // --- recheck and repair are the same orchestrator ---------------------
+
+    #[test]
+    fn recheck_and_repair_reach_the_same_orchestrator_and_go_further_down_it() {
+        // The criterion that says the three commands are not three paths into the
+        // engine. Same project, three purposes, one stage log — and the last two
+        // stages are what distinguishes them: `repair` adds the repair contract,
+        // `recheck` also compares with what the last run left open.
+        let fixture = Fixture::new("three-purposes");
+        a_rust_project(&fixture);
+        let paths = fixture.paths();
+        let project = fixture.project();
+
+        let check = run_with(Purpose::Check, &paths, &project, None);
+        let repair = run_with(Purpose::Repair, &paths, &project, None);
+        let recheck = run_with(Purpose::Recheck, &paths, &project, None);
+
+        let check = checked(&check);
+        let repair = checked(&repair);
+        let recheck = checked(&recheck);
+
+        for (purpose, report) in [
+            (Purpose::Check, check),
+            (Purpose::Repair, repair),
+            (Purpose::Recheck, recheck),
+        ] {
+            assert_eq!(report.run.purpose, purpose);
+            assert_eq!(report.command, purpose.as_str());
+            assert_eq!(
+                report
+                    .run
+                    .stages
+                    .iter()
+                    .map(|r| r.stage)
+                    .collect::<Vec<_>>(),
+                Stage::ALL.to_vec(),
+                "{purpose:?} did not walk the documented stages"
+            );
+            // The same first stages, from the same orchestrator: the project's
+            // state is a fact about the project, so three runs of one project
+            // must agree about it. Compared by digest rather than by the whole
+            // fingerprint, because the identifier is generated per run — it names
+            // *this reading*, and the digest is what says the reading was of the
+            // same tree.
+            assert_eq!(
+                digest_of_run(check),
+                digest_of_run(report),
+                "{purpose:?} read a different project state"
+            );
+        }
+
+        // `check` stops at the aggregate, and says why rather than going quiet.
+        for report in [check, repair] {
+            match &report.run.stage(Stage::Recheck).outcome {
+                StageOutcome::NotPartOfWork { detail } => {
+                    assert!(
+                        detail.contains("earlier one"),
+                        "stage 12 is out of scope without saying so: {detail}"
+                    );
+                }
+                other => panic!("`{}` claims to re-check: {other:?}", report.command),
+            }
+        }
+        assert!(
+            !matches!(
+                recheck.run.stage(Stage::Recheck).outcome,
+                StageOutcome::NotPartOfWork { .. }
+            ),
+            "`sure recheck` recorded its own stage as not part of the run"
+        );
+        // And the stage repair exists for is not out of scope for `repair`: this
+        // project has no open findings, so the contract has nothing to write and
+        // says so — which is a different statement from "this run does not do
+        // that", and the one the command must not make.
+        assert!(
+            !matches!(
+                repair.run.stage(Stage::RepairContract).outcome,
+                StageOutcome::NotPartOfWork { .. }
+            ),
+            "`sure repair` recorded the stage it exists for as not part of the run"
+        );
+        assert!(
+            matches!(
+                check.run.stage(Stage::RepairContract).outcome,
+                StageOutcome::NotPartOfWork { .. }
+            ),
+            "`sure check` claims to write repair instructions"
+        );
+    }
+
+    /// The project state a run is about, as the digest that names the tree.
+    fn digest_of_run(report: &CheckReport) -> Option<&str> {
+        report
+            .run
+            .run
+            .as_ref()
+            .map(|run| run.project_state.digest.as_str())
+    }
+
+    // --- the goal ---------------------------------------------------------
+
+    #[test]
+    fn a_goal_typed_to_sure_is_stored_and_the_check_still_happens() {
+        // P2-T010's acceptance and P7-T010's together: the goal is stored, the
+        // run continues into the pipeline, and the report says both. Before this
+        // task the command stopped at the write.
         let fixture = Fixture::new("goal-stored");
-        fixture.write("src/lib.rs", "pub fn answer() -> u32 { 42 }\n");
+        a_project(&fixture);
         let paths = fixture.paths();
         let project = fixture.project();
 
         let goal = "make the upload reject a file over 10 MB instead of failing silently";
-        let report = run_with(&check(), &paths, &project, Some(goal));
+        let report = run_with(Purpose::Check, &paths, &project, Some(goal));
 
-        let recorded = recorded(&report);
+        let check = checked(&report);
+        let recorded = check
+            .recorded_goal
+            .as_ref()
+            .expect("the goal was written and the report does not say so");
         assert_eq!(recorded.goal, goal);
         assert_eq!(recorded.requirement_id, EXPLICIT_GOAL_ID);
         assert_eq!(recorded.source, IntentSource::ExplicitUserGoal);
         assert_eq!(recorded.project_root, project.to_str().unwrap());
         assert!(recorded.record > 0, "a row identifier is not a row number");
-        assert!(
-            !recorded.project_state.digest.is_empty(),
-            "the report says which project state the goal is about and does not say which"
-        );
 
-        // Not a success. `sure check` in CI must not pass while checking nothing.
-        assert_eq!(report.exit_code(), exit::UNAVAILABLE);
-        assert_ne!(report.exit_code(), exit::OK);
-        assert_eq!(report.outcome(), "unavailable");
-        assert_eq!(report.command(), "check");
+        // The check happened: a verdict exists, and it is a verdict about the
+        // same project state the goal was recorded against.
+        let run = check
+            .run
+            .run
+            .as_ref()
+            .expect("the check produced a verdict");
+        assert_eq!(
+            run.project_state.digest, recorded.project_state.digest,
+            "the goal was recorded against one state and the check was about another"
+        );
+        // And the goal reached stage 2 rather than only the store: the run's
+        // intent holds it, so the check was made against what the user asked for.
+        assert_eq!(
+            run.intent.user_requirements().count(),
+            1,
+            "the goal was written and not used: {:?}",
+            run.intent
+        );
 
         let store = Store::open_at(&paths.store_file())
             .unwrap_or_else(|error| panic!("cannot open the store this run wrote: {error}"));
@@ -433,20 +1226,24 @@ mod tests {
     }
 
     #[test]
-    fn storing_a_goal_writes_no_recording_and_the_goal_is_not_summarized() {
-        // The two things a user cannot check for themselves. The first is the
+    fn the_goal_is_written_verbatim_and_before_the_check() {
+        // Two things a user cannot check for themselves. The first is the
         // acceptance's second half: nothing captured, nothing kept that was not
         // handed over in the same breath. The second is the same rule from the
         // other side — the words are the user's, so a run that trimmed or
         // rewrapped them would be storing a requirement nobody stated.
         let fixture = Fixture::new("goal-privacy");
-        fixture.write("README.md", "# a project\n");
+        a_project(&fixture);
         let paths = fixture.paths();
 
         let goal = "  keep the two-space indent\nand do not trim the trailing tab\t";
-        let report = run_with(&check(), &paths, &fixture.project(), Some(goal));
+        let report = run_with(Purpose::Check, &paths, &fixture.project(), Some(goal));
         assert_eq!(
-            recorded(&report).goal,
+            checked(&report)
+                .recorded_goal
+                .as_ref()
+                .expect("recorded")
+                .goal,
             goal,
             "the goal was edited on the way in"
         );
@@ -481,23 +1278,34 @@ mod tests {
         let paths = fixture.paths();
         let project = fixture.project();
 
-        let first = run_with(&check(), &paths, &project, Some("first thing"));
-        let again = run_with(&check(), &paths, &project, Some("second thing"));
+        let first = run_with(Purpose::Check, &paths, &project, Some("first thing"));
+        let again = run_with(Purpose::Check, &paths, &project, Some("second thing"));
         assert_eq!(
-            recorded(&first).project_state.digest,
-            recorded(&again).project_state.digest,
+            digest_of(&first),
+            digest_of(&again),
             "an unchanged project fingerprinted differently on a second run, so the \
              recorded state says nothing about the project"
         );
 
         fixture.write("main.py", "print('two')\n");
-        let changed = run_with(&check(), &paths, &project, Some("third thing"));
+        let changed = run_with(Purpose::Check, &paths, &project, Some("third thing"));
         assert_ne!(
-            recorded(&first).project_state.digest,
-            recorded(&changed).project_state.digest,
+            digest_of(&first),
+            digest_of(&changed),
             "a changed project fingerprinted the same, so a goal could be read against a \
              state it was never stated for"
         );
+    }
+
+    /// The fingerprint a recorded goal was written against.
+    fn digest_of(report: &Report) -> String {
+        checked(report)
+            .recorded_goal
+            .as_ref()
+            .expect("a recorded goal")
+            .project_state
+            .digest
+            .clone()
     }
 
     #[test]
@@ -509,7 +1317,7 @@ mod tests {
         let paths = fixture.paths();
 
         for goal in ["", "   ", "\t\n"] {
-            let report = run_with(&check(), &paths, &fixture.project(), Some(goal));
+            let report = run_with(Purpose::Check, &paths, &fixture.project(), Some(goal));
             let failure = failure(&report);
             assert_eq!(failure.command, "check");
             assert_eq!(failure.what, NOTHING_RECORDED);
@@ -528,31 +1336,22 @@ mod tests {
 
     #[test]
     fn a_project_that_cannot_be_read_leaves_no_store_behind() {
-        // The order of the two steps, as a fact about the filesystem. Opening a
-        // store creates its directory and its file, so if the fingerprint were
-        // taken afterwards, a run that recorded nothing would still have left a
+        // The order of the steps, as a fact about the filesystem. Opening a store
+        // creates its directory and its file, so if the fingerprint were taken
+        // afterwards, a run that recorded nothing would still have left a
         // database where the user keeps their history.
-        let fixture = Fixture::new("goal-unreadable");
-        let paths = fixture.paths();
-
+        //
         // Two projects that cannot be read, and they fail for different reasons:
         // which is the point, because a single case would leave the ordering
-        // resting on one error path.
-        //
-        // The first is relative, which cannot succeed on any machine: SURE
-        // refuses to resolve one against the current directory, because for a
-        // check the current directory is the project.
-        //
-        // The second is absolute and outside the store, and does not exist —
-        // the ordinary mistake of a mistyped path. It matters that this one is
-        // here: a relative root is refused by `Store::open`'s own boundary check
-        // as well, so a version of this module that opened the store *first* and
-        // read the project afterwards would still pass the relative case. The
-        // missing directory is refused by the fingerprinter and by nothing else,
-        // and a store opened before it would be a store left behind.
+        // resting on one error path. The relative one cannot succeed on any
+        // machine, and the missing absolute one is the ordinary mistake of a
+        // mistyped path.
+        let fixture = Fixture::new("goal-unreadable");
+        let paths = fixture.paths();
         let missing = fixture.root.join("not-a-directory");
+
         for project in [Path::new("not-a-project"), missing.as_path()] {
-            let report = run_with(&check(), &paths, project, Some("do it"));
+            let report = run_with(Purpose::Check, &paths, project, Some("do it"));
             let failure = failure(&report);
             assert_eq!(failure.what, NOTHING_RECORDED, "{}", project.display());
             assert_eq!(report.exit_code(), exit::FAILED);
@@ -587,7 +1386,7 @@ mod tests {
         let inside = Paths::from_roots(project.join(".sure"), fixture.root.join("config"))
             .expect("the scratch locations are absolute");
 
-        let report = run_with(&check(), &inside, &project, Some("do the thing"));
+        let report = run_with(Purpose::Check, &inside, &project, Some("do the thing"));
         assert_eq!(failure(&report).what, NOTHING_RECORDED);
         assert_eq!(report.exit_code(), exit::FAILED);
         assert!(
@@ -596,50 +1395,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn check_without_a_goal_is_the_same_refusal_it_has_always_been() {
-        // The half of this command that did not change, held still. A bare
-        // `sure check` does nothing, so it must say so — and it must not look for
-        // its files while saying it, because a machine where it cannot find them
-        // has to give the same answer as one where it can.
-        let fixture = Fixture::new("goal-absent");
-        let paths = fixture.paths();
-        let project = fixture.project();
+    // --- what a run writes on a machine that has never used SURE ----------
 
-        let report = run_with(&check(), &paths, &project, None);
-        let Report::Unavailable(not_yet) = &report else {
-            panic!("a bare `sure check` answered {report:?}");
-        };
-        assert_eq!(not_yet.command, "check");
-        assert_eq!(not_yet.does, DOES);
-        assert_eq!(not_yet.instead, NOTHING_CHECKED);
-        // Which of the two things did not happen, in the words the user reads.
-        // The constant is named above and the sentence is asserted here, because
-        // the two are different claims: a bare `sure check` recorded nothing
-        // *and* checked nothing, and a refusal that said only the first would
-        // leave a user wondering whether the check happened. The `--goal` path
-        // has the other sentence for the other reason — see `NOTHING_RECORDED`.
-        assert!(
-            not_yet.instead.contains("checked"),
-            "a bare `sure check` does not say the check did not happen: {:?}",
-            not_yet.instead
-        );
-        assert!(
-            !not_yet.instead.contains("recorded"),
-            "a bare `sure check` answers about the history rather than about the \
-             check: {:?}",
-            not_yet.instead
-        );
-        assert_eq!(report.exit_code(), exit::UNAVAILABLE);
+    #[test]
+    fn a_check_with_no_goal_on_a_machine_with_no_history_writes_nothing() {
+        // The promise the brief asks for: `sure check` on a machine that has
+        // never used SURE must not leave a database behind. Opening a store
+        // creates its directory and its file, and a check that created a history
+        // in order to report that it had nothing to compare against would be a
+        // command changing the thing it is describing.
+        let fixture = Fixture::new("no-history");
+        a_project(&fixture);
+        let paths = fixture.paths();
+
+        let report = run_with(Purpose::Check, &paths, &fixture.project(), None);
+        assert!(checked(&report).run.finished());
+
         assert!(
             !paths.store_file().exists(),
-            "a check with nothing to do created a store"
+            "a bare `sure check` created the record store"
+        );
+        assert!(
+            !paths.data_dir().exists(),
+            "a bare `sure check` created its data directory"
         );
 
-        // The same report, whether the locations are discovered or given. The
-        // discovered one is not asserted to succeed on every machine, only to
-        // agree: neither path may depend on where SURE keeps its files.
-        assert_eq!(run(&check(), Some(&project), None), report);
+        // And the run says what that cost rather than leaving it out: without a
+        // history there are no claims to check and nothing to compare against,
+        // and both stages are recorded as scope limits.
+        for stage in [Stage::ClaimChecking] {
+            match &checked(&report).run.stage(stage).outcome {
+                StageOutcome::NotRun { reason, .. } => assert_eq!(
+                    *reason,
+                    Some(sure_core::status::NotCheckedReason::NotApplicable),
+                    "{} is out of scope for a reason the vocabulary does not have",
+                    stage.as_str()
+                ),
+                other => panic!("{} without a history is {other:?}", stage.as_str()),
+            }
+        }
     }
 
     #[test]
@@ -665,25 +1459,27 @@ mod tests {
         );
     }
 
+    // --- the two renderings -----------------------------------------------
+
     #[test]
     fn every_refusal_in_this_module_says_what_did_not_happen() {
         // `crate::report::Failed`'s own rule: the fixed sentence is what tells a
         // user whether their history changed. Asserted over every failure this
         // module can produce, because the one that got it wrong would be the one
         // nobody drove.
-        let fixture = Fixture::new("goal-failure-text");
+        let fixture = Fixture::new("failure-text");
         let fixture_paths = fixture.paths();
         let project = fixture.project();
 
         let cases: Vec<(&str, Report)> = vec![
             (
                 "a goal with no words",
-                run_with(&check(), &fixture_paths, &project, Some("   ")),
+                run_with(Purpose::Check, &fixture_paths, &project, Some("   ")),
             ),
             (
                 "a project path that is not text",
                 run_with(
-                    &check(),
+                    Purpose::Check,
                     &fixture_paths,
                     Path::new("relative"),
                     Some("do it"),
@@ -692,7 +1488,7 @@ mod tests {
             (
                 "a store inside the project",
                 run_with(
-                    &check(),
+                    Purpose::Check,
                     &Paths::from_roots(project.join(".sure"), fixture.root.join("config"))
                         .expect("absolute"),
                     &project,
@@ -720,5 +1516,177 @@ mod tests {
                 failure.what
             );
         }
+    }
+
+    #[test]
+    fn the_human_form_states_what_was_not_checked_and_what_the_status_means() {
+        // The acceptance criterion "the run states what it did not check", in the
+        // form a person reads. Nothing here is a formatting of the frame: the
+        // sentences are the renderer's own.
+        let fixture = Fixture::new("human-form");
+        a_rust_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+
+        let written = report.human_text();
+        for needed in [
+            "SURE checked",
+            // The section this repository already renders for what a run could
+            // not establish, filled in from this run's own schedule and results.
+            "Could not check",
+            "run the tests",
+            "What the run did, stage by stage",
+            "NOT CHECKED",
+            "SURE exited with status 1",
+            "not 3",
+        ] {
+            assert!(
+                written.contains(needed),
+                "the human report does not say {needed:?}:\n{written}"
+            );
+        }
+        assert!(
+            !written.contains("is not implemented in this build"),
+            "a command that ran is worded as one this build lacks:\n{written}"
+        );
+    }
+
+    #[test]
+    fn a_run_that_did_not_finish_says_so_without_claiming_anything_about_the_project() {
+        // A project SURE cannot read is a complaint, not a report: there is no
+        // verdict, so there is nothing to file and nothing to read as one.
+        let fixture = Fixture::new("stopped");
+        let paths = fixture.paths();
+        let report = run_with(
+            Purpose::Check,
+            &paths,
+            &fixture.root.join("not-a-directory"),
+            None,
+        );
+
+        let check = checked(&report);
+        assert!(!check.run.finished());
+        assert_eq!(check.run.stopped_at, Some(Stage::Discover));
+        assert!(
+            !report.is_an_answer(),
+            "a stopped run was written as an answer"
+        );
+        assert_eq!(report.exit_code(), exit::FAILED);
+
+        let written = report.human_text();
+        for needed in [
+            "could not finish",
+            "stopped at stage 1 of 12",
+            "No verdict was produced",
+            "status 5",
+        ] {
+            assert!(
+                written.contains(needed),
+                "the complaint does not say {needed:?}:\n{written}"
+            );
+        }
+        assert!(
+            !written.contains("SURE checked"),
+            "a stopped run reports about the project as though it had read it:\n{written}"
+        );
+
+        // The frame says the same thing, in the fields a script reads.
+        let frame: Value = serde_json::from_str(&report.human_text()).unwrap_or_else(|_| {
+            let mut buffer = Vec::new();
+            report.machine(&mut buffer).expect("the frame writes");
+            serde_json::from_slice(&buffer).expect("the frame is JSON")
+        });
+        let _ = frame;
+        let details = machine_of(&report);
+        assert_eq!(details["state"], json!("stopped"));
+        assert_eq!(details["stopped_at"], json!("discover"));
+        assert!(details["report"].is_null());
+    }
+
+    #[test]
+    fn the_frame_carries_every_stage_and_the_reason_each_gap_has() {
+        // The machine form of the stage record: a script has to be able to name
+        // the stage that did not run and the vocabulary's reason for it, without
+        // parsing a sentence.
+        let fixture = Fixture::new("frame-stages");
+        a_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let details = machine_of(&report);
+
+        let stages = details["stages"].as_array().expect("a list of stages");
+        assert_eq!(stages.len(), Stage::ALL.len());
+        for (position, entry) in stages.iter().enumerate() {
+            assert_eq!(entry["number"], json!(position + 1));
+            assert_eq!(entry["stage"], json!(Stage::ALL[position].as_str()));
+            assert!(
+                entry["detail"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
+                "a stage with no account of itself: {entry}"
+            );
+            assert!(
+                ["ran", "not_run", "not_part_of_work", "unfinished"]
+                    .contains(&entry["outcome"].as_str().unwrap_or("")),
+                "a stage outcome a reader does not know: {entry}"
+            );
+        }
+        assert_eq!(
+            details["green"],
+            json!(false),
+            "this build cannot report a project clean, and the frame says it did: {details}"
+        );
+        assert_eq!(details["purpose"], json!("check"));
+        assert_eq!(details["mode"], json!("inspect_only"));
+        assert!(
+            details["report"]["aggregate"]["headline"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "the frame carries no verdict: {details}"
+        );
+    }
+
+    #[test]
+    fn the_goal_is_in_the_frame_and_so_is_what_the_run_did_with_it() {
+        // The other rendering of the one side effect, and the reason the goal is
+        // carried in the report type rather than only written to the store.
+        let fixture = Fixture::new("frame-goal");
+        a_project(&fixture);
+        let report = run_with(
+            Purpose::Check,
+            &fixture.paths(),
+            &fixture.project(),
+            Some("make it faster"),
+        );
+        let details = machine_of(&report);
+
+        let goal = &details["recorded_goal"];
+        assert_eq!(goal["goal"], json!("make it faster"));
+        assert_eq!(goal["source"], json!("explicit_user_goal"));
+        assert_eq!(goal["project_state"]["kind"], json!("content"));
+        assert!(
+            goal["record"]["as_i64"].is_null() && goal["record"].is_i64(),
+            "the row identifier is not a number: {goal}"
+        );
+        assert_eq!(goal["requirement_id"], json!(EXPLICIT_GOAL_ID));
+    }
+
+    #[test]
+    fn a_check_that_recorded_no_goal_says_so_by_leaving_the_field_null() {
+        let fixture = Fixture::new("frame-no-goal");
+        a_project(&fixture);
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        assert!(machine_of(&report)["recorded_goal"].is_null());
+    }
+
+    #[test]
+    fn the_purpose_a_command_runs_under_is_the_name_it_answers_with() {
+        // `CheckReport::command` comes from the purpose, and the frame's
+        // `command` comes from the report. Three commands, three names, one
+        // dispatcher each.
+        for purpose in [Purpose::Check, Purpose::Recheck, Purpose::Repair] {
+            assert_eq!(purpose.as_str(), purpose.as_str());
+        }
+        assert_eq!(Purpose::Check.as_str(), "check");
+        assert_eq!(Purpose::Recheck.as_str(), "recheck");
+        assert_eq!(Purpose::Repair.as_str(), "repair");
     }
 }

@@ -174,7 +174,15 @@ pub fn render_json_report_pretty(verdict: &ProjectVerdict) -> String {
     serde_json::to_string_pretty(&report).expect("JsonReport serializes to JSON")
 }
 
-fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
+/// The report as a value, before it is a string.
+///
+/// Public so that `sure check`'s own machine form can carry the verdict in the
+/// shape this module defines and versions, rather than growing a second
+/// description of a finding that would have to be kept in step with this one.
+/// `#[must_use]` because a caller that built it and dropped it wanted
+/// [`render_json_report`].
+#[must_use]
+pub fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
     let open = verdict.open_findings();
 
     let findings: Vec<JsonFinding> = open

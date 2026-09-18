@@ -89,9 +89,12 @@ const EVERY_COMMAND: &[&[&str]] = &[
 /// Every other command in [`EVERY_COMMAND`] answers `unavailable`, and the
 /// statuses below are only meaningful while that holds.
 const IMPLEMENTED: &[&[&str]] = &[
+    &["check"],
     &["doctor"],
     &["hook", "ingest"],
     &["protocol"],
+    &["recheck"],
+    &["repair"],
     &["version"],
 ];
 
@@ -107,7 +110,18 @@ const ALWAYS_OK: &[&[&str]] = &[&["protocol"], &["version"]];
 
 /// The commands that ran and answered nothing, used where a refusal is the
 /// subject rather than a report.
-const REFUSED: &[&[&str]] = &[&["check"], &["repair"], &["history", "delete"]];
+///
+/// `check`, `recheck` and `repair` used to be here and are not any more: they
+/// answer with a verdict, and a verdict is an answer — it goes to standard
+/// output and it is what a person piping the report to a file wanted. What a
+/// refusal looks like is still worth testing, so the commands that *are* refused
+/// stay, including the destructive one whose wording a user needs most.
+const REFUSED: &[&[&str]] = &[
+    &["history", "list"],
+    &["history", "delete"],
+    &["explain"],
+    &["config"],
+];
 
 #[test]
 fn every_documented_command_parses() {
@@ -497,6 +511,229 @@ fn the_two_paths_disagree_about_nothing_that_matters() {
             human.stderr
         );
     }
+}
+
+#[test]
+fn a_check_of_a_real_project_answers_with_a_verdict_and_never_with_status_three() {
+    // P7-T010's acceptance, at the process. `sure check` used to exit 3 — "this
+    // build cannot carry that out" — and the reason was true when it was
+    // written: nothing sequenced the stages. It does now, so the status that
+    // says "SURE cannot check a project" is a lie about this build, and 1 —
+    // "it checked, and the project is not clean" — is what happened.
+    //
+    // The project is this crate, which is a real one: a `Cargo.toml`, sources,
+    // and two declared commands that would run its code.
+    let human = run(&["check"]);
+    assert_eq!(
+        human.status, 1,
+        "`sure check` returned {}. 3 would mean this build cannot check a project, which it \
+         can; 0 would mean the project is clean, which no run in this build can establish.\n\
+         stdout:\n{}\nstderr:\n{}",
+        human.status, human.stdout, human.stderr
+    );
+    assert!(
+        human.stdout.contains("SURE checked"),
+        "the report does not say what it is about:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("NOT CHECKED"),
+        "the run does not mark what it did not check:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("SURE exited with status 1"),
+        "the report does not say what the status means, once the exit code is gone into a \
+         pipe:\n{}",
+        human.stdout
+    );
+    assert!(
+        !human.stderr.contains("is not implemented in this build"),
+        "a command that ran is worded as one this build lacks:\n{}",
+        human.stderr
+    );
+
+    // The same run, read by a script. What must never appear there is `ok`, and
+    // it must not appear for the reason the stage log gives.
+    let machine = run(&["--format", "json", "check"]);
+    assert_eq!(machine.status, human.status);
+    let frame: serde_json::Value =
+        serde_json::from_str(machine.stdout.trim()).expect("one frame on one line");
+    assert_eq!(frame["command"].as_str(), Some("check"));
+    assert_ne!(
+        frame["outcome"].as_str(),
+        Some("ok"),
+        "a run that did not finish its stages reported itself clean: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["state"].as_str(),
+        Some("finished"),
+        "{frame}"
+    );
+    assert_eq!(
+        frame["details"]["green"],
+        serde_json::json!(false),
+        "{frame}"
+    );
+    assert_eq!(frame["details"]["stopped_at"], serde_json::Value::Null);
+    let stages = frame["details"]["stages"]
+        .as_array()
+        .expect("the frame carries the stage log");
+    assert_eq!(stages.len(), 12, "{frame}");
+    assert!(
+        stages
+            .iter()
+            .any(|stage| stage["outcome"] == serde_json::json!("not_run")),
+        "this build runs no project code, so a run over a real crate must record a stage \
+         that did not run: {frame}"
+    );
+    assert!(
+        stages.iter().all(|stage| stage["detail"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())),
+        "a stage does not say what it did: {frame}"
+    );
+}
+
+#[test]
+fn the_three_pipeline_commands_are_one_orchestrator_with_three_purposes() {
+    // "`sure recheck` and `sure repair` reach the same orchestrator through
+    // `Command::report` rather than a second path into the engine." Compared
+    // here rather than asserted: the three runs are about the same project, they
+    // walk the same twelve stages in the same order, and the only differences
+    // are the stages at the end that say what each command is for.
+    let mut frames = Vec::new();
+    for command in ["check", "recheck", "repair"] {
+        let mut args = vec!["--format", "json", command];
+        let run = run(&args);
+        assert_eq!(run.status, 1, "`sure {command}` returned {}", run.status);
+        let frame: serde_json::Value = serde_json::from_str(run.stdout.trim())
+            .unwrap_or_else(|error| panic!("`sure {command}` is not one frame: {error}"));
+        assert_eq!(frame["command"].as_str(), Some(command), "{frame}");
+        args.clear();
+        frames.push(frame);
+    }
+
+    let project = frames[0]["details"]["project"].clone();
+    assert!(project.is_string(), "{}", frames[0]);
+    for frame in &frames {
+        assert_eq!(
+            frame["details"]["project"], project,
+            "two commands checked two different projects"
+        );
+        assert_eq!(frame["details"]["mode"], frames[0]["details"]["mode"]);
+        let names: Vec<&str> = frame["details"]["stages"]
+            .as_array()
+            .expect("a stage log")
+            .iter()
+            .map(|stage| stage["stage"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "discover",
+                "resolve-intent",
+                "fingerprint",
+                "plan",
+                "static-checks",
+                "dynamic-checks",
+                "completeness",
+                "model-assessment",
+                "claim-checking",
+                "aggregate",
+                "repair-contract",
+                "recheck",
+            ],
+            "`sure {}` did not walk the documented stages in order",
+            frame["details"]["purpose"]
+        );
+    }
+
+    // The last two stages are what separates them, and each says which of the
+    // three it is answering.
+    let last = |frame: &serde_json::Value| frame["details"]["stages"][11]["outcome"].clone();
+    assert_eq!(frames.iter().map(last).collect::<Vec<_>>().len(), 3);
+    assert_eq!(
+        frames[2]["details"]["stages"][11]["outcome"],
+        serde_json::json!("not_part_of_work"),
+        "`sure repair` claims to compare against an earlier run: {}",
+        frames[2]
+    );
+    assert_ne!(
+        frames[1]["details"]["stages"][11]["outcome"],
+        serde_json::json!("not_part_of_work"),
+        "`sure recheck` recorded its own stage as not part of the run: {}",
+        frames[1]
+    );
+    assert_ne!(
+        frames[2]["details"]["stages"][10]["outcome"],
+        serde_json::json!("not_part_of_work"),
+        "`sure repair` recorded the stage it exists for as not part of the run: {}",
+        frames[2]
+    );
+    assert_eq!(
+        frames[0]["details"]["stages"][10]["outcome"],
+        serde_json::json!("not_part_of_work"),
+        "`sure check` claims to write repair instructions: {}",
+        frames[0]
+    );
+}
+
+#[test]
+fn a_project_that_cannot_be_read_is_status_five_and_not_status_three() {
+    // The other half of the status rule, and the one a user meets by mistyping a
+    // path. 5 is "it tried and did not finish": a statement about this run. 3 is
+    // "this build cannot carry that out": a statement about the build, whose
+    // remedy is a newer SURE — and telling a user that would send them looking
+    // for an upgrade instead of at their path.
+    let missing = format!("{}/does-not-exist", env!("CARGO_MANIFEST_DIR"));
+    let human = run(&["check", &missing]);
+    assert_eq!(
+        human.status, 5,
+        "`sure check <missing>` returned {}:\n{}",
+        human.status, human.stderr
+    );
+    assert!(
+        human.stdout.is_empty(),
+        "a run with no verdict wrote to standard output:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stderr.contains("could not finish"),
+        "the complaint does not say the run did not finish:\n{}",
+        human.stderr
+    );
+    assert!(
+        human.stderr.contains("No verdict was produced"),
+        "a failed run does not say that it is not a statement about the project:\n{}",
+        human.stderr
+    );
+    assert!(
+        !human.stderr.contains("is not implemented in this build"),
+        "a run that tried is worded as a command this build lacks:\n{}",
+        human.stderr
+    );
+
+    let machine = run(&["--format", "json", "check", &missing]);
+    assert_eq!(machine.status, 5);
+    let frame: serde_json::Value = serde_json::from_str(machine.stdout.trim()).expect("one frame");
+    assert_eq!(frame["outcome"].as_str(), Some("failed"), "{frame}");
+    assert_eq!(frame["exit_code"].as_i64(), Some(5), "{frame}");
+    assert_eq!(
+        frame["details"]["state"].as_str(),
+        Some("stopped"),
+        "a run that produced no verdict says it finished: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["stopped_at"].as_str(),
+        Some("discover"),
+        "the frame does not say where the run stopped: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["report"],
+        serde_json::Value::Null,
+        "a run that produced no verdict carries one: {frame}"
+    );
 }
 
 #[test]

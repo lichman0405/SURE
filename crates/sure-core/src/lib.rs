@@ -46,6 +46,7 @@ pub mod intent_model;
 pub mod noop_heuristics;
 pub mod normalizer;
 pub mod paths;
+pub mod pipeline;
 pub mod plain_language_finding;
 pub mod probe;
 pub mod process;

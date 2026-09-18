@@ -289,6 +289,37 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          invent new checks; it only decides which of several proposals about the same \
          place should survive",
     ),
+    (
+        "src/pipeline.rs",
+        "`P7-T010`, and the first entry on this list that is not a proposer in the \
+         sense the eight above are: it decides nothing about which checks exist. It \
+         is the orchestration `docs/architecture/CHECK_PIPELINE.md` describes, and \
+         every proposal it hands the builder came from a module already listed \
+         above — `checks`, `runtime_probes` and the six completeness scanners are \
+         all called from its plan stage, and it adds no candidate of its own. It \
+         names the four types because it *holds* the builder those proposers are \
+         handed and reads back the plan they produced: `PlanBuilder::refused` is \
+         what lets it report a candidate that could not become a check, and the \
+         schedule it builds is what the aggregate, the coverage summary and the \
+         verdict are all computed over. **If this file ever gains a line that \
+         constructs a `CheckProposal`, that is a proposer and belongs in a \
+         `checks/` module rather than here** — which is the distinction this entry \
+         is written down to make checkable rather than assumed",
+    ),
+    (
+        "src/report.rs",
+        "`P7-T010`, and the second entry here that decides nothing: every line of \
+         this file that names one of the four words is inside its `#[cfg(test)]` \
+         module, where a fixture builds a one-check schedule so that a check's \
+         frame, its exit status and its two streams can be tested against a run \
+         that has a clean variant and an unclean one. A real project cannot \
+         supply the clean variant in this build — stage 5 reads every static \
+         check as `unknown` and stage 8 has no provider, so `sure check` is 1 for \
+         every project it can read — which is why the pair is built rather than \
+         observed. The shipped half of the file proposes nothing; **a line naming \
+         a proposer word above `#[cfg(test)]` would be a proposer arriving in the \
+         CLI, and this entry is not cover for it**",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

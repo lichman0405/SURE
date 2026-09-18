@@ -1178,6 +1178,57 @@
     "notes": ""
   },
   {
+    "id": "P7-T010",
+    "phase": "P7",
+    "title": "Implement the project check pipeline from discovery to verdict",
+    "required": true,
+    "depends_on": [
+      "P2-T012",
+      "P4-T001",
+      "P4-T009",
+      "P5-T006",
+      "P6-T009",
+      "P7-T005",
+      "P7-T006",
+      "P8-T010",
+      "P9-T002",
+      "P9-T005"
+    ],
+    "acceptance": [
+      "One orchestrator runs the stages of docs/architecture/CHECK_PIPELINE.md in order, calling the modules the earlier phases built rather than reimplementing any of them.",
+      "sure check PATH performs a real check - findings, checked/not-checked scope and an overall verdict - instead of exiting 3, and sure recheck and sure repair reach the same orchestrator through Command::report rather than a second path into the engine.",
+      "A stage that did not run, whether skipped, refused by the execution mode, unconfigured or errored, is recorded as such, and no stage in that state can aggregate to a clean verdict.",
+      "A dynamic check runs only where the selected execution mode authorises it; where it does not, the result is not checked and never passed.",
+      "The exit status follows docs/architecture/CLI.md - 0 for a clean project, 1 for a project that was checked and is not clean, 5 for a run that tried and did not finish - and the run states what it did not check."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor. The 166-task graph named every stage the pipeline runs and no task that runs them, so sure check, sure recheck and sure repair had no owner and answered status 3 (docs/architecture/CLI.md, \"recognised, not implemented\"). P14-T011, P14-T012, P15-T014, P16-T001 and P16-T007 are unreachable without it."
+  },
+  {
+    "id": "P7-T011",
+    "phase": "P7",
+    "title": "Calibrate finding severity and evidence class against the acceptance corpus",
+    "required": true,
+    "depends_on": [
+      "P4-T009",
+      "P6-T009",
+      "P7-T001",
+      "P7-T005",
+      "P7-T010",
+      "P14-T001",
+      "P14-T002"
+    ],
+    "acceptance": [
+      "Each release-blocking case in evaluation/acceptance-manifest.json whose fixture app exists under fixtures/adversarial/ yields a finding at the severity the manifest names, observed by running it and asserted by a test rather than by a report.",
+      "The rule that decides between note, can_fix_later and must_fix for a detector finding is written where the detectors and the aggregator can both be read against it, and false_completion_aggregator::is_style_noise follows that rule instead of deciding on its own.",
+      "The benign cases do not move: benign-test-mocks stays note, demo-analytics and lying-readme stay should_fix_first, and no finding about a test-only mock becomes must_fix.",
+      "Severity is not raised by relabelling: a finding the code cannot ground keeps its evidence class, and a detector that needs must_fix earns it by anchoring, not by declaring inference a fact.",
+      "evaluation/acceptance-manifest.json is unchanged - it is the requirement, not the implementation."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor. Every false-completion detector (noop_heuristics, demo_data_heuristics, route_consistency, ui_action_bridge, intent_implementation) emits Severity::Note and nothing else, and the aggregator moves note + non-critical + inference candidates to style_noise, so the release-blocking cases in the corpus cannot reach the must_fix severity the manifest asks for. P14-T012 would otherwise meet this at the end of the phase, in a task whose subject is the metrics."
+  },
+  {
     "id": "P8-T001",
     "phase": "P8",
     "title": "Implement versioned harness event ingestion",

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-18T13:04:34.294Z",
+  "last_updated": "2026-09-18T13:05:31.894Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -990,6 +990,24 @@
       ],
       "notes": "target/tmp/p7t009-accept-note.md"
     },
+    "P7-T010": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P7-T011": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
     "P8-T001": {
       "status": "accepted",
       "started_at": "2026-09-17T14:37:34.473Z",
@@ -1504,8 +1522,8 @@
       "notes": "Worker commit 69c7bee: 39 fixture files plus 2 test files (41 changed). Supervisor verification, none of it taken from the worker report: (1) cargo test -p sure-testkit --test fixture_apps = 14 passed; cargo test -p sure-core --test adversarial_fixture_detection = 10 passed. (2) All six fixtures were run by the supervisor - node scripts/check.js in each of fake-payment, fake-auth, fake-email, dead-button, demo-analytics and route-mismatch - and all six exit 0 printing their own PASS (on purpose) trap summary, so \"runnable\" is measured rather than claimed. (3) src/auth.js was read: verifyPassword looks the account up, receives the password argument, never compares it and returns true, so the bypass is real. (4) The two cargo test --workspace failures the worker reported were reproduced and are NOT the worker: they are analysis_provider tests that name a bare echo, which only resolves when echo.exe is on PATH, so they pass under Git Bash and fail under PowerShell. Fixed by the supervisor in 0c7bf90; sure-core is now green from both shells. Recorded gap, verified independently by the supervisor: every false-completion detector emits Severity::Note with EvidenceClass::Inference, and false_completion_aggregator::is_style_noise sorts exactly that combination into style_noise, while evaluation/acceptance-manifest.json requires must_fix for these release-blocking cases. The fixtures are correct; the severity calibration is not, and it is recorded in progress/HANDOFF.md as the second plan-level gap. Also recorded: nothing detects an authentication bypass itself - the fake-auth fixture fires on the evidence around it."
     },
     "P14-T002": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T13:05:31.894Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

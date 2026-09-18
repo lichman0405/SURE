@@ -2,12 +2,13 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 121 / 166 tasks accepted (counted from `progress/state.json` against
+Progress: 121 / 168 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
-this file). **Phase P0 complete (9/9), phase P1 complete
+this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
+below record why). **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
-(9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
+(9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
+9 of 11, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 7 of 10; Phase P13 is open
 at 1 of 9; Phase P14 is open at 1 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
@@ -464,14 +465,35 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
     `cargo test --workspace` tests, which the supervisor reproduced and traced to
     a defect of its own: see the shell-dependence note below. That fix is commit
     `0c7bf90`.
+68. The supervisor added `P7-T010` — *Implement the project check pipeline from
+    discovery to verdict* — to `tasks/tasks.json`, on the owner's decision of
+    2026-09-18 that the plan may change to close a gap in the plan. It owns the
+    sequencing of `docs/architecture/CHECK_PIPELINE.md` and the wiring of
+    `sure check`, `sure recheck` and `sure repair` to it. All ten of its
+    dependencies are accepted, so it is READY today; it is dispatched as soon as
+    the `sure-cli` and `fixtures` workers have landed, because it writes both
+    crates and would otherwise share them.
+69. The supervisor added `P7-T011` — *Calibrate finding severity and evidence
+    class against the acceptance corpus* — for the severity gap, so that the
+    calibration is not left to `P14-T012`, a task whose subject is the release
+    metrics rather than the severity semantics. It depends on `P7-T010` and on
+    the fixture apps it calibrates against, so it is not READY yet. Both new
+    tasks are `required`, both are `queued` in `progress/state.json`, and both
+    carry the reason they exist in their `notes`. Checked after the edit:
+    `node scripts/validate-bootstrap.mjs` reports 17 phases and 168 tasks, and
+    `node scripts/taskctl.mjs validate` reports state OK. `tasks/README.md` said
+    "Tasks: 159", which was already stale before this change; it now says 168.
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 7 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
-`P12-T007`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`,
-`P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
-`P14-T010`. `P12-T009` is now `in_progress`; the lowest-numbered READY task is
-`P12-T007`, which is held back deliberately — see the risk below.
+`P7-T010`, `P12-T007`, `P13-T002`, `P13-T003`, `P13-T004`,
+`P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
+`P14-T010` and `P15-T008`. `P12-T009` and `P14-T002` are `in_progress`. The
+lowest-numbered READY task is `P7-T010`, which is dispatched as soon as those two
+workers have landed: it writes `sure-cli` and `sure-core`, which they are holding
+between them. `P7-T010` is also the task five later tasks are waiting on, so it
+is not queued behind anything else.
 
-### Open plan-level risk: no task owns the check pipeline
+### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
 Measured on 2026-09-18 with `target/debug/sure.exe`, not inferred:
 
@@ -506,27 +528,40 @@ The three harness packages accepted so far (`claude-code`, `cursor`,
 `sure repair`; each is honest about its tier, and each becomes live only when
 this layer exists.
 
-Recommended remedy, for the owner's decision: add one task in the shape of the
-existing ones — for example "P12-T011: Implement the project check pipeline and
-wire it to the check, repair, recheck and mcp serve commands" — depending on `P4-T009`,
-`P7-T005`, `P9-T005` and `P12-T009`. It is deliberately not invented here: the
-task graph is the plan, `taskctl validate` is the check, and a supervisor who
-adds a task to close a gap in it is changing the plan rather than following it.
-Until the owner decides, `P12-T009` is instructed to route every tool through
-the existing `Command::report` path so that there is exactly one engine path for
+**What happened about it.** The supervisor did not add a task on its own
+authority: the task graph is the plan, `taskctl validate` is the check, and a
+supervisor that edits the plan is departing from it, not following it. The gap
+was reported to the owner with the evidence above on 2026-09-18, and the owner
+decided the plan may change to close it. `P7-T010` is the result (item 68), the
+same task that was recommended, filed in `P7` rather than `P12` because its
+subject is the verdict and the report rather than an integration, with the ten
+accepted dependencies it actually calls. Nothing else in the graph was edited:
+`P14-T011` does need a working check pipeline in practice, but rewiring an
+existing task's dependencies is a further plan change and was not made.
+
+Until `P7-T010` lands, `P12-T009` is instructed to route every tool through the
+existing `Command::report` path, so that there is exactly one engine path for
 the orchestrator to land on.
 
 `P12-T007` was briefly held back on the argument that an evidence bridge feeding
 a check nobody can run would be built on sand. That argument does not survive
 reading the task: `sure hook ingest` runs today, so a Codex evidence bridge is
 independently testable, and §14 of `MASTER_PROMPT.md` prefers the lowest-numbered
-READY task. It is queued next behind `P12-T009`, once the `sure-cli` working tree
-is free — the two would otherwise write the same crate at the same time.
+READY task. It now has a lower-numbered task in front of it — `P7-T010` — and goes
+next after that, once the `sure-cli` working tree is free.
 
-### Open plan-level risk: the detectors cannot reach the severities the corpus requires
+### Plan-level gap, closed 2026-09-18: the detectors cannot reach the severities the corpus requires
 
 Found by the `P14-T001` worker, confirmed independently by the supervisor on
-2026-09-18, and recorded here because no task owns it either.
+2026-09-18 — first from the aggregator, then from the detectors, which is the
+stronger half: `grep -o 'Severity::[A-Za-z]*'` over `noop_heuristics.rs`,
+`demo_data_heuristics.rs`, `route_consistency.rs`, `ui_action_bridge.rs` and
+`intent_implementation.rs` returns `Severity::Note` 21 times and no other level,
+so those detectors cannot express any severity but the weakest one. `P7-T011`
+(item 69) now owns the calibration; its acceptance keeps the manifest
+uneditable and keeps the benign cases where they are, because the cheap way to
+make a corpus pass is to promote everything, and that is the failure the
+`benign-test-mocks` case exists to catch.
 
 `evaluation/acceptance-manifest.json` requires `expected_severity: "must_fix"`
 for `fake-payment`, `fake-auth`, `dead-button` and `route-mismatch`, and all four
@@ -546,7 +581,12 @@ The fixtures record the gap rather than paper over it: each `scenario.json`
 carries `detector_severity_today` beside `required_severity`, and
 `crates/sure-core/tests/adversarial_fixture_detection.rs` pins it with a test
 named `what_is_detected_is_not_yet_what_the_manifest_requires`. No file in
-`evaluation/` was edited. Whoever owns the calibration owns this.
+`evaluation/` was edited, then or since.
+
+That test pins today's gap as today's gap. `P7-T011` has to change what it
+asserts, and the harmless way to do that is to invert it: the same fixtures
+should then assert the manifest's severity. Deleting it would lose the only
+statement in the tree that the two numbers were ever different.
 
 ### The gates were green for the wrong reason, and that is a process finding
 

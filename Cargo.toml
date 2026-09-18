@@ -93,6 +93,11 @@ sha2 = "0.11.0"
 # is where it becomes code, including the concurrency contract that depends on
 # this choice.
 rusqlite = { version = "0.37.0", features = ["bundled"] }
+# Regular expressions for the secret redaction engine. A real parser is needed
+# for user-configured redaction patterns and for detecting multi-line secret
+# shapes such as PEM private keys; hand-rolling the matching would be a false-
+# green risk when a pattern is slightly different from the one expected.
+regex = "1.11.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

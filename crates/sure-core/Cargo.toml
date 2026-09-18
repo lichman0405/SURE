@@ -17,6 +17,7 @@ toml = { workspace = true }
 sha2 = { workspace = true }
 dirs = { workspace = true }
 rusqlite = { workspace = true }
+regex = { workspace = true }
 
 # The testkit is a development-only dependency. Nothing the product ships may
 # reach it (see `sure-testkit`'s `workspace` module), and the loader tests use

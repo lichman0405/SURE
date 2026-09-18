@@ -19,6 +19,11 @@
 //! secrets written in shapes nobody has thought of yet, which is why the
 //! structural rules above matter more than the patterns below.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde_json::Value;
+
 /// What a redacted span is replaced with.
 pub const REDACTED: &str = "***";
 
@@ -73,6 +78,176 @@ const TOKEN_SHAPES: &[(&str, usize)] = &[
     ("eyJ", 30),
 ];
 
+/// A redaction engine that can be configured with extra literals and patterns.
+///
+/// The engine always applies the built-in detectors (URL authorities,
+/// credential-shaped assignments, known token prefixes). User-supplied
+/// literals and regex patterns are applied on top.
+#[derive(Debug, Clone)]
+pub struct Redactor {
+    /// Literal strings that should be redacted wherever they appear.
+    literal_secrets: Vec<String>,
+    /// Compiled regex patterns whose matches should be redacted.
+    patterns: Vec<Regex>,
+}
+
+impl Default for Redactor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Redactor {
+    /// Build a redactor with only the built-in detectors active.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            literal_secrets: Vec::new(),
+            patterns: Vec::new(),
+        }
+    }
+
+    /// Add a literal secret to redact.
+    ///
+    /// Longer literals are matched first so that a short literal that is a
+    /// substring of a longer one does not leave a fragment of the longer one
+    /// visible.
+    pub fn add_literal_secret(&mut self, secret: impl Into<String>) {
+        self.literal_secrets.push(secret.into());
+        self.literal_secrets
+            .sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        self.literal_secrets.dedup();
+    }
+
+    /// Add a compiled regex pattern to redact.
+    pub fn add_pattern(&mut self, pattern: Regex) {
+        self.patterns.push(pattern);
+    }
+
+    /// Add a regex pattern from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`regex::Error`] if `pattern` is not a valid regular expression.
+    pub fn add_pattern_str(&mut self, pattern: &str) -> Result<(), regex::Error> {
+        self.patterns.push(Regex::new(pattern)?);
+        Ok(())
+    }
+
+    /// Remove secrets from a value, leaving everything else exactly as it was.
+    ///
+    /// Passes, in order:
+    ///
+    /// 1. a password inside a URL authority, `https://user:secret@host` → `***@host`;
+    /// 2. the value of anything assigned to a credential-ish name, `api_key=...`;
+    /// 3. user-configured literal secrets;
+    /// 4. user-configured regex patterns;
+    /// 5. PEM-encoded private key blocks;
+    /// 6. a run of characters matching a known token shape.
+    ///
+    /// Line structure is left alone, because a caller may be redacting a block
+    /// of output rather than a single field. [`redact_for_diagnostic`] is this
+    /// plus escaping, and is what a caller that is building one line of prose
+    /// wants.
+    #[must_use]
+    pub fn redact(&self, value: &str) -> String {
+        let value = redact_url_authorities(value);
+        let value = redact_assignments(&value);
+        let value = self.redact_literals(&value);
+        let value = self.redact_patterns(&value);
+        let value = redact_pem_blocks(&value);
+        redact_tokens(&value)
+    }
+
+    /// Render a value for a diagnostic without risking a secret in the output.
+    ///
+    /// [`redact`], then control characters escaped, so a value cannot forge
+    /// structure in a multi-line message by containing newlines of its own.
+    #[must_use]
+    pub fn redact_for_diagnostic(&self, value: &str) -> String {
+        escape_control_characters(&self.redact(value))
+    }
+
+    /// Redact every string in a JSON-like value while preserving its shape.
+    ///
+    /// Keys are left alone: they are the document's structure, and a key that
+    /// had been rewritten would fail a schema check and read as a malformed
+    /// document rather than as a redacted one. Values of every type are walked,
+    /// and only strings can change — redaction never turns a string into a
+    /// number or a list into an object, which is why validating after redacting
+    /// is safe.
+    #[must_use]
+    pub fn redact_value(&self, value: &Value) -> Value {
+        match value {
+            Value::String(text) => Value::String(self.redact(text)),
+            Value::Array(items) => {
+                Value::Array(items.iter().map(|item| self.redact_value(item)).collect())
+            }
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .map(|(key, value)| (key.clone(), self.redact_value(value)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// Replace every configured literal secret with [`REDACTED`].
+    fn redact_literals(&self, text: &str) -> String {
+        if self.literal_secrets.is_empty() {
+            return text.to_owned();
+        }
+        let mut out = text.to_owned();
+        for secret in &self.literal_secrets {
+            if secret.is_empty() {
+                continue;
+            }
+            out = out.split(secret).collect::<Vec<_>>().join(REDACTED);
+        }
+        out
+    }
+
+    /// Replace every match of a configured regex pattern with [`REDACTED`].
+    fn redact_patterns(&self, text: &str) -> String {
+        if self.patterns.is_empty() {
+            return text.to_owned();
+        }
+        let mut out = text.to_owned();
+        for pattern in &self.patterns {
+            out = pattern.replace_all(&out, REDACTED).into_owned();
+        }
+        out
+    }
+}
+
+/// The default redactor used by the free functions.
+///
+/// This is built once and includes the built-in detectors. It does not include
+/// any user-configured literals or patterns; those require a [`Redactor`] built
+/// from configuration.
+static DEFAULT_REDACTOR: LazyLock<Redactor> = LazyLock::new(Redactor::new);
+
+/// Remove secrets from a value using the default redactor.
+///
+/// See [`Redactor::redact`] for the exact passes.
+#[must_use]
+pub fn redact(value: &str) -> String {
+    DEFAULT_REDACTOR.redact(value)
+}
+
+/// Render a value for a diagnostic using the default redactor.
+#[must_use]
+pub fn redact_for_diagnostic(value: &str) -> String {
+    DEFAULT_REDACTOR.redact_for_diagnostic(value)
+}
+
+/// Redact every string in a JSON-like value using the default redactor.
+#[must_use]
+pub fn redact_value(value: &Value) -> Value {
+    DEFAULT_REDACTOR.redact_value(value)
+}
+
 /// Whether a setting name looks like it holds a credential.
 #[must_use]
 pub fn looks_like_credential_name(name: &str) -> bool {
@@ -84,33 +259,6 @@ pub fn looks_like_credential_name(name: &str) -> bool {
     CREDENTIAL_NAME_FRAGMENTS
         .iter()
         .any(|fragment| normalised.contains(fragment))
-}
-
-/// Remove secrets from a value, leaving everything else exactly as it was.
-///
-/// Three passes, in order:
-///
-/// 1. a password inside a URL authority, `https://user:secret@host` → `***@host`;
-/// 2. the value of anything assigned to a credential-ish name, `api_key=...`;
-/// 3. a run of characters matching a known token shape.
-///
-/// Line structure is left alone, because a caller may be redacting a block of
-/// output rather than a single field. [`redact_for_diagnostic`] is this plus
-/// escaping, and is what a caller that is building one line of prose wants.
-#[must_use]
-pub fn redact(value: &str) -> String {
-    let value = redact_url_authorities(value);
-    let value = redact_assignments(&value);
-    redact_tokens(&value)
-}
-
-/// Render a value for a diagnostic without risking a secret in the output.
-///
-/// [`redact`], then control characters escaped, so a value cannot forge
-/// structure in a multi-line message by containing newlines of its own.
-#[must_use]
-pub fn redact_for_diagnostic(value: &str) -> String {
-    escape_control_characters(&redact(value))
 }
 
 /// Replace the userinfo of every `scheme://user:pass@host` with [`REDACTED`].
@@ -187,6 +335,62 @@ fn value_end(text: &str, from: usize) -> usize {
         .map_or(text.len(), |offset| from + offset)
 }
 
+/// Replace PEM-encoded private key blocks with [`REDACTED`].
+///
+/// Detects blocks beginning with `-----BEGIN` and ending with `-----END`,
+/// including the common `PRIVATE KEY`, `RSA PRIVATE KEY`, `EC PRIVATE KEY`,
+/// `DSA PRIVATE KEY`, `OPENSSH PRIVATE KEY` and `ENCRYPTED PRIVATE KEY`
+/// variants. The entire block, including the markers, is replaced so that no
+/// hint of the key type or its base64 body survives.
+///
+/// Certificates and other non-private-key PEM blocks are left readable, because
+/// a public certificate is not a secret.
+fn redact_pem_blocks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("-----BEGIN ") {
+        let (before, after) = rest.split_at(start);
+        out.push_str(before);
+
+        // Extract the label so we only redact private-key blocks.
+        let label_start = "-----BEGIN ".len();
+        let label_end = after[label_start..]
+            .find("-----")
+            .map(|n| label_start + n)
+            .unwrap_or(after.len());
+        let label = &after[label_start..label_end];
+        let is_private_key = label.to_ascii_uppercase().contains("PRIVATE KEY");
+
+        if let Some(end) = after.find("-----END ") {
+            // Find the end of the closing line.
+            let closing_start = end;
+            let after_closing = &after[closing_start..];
+            let closing_end = after_closing
+                .find('\n')
+                .map(|n| closing_start + n + 1)
+                .unwrap_or(after.len());
+            if is_private_key {
+                out.push_str(REDACTED);
+            } else {
+                out.push_str(&after[..closing_end]);
+            }
+            rest = &after[closing_end..];
+        } else {
+            // An unterminated BEGIN block: redact the rest only if it is a private key.
+            if is_private_key {
+                out.push_str(REDACTED);
+                break;
+            }
+            // For non-private-key blocks, copy the BEGIN line and continue scanning.
+            let line_end = after.find('\n').map(|n| n + 1).unwrap_or(after.len());
+            out.push_str(&after[..line_end]);
+            rest = &after[line_end..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Replace runs of characters that match a known credential shape.
 fn redact_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -258,8 +462,6 @@ fn bearer_token_length(rest: &str, out: &mut String) -> Option<usize> {
 /// Shared with [`crate::diagnostics::Field`], which escapes quotes and
 /// backslashes as well and needs the same treatment of the newline in the
 /// middle of a value.
-/// Render control characters as escapes so a value cannot add lines to a
-/// message, or start a new "line" that looks like it came from SURE.
 pub fn escape_control_characters(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
@@ -282,6 +484,7 @@ pub fn escape_control_characters(text: &str) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_password_in_a_url_does_not_survive() {
@@ -454,5 +657,177 @@ mod tests {
                 "{name} is not a credential and must not be reported as one"
             );
         }
+    }
+
+    // --- configured redaction ------------------------------------------------
+
+    #[test]
+    fn a_configured_literal_secret_is_redacted_everywhere() {
+        let mut redactor = Redactor::new();
+        redactor.add_literal_secret("my-super-secret-value");
+
+        let redacted = redactor.redact("prefix my-super-secret-value suffix");
+        assert!(!redacted.contains("my-super-secret-value"), "{redacted}");
+        assert_eq!(redacted, "prefix *** suffix");
+    }
+
+    #[test]
+    fn a_configured_regex_pattern_is_redacted() {
+        let mut redactor = Redactor::new();
+        redactor
+            .add_pattern_str(r"\bsecret-\d{4,}\b")
+            .expect("valid regex");
+
+        let redacted = redactor.redact("token secret-1234 and secret-999999");
+        assert_eq!(redacted, "token *** and ***");
+    }
+
+    #[test]
+    fn longer_literals_are_redacted_before_shorter_ones() {
+        let mut redactor = Redactor::new();
+        redactor.add_literal_secret("abc");
+        redactor.add_literal_secret("abcdef");
+
+        let redacted = redactor.redact("abcdef");
+        assert_eq!(redacted, "***");
+    }
+
+    #[test]
+    fn configured_rules_stack_with_built_in_detectors() {
+        let mut redactor = Redactor::new();
+        redactor.add_literal_secret("custom-secret");
+
+        let redacted =
+            redactor.redact("custom-secret and sk-abcdefghijklmnopqrstuvwxyz01 are both gone");
+        assert!(!redacted.contains("custom-secret"), "{redacted}");
+        assert!(
+            !redacted.contains("sk-abcdefghijklmnopqrstuvwxyz01"),
+            "{redacted}"
+        );
+        assert_eq!(redacted, "*** and *** are both gone");
+    }
+
+    // --- common secret formats -----------------------------------------------
+
+    #[test]
+    fn a_pem_private_key_block_is_fully_redacted() {
+        let key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MqK8k7f5l2EwkK4p\n-----END RSA PRIVATE KEY-----";
+        let redacted = redact(key);
+        assert!(!redacted.contains("MIIEpAIB"), "{redacted}");
+        assert!(!redacted.contains("BEGIN RSA PRIVATE KEY"), "{redacted}");
+        assert_eq!(redacted, REDACTED);
+    }
+
+    #[test]
+    fn pem_variants_are_all_redacted() {
+        for label in [
+            "PRIVATE KEY",
+            "RSA PRIVATE KEY",
+            "EC PRIVATE KEY",
+            "DSA PRIVATE KEY",
+            "OPENSSH PRIVATE KEY",
+            "ENCRYPTED PRIVATE KEY",
+        ] {
+            let key = format!("-----BEGIN {label}-----\nabc\n-----END {label}-----");
+            let redacted = redact(&key);
+            assert_eq!(redacted, REDACTED, "{label} was not redacted");
+        }
+    }
+
+    #[test]
+    fn a_password_in_a_connection_string_is_redacted() {
+        let redacted = redact("Server=myserver;Database=mydb;Password=hunter2;User Id=alice;");
+        assert!(!redacted.contains("hunter2"), "{redacted}");
+        assert!(redacted.contains("Password=***"), "{redacted}");
+        assert!(redacted.contains("Server=myserver"), "{redacted}");
+    }
+
+    #[test]
+    fn a_bearer_token_is_redacted() {
+        let redacted = redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0");
+        assert!(!redacted.contains("eyJhbGci"), "{redacted}");
+        assert!(redacted.contains("Bearer ***"), "{redacted}");
+    }
+
+    #[test]
+    fn an_api_key_is_redacted() {
+        let redacted = redact("api-key: sk-abcdefghijklmnopqrstuvwxyz01");
+        assert_eq!(redacted, "api-key: ***");
+    }
+
+    // --- false positives -----------------------------------------------------
+
+    #[test]
+    fn harmless_strings_that_look_a_bit_like_secrets_are_left_alone() {
+        for harmless in [
+            "ask-me-anything",
+            "risk-free trial",
+            "tokenize this sentence",
+            "the key to success",
+            "pass the salt",
+            "my password is not here",
+            "public_key_notes",
+            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+        ] {
+            assert_eq!(
+                redact(harmless),
+                harmless,
+                "{harmless} should not have been redacted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_random_looking_string_is_not_an_api_key() {
+        assert_eq!(redact("key: abc123"), "key: abc123");
+    }
+
+    // --- structured redaction ------------------------------------------------
+
+    #[test]
+    fn structured_redaction_preserves_json_shape() {
+        let document = serde_json::json!({
+            "status": "open",
+            "severity": "must_fix",
+            "count": 3,
+            "flags": [true, false, null],
+            "nested": {"title": "risk-free", "secret": "sk-abcdefghijklmnopqrstuvwxyz01"},
+        });
+        let redacted = redact_value(&document);
+        assert_eq!(redacted["count"], document["count"]);
+        assert_eq!(redacted["flags"], document["flags"]);
+        assert_eq!(redacted["nested"]["title"], json!("risk-free"));
+        assert_eq!(redacted["nested"]["secret"], json!("***"));
+    }
+
+    #[test]
+    fn structured_redaction_redacts_nested_secrets() {
+        let document = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "token": "ghp_abcdefghijklmnopqrstuvwxyz01",
+                    "url": "https://user:pass@example.com"
+                }
+            }
+        });
+        let redacted = redact_value(&document);
+        assert_eq!(redacted["level1"]["level2"]["token"], json!("***"));
+        assert_eq!(
+            redacted["level1"]["level2"]["url"],
+            json!("https://***@example.com")
+        );
+    }
+
+    #[test]
+    fn a_redactor_can_redact_a_json_value_with_configured_literals() {
+        let mut redactor = Redactor::new();
+        redactor.add_literal_secret("project-internal-secret");
+        let document = serde_json::json!({
+            "message": "project-internal-secret is in the payload",
+            "nested": {"key": "project-internal-secret"},
+        });
+        let redacted = redactor.redact_value(&document);
+        assert_eq!(redacted["message"], json!("*** is in the payload"));
+        assert_eq!(redacted["nested"]["key"], json!("***"));
     }
 }

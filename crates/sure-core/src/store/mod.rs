@@ -768,17 +768,7 @@ pub(crate) fn is_busy(error: &rusqlite::Error) -> bool {
 /// [`crate::redact::redact`], and `tests/store_lifecycle.rs` checks that against
 /// the bytes on disk.
 pub(crate) fn redact_document(value: &Value) -> Value {
-    match value {
-        Value::String(text) => Value::String(redact::redact(text)),
-        Value::Array(items) => Value::Array(items.iter().map(redact_document).collect()),
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .map(|(key, value)| (key.clone(), redact_document(value)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+    redact::redact_value(value)
 }
 
 /// How long to wait before asking again whether the file has become WAL yet.

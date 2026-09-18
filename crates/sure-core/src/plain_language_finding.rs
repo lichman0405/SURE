@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sure_domain::evidence::{AnchorSubject, Evidence, EvidenceAnchor};
 use sure_domain::finding::{AssessmentSource, Finding, FindingStatus};
 
-use crate::redact::escape_control_characters;
+use crate::redact::{escape_control_characters, redact};
 
 const FALLBACK_IMPACT: &str = "SURE did not record what this means for the project.";
 const FALLBACK_NEXT_ACTION: &str = "Review the evidence and decide what to do next.";
@@ -74,11 +74,11 @@ pub fn render_finding(finding: &Finding) -> PlainLanguageFinding {
         non_empty_or(&finding.next_step, || FALLBACK_NEXT_ACTION.to_owned());
 
     PlainLanguageFinding {
-        title: escape_control_characters(&finding.title),
-        what: escape_control_characters(&what),
-        impact: escape_control_characters(&impact),
+        title: escape_control_characters(&redact(&finding.title)),
+        what: escape_control_characters(&redact(&what)),
+        impact: escape_control_characters(&redact(&impact)),
         severity_label: finding.severity.label().to_owned(),
-        next_action: escape_control_characters(&next_action),
+        next_action: escape_control_characters(&redact(&next_action)),
         status_label: status_label(finding.status).to_owned(),
         is_model_only: is_model_only(finding),
         evidence_anchors: evidence_anchor_summaries(&finding.evidence),
@@ -153,8 +153,8 @@ fn evidence_anchor_summaries(evidence: &[Evidence]) -> Vec<EvidenceAnchorSummary
 
 fn summary_from_anchor(anchor: &EvidenceAnchor) -> EvidenceAnchorSummary {
     EvidenceAnchorSummary {
-        location: escape_control_characters(&anchor.location),
-        locator: escape_control_characters(&anchor.locator),
+        location: escape_control_characters(&redact(&anchor.location)),
+        locator: escape_control_characters(&redact(&anchor.locator)),
         subject: anchor.subject.as_str().to_owned(),
     }
 }

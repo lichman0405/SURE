@@ -124,6 +124,13 @@ pub enum ErrorKind {
         /// The offending path, already redacted.
         value: String,
     },
+    /// A regular expression in the redaction rules could not be compiled.
+    InvalidPattern {
+        /// The setting's dotted name.
+        setting: String,
+        /// Why the pattern was rejected.
+        message: String,
+    },
 }
 
 impl fmt::Display for ErrorKind {
@@ -260,6 +267,12 @@ impl fmt::Display for ErrorKind {
                  A project file describes this project; it cannot name files elsewhere on the \
                  machine.\n\n\
                  SURE stopped rather than follow it."
+            ),
+            Self::InvalidPattern { setting, message } => write!(
+                f,
+                "sure.yaml sets `{setting}` to a pattern SURE could not compile: {message}\n\n\
+                 SURE stopped rather than apply a rule that might silently fail to match.\n\n\
+                 Fix the pattern or remove it."
             ),
         }
     }
@@ -418,6 +431,10 @@ mod tests {
             ErrorKind::OutsideProject {
                 name: "project_intent.spec_path".to_owned(),
                 value: "../elsewhere/spec.md".to_owned(),
+            },
+            ErrorKind::InvalidPattern {
+                setting: "redaction.patterns".to_owned(),
+                message: "unclosed group".to_owned(),
             },
         ];
 

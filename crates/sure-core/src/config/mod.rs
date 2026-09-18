@@ -28,14 +28,15 @@ pub mod error;
 pub use authority::{Authority, Layer, Privilege, Resolved};
 pub use error::{ConfigError, ErrorKind, Location};
 pub use values::{
-    AnalysisProvider, CheckPreference, PrivacyMode, ProjectRequest, ProtectionMode, ReportFormat,
-    ScopeReduction,
+    AnalysisProvider, CheckPreference, PrivacyMode, ProjectRequest, ProtectionMode,
+    RedactionConfig, ReportFormat, ScopeReduction,
 };
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::redact;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 use sure_domain::execution::ExecutionMode;
@@ -203,6 +204,8 @@ pub struct Config {
     pub checks: ChecksConfig,
     /// Report output.
     pub report: ReportConfig,
+    /// Extra redaction rules.
+    pub redaction: RedactionConfig,
 }
 
 /// Where a [`LoadedConfig`] came from.
@@ -408,7 +411,45 @@ impl Config {
         self.validate_analysis()?;
         self.validate_privacy_and_analysis()?;
         self.validate_execution()?;
-        self.validate_intent()
+        self.validate_intent()?;
+        self.validate_redaction()
+    }
+
+    /// Build a [`crate::redact::Redactor`] from the built-in detectors plus the
+    /// rules configured in this file.
+    ///
+    /// The configuration is already validated before this is called, so the
+    /// regex patterns compile.
+    #[must_use]
+    pub fn redactor(&self) -> crate::redact::Redactor {
+        let mut redactor = crate::redact::Redactor::new();
+        for secret in &self.redaction.literals {
+            redactor.add_literal_secret(secret.clone());
+        }
+        for pattern in &self.redaction.patterns {
+            // Validation already proved this compiles; expect is unreachable.
+            #[allow(
+                clippy::expect_used,
+                reason = "validated in Config::validate_redaction"
+            )]
+            let compiled = Regex::new(pattern).expect("validated redaction pattern");
+            redactor.add_pattern(compiled);
+        }
+        redactor
+    }
+
+    /// Compile every configured redaction pattern so that a bad pattern stops
+    /// the run rather than failing silently later.
+    fn validate_redaction(&self) -> Result<(), ConfigError> {
+        for (index, pattern) in self.redaction.patterns.iter().enumerate() {
+            if let Err(error) = Regex::new(pattern) {
+                return Err(ConfigError::new(ErrorKind::InvalidPattern {
+                    setting: format!("redaction.patterns[{index}]"),
+                    message: error.to_string(),
+                }));
+            }
+        }
+        Ok(())
     }
 
     /// Modes documented as user-facing but not implemented in this release.
@@ -993,6 +1034,46 @@ report:
         assert_eq!(config.checks.start_local_services, CheckPreference::Never);
         assert_eq!(config.checks.browser_probe, CheckPreference::Always);
         assert_eq!(config.report.format, ReportFormat::Json);
+    }
+
+    #[test]
+    fn redaction_rules_parse_and_build_a_redactor() {
+        let text = "\
+redaction:
+  literals:
+    - project-internal-secret
+    - another-secret
+  patterns:
+    - \\bsecret-\\d{4,}\\b
+";
+        let config = Config::from_yaml(text).expect("redaction settings must parse");
+        assert_eq!(
+            config.redaction.literals,
+            vec![
+                "project-internal-secret".to_owned(),
+                "another-secret".to_owned()
+            ]
+        );
+        assert_eq!(
+            config.redaction.patterns,
+            vec![r"\bsecret-\d{4,}\b".to_owned()]
+        );
+
+        let redactor = config.redactor();
+        assert_eq!(redactor.redact("project-internal-secret here"), "*** here");
+        assert_eq!(redactor.redact("token secret-1234"), "token ***");
+    }
+
+    #[test]
+    fn an_invalid_redaction_pattern_is_refused() {
+        // The pattern is quoted so YAML parses it as a string before regex
+        // validation sees it; an unquoted '(' can be misread by the YAML parser.
+        let error = error_from("redaction:\n  patterns:\n    - \"(\"\n");
+        assert!(
+            matches!(error.kind(), ErrorKind::InvalidPattern { setting, .. } if setting == "redaction.patterns[0]"),
+            "{:?}",
+            error.kind()
+        );
     }
 
     #[test]

@@ -14,6 +14,28 @@ use serde::{Deserialize, Serialize};
 use sure_domain::execution::Permission;
 use sure_domain::variants::variants;
 
+/// User-supplied redaction rules.
+///
+/// These are applied on top of the built-in detectors. They are intended for
+/// project-specific secrets that the built-in pattern list does not recognise,
+/// such as internal token prefixes or constant values that appear in logs.
+///
+/// Putting raw secrets in a configuration file is a risk in itself: the file
+/// may be checked into version control or shared. This setting exists so that
+/// a user-level configuration can name secrets that SURE should mask, not so
+/// that secrets should be stored in project files.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RedactionConfig {
+    /// Literal strings to redact wherever they appear.
+    pub literals: Vec<String>,
+    /// Regular expressions whose matches are redacted.
+    ///
+    /// Each pattern is compiled when the configuration is loaded; an invalid
+    /// pattern is a configuration error rather than a runtime panic.
+    pub patterns: Vec<String>,
+}
+
 /// How much of a project's activity SURE is allowed to keep.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,

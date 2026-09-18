@@ -501,7 +501,8 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
     pipes with `target/tmp/mcp-probe.mjs`, read the dispatch path in source, and
     accepted the task; "Validation of `P12-T009`" below carries the numbers and
     the two deviations the worker disclosed. `sure-cli` is now free, which is
-    what `P7-T010` was waiting for.
+    what `P7-T010` was waiting for, and `P7-T010` was dispatched on this
+    acceptance from `target/tmp/brief-p7t010.md`.
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P7-T010`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`,
@@ -717,8 +718,16 @@ the supervisor, and both owned by other tasks:
   as `decision: "allow"` — a statement about a tool request that was never made,
   in SURE's own voice, on a path a harness reads. Neither commit touches
   `hook.rs`, so it predates this task and is not `P12-T009`'s to answer for.
+  The decision itself is deliberate and pinned: `cursor_session_start_allows_without_decision`
+  and `claude_code_session_start_allows_without_decision` (`hook.rs:260`, `:310`)
+  assert `Allow` for a session-start event, and a harness must not be blocked by
+  one. **The defect is the sentence, not the code path**: "no decision was needed
+  for this event" and "the execution mode permits this tool" are the same kind,
+  so the report claims the second while the tests name the first, and JSON hands
+  a harness `decision: "allow"` for an event that made no request.
   **Owner: `P13-T007`**, whose acceptance is that fail-open/fail-closed behaviour
-  is explicit for each harness and event.
+  is explicit for each harness and event — the fix is wording and a kind that can
+  say "no request to decide", with those two tests and their names moving too.
 
 The worker also corrected a description of the supervisor's, and the correction
 is right: the grammar test compares the grammar against a hand transcription,

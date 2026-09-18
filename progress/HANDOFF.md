@@ -2,10 +2,10 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 92 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 93 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11). Phase P9 is open at 4 of 5.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11). Phase P9 complete (5/5).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -22,7 +22,8 @@ commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
 accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted as commit
 `b7068a4`. `P8-T011` is accepted as commit `5bf6ee1`. `P9-T001` is accepted as commit
 `0982310`. `P9-T002` is accepted as commit `a398107`. `P9-T003` is accepted as commit
-`d1fd41b`. `P9-T004` is accepted as commit `df84d7f`. `P5-T005` received two follow-up security fixes in
+`d1fd41b`. `P9-T004` is accepted as commit `df84d7f`. `P9-T005` is accepted as commit
+`3c56d5b`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
@@ -250,12 +251,25 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     same bounded contract can be delivered to any harness adapter; the schema and
     protocol document registry now include `RepairEnvelope`, and round-trip and
     conformance tests cover it.
+38. A worker agent completed `P9-T004` — *Implement impacted-check selection* — as
+    commit `df84d7f`. The supervisor verified all quality gates and accepted the
+    task. `select_impacted_checks` in `crates/sure-core/src/repair_impact.rs`
+    expands a repair contract's `recheck` list with affected checks that overlap
+    the contract's evidence locations and serious deterministic regression checks
+    that run project code, deduplicating while preserving schedule order.
+39. A worker agent completed `P9-T005` — *Implement re-check lifecycle/history* —
+    as commit `3c56d5b`. The supervisor verified all quality gates and accepted
+    the task. `recheck_lifecycle.rs` in `crates/sure-core/src/` matches findings
+    across runs by a stable key, resolves previous open findings only when their
+    re-check checks pass, keeps findings open when evidence or checks are
+    missing, and stores every run's findings and check results so old runs
+    remain auditable.
 
-**Phase P9 is open at 4 of 5.** The READY list is now
+**Phase P9 complete (5/5).** The READY list is now
 `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T001`, *"Implement re-check lifecycle/history"*, which is the next
+`P10-T001`, *"Validate current Claude Code plugin/hook schemas"*, which is the next
 concrete action.
 
 ## What `P5-T007` added
@@ -14116,6 +14130,34 @@ absent text.
 - `crates/sure-core/src/lib.rs` — registered the new `repair_impact` module.
 
 ## Validation of `P9-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P9-T005` added
+
+- `crates/sure-core/src/recheck_lifecycle.rs` (new) — re-check lifecycle and history.
+  - `FindingKey` matches findings across runs by title plus the first checkable
+    evidence anchor; paths are normalised case-insensitively on Windows.
+  - `reconcile` compares previous open findings with current findings and check
+    results: current findings are reported open, reappearing findings stay open,
+    non-reappearing findings are resolved only when every listed re-check check
+    passed, and findings without re-checks or with failed/missing re-checks stay
+    open.
+  - `previous_open_findings` loads open findings from earlier runs from the store.
+  - `store_run` persists a run's findings and check results so every run remains
+    auditable.
+  - Unit tests cover new findings, reappearing findings, resolved-by-recheck,
+    failed/missing re-checks, all-rechecks-must-pass, cannot-confirm carry-forward,
+    model-only (non-checkable) findings, and Windows case-folding.
+- `crates/sure-core/src/lib.rs` — registered the new `recheck_lifecycle` module.
+
+## Validation of `P9-T005`
 
 | Gate | Result |
 | --- | ------ |

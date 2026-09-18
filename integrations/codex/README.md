@@ -47,6 +47,26 @@ hooks are skipped until the user reviews and trusts them by hash. A Tier 2 claim
 needs a shipped, exercised `PreToolUse` hook and a recorded run behind it. Until
 then, claiming it would be a false green.
 
+## What these commands answer in the current build
+
+This package is the Codex-side surface for commands the branch's build does not
+carry out yet. Observed on **2026-09-18** by running `target/debug/sure.exe`:
+
+| Command | What this build answers |
+| --- | --- |
+| `sure check` | status 3 — "not implemented in this build"; nothing was checked |
+| `sure repair` | status 3 — no repair instructions were produced |
+| `sure recheck` | status 3 — nothing was checked and nothing was compared |
+| `sure mcp serve` | status 2 — the subcommand is not in the grammar yet |
+
+Every artifact here resolves the binary, invokes the command, and reports a
+refusal as a refusal; none of them turns one into a result. The commands that do
+run here are the ones that answer about SURE or about this machine rather than
+about a project — `sure version`, `sure protocol` and `sure doctor` — which is
+why the "is SURE installed?" step in each artifact looks for the binary instead
+of running a check. `docs/architecture/CLI.md` is the authority for which
+commands a given build carries out.
+
 ## Install (Windows, no administrator rights)
 
 Everything installs into your own user profile. No elevated shell is required.

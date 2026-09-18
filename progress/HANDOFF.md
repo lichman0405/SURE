@@ -35,7 +35,7 @@ security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
 `3f9d002`. `P8-T009` received a follow-up security fix.
 
-**Since `P5-T006`'s acceptance, eleven things happened:**
+**Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
    cancellation* — as commit `a6dbf98`. The supervisor verified all quality gates
    on the combined tree and accepted the task.
@@ -447,11 +447,125 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     manifest shape, MCP reference, skill thinness, install/uninstall contract,
     symlink fallback, and actual PowerShell install/uninstall into a temporary
     directory.
+66. A worker agent completed `P12-T006` — *Implement Codex check/repair
+    integration* — as commit `20649d3`. The supervisor verified the delivered
+    Codex surface independently (see "Validation of `P12-T006`" below), added a
+    dated "What these commands answer in the current build" section to
+    `integrations/codex/README.md`, and accepted the task. `P14-T001` is being
+    done by a second worker in the same tree and is not yet reported.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
-`P12-T006`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T001`,
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 6 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
+`P12-T007`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`,
 `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
-`P14-T010`. `P12-T006` is now `in_progress`.
+`P14-T010`. `P12-T009` is now `in_progress`; the lowest-numbered READY task is
+`P12-T007`, which is held back deliberately — see the risk below.
+
+### Open plan-level risk: no task owns the check pipeline
+
+Measured on 2026-09-18 with `target/debug/sure.exe`, not inferred:
+
+| Command | Exit | Answer |
+| --- | --- | --- |
+| `sure check` | 3 | "not implemented in this build"; nothing was checked |
+| `sure repair` | 3 | no repair instructions were produced |
+| `sure recheck` | 3 | nothing was checked and nothing was compared |
+| `sure mcp serve` | 2 | unrecognized subcommand — not in the grammar yet |
+| `sure version` / `sure protocol` / `sure doctor` | 0 | these run |
+
+`crates/sure-cli/src/check.rs` says so in its own words ("This build cannot
+check a project yet"), and `crates/sure-cli/src/commands.rs` asserts that the
+commands this build implements are exactly `doctor`, `hook`, `protocol` and
+`version`. What is missing is one layer: an orchestrator that runs
+`docs/architecture/CHECK_PIPELINE.md` stages 1-10 for one project. Every piece
+it would call exists and is tested — `discover`, `components`, `fingerprint`,
+`intent_model`, `schedule`, `checks`, `aggregation`, `coverage_summary`,
+`project_verdict`, `plain_language_finding`, and the CLI renderers
+`human_report` / `json_report` / `portable_report` — but nothing sequences them,
+and **no task in `tasks/tasks.json` names that sequencing.** It is not P12-T009
+(whose acceptance is the MCP tool surface and its protocol tests) and it is not
+any P13/P14 task.
+
+Why it matters now rather than at the end: `P14-T011` must produce an acceptance
+report against `evaluation/acceptance-manifest.json`, `P14-T012` must show zero
+false green on the release-blocking corpus, `P15-T014` promises a nontechnical
+user "install and run a first check", and `P16-T001`/`P16-T007` run `sure check`
+on a clean machine and on this repository. All five are unreachable without it.
+The three harness packages accepted so far (`claude-code`, `cursor`,
+`agent-plugin`, and now `codex`) all tell their harness to run `sure check` or
+`sure repair`; each is honest about its tier, and each becomes live only when
+this layer exists.
+
+Recommended remedy, for the owner's decision: add one task in the shape of the
+existing ones — for example "P12-T011: Implement the project check pipeline and
+wire it to the check, repair, recheck and mcp serve commands" — depending on `P4-T009`,
+`P7-T005`, `P9-T005` and `P12-T009`. It is deliberately not invented here: the
+task graph is the plan, `taskctl validate` is the check, and a supervisor who
+adds a task to close a gap in it is changing the plan rather than following it.
+Until the owner decides, `P12-T009` is instructed to route every tool through
+the existing `Command::report` path so that there is exactly one engine path for
+the orchestrator to land on, and `P12-T007` is held back because an evidence
+bridge that feeds a check nobody can run would be built on sand.
+
+## What `P12-T006` added
+
+- `integrations/codex/skills/sure-check/SKILL.md` and `skills/sure-fix/SKILL.md`
+  — the current Codex skill surface (`$HOME/.agents/skills`), each with the
+  `name` and `description` front matter Codex requires. `sure-check` runs
+  `sure check` and forbids softening `unknown`, `skipped`, `error` or
+  `cannot_confirm` into a pass; `sure-fix` obtains the repair contract, treats it
+  as the acceptance contract, and runs `sure recheck`, with the sentence "Your
+  own message saying the fix works is not evidence".
+- `integrations/codex/prompts/check.md` and `prompts/fix.md` — the same two flows
+  on the `/prompts:<name>` surface. Upstream documents that surface as
+  deprecated, so the package keeps both and the README says which to prefer.
+- `integrations/codex/mcp.toml` — a `[mcp_servers.sure]` template declaring
+  `command = "sure"`, `args = ["mcp", "serve"]`, with the Windows config path and
+  the equivalent `codex mcp add sure -- sure mcp serve`.
+- `integrations/codex/README.md` — install and uninstall without administrator
+  rights, the `SURE_BIN` / PATH / `%LOCALAPPDATA%` resolution order, the achieved
+  tier stated plainly (**Tier 0 — snapshot**), Tier 2 explicitly *not* claimed
+  with the reason, a "Verified surface" table dated 2026-09-18 with the doc page
+  behind each claim, and a "Not verified" section that says no Codex binary was
+  run from this repository.
+- `crates/sure-testkit/tests/integration_thinness.rs` — 216 lines of `codex_*`
+  tests: skill front matter and thinness, the uncertainty-preserving check
+  prompt, both repair surfaces (so neither drifts), the MCP template, and the
+  README's tier statements.
+
+The supervisor added one section to that README after the worker's commit:
+**"What these commands answer in the current build"**, a dated table of what
+`sure check` (3), `sure repair` (3), `sure recheck` (3) and `sure mcp serve` (2)
+actually answer today, measured with `target/debug/sure.exe`. The package is
+correct and honest without it, but a reader could otherwise install it and
+expect a check to run. See the plan-level risk at the top of this file.
+
+## Validation of `P12-T006`
+
+The supervisor did not take the worker's report as evidence:
+
+1. `cargo test -p sure-testkit --test integration_thinness` — **33 passed, 0
+   failed**, including every `codex_*` test and the pre-existing
+   `harness_packages_are_thin`.
+2. Every Codex claim the package rests on was re-fetched from the vendor
+   documentation rather than accepted from the worker: `developers.openai.com/codex`
+   308-redirects to `learn.chatgpt.com/docs`; skills load from
+   `$HOME/.agents/skills` and `$CWD/.agents/skills` and require `name` and
+   `description`; custom prompts live in `~/.codex/prompts` and are documented as
+   deprecated; MCP servers are `[mcp_servers.<name>]` in `~/.codex/config.toml`;
+   hooks come from `~/.codex/hooks.json` or `[hooks]`, `PreToolUse` can deny with
+   `permissionDecision: "deny"` or exit 2, non-managed hooks need trust by hash,
+   and the docs describe tool hooks as "a guardrail, not a complete enforcement
+   boundary".
+3. The tests were read rather than counted. `codex_mcp_template_names_sure_mcp_serve`
+   parses `integrations/agent-plugin/mcp.json` and asserts the Codex template
+   carries the *same* command and args, so the two packages cannot silently drift
+   into describing two different bridges; `codex_repair_handoff_references_repair_and_recheck`
+   iterates both repair surfaces in one test for the same reason. Neither is a
+   restatement of the file it checks.
+4. The tier claim was checked against the package's own contents: nothing in it
+   forwards Codex session events, so Tier 0 is the honest description, and the
+   README says in as many words that Tier 1 is not claimed here and Tier 2 is
+   claimed only with a shipped, exercised `PreToolUse` hook.
 
 ## What `P12-T005` added
 

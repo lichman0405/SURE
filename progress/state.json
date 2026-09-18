@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P12",
-  "last_updated": "2026-09-18T11:36:13.970Z",
+  "current_phase": "P14",
+  "last_updated": "2026-09-18T12:59:21.905Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1369,13 +1369,13 @@
       "notes": "Added agent-plugin/scripts/{install,uninstall}.ps1, updated plugin.json with repository/license/mcpServers/skills, added integration_thinness tests for manifest, MCP, skill, install/uninstall contract, symlink fallback, and actual PowerShell install/uninstall into temp directory. All gates green: cargo fmt --check, clippy -D warnings, cargo test --workspace --all-features --no-fail-fast, validate-bootstrap, taskctl validate."
     },
     "P12-T006": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-18T12:30:00.000Z",
-      "finished_at": null,
+      "finished_at": "2026-09-18T12:58:55.327Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Worker commit 20649d3: Codex skills (sure-check, sure-fix), prompts (check, fix), mcp.toml and a rewritten README, plus 216 lines of codex_* thinness tests. Supervisor verification: integration_thinness 33/33 green; every Codex surface the worker relies on was independently re-fetched (skills paths and required name/description front matter; hooks.json/config.toml events, PreToolUse deny, trust-by-hash, guardrail-not-boundary wording; custom-prompt deprecation; developers.openai.com/codex 308-redirects to learn.chatgpt.com/docs). The mcp.toml test cross-reads integrations/agent-plugin/mcp.json and asserts identical command/args, so it is an anti-drift guard rather than a restatement. Tier 0 is claimed and Tier 2 is explicitly not claimed. Supervisor addition: integrations/codex/README.md gained a dated \"What these commands answer in the current build\" section, because target/debug/sure.exe answers sure check/repair/recheck with status 3 (not implemented in this build) and sure mcp serve with status 2; the acceptance is the documented Codex surface at Tier 0, and end-to-end invocation waits on the CLI check engine, which no task in tasks/tasks.json currently owns (recorded in progress/HANDOFF.md)."
     },
     "P12-T007": {
       "status": "queued",
@@ -1396,8 +1396,8 @@
       "notes": ""
     },
     "P12-T009": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T12:59:18.610Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
@@ -1495,8 +1495,8 @@
       "notes": ""
     },
     "P14-T001": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T12:59:21.905Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

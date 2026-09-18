@@ -24,7 +24,7 @@ one over to report accurately" is not expressible.
 
 **There is no async code yet.** Spans earn their keep by propagating across
 await points and across task boundaries. SURE has no daemon
-(`docs/adr/0003-no-persistent-daemon-in-v0.1.md`) and no `tokio` yet, so the
+(`docs/adr/0003-no-persistent-daemon-v01.md`) and no `tokio` yet, so the
 value being paid for is not yet being collected, while the subscriber registry
 — process-global mutable state — would be adopted immediately.
 `RUST_DESIGN.md`'s own dependency strategy says to "choose current compatible

@@ -2,10 +2,10 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 87 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 88 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -20,11 +20,11 @@ accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 `d0c496d`. `P8-T003` is accepted as commit `178b574`. `P8-T004` is accepted as
 commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
 accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted as commit
-`b7068a4`. `P5-T005` received two follow-up security fixes in
+`b7068a4`. `P8-T011` is accepted as commit `5bf6ee1`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
-`3f9d002`. `P8-T009` received a follow-up security fix. Phase P8 is open at 10 of 11.
+`3f9d002`. `P8-T009` received a follow-up security fix.
 
 **Since `P5-T006`'s acceptance, eleven things happened:**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -220,13 +220,21 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     assessment labels (`Confirmed`/`Contradicted`/`CannotConfirm`/`NotCheckable`),
     and a plain-language reason or fallback explanation. The JSON report schema
     version advanced to 2 with an optional `claim_checks` array.
+34. A worker agent completed `P8-T011` — *Implement idempotent/concurrent hook
+    event ingestion* — as commit `5bf6ee1`. The supervisor verified all quality
+    gates and accepted the task. A unique index on `(harness_session_id,
+    project_root, harness_source)` makes concurrent session creation deterministic,
+    `SessionEventStore::persist` inserts into `session_events` with `INSERT OR
+    IGNORE` before creating the `records` row so duplicate event IDs return
+    `AlreadyExists`, and new unit tests verify duplicate-event idempotency,
+    concurrent session reuse, and distinct sessions for events without a harness
+    session id.
 
-**Phase P7 is complete (9/9). Phase P8 is open at 10 of 11.** The READY list is now
-`P8-T011`, `P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
+**Phase P8 is complete (11/11).** The READY list is now
+`P9-T001`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P8-T011`, *"Implement idempotent/concurrent hook event ingestion"*, which is the next
-concrete action.
+`P9-T001`, which is the next concrete action.
 
 ## What `P5-T007` added
 
@@ -13934,6 +13942,44 @@ absent text.
   exclusion, expired-retention queries, and escaped error messages.
 
 ## Validation of `P8-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P8-T011` added
+
+- `crates/sure-core/src/store/sql/0003_sessions_unique.sql` (new) — unique index
+  `sessions_unique` on `(harness_session_id, project_root, harness_source)`.
+- `crates/sure-core/src/store/migrations.rs` — migration 0003 wired into the
+  append-only migration list.
+- `crates/sure-core/src/session_event_store.rs`:
+  - `find_session_by_harness` helper extracted for re-querying sessions by
+    harness id + project root + source.
+  - `find_or_create_session_in_tx` uses `INSERT OR IGNORE` and re-queries on
+    conflict, so concurrent hook processes creating the same session reuse one
+    row instead of failing.
+  - `persist` writes to `session_events` first with `INSERT OR IGNORE`, then
+    creates the `records` row only when the event is new, and updates
+    `record_row_id`. A duplicate `event_id` therefore returns
+    `PersistResult::AlreadyExists` deterministically.
+  - Collapsed nested `if let` checks with let-chains to satisfy clippy.
+- Three new inline tests:
+  - `concurrent_duplicate_event_id_is_idempotent` — two threads ingest the same
+    event id; one returns `Stored`, the other `AlreadyExists`, and the database
+    contains exactly one event row.
+  - `concurrent_session_creation_reuses_one_session_row` — two threads ingest
+    different events for the same harness session; one session row is created
+    and both events are bound to it.
+  - `events_without_session_id_get_distinct_sessions` — events with no harness
+    session id each get their own session row because SURE has no correlation
+    basis.
+
+## Validation of `P8-T011`
 
 | Gate | Result |
 | --- | ------ |

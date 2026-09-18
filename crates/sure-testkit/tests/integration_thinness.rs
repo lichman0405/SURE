@@ -270,3 +270,63 @@ fn claude_code_synthetic_fixtures_are_valid_json_with_expected_shape() {
         "expected at least four claude-code synthetic fixtures, found {count}"
     );
 }
+
+#[test]
+fn cursor_launcher_contract_fixtures_are_valid_json() {
+    let launcher = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("fixtures")
+        .join("launcher");
+    assert!(
+        launcher.is_dir(),
+        "cursor launcher fixtures directory must exist"
+    );
+
+    let entries = std::fs::read_dir(&launcher).expect("launcher fixtures directory is readable");
+    let mut count = 0;
+    for entry in entries {
+        let entry = entry.expect("launcher fixture entry readable");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        count += 1;
+        let text = std::fs::read_to_string(&path).expect("launcher fixture file readable");
+        let _: serde_json::Value =
+            serde_json::from_str(&text).expect("launcher fixture must be valid JSON");
+    }
+    assert!(
+        count >= 3,
+        "expected at least three cursor launcher contract fixtures, found {count}"
+    );
+
+    // The launcher script must resolve SURE from the override, PATH, and the
+    // per-user install location, and must not fabricate evidence when missing.
+    let script = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("scripts")
+        .join("sure-hook.ps1");
+    let text = std::fs::read_to_string(&script).expect("cursor launcher script readable");
+    assert!(
+        text.contains("SURE_BIN"),
+        "cursor launcher must honour SURE_BIN override"
+    );
+    assert!(
+        text.contains("Get-Command sure"),
+        "cursor launcher must look for sure on PATH"
+    );
+    assert!(
+        text.contains("LOCALAPPDATA"),
+        "cursor launcher must fall back to per-user install location"
+    );
+    assert!(
+        text.contains("SURE binary not found"),
+        "cursor launcher must fail safely when SURE is missing"
+    );
+    assert!(
+        text.contains("hook ingest --source cursor"),
+        "cursor launcher must forward to the SURE core"
+    );
+}

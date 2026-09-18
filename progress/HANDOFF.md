@@ -3,7 +3,18 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing. `P15-T016` (make the ubuntu and macos jobs green again,
+**In flight:** `P13-T006` (implement protection audit history), dispatched from
+base commit `a752fdc` — the `P15-T016` acceptance — with its brief at
+`target/tmp/brief-p13t006.md`. Its acceptance is *"warn/block/allow-once decision
+recorded locally without secrets"*, and the brief's job is to say what is already
+true in the tree so the worker does not re-derive it: the vocabulary
+(`ProtectionDecisionKind`, `ProtectionDecision`, `Danger`) already exists in
+`hook_protection.rs` and the gap is that nothing persists a decision, because
+`assess_request` is pure and its output dies with the process. The four points
+the brief names as the hard part are the subject half of "without secrets", where
+the row hangs so that a user can still delete it, how "allow-once" is told apart
+from an ordinary allow, and what a failed write does to the exit code a harness
+depends on. `P15-T016` (make the ubuntu and macos jobs green again,
 and keep them read) was dispatched from base commit `7e021ae`, handed back as
 `853d7de`, verified independently and **accepted**; "What `P15-T016` added" and
 "Validation of `P15-T016`" below carry the numbers. **It was the first time this

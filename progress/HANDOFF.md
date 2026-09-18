@@ -351,12 +351,54 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     raw event fixtures to the SURE event protocol, reports capability tier as
     Observed (Tier 1), and `sure hook ingest --source claude-code` is wired
     alongside the Cursor path.
+52. A worker agent completed `P10-T005` — *Implement Claude repair handoff* —
+    as commit `b05825e`. The supervisor re-ran the hook and integration-thinness
+    tests and accepted the task. The Claude Code `fix.md` command now resolves
+    the local SURE binary, fails safely when SURE is missing, and explicitly
+    instructs Claude to run `sure repair`, implement the repair, run acceptance
+    checks, and then invoke `sure recheck`. The same commit fail-closes
+    `claude-code` `pre-tool-use` hook events in `crates/sure-cli/src/hook.rs`
+    until P10-T006 wires the full protection decision path.
 
-**Phase P11 is open at 7 of 9; Phase P10 is open at 4 of 8.** The READY list is now
-`P10-T005`, `P10-T006`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+**Phase P11 is open at 7 of 9; Phase P10 is open at 5 of 8.** The READY list is now
+`P10-T007`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T005`, *"Implement Claude repair handoff"*, which is the next concrete action.
+`P14-T007` and `P14-T010`. `P10-T006` — *"Implement Claude Code protection
+response"* — is in progress; it is the next concrete action.
+
+## What `P10-T005` added
+
+- `integrations/claude-code/commands/fix.md` — rewritten to match the Cursor
+  repair handoff shape:
+  - Resolves the local SURE binary in order: `$env:SURE_BIN`, `sure` on PATH,
+    `%LOCALAPPDATA%\SURE\bin\sure.exe`.
+  - Fails safely when SURE is not found, suggesting `sure doctor` or the
+    installation instructions; does not fabricate a result.
+  - Tells Claude to run `sure repair` to obtain the repair contract, implement
+    only the required repair while preserving listed behavior, run acceptance
+    checks, and then invoke `sure recheck`.
+  - Retains the instruction not to mark a SURE finding resolved solely from the
+    model's own statement.
+  - Does not copy the core-owned frozen `NO_TRUSTED_INTENT_LIMITATION` sentence.
+- `crates/sure-testkit/tests/integration_thinness.rs` — added
+  `claude_code_repair_handoff_references_repair_and_recheck`, asserting that
+  `fix.md` exists, references `sure repair` and `sure recheck`, and does not
+  embed the normalized frozen sentence.
+- `crates/sure-cli/src/hook.rs` — changed the `claude-code` `pre-tool-use` path
+  from unconditional `Allow` to `Block` with a reason explaining that protection
+  decisions are not yet wired. This is a fail-closed interim behavior pending
+  P10-T006.
+
+## Validation of `P10-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test -p sure-cli hook::tests` | green (9 passed) |
+| `cargo test -p sure-testkit` | green (28 passed) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T003` added
 

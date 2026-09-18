@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P10",
-  "last_updated": "2026-09-18T08:40:39.515Z",
+  "last_updated": "2026-09-18T08:44:14.606Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1198,13 +1198,13 @@
       "notes": "Supervisor review: worker implemented Claude check command in commit d57c215; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P10-T005": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-18T08:35:06.192Z",
-      "finished_at": null,
+      "finished_at": "2026-09-18T08:44:14.605Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Supervisor review: worker implemented Claude repair handoff in commit b05825e; re-ran cargo test -p sure-cli hook::tests and cargo test -p sure-testkit, all green. Commit also includes a fail-closed stub for claude-code pre-tool-use events pending P10-T006."
     },
     "P10-T006": {
       "status": "in_progress",

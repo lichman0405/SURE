@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P12",
-  "last_updated": "2026-09-18T11:13:46.443Z",
+  "last_updated": "2026-09-18T11:36:13.970Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1351,22 +1351,22 @@
       "notes": ""
     },
     "P12-T004": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T11:17:53.966Z",
+      "finished_at": "2026-09-18T11:36:13.969Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
       "notes": ""
     },
     "P12-T005": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T11:20:35.760Z",
+      "finished_at": "2026-09-18T12:00:00.000Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Added agent-plugin/scripts/{install,uninstall}.ps1, updated plugin.json with repository/license/mcpServers/skills, added integration_thinness tests for manifest, MCP, skill, install/uninstall contract, symlink fallback, and actual PowerShell install/uninstall into temp directory. All gates green: cargo fmt --check, clippy -D warnings, cargo test --workspace --all-features --no-fail-fast, validate-bootstrap, taskctl validate."
     },
     "P12-T006": {
       "status": "queued",

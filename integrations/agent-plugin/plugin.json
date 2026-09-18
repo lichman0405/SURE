@@ -3,5 +3,9 @@
   "name": "sure",
   "description": "Check AI-built software with the local SURE engine and use grounded repair contracts.",
   "version": "0.0.0-bootstrap",
-  "author": { "name": "SURE contributors" }
+  "author": { "name": "SURE contributors" },
+  "repository": "https://github.com/lichman0405/SURE",
+  "license": "Apache-2.0",
+  "mcpServers": "mcp.json",
+  "skills": "skills/"
 }

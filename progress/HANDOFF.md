@@ -2,11 +2,11 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 98 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 119 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9), phase P8 complete (11/11). Phase P9 complete (5/5). Phase P10 complete
-(1/1). Phase P11 is open at 3 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(1/1). Phase P11 complete (9/9). Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -432,12 +432,92 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     PEM private-key blocks) and user-configurable literal/regex redaction,
     validated regex patterns at config load time, and wired redaction into
     diagnostics and the store.
+64. The supervisor completed `P12-T004` — *Implement user-owned OpenAI-compatible
+    provider* — as commit `b374e13`. Replaced the placeholder with a
+    `ureq`-based synchronous provider that reads the API key from
+    `SURE_OPENAI_API_KEY`, redacts the prompt before sending and credentials in
+    errors, supports test-only transport injection for no-network tests, and
+    documents the fields and no-proxy behavior in `sure.example.yaml`.
+65. The supervisor completed `P12-T005` — *Validate portable Agent Plugin
+    package* — in the resumed session. Added
+    `integrations/agent-plugin/scripts/{install,uninstall}.ps1` with per-user,
+    no-admin-required copy/symlink install and uninstall, updated
+    `integrations/agent-plugin/plugin.json` with `repository`, `license`,
+    `mcpServers` and `skills`, and added `integration_thinness` tests covering
+    manifest shape, MCP reference, skill thinness, install/uninstall contract,
+    symlink fallback, and actual PowerShell install/uninstall into a temporary
+    directory.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 4 of 10; Phase P13 is open at 1 of 9.** The READY list is now
-`P12-T004`, `P12-T009`, `P13-T004`, `P14-T001`,
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** The READY list is now
+`P12-T006`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T001`,
 `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
 `P14-T010`. The lowest-numbered READY task is
-`P12-T004`, which is the next concrete action.
+`P12-T006`, which is the next concrete action.
+
+## What `P12-T005` added
+
+- `integrations/agent-plugin/scripts/install.ps1` — per-user, no-admin-required
+  installer for the portable Agent Plugin.
+  - Resolves the SURE binary in the same order as other launchers:
+    `SURE_BIN` > PATH > `%LOCALAPPDATA%\SURE\bin\sure.exe`.
+  - Defaults the install destination to `%LOCALAPPDATA%\agent-plugins\sure`,
+    overridable via `AGENT_PLUGIN_DIR`.
+  - Detects Windows symlink capability and prefers a symlink; falls back to a
+    full copy with `Copy-Item` when `-ForceCopy` is supplied or symlinks are
+    unavailable.
+  - Renders `{{SURE_BIN}}` and `{{PLUGIN_ROOT}}` placeholders in copied package
+    files.
+- `integrations/agent-plugin/scripts/uninstall.ps1` — removes the installed
+  plugin directory and reports whether anything was removed.
+- `integrations/agent-plugin/plugin.json` — added `repository`, `license`,
+  `mcpServers` and `skills` fields so the package is self-describing.
+- `crates/sure-testkit/tests/integration_thinness.rs` — added tests covering:
+  - manifest JSON shape and expected fields;
+  - MCP manifest referencing `sure mcp serve`;
+  - skill existence and thinness (no frozen wording copy);
+  - install/uninstall script contracts;
+  - symlink fallback requirement;
+  - actual PowerShell install/uninstall into a temporary directory on Windows.
+
+## Validation of `P12-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --all-features --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P12-T004` added
+
+- `crates/sure-core/src/analysis_provider/mod.rs` — replaced the placeholder
+  `OpenAiCompatibleAnalyzer` with a `ureq`-based synchronous provider.
+  - Reads the API key from the `SURE_OPENAI_API_KEY` environment variable.
+  - Builds a minimal chat-completion request with user prompt and bounded
+    `max_tokens`.
+  - Redacts the prompt via `crate::redact::redact` before it leaves SURE and
+    redacts the API key/credentials from error messages.
+  - Maps HTTP errors, JSON parse failures, missing choices, and network issues
+    to `AnalysisError::OpenAiCompatibleFailed` with a plain-language message.
+  - Returns the assistant content as an `AnalysisResponse` classified as a model
+    assessment, not deterministic evidence.
+  - Supports test-only transport injection so the provider can be exercised
+    without network access.
+- `Cargo.lock` / `Cargo.toml` / `crates/sure-core/Cargo.toml` — added `ureq`
+  and updated workspace dependencies.
+- `sure.example.yaml` — documented the OpenAI-compatible provider fields and
+  no-proxy behavior.
+
+## Validation of `P12-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P12-T003` added
 

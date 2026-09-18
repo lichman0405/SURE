@@ -21,6 +21,7 @@ use std::path::Path;
 use sure_core::config::Config;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
+use sure_core::full_recording::{self, FullRecordingConsent};
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::{decide_claude_code_tool, decide_cursor_tool};
 use sure_core::ids::EventId;
@@ -104,7 +105,8 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
 
     // Best-effort persistence. The harness cares most about the decision for
     // pre-tool-use; a store failure should not block the operation.
-    let _ = persist_event(&ingested, &project_root);
+    let event_id = EventId::generate();
+    let _ = persist_event(&ingested, &project_root, &event_id);
 
     // Evaluate protection for pre-tool-use events.
     let is_pre_tool_use =
@@ -133,10 +135,21 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
 fn persist_event(
     ingested: &sure_core::harness_event::IngestedEvent,
     project_root: &str,
+    event_id: &EventId,
 ) -> Result<(), String> {
     let paths = Paths::discover().map_err(|e| e.to_string())?;
+    let _ = persist_event_with_paths(ingested, project_root, event_id, &paths);
+    Ok(())
+}
+
+fn persist_event_with_paths(
+    ingested: &sure_core::harness_event::IngestedEvent,
+    project_root: &str,
+    event_id: &EventId,
+    paths: &Paths,
+) -> Result<sure_core::ids::FingerprintId, String> {
     let project_path = Path::new(project_root);
-    let store = Store::open(&paths, project_path).map_err(|e| e.to_string())?;
+    let store = Store::open(paths, project_path).map_err(|e| e.to_string())?;
     let session_store = SessionEventStore::new(&store);
 
     let fingerprint = match project_fingerprint(project_path, &FingerprintOptions::default()) {
@@ -144,13 +157,25 @@ fn persist_event(
         Err(e) => return Err(e.to_string()),
     };
 
-    let event_id = EventId::generate();
-
     session_store
-        .persist(ingested, project_root, &fingerprint.id, &event_id)
+        .persist(ingested, project_root, &fingerprint.id, event_id)
         .map_err(|e| e.to_string())?;
 
-    Ok(())
+    // Best-effort full recording. Failure must not affect the hook decision.
+    let consent = match Config::load(project_path) {
+        Ok(loaded) if loaded.config.privacy.full_recording => FullRecordingConsent::Full,
+        _ => FullRecordingConsent::ProjectionOnly,
+    };
+    let _ = full_recording::persist_full_recording(
+        &store,
+        ingested,
+        event_id,
+        project_root,
+        &fingerprint.id,
+        consent,
+    );
+
+    Ok(fingerprint.id)
 }
 
 fn load_execution_config(project_root: &str) -> (ExecutionMode, ExecutionPermissions) {
@@ -315,6 +340,99 @@ mod tests {
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
+        );
+    }
+
+    // --- full recording opt-in integration tests --------------------------------
+
+    use sure_core::full_recording::full_recordings_for_project;
+    use sure_protocol::event::EventEnvelope;
+
+    fn scratch_hook_dir(name: &str) -> std::path::PathBuf {
+        repository_root()
+            .join("target")
+            .join("tmp")
+            .join(name)
+            .join(format!("{}", std::process::id()))
+    }
+
+    fn make_claude_event(
+        project_root: &std::path::Path,
+    ) -> sure_core::harness_event::IngestedEvent {
+        let envelope = EventEnvelope::new("claude-code", "tool.completed", "2026-09-18T12:00:00Z")
+            .with_capability_tier(sure_core::capability::CapabilityTier::Observed)
+            .with_session_id("test-session")
+            .with_project_root(project_root.to_string_lossy().into_owned())
+            .with_payload(serde_json::json!({"tool": "Bash", "output": "hello"}));
+
+        ingest_event_str(&envelope.to_json().expect("envelope serialises")).expect("event ingests")
+    }
+
+    #[test]
+    fn full_recording_is_stored_when_opted_in() {
+        let tmp = scratch_hook_dir("hook-full-recording-opted-in");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        std::fs::write(
+            project.join("sure.yaml"),
+            "privacy:\n  full_recording: true\n",
+        )
+        .expect("write config");
+
+        let data = tmp.join("data");
+        let config = tmp.join("config");
+        let paths = Paths::from_roots(data, config).expect("paths are valid");
+
+        let ingested = make_claude_event(&project);
+        let event_id = EventId::generate();
+
+        let fingerprint =
+            persist_event_with_paths(&ingested, &project.to_string_lossy(), &event_id, &paths)
+                .expect("persist succeeds");
+
+        let store = Store::open_at(&paths.store_file()).expect("store opens");
+        let recordings = full_recordings_for_project(&store, &fingerprint, 10).expect("query");
+
+        assert_eq!(recordings.len(), 1, "one full recording should exist");
+        assert_eq!(recordings[0].event_type, "tool.completed");
+        assert_eq!(recordings[0].source, "claude-code");
+        assert_eq!(recordings[0].event_id, Some(event_id.as_str().to_owned()));
+    }
+
+    #[test]
+    fn full_recording_is_not_stored_when_not_opted_in() {
+        let tmp = scratch_hook_dir("hook-full-recording-opted-out");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        std::fs::write(
+            project.join("sure.yaml"),
+            "privacy:\n  full_recording: false\n",
+        )
+        .expect("write config");
+
+        let data = tmp.join("data");
+        let config = tmp.join("config");
+        let paths = Paths::from_roots(data, config).expect("paths are valid");
+
+        let ingested = make_claude_event(&project);
+        let event_id = EventId::generate();
+
+        let fingerprint =
+            persist_event_with_paths(&ingested, &project.to_string_lossy(), &event_id, &paths)
+                .expect("persist succeeds");
+
+        let store = Store::open_at(&paths.store_file()).expect("store opens");
+        let recordings = full_recordings_for_project(&store, &fingerprint, 10).expect("query");
+
+        assert!(
+            recordings.is_empty(),
+            "no full recording should exist when opt-in is false"
         );
     }
 }

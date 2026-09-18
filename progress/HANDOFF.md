@@ -3,17 +3,33 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing. `P15-T017` (make the non-Windows configuration
+**In flight:** `P13-T007` (implement hook failure semantics tests), dispatched
+from base commit `f14f715` — the `P15-T017` acceptance — with its brief at
+`target/tmp/brief-p13t007.md`. It is the first task dispatched under the sixth
+gate, and its subject is the one this repository's own security documentation
+names as a threat it has never resolved: `docs/security/PROTECTION_MODE.md:105`
+requires every integration to document whether its hook failure behaviour is
+fail-open or fail-closed for the relevant event,
+`docs/security/THREAT_MODEL.md:61-62` states the confusion as T18 and resolves it
+nowhere, and `docs/architecture/CONFIG_AUTHORITY.md:152` names `P13-T007` as the
+owner of the per-integration documentation that does not exist. The brief was
+measured before it was written: the seven launcher scripts and what each does
+when the binary is missing, the seventeen failure branches in
+`crates/sure-cli/src/hook.rs` and which of them fail open, fail closed or leave
+the answer alone, the four event surfaces and the cells where they disagree, the
+tests that exist, and the two that do not — a launcher has never been executed by
+a test, and no binary-level test feeds `sure hook ingest` a failure.
+
+`P15-T017` (make the non-Windows configuration
 checkable from Windows) was dispatched from base commit `9294c4a` — the
 `P13-T006` acceptance — with its brief at `target/tmp/brief-p15t017.md`, handed
-back as `74a16e1`, verified independently and **accepted**; "What `P15-T017`
-added" and "Validation of `P15-T017`" below carry the numbers. It delivered one
+back as `74a16e1`, verified independently and **accepted** as `f14f715`; "What
+`P15-T017` added" and "Validation of `P15-T017`" below carry the numbers. It
+delivered one
 file, `scripts/check-non-windows.mjs`, which compiles both Unix `cfg` sets from
 this machine, names the two crates it cannot reach and why, refuses rather than
 passing when a target or a tool is missing, and is adopted here as the **sixth
-local gate** at **1.3 s warm / 19 s cold**. **The next dispatch is `P13-T007`
-(implement hook failure semantics tests)** — first in the READY list this
-acceptance leaves behind — and its brief is not written yet.
+local gate** at **1.3 s warm / 19 s cold**.
 `P13-T006` (implement protection audit history) was dispatched from
 base commit `a752fdc` — the `P15-T016` acceptance — with its brief at
 `target/tmp/brief-p13t006.md`, handed back as `72365b9`, verified independently
@@ -1189,6 +1205,40 @@ tree is or is not intact would be reading a claim the file does not make.
     rule down a third time.** From `P15-T017` on, this file's validations give
     the parent count and name the raw sum when the raw sum is what a log shows.
 
+    **The script was built the same day, and its first version reproduced the
+    error this item is about.** `target/tmp/measure-run.mjs` was written to
+    measure run `35396267231` — `P15-T017`'s acceptance commit — and its first
+    version attributed every `test result:` line to the nearest preceding
+    header, which on those three logs printed **2518 / 2509 / 2510 as the parent
+    count**, the raw sums, on logs where the parent counts are 2508 / 2499 /
+    2500. Two causes, and the second is the one that matters: the header pattern
+    required a `(` after the name, so `   Doc-tests sure_cli` matched nothing and
+    5 of the 63 headers were invisible; and **attribution by position is not a
+    rule** — on Windows the ten children of `store_concurrency` print *before*
+    the parent's own result line and on macOS *after* it, and three parents'
+    lines on macOS land past the next header entirely, so grouping a log by "the
+    last header seen" merges and splits differently on different runners. The
+    instrument that replaces it does not depend on position: **count the
+    `test <name> ... ok` lines**, one per test the parent ran, which the children
+    contribute none of because they run quiet. It agrees with *raw sum − 10* on
+    all nine logs measured — `35396267231` (2518 / 2509 / 2510 raw, **2508 /
+    2499 / 2500** parents), `35393536379` (the same six figures) and
+    `35389096745` (2504 / 2495 / 2496 raw, **2494 / 2485 / 2486** parents) — and
+    the script now prints both and prints **no parent figure at all** when they
+    disagree. The falsifier above was therefore not triggered; what was triggered
+    is the reason it exists, on the tool rather than on a sentence. One further
+    number recorded so it is not mistaken for a defect: **7 test names appear
+    twice on every platform in every run** — `a_manifest_sure_ran_out_of_budget_for_is_unread_and_never_absent`,
+    `the_helper_that_looks_for_new_files_can_see_a_new_file`,
+    `a_relative_root_is_refused_rather_than_resolved_against_the_current_directory`,
+    `a_manifest_that_is_not_there_is_not_a_project_that_declares_nothing`,
+    `every_fixture_sits_at_a_path_two_platforms_disagree_about`,
+    `the_command_a_check_names_is_the_line_sure_would_run`,
+    `two_independent_readings_of_one_project_give_the_same_identifiers` — so 2508
+    ok lines are **2501 distinct names** on Windows, 2492 on macOS and 2493 on
+    Ubuntu. A same-named test in two different binaries is a collision, not a
+    re-run: the children print no ok lines at all.
+
 The READY list, recomputed on 2026-09-19 from `tasks/tasks.json` against the
 `progress/state.json` that `P15-T017`'s acceptance stages — the predicate
 `scripts/taskctl.mjs` implements, applied to the two committed files rather than
@@ -1197,10 +1247,10 @@ carried forward in prose — is `P13-T007`, `P13-T009`, `P13-T010`, `P14-T004`,
 `P15-T008`, `P15-T015`, `P15-T018`, `P15-T019`, `P15-T020`, `P7-T012`,
 `P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them.
 **`P13-T007` (implement hook failure semantics tests) is the first of those and
-is the next dispatch**; it is first because `P15-T017` has left the list and
-`P13-T006` left it one acceptance earlier, and the list `P15-T017` was itself
-dispatched from is the one printed above this paragraph, which had `P15-T017` at
-its front.
+is the dispatch this commit makes**; it is first because `P15-T017` has left the
+list and `P13-T006` left it one acceptance earlier, and the list `P15-T017` was
+itself dispatched from is the one printed above this paragraph, which had
+`P15-T017` at its front.
 
 **This paragraph printed a false list, and the error is worth more than the
 correction.** As it stood until now it named `P13-T006` as the front of the READY
@@ -1772,9 +1822,26 @@ returns and whose parent `bb1a4ec` is that task's dispatch commit. No other
 field of either entry changed and no other entry was touched: `head_sha` and
 `base_sha` now stand at **40 of the 179** each, against 37 and 40 before.
 
-**What this acceptance owes and cannot pay here**: the run for the commit that
-carries it, and the sixth gate's verdict on that commit's bytes. It is read in
-this session and reported in the next entry.
+**The run this acceptance owed, read in the session that wrote it**: `35396267231`
+on `f14f715`, all five jobs green, **`run_attempt 1` on every one** — read with
+`gh run watch 35396267231 --exit-status` (exit 0; transcript kept at
+`target/tmp/watch-f14f715.txt`) and then
+`gh api repos/lichman0405/SURE/actions/runs/35396267231/jobs`. Per-platform, from
+the three job logs fetched to `target/tmp/f14f715-{windows,macos,ubuntu}.log`: 63
+headers and 73 result lines on each, **2508 / 2499 / 2500 parent tests** against
+2518 / 2509 / 2510 raw, **0 failed**, **12 ignored**, and **zero occurrences of
+`Text file busy`** on any of the three — identical to `9294c4a`'s run in every
+cell, which is what a commit touching `SHA256SUMS.txt`, `progress/HANDOFF.md`,
+`progress/state.json` and comments in a `.mjs` file should produce. That is the
+**eighth consecutive green `ci` run**, the seventh on the first attempt, and the
+ninth ubuntu test-step execution in a row without the race — a sample and not an
+explanation, as `P15-T019`, still undispatched, says.
+
+**What remains owed**: the run of the dispatch commit that follows this one,
+which is the next acceptance's backfill under the chain rule. The sixth gate's
+verdict on the committed script bytes is not owed — it does not run in `ci` at
+all, and it was run here over those bytes and exits 0, as the paragraph above
+records.
 
 **The READY list after this acceptance**, recomputed from `tasks/tasks.json`
 against the `progress/state.json` this commit stages rather than carried

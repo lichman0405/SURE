@@ -28,6 +28,7 @@ use sure_domain::finding::{
 };
 use sure_domain::ids::{CheckId, ClaimId, FindingId, FingerprintId, RepairId, SessionId};
 use sure_domain::intent::{IntentSource, Requirement};
+use sure_domain::repair::RepairEnvelope;
 use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 use sure_domain::vocabulary::{Claim, GitState, ProjectFingerprint, RepairContract};
@@ -123,6 +124,10 @@ pub fn repair() -> RepairContract {
     }
 }
 
+pub fn repair_envelope() -> RepairEnvelope {
+    RepairEnvelope::new(repair()).for_harness("claude-code")
+}
+
 pub fn envelope() -> EventEnvelope {
     EventEnvelope::new("claude-code", "tool.completed", "2026-09-14T09:10:56.827Z")
         .with_capability_tier(CapabilityTier::Observed)
@@ -189,6 +194,10 @@ pub fn documents() -> Vec<(DocumentKind, Value)> {
         (
             DocumentKind::Repair,
             serde_json::to_value(repair()).expect("a repair contract serializes"),
+        ),
+        (
+            DocumentKind::RepairEnvelope,
+            serde_json::to_value(repair_envelope()).expect("a repair envelope serializes"),
         ),
         (
             DocumentKind::Event,

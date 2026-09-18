@@ -32,7 +32,7 @@ mod common;
 
 use common::{
     check_result, claim, content_fingerprint, documents, envelope, finding, fingerprint,
-    git_fingerprint, not_run_result, repair, requirement,
+    git_fingerprint, not_run_result, repair, repair_envelope, requirement,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -70,6 +70,7 @@ fn every_document_survives_a_round_trip_through_json() {
     round_trips(&check_result());
     round_trips(&requirement());
     round_trips(&repair());
+    round_trips(&repair_envelope());
     round_trips(&envelope());
 }
 

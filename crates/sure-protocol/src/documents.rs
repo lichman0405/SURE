@@ -1,4 +1,4 @@
-//! The seven documents SURE writes down, and the schemas that describe them.
+//! The eight documents SURE writes down, and the schemas that describe them.
 //!
 //! Everything SURE stores, prints as machine-readable output or hands to a
 //! harness is one of these. Each has a schema in `schemas/`, and the schemas are
@@ -23,6 +23,7 @@
 //! | `check-result.schema.json` | check result | `sure_domain::status::CheckResult` |
 //! | `project-intent.schema.json` | **one** requirement | `sure_domain::intent::Requirement` |
 //! | `repair.schema.json` | repair contract | `sure_domain::vocabulary::RepairContract` |
+//! | `repair-envelope.schema.json` | repair envelope | `sure_domain::repair::RepairEnvelope` |
 //! | `fixture-expectation.schema.json` | test fixture | `fixtures/` scenario files |
 //!
 //! The intent row is the one worth reading twice. `ProjectIntent` is a
@@ -62,6 +63,9 @@ pub enum DocumentKind {
     ProjectIntent,
     /// Bounded repair instructions for a coding harness.
     Repair,
+    /// Harness-neutral wrapper that delivers the same repair contract to any
+    /// adapter.
+    RepairEnvelope,
     /// What an evaluation fixture requires a run to produce.
     FixtureExpectation,
 }
@@ -74,6 +78,7 @@ pub const ALL: &[DocumentKind] = &[
     DocumentKind::CheckResult,
     DocumentKind::ProjectIntent,
     DocumentKind::Repair,
+    DocumentKind::RepairEnvelope,
     DocumentKind::FixtureExpectation,
 ];
 
@@ -88,6 +93,7 @@ impl DocumentKind {
             Self::CheckResult => "check-result",
             Self::ProjectIntent => "project-intent",
             Self::Repair => "repair",
+            Self::RepairEnvelope => "repair-envelope",
             Self::FixtureExpectation => "fixture-expectation",
         }
     }
@@ -102,6 +108,7 @@ impl DocumentKind {
             Self::CheckResult => "check-result.schema.json",
             Self::ProjectIntent => "project-intent.schema.json",
             Self::Repair => "repair.schema.json",
+            Self::RepairEnvelope => "repair-envelope.schema.json",
             Self::FixtureExpectation => "fixture-expectation.schema.json",
         }
     }
@@ -118,6 +125,9 @@ impl DocumentKind {
             Self::CheckResult => include_str!("../../../schemas/check-result.schema.json"),
             Self::ProjectIntent => include_str!("../../../schemas/project-intent.schema.json"),
             Self::Repair => include_str!("../../../schemas/repair.schema.json"),
+            Self::RepairEnvelope => {
+                include_str!("../../../schemas/repair-envelope.schema.json")
+            }
             Self::FixtureExpectation => {
                 include_str!("../../../schemas/fixture-expectation.schema.json")
             }

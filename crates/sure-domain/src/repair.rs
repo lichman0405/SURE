@@ -5,10 +5,62 @@
 //! condition it produces is tied to an observable check or anchor rather than to
 //! an invented fact.
 
+use serde::{Deserialize, Serialize};
+
 use crate::evidence::EvidenceClass;
 use crate::finding::Finding;
 use crate::ids::{CheckId, RepairId};
 use crate::vocabulary::RepairContract;
+
+/// The version of the harness-neutral repair envelope format.
+///
+/// Bumping this means the wrapper around a [`RepairContract`] changed in a way
+/// that readers need to know about. The contract inside keeps its own identity.
+pub const REPAIR_ENVELOPE_VERSION: u32 = 1;
+
+/// A harness-neutral wrapper around a [`RepairContract`].
+///
+/// Adapters for Claude, Cursor, Codex and any future harness receive the same
+/// contract; the envelope only adds delivery metadata. The `target_harness`
+/// field is optional: when present it names the adapter this envelope was
+/// addressed to, but the contract itself is unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepairEnvelope {
+    /// Envelope format version.
+    pub version: u32,
+    /// The bounded repair contract any adapter can consume.
+    pub contract: RepairContract,
+    /// Optional adapter this envelope is addressed to. `None` means the envelope
+    /// is harness-neutral.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_harness: Option<String>,
+}
+
+impl RepairEnvelope {
+    /// Wrap a contract in a neutral envelope.
+    #[must_use]
+    pub fn new(contract: RepairContract) -> Self {
+        Self {
+            version: REPAIR_ENVELOPE_VERSION,
+            contract,
+            target_harness: None,
+        }
+    }
+
+    /// Address the envelope to a specific harness adapter without changing the
+    /// contract.
+    #[must_use]
+    pub fn for_harness(mut self, harness: impl Into<String>) -> Self {
+        self.target_harness = Some(harness.into());
+        self
+    }
+
+    /// The contract every adapter ultimately works from.
+    #[must_use]
+    pub fn into_contract(self) -> RepairContract {
+        self.contract
+    }
+}
 
 /// Why a repair contract could not be generated from a finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,5 +356,56 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("hiding") || s.contains("symptom"))
         );
+    }
+
+    #[test]
+    fn repair_envelope_wraps_a_contract_without_changing_it() {
+        let finding = grounded_finding();
+        let contract = RepairContract::from_finding_with_one_check(&finding, CheckId::generate())
+            .expect("contract is generated");
+        let envelope = RepairEnvelope::new(contract.clone());
+
+        assert_eq!(envelope.version, REPAIR_ENVELOPE_VERSION);
+        assert!(envelope.target_harness.is_none());
+        assert_eq!(envelope.into_contract(), contract);
+    }
+
+    #[test]
+    fn repair_envelope_can_be_addressed_to_a_harness() {
+        let finding = grounded_finding();
+        let contract = RepairContract::from_finding_with_one_check(&finding, CheckId::generate())
+            .expect("contract is generated");
+        let envelope = RepairEnvelope::new(contract).for_harness("claude-code");
+
+        assert_eq!(envelope.target_harness.as_deref(), Some("claude-code"));
+        assert_eq!(envelope.version, REPAIR_ENVELOPE_VERSION);
+    }
+
+    #[test]
+    fn repair_envelope_round_trips_through_json() {
+        let finding = grounded_finding();
+        let contract = RepairContract::from_finding_with_one_check(&finding, CheckId::generate())
+            .expect("contract is generated");
+        let envelope = RepairEnvelope::new(contract).for_harness("cursor");
+
+        let text = serde_json::to_string(&envelope).expect("envelope serializes");
+        let back: RepairEnvelope = serde_json::from_str(&text).expect("envelope deserializes");
+        assert_eq!(back, envelope);
+    }
+
+    #[test]
+    fn repair_envelope_omits_target_harness_when_none() {
+        let finding = grounded_finding();
+        let contract = RepairContract::from_finding_with_one_check(&finding, CheckId::generate())
+            .expect("contract is generated");
+        let envelope = RepairEnvelope::new(contract);
+
+        let document = serde_json::to_value(&envelope).expect("envelope serializes");
+        assert!(document.get("target_harness").is_none());
+        assert_eq!(
+            document["version"],
+            serde_json::json!(REPAIR_ENVELOPE_VERSION)
+        );
+        assert!(document.get("contract").is_some());
     }
 }

@@ -25,9 +25,9 @@
 //!
 //! # Why a kind is not just a document kind
 //!
-//! [`RecordKind`] wraps [`DocumentKind`] rather than restating it, so the six
-//! schemas and the six storable kinds cannot drift apart: there is one list, and
-//! the seventh kind, [`RecordKind::Recording`], is the one thing SURE stores
+//! [`RecordKind`] wraps [`DocumentKind`] rather than restating it, so the seven
+//! schemas and the seven storable kinds cannot drift apart: there is one list, and
+//! the eighth kind, [`RecordKind::Recording`], is the one thing SURE stores
 //! that has no schema because it is not a statement about a project — it is raw
 //! captured material, kept only under explicit opt-in
 //! (`docs/security/PRIVACY.md`), and held to a different rule: it is excluded
@@ -98,6 +98,7 @@ impl RecordKind {
         RecordKind::Document(DocumentKind::CheckResult),
         RecordKind::Document(DocumentKind::ProjectIntent),
         RecordKind::Document(DocumentKind::Repair),
+        RecordKind::Document(DocumentKind::RepairEnvelope),
         RecordKind::Recording,
         RecordKind::Approval,
     ];

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P11",
-  "last_updated": "2026-09-18T07:48:53.812Z",
+  "last_updated": "2026-09-18T08:16:10.326Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1297,13 +1297,13 @@
       "notes": "Supervisor review: worker implemented Cursor protection where supported in commit 7959b89; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T007": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-18T07:48:53.811Z",
-      "finished_at": null,
+      "finished_at": "2026-09-18T08:16:10.325Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Supervisor review: worker implemented Cursor local-plugin installation/symlink flow in commit 69186ebd; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T008": {
       "status": "queued",

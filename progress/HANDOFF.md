@@ -395,12 +395,113 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     stop) through the real ingest path against a temp store, asserts the
     expected protection decisions, and verifies persisted event types and a
     consistent session id.
+58. A worker agent completed `P12-T001` — *Implement AnalysisProvider
+    abstraction* — as commit `68d4396`. The supervisor re-ran the full gate set
+    and accepted the task. Added `sure_core::analysis_provider` with an
+    `Analyzer` trait, `AnalysisRequest`/`AnalysisResponse`, and backends for
+    `Disabled`, `LocalCommand`, `ClaudeCli`, and `OpenAiCompatible`. Added
+    `analysis.command` config validation and documented it in
+    `sure.example.yaml`.
+59. A worker agent completed `P12-T008` — *Document Copilot adapter boundary* —
+    as commit `462cd4b`. The supervisor re-ran the full gate set and accepted
+    the task. Added `integrations/copilot/README.md`, a hooks manifest template,
+    and a thin PowerShell launcher, defining the protocol surface for a future
+    GitHub Copilot integration that reuses the same event/repair protocols as
+    the Claude Code and Cursor adapters.
+60. The supervisor completed `P11-T009` — *Decide whether TypeScript extension
+    is necessary* — and accepted it. Added
+    `docs/adr/0013-no-typescript-extension-for-v01.md`, recording that
+    plugins/hooks satisfy v0.1 and no TypeScript extension is needed unless a
+    concrete missing capability is demonstrated later.
 
-**Phase P11 is open at 8 of 9; Phase P10 is complete at 9 of 9.** The READY list is now
-`P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 2 of 10.** The READY list is now
+`P12-T002`, `P12-T003`, `P12-T004`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
 `P14-T007`, `P14-T009` and `P14-T010`. The lowest-numbered READY task is
-`P12-T001`, which is the next concrete action.
+`P12-T002`, which is the next concrete action.
+
+## What `P12-T001` added
+
+- `crates/sure-core/src/analysis_provider/mod.rs` (new) — defines the `Analyzer`
+  trait, `AnalysisRequest`/`AnalysisResponse`, `AnalysisError`, and a
+  `build(config, project_root)` factory.
+- Implementations for four categories:
+  - `DisabledAnalyzer` — refuses every request; deterministic checks stay
+    independent.
+  - `LocalCommandAnalyzer` — runs a user-configured local command and returns
+    stdout/stderr/exit code.
+  - `ClaudeCliAnalyzer` — placeholder for the `claude` CLI backend.
+  - `OpenAiCompatibleAnalyzer` — placeholder for an OpenAI-compatible HTTP
+    backend.
+- `crates/sure-core/src/config/mod.rs` — added `analysis.command` as an
+  optional typed argument list, with validation that it is only allowed when
+  `provider` is `local_command`.
+- `crates/sure-core/tests/spawn_sites.rs` — exempted the new module because it
+  is a non-product analysis backend, not a path that runs project code.
+- `sure.example.yaml` — documented the new `analysis.command` field.
+
+## Validation of `P12-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P12-T008` added
+
+- `integrations/copilot/README.md` — adapter boundary document for a future
+  GitHub Copilot integration, referencing existing Claude Code/Cursor files and
+  core Rust modules by path.
+  - Describes the event ingestion contract (`sure hook ingest --source copilot`).
+  - Maps expected event kinds and tool names to SURE `ActionKind` values.
+  - Defines the protection response contract (`allow`/`warn`/`block`) and
+    exit-code semantics.
+  - Lists what the adapter must not do: duplicate the check engine, invent
+    evidence, copy frozen wording, or reimplement execution-mode semantics.
+  - Delegates `sure check`, `sure repair`, and `sure recheck` to the SURE CLI.
+  - States the integration remains Observed (Tier 1) until Copilot's hook
+    contract guarantees enforcement.
+- `integrations/copilot/hooks/hooks.json` — placeholder hook manifest mirroring
+  the Claude Code/Cursor structure.
+- `integrations/copilot/scripts/sure-hook.ps1` — thin Windows launcher that
+  forwards stdin JSON to `sure hook ingest --source copilot` and fails safely
+  when SURE is missing.
+
+## Validation of `P12-T008`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P11-T009` added
+
+- `docs/adr/0013-no-typescript-extension-for-v01.md` — records the decision
+  that, for v0.1, the existing plugin/hook packaging is sufficient and no
+  TypeScript editor extension is required.
+  - References ADR 0008 and the now-implemented Claude Code/Cursor/Copilot
+    integrations.
+  - Lists concrete reasons: protection/check logic stays in the Rust core,
+    custom commands are surfaced through the harness's command system, and
+    event persistence/reporting remain core-owned.
+  - Defines the revisit condition: a concrete missing capability that cannot be
+    satisfied by command/hook mechanisms.
+
+## Validation of `P11-T009`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T008` added
 
@@ -14802,5 +14903,23 @@ absent text.
 | `cargo fmt --all -- --check` | green |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
 | `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P11-T009` added
+
+- `docs/adr/0013-no-typescript-extension-for-v01.md` — decision record
+  concluding that the existing plugin/hook surface satisfies v0.1 and no
+  TypeScript extension is required. The ADR references the Claude Code,
+  Cursor, and Copilot adapter boundaries, records the revisit condition, and
+  requires a concrete missing capability before any future extension is built.
+
+## Validation of `P11-T009`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |

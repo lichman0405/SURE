@@ -287,6 +287,61 @@ pub enum HookAction {
         /// The kind of event, as named by the harness.
         event_kind: Option<String>,
     },
+    /// Record a one-time allowance for one request SURE would otherwise hold.
+    ///
+    /// The tool and the subject are the harness's own words, spelled exactly as
+    /// the harness sends them: the command line for a shell tool, the path for
+    /// a tool that names one. The first request that matches both **exactly**
+    /// spends the allowance, and nothing else about SURE changes — the
+    /// allowance covers the three acts `docs/security/THREAT_MODEL.md` calls
+    /// dangerous and no others, and it is never a way to run under execution
+    /// settings the user did not change.
+    ///
+    /// This is a command a **person** runs. Nothing a project's files or an
+    /// agent's output can say records an allowance, because a hook cannot ask a
+    /// user for consent and this is that answer, given by a user, on purpose.
+    ///
+    /// Both integrations are capability tier 1 (Observed): SURE records what it
+    /// would do, and cannot confirm what a harness does with the answer. See
+    /// `docs/security/PROTECTION_MODE.md`.
+    #[command(group(
+        clap::ArgGroup::new("subject")
+            .required(true)
+            .multiple(false)
+            .args(["command", "path"])
+    ))]
+    AllowOnce {
+        /// The tool name, exactly as the harness sends it.
+        #[arg(long, value_name = "NAME")]
+        tool: String,
+
+        /// The command line, exactly as the harness would send it.
+        #[arg(long, value_name = "WORDS")]
+        command: Option<String>,
+
+        /// The path, exactly as the harness would send it.
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
+
+        /// The project the allowance is for. Default: the current directory.
+        ///
+        /// It has to be the directory the harness reports as the request's
+        /// project — the one `sure hook ingest` reads out of the event — or the
+        /// two are different projects and the allowance is never spent. Run
+        /// this from the project, or name it here.
+        #[arg(long, value_name = "DIR")]
+        project: Option<PathBuf>,
+
+        /// How long the allowance lasts, in minutes. One day is the longest
+        /// SURE records, and thirty minutes is what it records when the user
+        /// does not say.
+        #[arg(
+            long,
+            value_name = "MINUTES",
+            default_value_t = sure_core::allowance::DEFAULT_MINUTES
+        )]
+        minutes: u32,
+    },
 }
 
 impl Command {

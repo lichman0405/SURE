@@ -265,6 +265,34 @@ pub struct Failed {
     pub detail: String,
 }
 
+/// One one-time allowance, as `sure hook allow-once` wrote it down.
+///
+/// The subject is the user's own words — they typed them on this command line —
+/// so this report may name them back; nothing here came from a harness, and
+/// nothing about a project's files reaches it. The row id is carried so a user
+/// can find the grant afterwards in `sure history`, and the window's end is
+/// carried so that a grant that was never spent is visible as what it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookAllowance {
+    /// The tool name, exactly as the user typed it.
+    pub tool: String,
+    /// The command line or path, exactly as the user typed it.
+    pub subject: String,
+    /// The project the allowance is for: the directory a request has to arrive
+    /// from for the grant to be spendable.
+    ///
+    /// Named in what the user reads, and that is the point of carrying it here:
+    /// a grant recorded from the wrong directory is spendable by nothing, and
+    /// the only moment at which a user can notice that is now.
+    pub project: String,
+    /// How long the allowance lasts, in minutes.
+    pub minutes: u32,
+    /// The store row the grant was written as.
+    pub grant: i64,
+    /// When it stops being usable, in milliseconds since the epoch.
+    pub not_after_ms: i64,
+}
+
 /// One Model Context Protocol message, on its way to the caller.
 ///
 /// # Why a protocol message is a [`Report`]
@@ -393,6 +421,13 @@ pub enum Report {
     ///
     /// The machine form is the decision JSON that the harness reads from stdout.
     HookDecision(sure_core::hook_protection::ProtectionDecision),
+    /// `sure hook allow-once`, carrying the one-time allowance it recorded.
+    ///
+    /// Not a decision and not a setting: a grant the user made, on the command
+    /// line, for one request SURE would otherwise hold. See
+    /// `crate::hook::run_allow_once` for what is written and
+    /// `sure_core::allowance` for what spending it means.
+    HookAllowance(Box<HookAllowance>),
     /// `sure mcp serve`, carrying one Model Context Protocol message for the
     /// caller.
     ///
@@ -474,6 +509,12 @@ impl Report {
                 | sure_core::hook_protection::ProtectionDecisionKind::Warn => "ok",
                 sure_core::hook_protection::ProtectionDecisionKind::Block => "not_green",
             },
+            // A recorded allowance is an answer about this machine's own store:
+            // what was written, and when it stops being usable. Like a history
+            // report, and unlike a hook decision, it is never `not_green` — that
+            // is a statement about a project, and this command does not look at
+            // one. A write that did not land is a [`Self::Failed`], below.
+            Self::HookAllowance(_) => "ok",
             // A protocol message is answered for the caller rather than
             // reported to a user, and its outcome is the message's own: an
             // error — a JSON-RPC error object, or a tool result carrying
@@ -558,6 +599,11 @@ impl Report {
                 | sure_core::hook_protection::ProtectionDecisionKind::Warn => exit::OK,
                 sure_core::hook_protection::ProtectionDecisionKind::Block => exit::NOT_GREEN,
             },
+            // 0, and it is a user's own command that asked: the allowance is
+            // written, or this is a [`Self::Failed`] above. Nothing about a
+            // harness has been decided here, so no other status would be a
+            // statement about this run.
+            Self::HookAllowance(_) => exit::OK,
             // 3 rather than 0 for a message that says SURE could not answer, so
             // that the status and the outcome keep telling one story: `ok` is
             // the only outcome that may exit 0. It is not 1, because 1 says a
@@ -612,6 +658,10 @@ impl Report {
             Self::Unavailable(_) | Self::Failed(_) => false,
             // A hook decision is an answer: the command ran and produced a result.
             Self::HookDecision(_) => true,
+            // The same, for the user's own command: `sure hook allow-once >
+            // allowance.txt` has to put the sentence in the file, because the
+            // sentence is the whole of what the command was asked for.
+            Self::HookAllowance(_) => true,
             // A protocol message is the session's answer to its caller, and it
             // goes to stdout whether or not it carries an error: an MCP client
             // reads refusals there too, and a refusal sent anywhere else is a
@@ -734,6 +784,37 @@ impl Report {
                     )
                 }
             },
+            // What the user asked for is one sentence, and the conditions on it
+            // are the rest: the grant covers one request that SURE itself names
+            // as one of the three dangerous acts, it is spent by a request whose
+            // tool and words match this one exactly, and nothing else about SURE
+            // changes. Every sentence is *would* rather than *will*: both
+            // integrations are Observed (Tier 1), and this build cannot confirm
+            // that a harness reads the answer — see
+            // `docs/security/PROTECTION_MODE.md`.
+            Self::HookAllowance(allowance) => {
+                writeln!(
+                    out,
+                    "SURE recorded a one-time allowance for tool '{}', for the request '{}'.",
+                    allowance.tool, allowance.subject
+                )?;
+                writeln!(out)?;
+                writeln!(
+                    out,
+                    "It is for '{}', it lasts {}, and the first request that matches both the \
+                     tool and the words exactly spends it.",
+                    allowance.project,
+                    minutes(allowance.minutes)
+                )?;
+                writeln!(out)?;
+                writeln!(
+                    out,
+                    "SURE would then let that one request through, if SURE names it as deleting \
+                     a whole location, overwriting published commits, or reading a file of \
+                     credentials. Any other request is held exactly as it was before, and a \
+                     second request with the same words is not covered."
+                )
+            }
             // A protocol message has no human form: it is JSON-RPC and its
             // reader is a program. The arm is here because every variant has
             // both, and it writes the message itself rather than a rendering of
@@ -905,6 +986,21 @@ impl Report {
                     frame["reason"] = json!(reason);
                 }
             }
+            // The grant the user just recorded, built from the same values the
+            // human form renders. `grant` is the store row, so a script can find
+            // the row again, and `not_after_ms` is when the window closes — the
+            // two facts about an allowance that a reader outside SURE has no
+            // other way to learn.
+            Self::HookAllowance(allowance) => {
+                frame["details"] = json!({
+                    "tool": allowance.tool,
+                    "subject": allowance.subject,
+                    "project": allowance.project,
+                    "minutes": allowance.minutes,
+                    "grant": allowance.grant,
+                    "not_after_ms": allowance.not_after_ms,
+                });
+            }
             // The session summary is a report like any other and keeps the
             // envelope, so that `sure --format json mcp serve` writes something
             // a reader can line up with every other frame. See
@@ -950,6 +1046,10 @@ impl Report {
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
             Self::HookDecision(_) => "hook",
+            // The same command name for the other half of `sure hook`: this is a
+            // subcommand of the entry point a harness calls, and the frame names
+            // the command the user typed, which is `hook` either way.
+            Self::HookAllowance(_) => "hook",
             // The command a user types, for both of the bridge's reports: the
             // session and the messages in it are `sure mcp serve`, and a frame
             // that named anything else would name a command that does not exist
@@ -957,6 +1057,19 @@ impl Report {
             // message, under `structuredContent.tool`.
             Self::Mcp(_) | Self::McpSession(_) => "mcp",
         }
+    }
+}
+
+/// A number of minutes as a user reads it.
+///
+/// `1 minutes` is the kind of line that makes a reader stop trusting the rest of
+/// the sentence, and the allowance's window is the one number a user has to act
+/// on before it closes.
+fn minutes(count: u32) -> String {
+    if count == 1 {
+        "1 minute".to_owned()
+    } else {
+        format!("{count} minutes")
     }
 }
 
@@ -1224,6 +1337,19 @@ mod tests {
         }))
     }
 
+    /// A one-time allowance the user recorded, as `sure hook allow-once` reports
+    /// one. The words are a user's own — this report never carries a harness's.
+    fn a_recorded_allowance() -> Report {
+        Report::HookAllowance(Box::new(HookAllowance {
+            tool: "Bash".to_owned(),
+            subject: "rm -rf build/".to_owned(),
+            project: "C:\\work\\app".to_owned(),
+            minutes: sure_core::allowance::DEFAULT_MINUTES,
+            grant: 41,
+            not_after_ms: 1_700_001_800_000,
+        }))
+    }
+
     /// A JSON-RPC error object: a request SURE would not carry out.
     fn a_protocol_error() -> Report {
         Report::Mcp(Box::new(McpMessage {
@@ -1313,6 +1439,7 @@ mod tests {
             Report::HookDecision(sure_core::hook_protection::ProtectionDecision::block(
                 "The current execution mode does not permit this action.",
             )),
+            a_recorded_allowance(),
             a_protocol_error(),
             a_tool_result(false),
             a_tool_result(true),

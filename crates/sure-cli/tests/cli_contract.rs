@@ -266,6 +266,20 @@ const EVERY_COMMAND: &[&[&str]] = &[
     &["config", "show"],
     &["config", "validate"],
     &["hook", "ingest"],
+    // A one-time allowance, recorded against the store this file named and
+    // against the directory the child process starts in — the default for
+    // `--project`, and a directory that is not the store. It writes one row,
+    // into a store that belongs to this test, for a request that does nothing
+    // anywhere, so the run is destructive in shape and inert in fact, like
+    // `history delete --all` above.
+    &[
+        "hook",
+        "allow-once",
+        "--tool",
+        "Bash",
+        "--command",
+        "npm test",
+    ],
     &["explain"],
     &["protocol"],
     &["version"],

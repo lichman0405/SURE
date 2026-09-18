@@ -43,6 +43,7 @@ process's argument vector and from nowhere else.
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
 | `sure hook ingest` | record one event from a coding harness | works; for a pre-action event it also answers with the action SURE would take and a sentence saying why |
+| `sure hook allow-once --tool NAME (--command WORDS \| --path PATH) [--project DIR] [--minutes N]` | record a one-time allowance for one request SURE would otherwise hold | works; SURE writes the grant to its store, and the first request that matches the tool and the subject exactly would be let through once — see `docs/security/PROTECTION_MODE.md` |
 | `sure explain [ID]` | explain one recorded result in plain language | recognised, not implemented |
 | `sure mcp serve` | answer a coding harness that speaks the Model Context Protocol | works; each tool it exposes runs one command in this table and returns that command's own answer |
 | `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
@@ -551,7 +552,7 @@ configuration and its own record, not a report of traffic.
 
 | Status | Meaning | Who returns it |
 | --- | --- | --- |
-| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version`; `hook ingest` when the action it answered with is allow or warn, so a launcher is not stopped |
+| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version`; `hook ingest` when the action it answered with is allow or warn, so a launcher is not stopped; `hook allow-once` when the grant was written |
 | 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean; `hook ingest` when the action it answered with is a block, which is the answer a launcher relays |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
 | 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
@@ -616,6 +617,7 @@ anything about output or status: both are SURE's, and both have one home.
 | A doctor report's status, outcome and problems agree | same file, `a_doctor_report_is_an_answer_however_it_turns_out` |
 | No module outside `output.rs` writes to a stream | same file, `only_the_output_module_writes_to_a_stream` |
 | `sure hook ingest` reads the event from standard input and answers a protection decision | same file, `hook_ingest_reads_standard_input_and_evaluates_protection` |
+| A recorded allowance is spent by the exact request it names, once, and by no other | `crates/sure-cli/src/hook.rs`, `a_broad_delete_is_held_and_an_allowance_for_it_lets_one_through`, `an_allowance_covers_one_request_and_not_its_neighbours`, `a_force_push_is_held_and_an_allowance_for_it_lets_one_through`, `a_read_of_credentials_is_held_under_strict_and_an_allowance_for_it_lets_one_through` |
 | The mode a decision is made under is the arbitrated one, and `strict` holds an operation `standard` allows | `crates/sure-cli/tests/cli_contract.rs`, `the_protection_mode_a_project_names_is_the_one_sure_decides_under`; `crates/sure-cli/src/hook.rs`, `a_project_file_cannot_lower_the_mode_the_user_set` and `the_same_read_is_allowed_under_standard_and_held_under_strict` |
 | The grammar is the list in this document | `crates/sure-cli/src/main.rs`, `the_grammar_is_the_one_docs_architecture_cli_md_lists` |
 | Every MCP tool answers with what the command line behind it answers | `crates/sure-cli/tests/mcp_protocol.rs`, `every_tool_answers_what_the_command_line_behind_it_answers` |

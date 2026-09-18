@@ -414,7 +414,15 @@ mod tests {
                 // `Check` joins them: it is implemented and it is not in this
                 // list, so a report of that shape here means the list grew an
                 // invocation that reads the store this machine really uses.
-                Report::Check(_) | Report::Failed(_) | Report::Mcp(_) | Report::McpSession(_) => {
+                // `HookAllowance` joins it for the same reason and one more:
+                // `hook allow-once` writes a row, so no invocation of it belongs
+                // in a list this test holds to leaving the machine as it found
+                // it. Its own tests cover the write, against stores they name.
+                Report::Check(_)
+                | Report::Failed(_)
+                | Report::Mcp(_)
+                | Report::McpSession(_)
+                | Report::HookAllowance(_) => {
                     panic!(
                         "{command:?} produced {report:?}, and nothing in this list may have a \
                      side effect or a failure. See `every_command`."

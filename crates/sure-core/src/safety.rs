@@ -356,6 +356,98 @@ where
     }
 }
 
+/// The words of a command line a harness says it is about to run, or `None`
+/// when SURE declines to read it.
+///
+/// # Why there is a function here that splits a string
+///
+/// [`classify`] takes a program and an argument vector, and it has no variant
+/// that takes a string, because splitting shell text is itself the act of
+/// starting a shell. This function is not an exception to that rule; it is the
+/// only alternative to having no reading at all. A harness's `Bash` tool sends
+/// **one string** and no argument vector, so a caller that wants to know what
+/// the harness claims it is about to run has either this reading or none.
+///
+/// # What it does is refuse first, and read only what is left
+///
+/// A line is read only when it has exactly one reading. Any character that
+/// could mean something to a shell other than itself — quoting, substitution,
+/// a separator, a redirection, a comment, a variable, an escape — makes the
+/// whole line unreadable and this function answers `None`. What is left is
+/// words separated by whitespace, and splitting *that* is not interpretation,
+/// because there is nothing left in the text that could have been interpreted.
+///
+/// `~`, `*`, `?`, `[` and `]` are read as ordinary characters rather than
+/// refused, because the only reading a caller makes of a word is the cautious
+/// one: those characters name a whole location rather than standing for one,
+/// and refusing them would throw away the answer that matters most
+/// (`rm -rf *`) to avoid a question nobody asked.
+///
+/// # The answer is the harness's claim, not a fact about what runs
+///
+/// It is the harness's own words about itself — data, like every other field of
+/// a harness event. SURE does not establish that the line it was handed is the
+/// line that will run, and nothing here should be read as though it did.
+#[must_use]
+pub fn read_simple_command(line: &str) -> Option<Vec<String>> {
+    if line.chars().any(is_shell_syntax) {
+        return None;
+    }
+    let words: Vec<String> = line
+        .split(|character: char| character.is_ascii_whitespace())
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    Some(words)
+}
+
+/// Whether this character would have to be interpreted before the line could be
+/// read as words.
+///
+/// Not a parser for any shell, and not a list of every character any shell
+/// treats specially: it is the list of characters whose meaning is *not* the
+/// character, and one of them being present is what makes the whole line
+/// unreadable. `"` and `'` quote, `\` escapes, `$` and `` ` `` substitute, `;`
+/// `&` `|` separate commands, `<` `>` redirect, `(` `)` `{` `}` `!` `^` group
+/// or expand, `#` begins a comment, `%` expands a variable in cmd.exe, and a
+/// line break would end this command and begin another.
+///
+/// `\` is on the list although it is also a path separator on the platform SURE
+/// is built for, and that is the deliberate half: in the shells these harnesses
+/// run through it escapes the next character, so a line containing one has two
+/// readings and SURE takes neither. The cost is a Windows-style path in a shell
+/// command — which is therefore not read, named, or offered for a one-time
+/// allowance — and the alternative cost is a reading SURE would have to guess
+/// at.
+fn is_shell_syntax(character: char) -> bool {
+    matches!(
+        character,
+        '"' | '\''
+            | '\\'
+            | '$'
+            | '`'
+            | ';'
+            | '&'
+            | '|'
+            | '<'
+            | '>'
+            | '('
+            | ')'
+            | '{'
+            | '}'
+            | '!'
+            | '#'
+            | '%'
+            | '^'
+            | '\n'
+            | '\r'
+            | '\0'
+    )
+}
+
 /// Remove classes from a set, without ever producing an empty one.
 ///
 /// Empty is not a state [`CommandEffects`] has, and it is not the right answer
@@ -1273,6 +1365,79 @@ mod tests {
                 };
                 assert_eq!(first, other, "{name} does not answer as {}", entry.names[0]);
             }
+        }
+    }
+
+    #[test]
+    fn a_line_with_one_reading_is_read_as_its_words() {
+        let cases = [
+            ("rm -rf build/", vec!["rm", "-rf", "build/"]),
+            (
+                "git push --force origin main",
+                vec!["git", "push", "--force", "origin", "main"],
+            ),
+            ("npm   test", vec!["npm", "test"]),
+            // A separator SURE reads past rather than interpreting: `--` ends
+            // the flags, and to this reading it is a word like any other.
+            ("rm -rf -- build", vec!["rm", "-rf", "--", "build"]),
+            // Unicode survives, because a project path may be one.
+            ("rm -rf Ünïcödé", vec!["rm", "-rf", "Ünïcödé"]),
+            // Characters that name a whole location are kept: the reading a
+            // caller makes of a word is the cautious one.
+            ("rm -rf *", vec!["rm", "-rf", "*"]),
+            ("rm -rf ~", vec!["rm", "-rf", "~"]),
+            ("del *.*", vec!["del", "*.*"]),
+        ];
+        for (line, expected) in cases {
+            assert_eq!(
+                read_simple_command(line),
+                Some(
+                    expected
+                        .iter()
+                        .map(|word| (*word).to_owned())
+                        .collect::<Vec<_>>()
+                ),
+                "{line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_a_shell_would_read_first_is_not_read_at_all() {
+        // One character per case, and each of them means something other than
+        // itself to a shell. The answer is `None` and not a guess: a caller
+        // that cannot read the line cannot say anything about it, which is the
+        // state SURE was in before this function existed.
+        let cases = [
+            "rm -rf \"my dir\"",
+            "rm -rf 'my dir'",
+            "rm -rf my\\ dir",
+            "rm -rf $HOME",
+            "rm -rf `pwd`",
+            "cargo test && rm -rf .",
+            "cargo test; rm -rf .",
+            "cargo test | tee out",
+            "cat secrets > out",
+            "cat < in",
+            "echo (x)",
+            "echo {a,b}",
+            "echo !history",
+            "echo x # comment",
+            "echo %PATH%",
+            "echo ^x",
+            "echo a\nrm -rf .",
+            "echo a\rrm -rf .",
+            "echo \u{0}",
+        ];
+        for line in cases {
+            assert_eq!(read_simple_command(line), None, "{line:?} was read");
+        }
+    }
+
+    #[test]
+    fn a_line_holding_no_words_is_not_a_command() {
+        for line in ["", "   ", "\t", "  \t  "] {
+            assert_eq!(read_simple_command(line), None, "{line:?}");
         }
     }
 }

@@ -21,12 +21,52 @@
 //! mode. A refusal the domain reached is never diluted by a mode — strict adds
 //! a question, it does not replace an answer.
 //!
-//! What the second question may look at is deliberately narrow. Shell text is
-//! **not** read: `crate::safety` refuses shell grammar on purpose, because a
-//! classifier that reads a command line is either a shell or wrong, and one
-//! that guesses is worse than one that declines. What is classified is the path
-//! the normalised event carries — the argument the harness itself says the tool
-//! is aimed at — and only for the three action kinds that name one file.
+//! What the second question may look at is deliberately narrow, and since
+//! `P13-T005` it is two things rather than one.
+//!
+//! What is classified is the path the normalised event carries — the argument
+//! the harness itself says the tool is aimed at — and only for the three action
+//! kinds that name one file. That rule is `P13-T004`'s and it is unchanged.
+//!
+//! Beside it, a **command line the harness claims** is read, for one purpose
+//! and with one reader: [`crate::safety::read_simple_command`], which refuses
+//! any text whose meaning is not the characters in it and answers `None` rather
+//! than a guess. This module reads the harness's own `args.command` — the
+//! string the harness says it is about to run — and puts it to
+//! [`crate::safety::classify`], the one classifier, exactly as `P3-T004` puts a
+//! program and an argument vector to it. Nothing here is a second table of
+//! dangerous commands and nothing here decides anything: the reading can only
+//! *name* a danger in a request that was already held, and a name never lets
+//! one through. The one thing a name changes is that an allowance the user
+//! recorded can be spent on it (see below).
+//!
+//! A command line SURE declines to read is not a gap to be filled: the request
+//! keeps the answer it would have had before, which for a shell tool is a
+//! refusal, and the sentence says nothing about what the command would do.
+//!
+//! # The three dangers, and the one-time allowance
+//!
+//! Three dangerous acts are named: a **broad delete**, a **force push** and a
+//! **sensitive read** ([`Danger`]). Each is read off an answer the code below
+//! already reaches — the classifier's own `Source::Rule` and `Destructive`
+//! class for the first two, and strict mode's credential rule for the third —
+//! so there is one answer to *what would this do* and the danger is a reading
+//! of it rather than a rule beside it.
+//!
+//! A user who has been shown one of these can record, with
+//! `sure hook allow-once`, that SURE would let **one** matching request
+//! through, once. The record is the durable half: a hook is a fresh process per
+//! event, so a one-time grant cannot live in memory, and
+//! `crate::allowance` states what is stored and [`Store::spend_allowance`]
+//! states how it is spent atomically.
+//!
+//! [`Store::spend_allowance`]: crate::store::Store::spend_allowance
+//!
+//! **This is a statement about what SURE would do.** Both integrations are
+//! Observed (Tier 1), so nothing here establishes that a harness honours an
+//! allowance any more than it establishes that a harness honours a block. The
+//! sentence an allowance produces says *SURE would let this through*, and the
+//! limit is the same one every other answer in this module has.
 //!
 //! # Capability tier honesty
 //!
@@ -38,11 +78,12 @@
 
 use serde::{Deserialize, Serialize};
 use sure_domain::execution::{
-    ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions, decide,
+    ActionKind, CommandClass, ExecutionDecision, ExecutionMode, ExecutionPermissions, decide,
 };
 use sure_domain::variants::variants;
 
 use crate::config::{CUSTOM_PROTECTION_EXPLANATION, CUSTOM_PROTECTION_INSTEAD, ProtectionMode};
+use crate::safety::{self, Source};
 
 /// What the protection adapter decided about a tool request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,24 +169,38 @@ impl ProtectionDecision {
 
 /// What a harness says it is about to do.
 ///
-/// Both fields are the request's own words: the tool name exactly as it was
-/// sent, and the path the normalised event carries, when it carries one. They
-/// are **data** — another program's claim about itself — so nothing here treats
-/// either as evidence that the tool would do what it says, and no field of the
-/// request is echoed back inside a sentence SURE writes.
+/// Every field is the request's own words: the tool name exactly as it was
+/// sent, the path the normalised event carries when it carries one, and the
+/// command line the harness claims it is about to run when it is a shell tool.
+/// They are **data** — another program's claim about itself — so nothing here
+/// treats any of them as evidence that the tool would do what it says, and no
+/// field of the request is echoed back inside a sentence SURE writes.
+///
+/// A request carries a path or a command, and which one it carries is the
+/// harness's own vocabulary: `Read` and `Write` name files, `Bash` and `Shell`
+/// carry a command line, and neither vocabulary has both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolRequest<'a> {
     /// The tool name, exactly as the harness sent it.
     pub tool: &'a str,
     /// The path the normalised event names, when it names one.
     pub path: Option<&'a str>,
+    /// The command line the harness claims, when it claims one.
+    ///
+    /// Read only through [`crate::safety::read_simple_command`], only to name a
+    /// danger, and never echoed.
+    pub command: Option<&'a str>,
 }
 
 impl<'a> ToolRequest<'a> {
-    /// A request for a tool that names no path.
+    /// A request for a tool that names no path and no command.
     #[must_use]
     pub const fn of(tool: &'a str) -> Self {
-        Self { tool, path: None }
+        Self {
+            tool,
+            path: None,
+            command: None,
+        }
     }
 
     /// The same request, with the path the harness named.
@@ -154,7 +209,46 @@ impl<'a> ToolRequest<'a> {
         Self {
             tool,
             path: Some(path),
+            command: None,
         }
+    }
+
+    /// A request for a tool that claims a command line.
+    #[must_use]
+    pub const fn running(tool: &'a str, command: &'a str) -> Self {
+        Self {
+            tool,
+            path: None,
+            command: Some(command),
+        }
+    }
+
+    /// The same request, with the path the harness named, when it named one.
+    ///
+    /// A builder rather than a fourth argument to [`ToolRequest::of`], because
+    /// a payload SURE could not read a field out of and a payload that did not
+    /// carry the field are the same request: nothing was named.
+    #[must_use]
+    pub const fn and_path(self, path: Option<&'a str>) -> Self {
+        Self { path, ..self }
+    }
+
+    /// The same request, with the command line the harness claimed, if it
+    /// claimed one.
+    #[must_use]
+    pub const fn and_command(self, command: Option<&'a str>) -> Self {
+        Self { command, ..self }
+    }
+
+    /// What the request is aimed at, in the harness's own words.
+    ///
+    /// One string rather than two, and that is what a one-time allowance is
+    /// recorded against: the exact command line for a shell tool, the exact
+    /// path for a tool that names one. It is `None` only for a request that
+    /// names neither, which is a request no allowance can cover.
+    #[must_use]
+    pub fn subject(&self) -> Option<&'a str> {
+        self.command.or(self.path)
     }
 }
 
@@ -175,6 +269,9 @@ fn cursor_tool_to_action_kind(tool: &str) -> ActionKind {
 /// mode and permissions, and then asks the protection mode's question. No new
 /// rule engine is invented.
 ///
+/// This is [`assess_cursor_tool`] without the danger, for a caller that wants
+/// the answer alone.
+///
 /// # Capability tier honesty
 ///
 /// Cursor remains **Observed** (Tier 1). The hook manifest does not confirm
@@ -188,7 +285,18 @@ pub fn decide_cursor_tool(
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
 ) -> ProtectionDecision {
-    decide_request(
+    assess_cursor_tool(request, mode, permissions, protection).decision
+}
+
+/// [`decide_cursor_tool`], and which danger it named on the way.
+#[must_use]
+pub fn assess_cursor_tool(
+    request: &ToolRequest<'_>,
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
+) -> Assessment {
+    assess_request(
         cursor_tool_to_action_kind(request.tool),
         request,
         mode,
@@ -214,6 +322,9 @@ fn claude_code_tool_to_action_kind(tool: &str) -> ActionKind {
 /// and permissions, and then asks the protection mode's question. No new rule
 /// engine is invented.
 ///
+/// This is [`assess_claude_code_tool`] without the danger, for a caller that
+/// wants the answer alone.
+///
 /// # Capability tier honesty
 ///
 /// Claude Code remains **Observed** (Tier 1). The hook manifest wires
@@ -228,13 +339,45 @@ pub fn decide_claude_code_tool(
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
 ) -> ProtectionDecision {
-    decide_request(
+    assess_claude_code_tool(request, mode, permissions, protection).decision
+}
+
+/// [`decide_claude_code_tool`], and which danger it named on the way.
+#[must_use]
+pub fn assess_claude_code_tool(
+    request: &ToolRequest<'_>,
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
+) -> Assessment {
+    assess_request(
         claude_code_tool_to_action_kind(request.tool),
         request,
         mode,
         permissions,
         protection,
     )
+}
+
+/// What the rule answered, and which of the three dangers it named on the way.
+///
+/// The danger is carried beside the decision rather than inside it because
+/// [`ProtectionDecision`] is what a harness reads: a field added there would be
+/// a change to the integration's response made for a caller's benefit, and this
+/// module's answers are a contract with two harnesses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assessment {
+    /// What SURE would do about the request.
+    pub decision: ProtectionDecision,
+    /// Which danger was named, when one was.
+    ///
+    /// `Some` only where [`decision`](Self::decision) is a block, and a block
+    /// with `None` is a request held for a reason no allowance may be spent on:
+    /// a mode that does not permit it, the one mode this release refuses, a
+    /// whole-location change strict holds, a migration, CI configuration. The
+    /// danger is *the* list of what a recorded allowance can let through, so
+    /// this field is also that list.
+    pub danger: Option<Danger>,
 }
 
 /// The one decision path both integrations share.
@@ -244,13 +387,20 @@ pub fn decide_claude_code_tool(
 /// protection mode. A mode can therefore make an answer firmer and can never
 /// make one weaker — the same rule `Authority::protection` applies to the two
 /// configuration layers.
-fn decide_request(
+///
+/// `P13-T005` adds one thing to that order and changes none of it: the danger a
+/// request was held for is *recorded* beside the answer. Recording is the whole
+/// of it — the answer itself is the one this function would have given before,
+/// except that a shell request held for a named danger carries a sentence about
+/// what the command would do instead of the generic one about consent, which is
+/// more information and not a weaker refusal.
+fn assess_request(
     action_kind: ActionKind,
     request: &ToolRequest<'_>,
     mode: ExecutionMode,
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
-) -> ProtectionDecision {
+) -> Assessment {
     let base = decide(action_kind, mode, permissions);
 
     // The mode this release does not implement is answered first and alone.
@@ -258,11 +408,30 @@ fn decide_request(
     // the configuration reader gives the same value in a file: a mode SURE
     // cannot apply must not be quietly answered as though it were standard.
     if protection == ProtectionMode::Custom {
-        return ProtectionDecision::block(custom_reason());
+        return Assessment {
+            decision: ProtectionDecision::block(custom_reason()),
+            danger: None,
+        };
     }
 
     if !base.is_allowed() {
-        return base_decision(base);
+        // The danger is read here too, and it is read off a refusal rather than
+        // off an allow because that is where a shell request always lands: the
+        // domain holds every arbitrary command for consent, and a hook cannot
+        // ask for consent.
+        //
+        // It is read for `NeedsConsent` and for nothing else. `Denied` is the
+        // execution mode or the permissions refusing, and a one-time allowance
+        // is not a way to run under settings the user did not change.
+        let danger = match base {
+            ExecutionDecision::NeedsConsent => claimed_danger(action_kind, request),
+            ExecutionDecision::Allowed | ExecutionDecision::Denied => None,
+        };
+        let decision = match danger {
+            Some(danger) => ProtectionDecision::block(danger_reason(danger)),
+            None => base_decision(base),
+        };
+        return Assessment { decision, danger };
     }
 
     match protection {
@@ -270,13 +439,259 @@ fn decide_request(
         // cannot produce from a file is still a value this function is total
         // over, and `unreachable!` in a decision path would be a panic where an
         // answer was asked for.
-        ProtectionMode::Custom => ProtectionDecision::block(custom_reason()),
-        ProtectionMode::Standard => ProtectionDecision::allow_with(STANDARD_ALLOWS),
+        ProtectionMode::Custom => Assessment {
+            decision: ProtectionDecision::block(custom_reason()),
+            danger: None,
+        },
+        ProtectionMode::Standard => Assessment {
+            decision: ProtectionDecision::allow_with(STANDARD_ALLOWS),
+            danger: None,
+        },
         ProtectionMode::Strict => match sensitive_area(action_kind, request.path) {
-            Some((area, role)) => ProtectionDecision::block(strict_reason(area, role)),
-            None => ProtectionDecision::allow_with(STRICT_ALLOWS),
+            Some((area, role)) => Assessment {
+                // The sentence is `P13-T004`'s and is not rewritten here: it
+                // already names the consequence for both of the categories a
+                // danger is read from, and two sentences for one hold would be
+                // two chances to disagree.
+                decision: ProtectionDecision::block(strict_reason(area, role)),
+                danger: danger_of(area, role),
+            },
+            None => Assessment {
+                decision: ProtectionDecision::allow_with(STRICT_ALLOWS),
+                danger: None,
+            },
         },
     }
+}
+
+/// A dangerous act SURE can name.
+///
+/// The three `P13-T005` is about, and the list is deliberately closed: a danger
+/// is the *only* thing a recorded one-time allowance can let through, so a
+/// fourth reader here would widen the override as well as the vocabulary.
+///
+/// Nothing here is a rule of its own. Each danger is read off an answer the
+/// code already reaches — [`safety::classify`]'s own `Source::Rule` and its
+/// `Destructive` class for the first two, strict mode's credential rule for the
+/// third — and a danger is only ever attached to a request that was held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Danger {
+    /// The request would delete across a whole location rather than the files
+    /// it names: a command the classifier calls destructive whose operands name
+    /// a location, or a change strict holds for the same reason.
+    BroadDelete,
+    /// The request would replace commits that were already published.
+    ForcePush,
+    /// The request would read a file where credentials or keys live.
+    SensitiveRead,
+}
+
+variants!(
+    /// Every danger a one-time allowance can be spent on.
+    Danger {
+        BroadDelete,
+        ForcePush,
+        SensitiveRead
+    }
+);
+
+impl Danger {
+    /// The danger in the words a user reads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::BroadDelete => "delete a whole location",
+            Self::ForcePush => "overwrite published commits",
+            Self::SensitiveRead => "read a file of credentials",
+        }
+    }
+
+    /// What this danger means for the user's own work.
+    ///
+    /// Two of the three are sentences that already exist: a whole-location
+    /// change and a read of credentials are categories
+    /// `docs/security/PROTECTION_MODE.md` names for strict mode, and the
+    /// sentence a user reads for them is [`SensitiveArea::consequence`]'s. Only
+    /// the force push needs words of its own, because nothing before this task
+    /// said anything about one.
+    #[must_use]
+    pub const fn consequence(self) -> &'static str {
+        match self {
+            Self::BroadDelete => SensitiveArea::BroadFilesystemChange.consequence(PathRole::Change),
+            Self::ForcePush => FORCE_PUSH_CONSEQUENCE,
+            Self::SensitiveRead => SensitiveArea::SecretMaterial.consequence(PathRole::Read),
+        }
+    }
+}
+
+/// What a force push costs, in the user's words.
+const FORCE_PUSH_CONSEQUENCE: &str = "This would replace commits that were already published. \
+     Anything built on them — someone else's branch, a release, a review — is left pointing at \
+     work that is no longer there.";
+
+/// The half of a named-danger block that is the same for all three.
+///
+/// It says what SURE answers rather than what the harness did. Both integrations
+/// are Observed (Tier 1), so a sentence claiming the command was stopped would
+/// be a false green.
+const DANGER_TAIL: &str = " A harness hook cannot ask you about this, so SURE does not allow it.";
+
+/// The half of the sentence a spent allowance produces that is the same for all
+/// three.
+///
+/// The words are *SURE would* for the same reason [`DANGER_TAIL`]'s are: an
+/// allowance is a decision SURE reaches, not a fact about the harness, and
+/// nothing in this build can establish that the harness acted on it.
+const ALLOWANCE_TAIL: &str = " You recorded a one-time allowance for this exact request, and \
+     this use spends it, so SURE would let this one through. No further request with these words \
+     would be allowed.";
+
+/// The sentence a request held for a named danger is answered with.
+#[must_use]
+pub fn danger_reason(danger: Danger) -> String {
+    format!("{}{DANGER_TAIL}", danger.consequence())
+}
+
+/// The sentence a request allowed by a spent allowance is answered with.
+#[must_use]
+pub fn allowance_reason(danger: Danger) -> String {
+    format!("{}{ALLOWANCE_TAIL}", danger.consequence())
+}
+
+/// The sentence a held request is answered with when SURE could not read its own
+/// record of allowances.
+///
+/// A state of its own, and a sentence of its own, because the user may hold a
+/// grant for exactly this request and SURE does not know whether they do. The
+/// generic hold says nothing about it and the spent-allowance sentence would
+/// claim a use that was never written; this says what happened to the read and
+/// what the answer still is.
+const ALLOWANCE_UNREADABLE: &str = " SURE could not read its record of one-time allowances, so \
+     it has not spent one and does not allow this.";
+
+/// [`ALLOWANCE_UNREADABLE`], for the danger the request was held for.
+///
+/// The danger is not named in the sentence — the block's own reason already
+/// says what the command would do — so the parameter is here to keep the two
+/// sentences answering the same request rather than to be printed.
+#[must_use]
+pub fn allowance_unreadable_reason(danger: Danger) -> String {
+    format!("{}{ALLOWANCE_UNREADABLE}", danger.consequence())
+}
+
+/// Which danger a strict-mode category is, when it is one of the three.
+///
+/// A whole-location change is a broad delete and a read of credentials is a
+/// sensitive read; the migration, CI and configuration categories are held by
+/// strict mode and are **not** dangers, so no allowance can let them through.
+/// That is a decision rather than an omission: what a one-time allowance covers
+/// is the three acts `THREAT_MODEL.md` calls dangerous, and widening it to
+/// every category strict holds would make the allowance a way to run under a
+/// mode the user did not change.
+fn danger_of(area: SensitiveArea, role: PathRole) -> Option<Danger> {
+    match (area, role) {
+        (SensitiveArea::BroadFilesystemChange, _) => Some(Danger::BroadDelete),
+        (SensitiveArea::SecretMaterial, PathRole::Read) => Some(Danger::SensitiveRead),
+        _ => None,
+    }
+}
+
+/// The danger a claimed command line would do, if SURE can read it and its own
+/// classifier calls it destructive.
+///
+/// Two questions, both answered by code that already exists: what the words are
+/// ([`safety::read_simple_command`], which refuses anything with two readings)
+/// and what the command does ([`safety::classify`], the one classifier).
+fn claimed_danger(action_kind: ActionKind, request: &ToolRequest<'_>) -> Option<Danger> {
+    match action_kind {
+        // The one kind whose request carries a command line.
+        ActionKind::ArbitraryCommand => request.command.and_then(command_danger),
+        // None of these carries a command through the harness tool classifiers:
+        // a path tool names a path, and the rest name nothing. A kind added to
+        // the vocabulary has to be answered here rather than falling through a
+        // wildcard, so each is named.
+        ActionKind::ReadFile
+        | ActionKind::WriteProjectFile
+        | ActionKind::DeleteProjectFile
+        | ActionKind::ListDirectory
+        | ActionKind::ReadMetadata
+        | ActionKind::StaticAnalysis
+        | ActionKind::RunTests
+        | ActionKind::Build
+        | ActionKind::TypeCheck
+        | ActionKind::Lint
+        | ActionKind::StartService
+        | ActionKind::LocalProbe
+        | ActionKind::BrowserProbe
+        | ActionKind::BrowserObservation
+        | ActionKind::InstallDependencies
+        | ActionKind::NetworkAccess
+        | ActionKind::ExternalService => None,
+    }
+}
+
+/// What one command line would do, read from the classifier's own answer.
+///
+/// `None` covers every way of not knowing: text with more than one reading, a
+/// program the table does not have, an operation it does not have, a command
+/// that is not destructive, and a destructive command whose operands name files
+/// rather than a location. None of them is a gap — a shell request is held
+/// whatever this answers, and the only thing the answer changes is whether the
+/// user can spend a recorded allowance on it.
+fn command_danger(command: &str) -> Option<Danger> {
+    let words = safety::read_simple_command(command)?;
+    let (program, arguments) = words.split_first()?;
+    let classification = safety::classify(program, arguments);
+
+    // Only a row of the classifier's own table can name a danger. A program it
+    // does not know, an operation it does not know, and text it cannot read are
+    // all answered with every category, `Destructive` among them, and naming a
+    // danger off one of those would be reporting SURE's own failure to classify
+    // as a fact about the command.
+    let Source::Rule {
+        program,
+        decided_by,
+    } = classification.source()
+    else {
+        return None;
+    };
+    if !classification
+        .effects()
+        .classes()
+        .contains(&CommandClass::Destructive)
+    {
+        return None;
+    }
+
+    // A push that destroys is a push with a force flag: the table's `push` row
+    // reaches `Destructive` through no other form, so the class is the force
+    // flag rather than a second reading of the arguments.
+    if program == "git" && decided_by == Some("push") {
+        return Some(Danger::ForcePush);
+    }
+
+    // Breadth, and it is the same question `strict` asks of a path: one operand
+    // that names a location rather than a file. An operand-less destructive
+    // command is deliberately not a broad delete — `git clean -fdx` and
+    // `git reset --hard` are destructive without naming anything SURE can
+    // bound, and naming them would put a sentence about "a whole location" on a
+    // command whose location SURE has not established.
+    arguments
+        .iter()
+        .filter(|word| !word.starts_with('-'))
+        .any(|word| word_names_a_whole_location(word))
+        .then_some(Danger::BroadDelete)
+}
+
+/// Whether one operand of a command line names a location rather than a file.
+///
+/// The folding and the question are `sensitive_area`'s, applied to a word
+/// instead of to a path: a backslash is a separator whatever the platform, case
+/// is folded on every platform, and [`names_a_whole_location`] decides.
+fn word_names_a_whole_location(word: &str) -> bool {
+    let folded = folded(word);
+    let folded = folded.as_str();
+    names_a_whole_location(folded, fold_segments(folded).count())
 }
 
 /// The sentence SURE answers with when the mode in force is the one this
@@ -501,8 +916,8 @@ fn sensitive_area(
     // every platform rather than only on Windows. Finding a category is the
     // firmer answer, and a rule whose answer changed with the file system under
     // it would be a rule two machines could disagree about.
-    let folded = path.replace('\\', "/").to_lowercase();
-    let folded = folded.trim();
+    let folded = folded(path);
+    let folded = folded.as_str();
 
     if folded.is_empty() {
         return match role {
@@ -511,7 +926,7 @@ fn sensitive_area(
         };
     }
 
-    let segments: Vec<&str> = folded.split('/').filter(|part| !part.is_empty()).collect();
+    let segments: Vec<&str> = fold_segments(folded).collect();
     let file_name = segments.last().copied().unwrap_or_default();
 
     // A read is asked one question and no other, because the document's areas
@@ -589,6 +1004,25 @@ const CI_FILE_NAMES: [&str; 9] = [
     ".woodpecker.yml",
     ".gitlab-ci.yaml",
 ];
+
+/// A path as SURE compares it: both separators folded to one, case folded,
+/// surrounding whitespace trimmed.
+///
+/// One function rather than the same three steps at each call site, because the
+/// question *is this the same path* has to have one answer: a path and a word
+/// out of a command line are folded by the same rule or the breadth rule would
+/// answer differently about the two halves of the same request.
+fn folded(text: &str) -> String {
+    text.replace('\\', "/").trim().to_lowercase()
+}
+
+/// The path segments of a folded path, empty ones dropped.
+///
+/// A `/` at the front, at the back, or doubled names the same thing as one, and
+/// [`names_a_whole_location`] asks the segment count as well as the text.
+fn fold_segments(folded: &str) -> impl Iterator<Item = &str> {
+    folded.split('/').filter(|part| !part.is_empty())
+}
 
 /// Whether the path names a location rather than one file.
 fn names_a_whole_location(normalised: &str, segment_count: usize) -> bool {
@@ -1162,6 +1596,281 @@ mod tests {
                 _ => None,
             };
             assert_eq!(role, expected, "{kind:?}");
+        }
+    }
+
+    // --- P13-T005: the three dangers, and what may be allowed once ----------
+
+    /// The canonical broad delete, on every spelling of "a whole location" the
+    /// breadth rule already recognises. `rm -rf build` is deliberately absent:
+    /// the rule reads a location from a trailing separator, a glob, a drive or
+    /// one of the location words, and `build` is a name like any other — which
+    /// is a limit, not an accident, and it is the same limit strict mode
+    /// applies to a path.
+    #[test]
+    fn a_destructive_command_over_a_whole_location_is_a_broad_delete() {
+        for line in [
+            "rm -rf /",
+            "rm -rf .",
+            "rm -rf ..",
+            "rm -rf ~",
+            "rm -rf *",
+            "rm -rf build/",
+            "rm -rf -- .",
+            "del *.*",
+            "rmdir /s ..",
+            "shred -u ~",
+            "git clean -fdx .",
+            "git rm -r --cached .",
+        ] {
+            assert_eq!(
+                command_danger(line),
+                Some(Danger::BroadDelete),
+                "{line:?} was not named"
+            );
+        }
+    }
+
+    /// An operand-free destructive command is not a broad delete. `git clean
+    /// -fdx` and `git reset --hard` destroy a lot without naming anything SURE
+    /// can bound, and a sentence claiming *a whole location* about a command
+    /// whose location SURE has not established would be a sentence SURE cannot
+    /// stand behind. They are still held; they are not overridable.
+    #[test]
+    fn a_destructive_command_that_names_nothing_is_not_named_as_broad() {
+        for line in ["git clean -fdx", "git reset --hard", "git prune"] {
+            assert_eq!(command_danger(line), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_push_that_destroys_history_is_a_force_push() {
+        for line in [
+            "git push --force",
+            "git push -f origin main",
+            "git push --force-with-lease origin main",
+            "git push --force-if-includes origin main",
+        ] {
+            assert_eq!(
+                command_danger(line),
+                Some(Danger::ForcePush),
+                "{line:?} was not named"
+            );
+        }
+    }
+
+    /// The half that keeps the naming honest: an ordinary push is network and
+    /// nothing else, and a command that merely mentions the words is not a
+    /// force push — the classifier decides, not a search for "force".
+    #[test]
+    fn a_push_that_destroys_nothing_is_not_a_force_push() {
+        for line in [
+            "git push",
+            "git push origin main",
+            "git log --force",
+            "echo git push --force",
+        ] {
+            assert_eq!(command_danger(line), None, "{line:?}");
+        }
+    }
+
+    /// Everything SURE cannot read or cannot classify stays unnamed, which is
+    /// the answer that asserts nothing: the request keeps the block it already
+    /// had, and no allowance can be recorded for a danger SURE did not name.
+    #[test]
+    fn a_command_sure_cannot_read_or_classify_names_no_danger() {
+        assert_eq!(command_danger(""), None);
+        assert_eq!(command_danger("   "), None);
+        // Text with more than one reading.
+        for line in [
+            "rm -rf \"my dir\"",
+            "rm -rf 'my dir'",
+            "rm -rf my\\ dir",
+            "rm -rf $HOME",
+            "cargo test && rm -rf /",
+            "rm -rf . || true",
+            "cat secrets > out",
+        ] {
+            assert_eq!(command_danger(line), None, "{line:?} was read");
+        }
+        // Read, and the classifier has no row: every category, `Destructive`
+        // among them, and SURE's own refusal to classify is not a fact about
+        // the command.
+        assert_eq!(command_danger("frobnicate /"), None);
+        // A destructive command whose operand is a name rather than a location.
+        assert_eq!(command_danger("rm -rf build"), None);
+        assert_eq!(command_danger("del report.txt"), None);
+    }
+
+    #[test]
+    fn every_danger_has_a_sentence_in_the_users_words() {
+        for danger in Danger::ALL {
+            let consequence = danger.consequence();
+            assert!(consequence.len() > 40, "{danger:?}: {consequence}");
+            assert!(consequence.ends_with('.'), "{danger:?}: {consequence}");
+            let held = danger_reason(*danger);
+            assert!(held.starts_with(consequence), "{held}");
+            assert!(held.contains("SURE does not allow it"), "{held}");
+            let allowed = allowance_reason(*danger);
+            assert!(allowed.starts_with(consequence), "{allowed}");
+            assert!(
+                allowed.contains("SURE would let this one through"),
+                "{allowed}"
+            );
+            let unread = allowance_unreadable_reason(*danger);
+            assert!(unread.starts_with(consequence), "{unread}");
+            assert!(unread.contains("does not allow this"), "{unread}");
+            for sentence in [&held, &allowed, &unread] {
+                assert!(
+                    !sentence.contains("protection.mode") && !sentence.contains("can_grant"),
+                    "policy jargon reached a user: {sentence}"
+                );
+            }
+        }
+    }
+
+    /// The whole point of the reading: a shell request that SURE would have
+    /// answered with one generic sentence about consent now says what the
+    /// command would do. The refusal is not weakened — it is the same Block.
+    #[test]
+    fn a_shell_request_held_for_a_named_danger_says_what_it_would_do() {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.run_project_code = true;
+        let assessment = assess_claude_code_tool(
+            &ToolRequest::running("Bash", "rm -rf build/"),
+            ExecutionMode::HostConfirmed,
+            &permissions,
+            ProtectionMode::Standard,
+        );
+        assert_eq!(assessment.decision.decision, ProtectionDecisionKind::Block);
+        assert_eq!(assessment.danger, Some(Danger::BroadDelete));
+        let reason = assessment.decision.reason.expect("a block says why");
+        assert!(reason.contains("whole location"), "{reason}");
+        assert!(
+            !reason.contains("rm -rf") && !reason.contains("build"),
+            "a field of the request was echoed into a sentence SURE writes: {reason}"
+        );
+    }
+
+    /// A request SURE cannot read is answered exactly as it was before this
+    /// existed: the same sentence, and no danger to spend an allowance on.
+    #[test]
+    fn a_shell_request_sure_cannot_read_keeps_the_consent_sentence() {
+        // The permissions that reach `NeedsConsent` rather than `Denied`: an
+        // arbitrary command is held for consent even where running project code
+        // is allowed, because a hook cannot ask for the consent.
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.run_project_code = true;
+        for command in ["rm -rf \"my dir\"", "cargo test && rm -rf /", "npm test"] {
+            let assessment = assess_claude_code_tool(
+                &ToolRequest::running("Bash", command),
+                ExecutionMode::HostConfirmed,
+                &permissions,
+                ProtectionMode::Standard,
+            );
+            assert_eq!(assessment.danger, None, "{command:?}");
+            assert_eq!(
+                assessment.decision.decision,
+                ProtectionDecisionKind::Block,
+                "{command:?}"
+            );
+            assert_eq!(
+                assessment.decision.reason.as_deref(),
+                Some(
+                    "This action needs explicit approval; the hook cannot obtain consent, so it \
+                     is blocked."
+                ),
+                "{command:?}"
+            );
+        }
+    }
+
+    /// A path tool carries no command line, so nothing is read for one — and a
+    /// request that was never held carries no danger either.
+    #[test]
+    fn a_danger_only_ever_attaches_to_a_held_request() {
+        let inspect = ExecutionPermissions::inspect_only();
+        let allowed = assess_cursor_tool(
+            &ToolRequest::at("Read", "src/lib.rs"),
+            ExecutionMode::InspectOnly,
+            &inspect,
+            ProtectionMode::Standard,
+        );
+        assert_eq!(allowed.decision.decision, ProtectionDecisionKind::Allow);
+        assert_eq!(allowed.danger, None);
+
+        // A command line on a tool that does not carry one is not read.
+        assert_eq!(
+            claimed_danger(
+                ActionKind::ReadFile,
+                &ToolRequest::running("Read", "rm -rf /")
+            ),
+            None
+        );
+        assert_eq!(
+            claimed_danger(
+                ActionKind::ArbitraryCommand,
+                &ToolRequest::running("Bash", "rm -rf /")
+            ),
+            Some(Danger::BroadDelete)
+        );
+    }
+
+    /// The engine's own refusal is not overridable: a one-time allowance is a
+    /// way to let one request through the protection question, not a way to run
+    /// under an execution mode the user did not change.
+    #[test]
+    fn the_execution_modes_refusal_is_never_a_danger() {
+        let denied = assess_cursor_tool(
+            &ToolRequest::at("Write", ".env"),
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+            ProtectionMode::Strict,
+        );
+        assert_eq!(denied.decision.decision, ProtectionDecisionKind::Block);
+        assert_eq!(denied.danger, None);
+
+        let refused_mode = assess_cursor_tool(
+            &ToolRequest::running("Shell", "rm -rf /"),
+            ExecutionMode::HostConfirmed,
+            &ExecutionPermissions::inspect_only(),
+            ProtectionMode::Custom,
+        );
+        assert_eq!(refused_mode.danger, None);
+    }
+
+    /// Strict mode's categories, and which of them are the three dangers. A
+    /// read of credentials is one; a change to a secret, a migration and CI
+    /// configuration are held and are not.
+    #[test]
+    fn strict_names_a_danger_only_for_the_acts_this_task_is_about() {
+        let cases = [
+            ("Read", ".env", true, Some(Danger::SensitiveRead)),
+            ("Read", "src/lib.rs", false, None),
+            ("Write", ".env", true, None),
+            ("Write", "migrations/0001_init.sql", true, None),
+            ("Write", ".github/workflows/ci.yml", true, None),
+            ("Delete", ".", true, Some(Danger::BroadDelete)),
+            ("Delete", "src/lib.rs", false, None),
+        ];
+        for (tool, path, held, expected) in cases {
+            let permissions = if tool == "Read" {
+                ExecutionPermissions::inspect_only()
+            } else {
+                writer()
+            };
+            let assessment = assess_cursor_tool(
+                &ToolRequest::at(tool, path),
+                ExecutionMode::HostConfirmed,
+                &permissions,
+                ProtectionMode::Strict,
+            );
+            assert_eq!(assessment.danger, expected, "{tool} {path}");
+            assert_eq!(
+                assessment.decision.decision == ProtectionDecisionKind::Block,
+                held,
+                "{tool} {path}"
+            );
         }
     }
 }

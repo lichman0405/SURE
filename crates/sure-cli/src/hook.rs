@@ -13,21 +13,33 @@
 //! 4. Persist it via the existing session event store.
 //! 5. For `pre-tool-use` events, evaluate a protection decision using the
 //!    existing execution-safety machinery and return it as a structured JSON
-//!    response.
+//!    response — spending a one-time allowance the user recorded for exactly
+//!    this request, if there is one, and answering with what SURE would then do
+//!    (see [`with_any_allowance`]).
+//!
+//! `sure hook allow-once` is the other half of step 5: it is the command a
+//! person runs to give the answer a hook cannot ask for, and it writes one row
+//! to SURE's store. A hook is a fresh process per event, so that row is the only
+//! place a one-time grant can live; see `sure_core::allowance`.
 
 use std::io::{self, Read};
 use std::path::Path;
 
+use sure_core::allowance;
 use sure_core::config::Authority;
 use sure_core::config::Config;
 use sure_core::config::ProtectionMode;
+use sure_core::diagnostics::Timestamp;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::full_recording::{
     self, DEFAULT_FULL_RECORDING_RETENTION_DAYS, FullRecordingConsent,
 };
 use sure_core::harness_event::ingest_event_str;
-use sure_core::hook_protection::{ToolRequest, decide_claude_code_tool, decide_cursor_tool};
+use sure_core::hook_protection::{
+    Assessment, ProtectionDecision, ToolRequest, allowance_reason, allowance_unreadable_reason,
+    assess_claude_code_tool, assess_cursor_tool,
+};
 use sure_core::ids::EventId;
 use sure_core::normalizer::{claude_code, codex, cursor};
 use sure_core::paths::Paths;
@@ -35,7 +47,7 @@ use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::Store;
 
 use crate::cli::HookAction;
-use crate::report::{Failed, Report};
+use crate::report::{Failed, HookAllowance, Report};
 
 /// Run a hook action and produce a report.
 ///
@@ -63,6 +75,156 @@ pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
 
             run_ingest(source.as_deref(), event_kind.as_deref(), event_text, store)
         }
+        HookAction::AllowOnce {
+            tool,
+            command,
+            path,
+            project,
+            minutes,
+        } => run_allow_once(
+            tool,
+            command.as_deref(),
+            path.as_deref(),
+            project.as_deref(),
+            *minutes,
+            store,
+        ),
+    }
+}
+
+/// Record one one-time allowance, for one request, as the user typed it.
+///
+/// Nothing about the subject is read here. Whether it is a broad delete, a force
+/// push or a read of credentials is decided when a request arrives
+/// ([`sure_core::hook_protection`]), because that is the only moment at which
+/// there is a request to read, and a command line this function refused to
+/// record would be a second rule about what is dangerous. What this function
+/// *does* refuse is a window SURE will not record and a request with no words
+/// in it: the first is [`run_allow_once_with_paths`]'s, the second the grammar's
+/// as well.
+///
+/// There is no validation of the *subject* against the tools SURE knows, and no
+/// requirement that the tool be one of them. The tool name is the harness's
+/// vocabulary and this is the user's claim about which harness tool they are
+/// covering; an allowance that names a tool no request ever carries is spent by
+/// nothing and expires, which is a wasted minute and not a wrong answer. The
+/// same is true of a subject SURE would never name as dangerous: it is recorded,
+/// it is never spent, and what the user reads says which three acts it can cover.
+///
+/// The project is the one caller-side fact this command takes as given, because
+/// nothing else can supply it: [`run_allow_once_with_paths`] stores the grant
+/// against `--project`, and a grant recorded for a different directory than the
+/// one a request arrives from is spendable by nothing. What the user reads names
+/// the directory, so that mistake is visible while it can still be corrected.
+fn run_allow_once(
+    tool: &str,
+    command: Option<&str>,
+    path: Option<&str>,
+    project: Option<&Path>,
+    minutes: u32,
+    store: Option<&Path>,
+) -> Report {
+    let Some(subject) = command.or(path) else {
+        // clap asks for exactly one of `--command` and `--path`, so this is
+        // unreachable from a command line; it is here because an answer is
+        // better than a panic if the grammar ever changes.
+        return failed(
+            "No request was named.",
+            "Name the request with --command for a shell tool, or --path for a tool that names \
+             a file."
+                .to_owned(),
+        );
+    };
+
+    let project_root = match project {
+        Some(dir) => dir.to_string_lossy().into_owned(),
+        None => match std::env::current_dir() {
+            Ok(cwd) => cwd.to_string_lossy().into_owned(),
+            Err(error) => {
+                return failed(
+                    "SURE could not read the current directory.",
+                    format!("{error}. Name the project with --project."),
+                );
+            }
+        },
+    };
+
+    let paths = match Paths::discover_at(store) {
+        Ok(paths) => paths,
+        Err(error) => {
+            return failed(
+                "SURE could not discover its data directories.",
+                error.to_string(),
+            );
+        }
+    };
+
+    run_allow_once_with_paths(tool, subject, &project_root, minutes, &paths)
+}
+
+/// [`run_allow_once`], with the locations already resolved.
+///
+/// The same split [`run_ingest`] has and for the same reason: what the command
+/// *decides* is testable against locations a test named, and the only part that
+/// reaches the machine's own files is the wrapper above.
+fn run_allow_once_with_paths(
+    tool: &str,
+    subject: &str,
+    project_root: &str,
+    minutes: u32,
+    paths: &Paths,
+) -> Report {
+    if !allowance::window_is_allowed(minutes) {
+        return failed(
+            "SURE will not record an allowance lasting that long.",
+            format!(
+                "--minutes must be between 1 and {}, and {} is what SURE records when the \
+                 duration is not given. An allowance is a single use of one request, and one \
+                 SURE records for longer than that is a standing permission with a shorter \
+                 name.",
+                allowance::MAX_MINUTES,
+                allowance::DEFAULT_MINUTES
+            ),
+        );
+    }
+
+    let project_path = Path::new(project_root);
+    let store_handle = match Store::open(paths, project_path) {
+        Ok(store_handle) => store_handle,
+        Err(error) => {
+            return failed("SURE could not open its record store.", error.to_string());
+        }
+    };
+
+    // The fingerprint is a note about which revision of the project this was
+    // recorded against; the allowance is *not* scoped by it. An allowance keyed
+    // to a fingerprint would stop being spendable the moment the agent wrote a
+    // line of code, which is the moment the request it was recorded for tends to
+    // arrive.
+    let fingerprint = match project_fingerprint(project_path, &FingerprintOptions::default()) {
+        Ok(fingerprint) => fingerprint,
+        Err(error) => return failed("SURE could not fingerprint the project.", error.to_string()),
+    };
+
+    let now_ms = Timestamp::now().as_millis();
+    match allowance::record(
+        &store_handle,
+        project_root,
+        &fingerprint.id,
+        tool,
+        subject,
+        minutes,
+        now_ms,
+    ) {
+        Ok(grant) => Report::HookAllowance(Box::new(HookAllowance {
+            tool: tool.to_owned(),
+            subject: subject.to_owned(),
+            project: project_root.to_owned(),
+            minutes,
+            grant,
+            not_after_ms: now_ms.saturating_add(i64::from(minutes) * 60_000),
+        })),
+        Err(error) => failed("SURE could not record the allowance.", error.to_string()),
     }
 }
 
@@ -172,23 +334,33 @@ fn run_ingest_with_paths(
         event_kind == Some("pre-tool-use") || envelope.event_type == "tool.requested";
 
     if is_pre_tool_use {
-        // The tool name and the path are the request's own words — the
-        // normaliser lifts `path` from the payload the harness sent, and
-        // nothing here reads the harness's raw `args`. They are handed to the
-        // rule as data (P13-T004); the rule classifies the path and never
-        // echoes it back inside a sentence SURE writes.
-        let request = ToolRequest {
-            tool: envelope
+        // The tool name, the path and the command are the request's own words —
+        // the normaliser lifts `path` from the payload the harness sent, and
+        // `args` is the harness's own arguments object, where a shell tool's
+        // command line lives (`normalizer::{cursor,claude_code}`). They are
+        // handed to the rule as data (P13-T004); the rule classifies the path
+        // and reads the command with `safety::read_simple_command`, which
+        // refuses any line with more than one reading, and never echoes either
+        // one back inside a sentence SURE writes.
+        let request = ToolRequest::of(
+            envelope
                 .payload
                 .get("tool")
                 .and_then(|v| v.as_str())
                 .unwrap_or(""),
-            path: envelope.payload.get("path").and_then(|v| v.as_str()),
-        };
+        )
+        .and_path(envelope.payload.get("path").and_then(|v| v.as_str()))
+        .and_command(
+            envelope
+                .payload
+                .get("args")
+                .and_then(|args| args.get("command"))
+                .and_then(|v| v.as_str()),
+        );
 
         let (mode, permissions, protection) = load_execution_config(&project_root, paths);
 
-        let decision = match source {
+        let assessment = match source {
             // Codex is documented to name its shell tool `Bash` and to match its
             // patch tool as `Edit` or `Write`, which is the vocabulary this
             // classifier already recognises. A Codex name outside it — a local
@@ -197,17 +369,69 @@ fn run_ingest_with_paths(
             // passing. `integrations/codex/README.md` records that limitation
             // and why the decision is advisory on this harness.
             Some("claude-code" | "codex") => {
-                decide_claude_code_tool(&request, mode, &permissions, protection)
+                assess_claude_code_tool(&request, mode, &permissions, protection)
             }
             // `Some("cursor")`, and anything else: the match above has already
             // refused a source SURE does not know.
-            _ => decide_cursor_tool(&request, mode, &permissions, protection),
+            _ => assess_cursor_tool(&request, mode, &permissions, protection),
         };
-        return Report::HookDecision(decision);
+        return Report::HookDecision(with_any_allowance(
+            &assessment,
+            &request,
+            &project_root,
+            paths,
+        ));
     }
 
     // For non-pre-tool-use events, report success.
     Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow())
+}
+
+/// The decision, with a recorded one-time allowance spent on it when one covers
+/// the request.
+///
+/// This is the whole of the override path, and it can only ever make the answer
+/// **more permissive for one request that SURE itself named as dangerous**. Two
+/// things keep it that shape:
+///
+/// * a danger is attached to a held request only, and only for three acts (see
+///   [`sure_core::hook_protection::Danger`]), so a request held for any other
+///   reason — the execution mode, a settings file SURE could not read, a
+///   migration, a whole-location change strict holds — has nothing to spend;
+/// * the spend is one store transaction that re-reads the grants, so two hooks
+///   racing on one allowance cannot both spend it.
+///
+/// Every failure here is answered with the hold, never with the allowance: a
+/// store SURE cannot read is a store whose allowances it does not know, and
+/// answering "no allowance" and answering "allow" are the two ways to get that
+/// wrong. The sentence differs between them, because a user who recorded an
+/// allowance a minute ago should be able to tell "there was none" from "SURE
+/// could not look".
+fn with_any_allowance(
+    assessment: &Assessment,
+    request: &ToolRequest<'_>,
+    project_root: &str,
+    paths: &Paths,
+) -> ProtectionDecision {
+    let (Some(danger), Some(subject)) = (assessment.danger, request.subject()) else {
+        return assessment.decision.clone();
+    };
+
+    let store = match Store::open(paths, Path::new(project_root)) {
+        Ok(store) => store,
+        Err(_) => return ProtectionDecision::block(allowance_unreadable_reason(danger)),
+    };
+
+    match store.spend_allowance(
+        project_root,
+        request.tool,
+        subject,
+        Timestamp::now().as_millis(),
+    ) {
+        Ok(Some(_)) => ProtectionDecision::allow_with(allowance_reason(danger)),
+        Ok(None) => assessment.decision.clone(),
+        Err(_) => ProtectionDecision::block(allowance_unreadable_reason(danger)),
+    }
 }
 
 fn persist_event_with_paths(
@@ -324,7 +548,7 @@ fn failed(what: &'static str, detail: String) -> Report {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use sure_core::hook_protection::ProtectionDecisionKind;
+    use sure_core::hook_protection::{Danger, ProtectionDecisionKind, allowance_reason};
     use sure_testkit::repository_root;
 
     fn fixture(name: &str) -> String {
@@ -1461,5 +1685,389 @@ mod tests {
             "a refused mode may not resolve to the default"
         );
         assert!(reason.contains("credentials"), "{reason}");
+    }
+
+    // --- the three dangers, and the one-time allowance that answers one -------
+    //
+    // Everything here runs through `run_ingest_with_paths` and
+    // `run_allow_once_with_paths` — the same bodies a harness's `sure hook
+    // ingest` and a user's `sure hook allow-once` reach, minus the argument
+    // vector — against locations this test named. The process-level side of the
+    // writer is in `tests/cli_contract.rs`, which runs the binary.
+
+    /// A Cursor `preToolUse` event for a shell tool: the command line travels in
+    /// the harness's own `args` object, which is where a shell tool's words
+    /// live on both integrations.
+    fn cursor_shell_request_at(project: &std::path::Path, tool: &str, command: &str) -> String {
+        serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": "p13t005",
+            "project_root": project.to_string_lossy(),
+            "tool": tool,
+            "args": {"command": command},
+            "timestamp_utc": "2026-09-19T10:00:00Z",
+            "source": "cursor",
+        })
+        .to_string()
+    }
+
+    /// Run one shell request and hand back what SURE answered and said.
+    fn run_shell_request(
+        project: &std::path::Path,
+        paths: &Paths,
+        tool: &str,
+        command: &str,
+    ) -> (ProtectionDecisionKind, String) {
+        let text = cursor_shell_request_at(project, tool, command);
+        let report = run_ingest_with_paths(Some("cursor"), Some("pre-tool-use"), &text, paths);
+        match &report {
+            Report::HookDecision(decision) => (
+                decision.decision,
+                decision
+                    .reason
+                    .clone()
+                    .expect("the rule answers a request with an action and a reason"),
+            ),
+            other => panic!("expected HookDecision, got {other:?}"),
+        }
+    }
+
+    /// Record an allowance the way `sure hook allow-once` records one, and
+    /// require that it was recorded.
+    fn allow_once(paths: &Paths, project: &std::path::Path, tool: &str, subject: &str) -> i64 {
+        let report = run_allow_once_with_paths(
+            tool,
+            subject,
+            &project.to_string_lossy(),
+            allowance::DEFAULT_MINUTES,
+            paths,
+        );
+        match report {
+            Report::HookAllowance(recorded) => recorded.grant,
+            other => panic!("expected a recorded allowance, got {other:?}"),
+        }
+    }
+
+    /// Every grant in a store that no request has spent.
+    ///
+    /// Read the way [`sure_core::allowance::outstanding`] reads, so that a test
+    /// asking "was this spent" is asking the same question the decision path
+    /// asks rather than a second one that happens to agree.
+    fn outstanding_grants(paths: &Paths, project: &std::path::Path) -> Vec<i64> {
+        let store = Store::open(paths, project).expect("the store opens");
+        let rows = store
+            .history(
+                &sure_core::store::HistoryFilter {
+                    project_fingerprint: None,
+                    kind: Some(sure_core::store::RecordKind::Allowance),
+                    include_recordings: false,
+                },
+                allowance::SCAN_LIMIT,
+            )
+            .expect("the rows read back");
+
+        let mut spent: Vec<i64> = Vec::new();
+        let mut grants: Vec<i64> = Vec::new();
+        for row in rows {
+            match allowance::read_back(row.clone()) {
+                Ok(allowance::AllowanceRecord::Grant(_)) => grants.push(row.id),
+                Ok(allowance::AllowanceRecord::Spent(use_of)) => spent.push(use_of.grant),
+                Err(error) => panic!("an unreadable allowance row: {error}"),
+            }
+        }
+        grants.retain(|id| !spent.contains(id));
+        grants
+    }
+
+    #[test]
+    fn a_broad_delete_is_held_and_an_allowance_for_it_lets_one_through() {
+        // The acceptance, through the command a harness runs. `rm -rf build/`
+        // is the classifier's own destructive `rm` row with an operand that
+        // names a whole location, and the mode is the one a user who has agreed
+        // to run project code is in — so the answer before the allowance is the
+        // consent hold, said in the user's terms.
+        let (project, paths) = a_project_with(
+            "p13t005-broad-delete",
+            "execution:\n  mode: host_confirmed\n",
+        );
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("names a whole location"),
+            "the hold does not say what the command would do: {reason}"
+        );
+        assert!(
+            reason.ends_with("SURE does not allow it."),
+            "the hold is not in the voice this build answers in: {reason}"
+        );
+
+        // The user records an allowance for exactly this request.
+        let grant = allow_once(&paths, &project, "Shell", "rm -rf build/");
+        assert!(grant > 0, "an allowance is a stored row");
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Allow,
+            "the recorded allowance did not let this one request through"
+        );
+        assert_eq!(
+            reason,
+            allowance_reason(Danger::BroadDelete),
+            "the sentence is not the one a spent allowance produces"
+        );
+        assert!(
+            reason.contains("SURE would let this one through"),
+            "the answer claims more than SURE can confirm: {reason}"
+        );
+
+        // And it is spent: the same words again are held exactly as before.
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "one allowance covered two requests"
+        );
+        assert!(reason.contains("names a whole location"), "{reason}");
+    }
+
+    #[test]
+    fn an_allowance_covers_one_request_and_not_its_neighbours() {
+        let (project, paths) = a_project_with(
+            "p13t005-one-request",
+            "execution:\n  mode: host_confirmed\n",
+        );
+        allow_once(&paths, &project, "Shell", "rm -rf build/");
+
+        // A different command, the same tool.
+        let (action, _) = run_shell_request(&project, &paths, "Shell", "rm -rf dist/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "another command was covered"
+        );
+
+        // The same command, claimed by a different tool.
+        let (action, _) = run_shell_request(&project, &paths, "Bash", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "another tool was covered"
+        );
+
+        // Neither of those spent it, so the request it was recorded for is the
+        // one that does. Exact matching is the whole of the scoping, and the
+        // order of these three assertions is what shows it.
+        let (action, _) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn a_force_push_is_held_and_an_allowance_for_it_lets_one_through() {
+        let (project, paths) =
+            a_project_with("p13t005-force-push", "execution:\n  mode: host_confirmed\n");
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "git push --force");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("replace commits that were already published"),
+            "a force push is not named for what it does: {reason}"
+        );
+
+        allow_once(&paths, &project, "Shell", "git push --force");
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "git push --force");
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+        assert_eq!(reason, allowance_reason(Danger::ForcePush));
+
+        // An ordinary push is another request: it is not a force push, so it is
+        // not named as a danger and no allowance is spent on it.
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "git push origin main");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "every shell request is held; the question is which sentence it gets"
+        );
+        assert!(
+            !reason.contains("replace commits"),
+            "an ordinary push was named as a force push: {reason}"
+        );
+    }
+
+    #[test]
+    fn a_read_of_credentials_is_held_under_strict_and_an_allowance_for_it_lets_one_through() {
+        let (project, paths) =
+            a_project_with("p13t005-sensitive-read", "protection:\n  mode: strict\n");
+
+        let (action, reason) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(reason.contains("credentials or keys"), "{reason}");
+
+        allow_once(&paths, &project, "Read", ".env");
+        let (action, reason) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+        assert_eq!(reason, allowance_reason(Danger::SensitiveRead));
+
+        // The next read of the same file is held again.
+        let (action, _) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Block);
+    }
+
+    #[test]
+    fn an_allowance_is_not_spent_by_a_request_that_was_never_held() {
+        // The property that keeps an allowance from becoming a setting: it can
+        // only ever change an answer SURE reached about one dangerous request.
+        // An ordinary read is allowed by the rule itself, and the grant is still
+        // there afterwards — which is how this test tells "the allowance was not
+        // needed" from "the allowance was quietly used up".
+        let (project, paths) = a_project_with("p13t005-unspent", "protection:\n  mode: strict\n");
+        let grant = allow_once(&paths, &project, "Read", ".env");
+
+        let (action, reason) = run_cursor_request(&project, &paths, "Read", Some("src/lib.rs"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+        assert_ne!(
+            reason,
+            allowance_reason(Danger::SensitiveRead),
+            "an ordinary read was answered with the allowance's sentence"
+        );
+        assert_eq!(
+            outstanding_grants(&paths, &project),
+            vec![grant],
+            "an ordinary read spent the allowance"
+        );
+
+        // And the request it was recorded for is still the one that spends it.
+        let (action, _) = run_cursor_request(&project, &paths, "Read", Some(".env"));
+        assert_eq!(action, ProtectionDecisionKind::Allow);
+        assert!(
+            outstanding_grants(&paths, &project).is_empty(),
+            "the grant was not spent by the request it named"
+        );
+    }
+
+    #[test]
+    fn a_hold_sure_cannot_tie_to_an_allowance_is_never_letting_one_through() {
+        // A shell request SURE cannot read has no danger, so no allowance can
+        // cover it — the answer is the consent hold it has always been. This is
+        // the limit of the override stated as a test: a command line with more
+        // than one reading is never let through by a grant.
+        let (project, paths) =
+            a_project_with("p13t005-unreadable", "execution:\n  mode: host_confirmed\n");
+        for line in [
+            "rm -rf \"my dir\"",
+            "rm -rf / && echo done",
+            "git push --force; echo done",
+        ] {
+            let (action, reason) = run_shell_request(&project, &paths, "Shell", line);
+            assert_eq!(
+                action,
+                ProtectionDecisionKind::Block,
+                "{line} is a line SURE can read in one way only? {reason}"
+            );
+            assert!(
+                !reason.contains("You recorded a one-time allowance"),
+                "{line} was let through by an allowance: {reason}"
+            );
+        }
+
+        // And a destructive command whose operands name files rather than a
+        // location is held for consent and is not named as a broad delete, so
+        // an allowance recorded for its exact words cannot let it through
+        // either. That is the fail-closed direction: SURE does not call a
+        // command dangerous on a guess, and it does not spend a grant on one
+        // either.
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(!reason.contains("names a whole location"), "{reason}");
+        allow_once(&paths, &project, "Shell", "rm -rf build");
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "an allowance let through a request SURE never named as dangerous"
+        );
+        assert!(!reason.contains("one-time allowance"), "{reason}");
+    }
+
+    #[test]
+    fn a_store_sure_cannot_read_holds_the_request_and_says_so() {
+        // A store inside the project it is recording about is refused by
+        // `Paths::ensure_outside`, which is the one way this path fails that a
+        // test can arrange without a broken disk. The answer must be the hold,
+        // and the sentence must be the one that says SURE could not look —
+        // "there is no allowance" would be a claim about a store it never read.
+        let tmp = scratch_hook_dir("p13t005-store-unreadable");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        std::fs::write(
+            project.join("sure.yaml"),
+            "execution:\n  mode: host_confirmed\n",
+        )
+        .expect("write project config");
+        let paths = Paths::from_roots(project.join("data"), project.join("config"))
+            .expect("the roots are absolute");
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("could not read its record of one-time allowances"),
+            "a store SURE cannot read is reported as something else: {reason}"
+        );
+        assert!(
+            !reason.contains("one-time allowance for this exact request"),
+            "a request was let through on a store SURE never read: {reason}"
+        );
+    }
+
+    #[test]
+    fn the_writer_refuses_a_window_it_will_not_record() {
+        let (project, paths) = a_project_with("p13t005-window", "");
+        let too_short = run_allow_once_with_paths(
+            "Shell",
+            "rm -rf build/",
+            &project.to_string_lossy(),
+            0,
+            &paths,
+        );
+        match too_short {
+            Report::Failed(failure) => {
+                assert!(
+                    failure.detail.contains('1') && failure.detail.contains("1440"),
+                    "the refusal does not say what SURE will record: {}",
+                    failure.detail
+                );
+            }
+            other => panic!("an allowance of no minutes was answered with {other:?}"),
+        }
+        let too_long = run_allow_once_with_paths(
+            "Shell",
+            "rm -rf build/",
+            &project.to_string_lossy(),
+            allowance::MAX_MINUTES + 1,
+            &paths,
+        );
+        assert!(
+            matches!(too_long, Report::Failed(_)),
+            "a standing permission was recorded as a one-time allowance"
+        );
+        assert!(
+            outstanding_grants(&paths, &project).is_empty(),
+            "a refused window still wrote a row"
+        );
+
+        // The bound itself is recorded, so the refusal is about the bound and
+        // not about the writer being unwilling to record anything at all.
+        let longest = run_allow_once_with_paths(
+            "Shell",
+            "rm -rf build/",
+            &project.to_string_lossy(),
+            allowance::MAX_MINUTES,
+            &paths,
+        );
+        assert!(
+            matches!(longest, Report::HookAllowance(_)),
+            "the longest window SURE documents was refused: {longest:?}"
+        );
     }
 }

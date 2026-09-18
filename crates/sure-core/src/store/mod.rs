@@ -93,7 +93,7 @@ mod record;
 
 pub use error::StoreError;
 pub use migrations::{LATEST as LATEST_SCHEMA_VERSION, Migration, MigrationError};
-pub use record::{APPROVAL, RECORDING, RecordKind, StoredRecord};
+pub use record::{ALLOWANCE, APPROVAL, RECORDING, RecordKind, StoredRecord};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -105,6 +105,7 @@ use serde_json::Value;
 use sure_domain::execution::HostConsent;
 use sure_domain::ids::FingerprintId;
 
+use crate::allowance::{self, AllowanceRecord};
 use crate::diagnostics::Timestamp;
 use crate::paths::Paths;
 use crate::redact;
@@ -504,6 +505,111 @@ impl Store {
         )
     }
 
+    /// Store a one-time allowance, so that the request it was recorded for can
+    /// spend it.
+    ///
+    /// A method of its own rather than `append_for(RecordKind::Allowance, ..)`,
+    /// for the reason [`Store::append_approval`] is one: a grant is a permission
+    /// the user gave, and writing one down is a thing a call site should have to
+    /// have typed on purpose. `crate::allowance` states what the document holds
+    /// and what it deliberately does not.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::MalformedRow`] if the record cannot be turned into JSON,
+    /// plus everything [`Store::append`] reports. There is no schema for this
+    /// kind, so there is no [`StoreError::Rejected`] from one.
+    pub fn append_allowance(
+        &self,
+        allowance: &AllowanceRecord,
+        project_root: &str,
+        fingerprint: &FingerprintId,
+    ) -> Result<i64, StoreError> {
+        let document =
+            serde_json::to_value(allowance).map_err(|error| StoreError::MalformedRow {
+                id: 0,
+                message: error.to_string(),
+            })?;
+        self.insert(
+            RecordKind::Allowance,
+            &document,
+            Some(project_root),
+            Some(fingerprint.as_str()),
+        )
+    }
+
+    /// Spend one outstanding allowance for a request, if there is one.
+    ///
+    /// Returns the row id of the grant that was spent, or `None` when there was
+    /// nothing to spend.
+    ///
+    /// **The read and the write are one transaction**, and that is the reason
+    /// this lives in the store rather than beside the question the pure
+    /// [`allowance::outstanding`] answers: a harness calls a hook as a fresh
+    /// process per event, two identical requests can arrive at once, and a check
+    /// in one transaction followed by a write in another would let one
+    /// allowance be spent twice by two processes that both looked when it was
+    /// outstanding.
+    ///
+    /// `None` also covers a store holding more allowance rows than
+    /// [`allowance::SCAN_LIMIT`]: SURE does not read past the bound, and the
+    /// direction it fails in is the one that spends nothing.
+    ///
+    /// The use is written with no project fingerprint. A grant is a statement
+    /// about the project state the user made it in and carries that state; a
+    /// use is a statement about SURE's own permission and carries the row it
+    /// spent instead.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Decode`] if a row of this kind cannot be read, plus the
+    /// store's own write errors. A use that could not be written is reported
+    /// rather than swallowed: an allowance that was allowed without being spent
+    /// is a permission that never ends.
+    pub fn spend_allowance(
+        &self,
+        project_root: &str,
+        tool: &str,
+        subject: &str,
+        now_ms: i64,
+    ) -> Result<Option<i64>, StoreError> {
+        let filter = HistoryFilter {
+            project_fingerprint: None,
+            kind: Some(RecordKind::Allowance),
+            include_recordings: false,
+        };
+        self.transaction(|connection| {
+            let rows = self.history(&filter, allowance::SCAN_LIMIT)?;
+            if rows.len() >= allowance::SCAN_LIMIT {
+                return Ok(None);
+            }
+            let Some(grant) = allowance::outstanding(&rows, project_root, tool, subject, now_ms)?
+            else {
+                return Ok(None);
+            };
+
+            let use_of = AllowanceRecord::Spent(allowance::Spent {
+                grant,
+                spent_at_ms: now_ms,
+            });
+            let document =
+                serde_json::to_value(use_of).map_err(|error| StoreError::MalformedRow {
+                    id: 0,
+                    message: error.to_string(),
+                })?;
+            let text = self.validate_and_stringify(RecordKind::Allowance, &document)?;
+            self.write_row(
+                connection,
+                RecordKind::Allowance,
+                &text,
+                Timestamp::now().as_millis(),
+                Some(project_root),
+                None,
+            )?;
+            Ok(Some(grant))
+        })
+    }
+
     /// Read records, newest first.
     ///
     /// `limit` is the maximum number of records to return, and `0` returns none.
@@ -741,26 +847,51 @@ impl Store {
     ) -> Result<i64, StoreError> {
         let text = self.validate_and_stringify(kind, document)?;
         let written_at_ms = Timestamp::now().as_millis();
-        let version = i64::from(sure_protocol::DOCUMENT_VERSION);
 
         self.transaction(|connection| {
-            connection
-                .execute(
-                    "INSERT INTO records (kind, document_version, written_at_ms, \
-                     project_root, project_fingerprint, document) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    rusqlite::params![
-                        kind.as_str(),
-                        version,
-                        written_at_ms,
-                        project_root,
-                        project_fingerprint,
-                        text
-                    ],
-                )
-                .map_err(|error| self.open_error(error))?;
-            Ok(connection.last_insert_rowid())
+            self.write_row(
+                connection,
+                kind,
+                &text,
+                written_at_ms,
+                project_root,
+                project_fingerprint,
+            )
         })
+    }
+
+    /// The `INSERT` itself, with no transaction of its own.
+    ///
+    /// Split out of [`Store::insert`] so that a write which has to read and
+    /// decide **inside the same transaction** — [`Store::spend_allowance`] —
+    /// uses the one statement every other write uses, rather than a second copy
+    /// of it that could drift from this one. The caller owns the transaction;
+    /// [`Store::insert`] is the caller that opens one of its own.
+    fn write_row(
+        &self,
+        connection: &Connection,
+        kind: RecordKind,
+        text: &str,
+        written_at_ms: i64,
+        project_root: Option<&str>,
+        project_fingerprint: Option<&str>,
+    ) -> Result<i64, StoreError> {
+        connection
+            .execute(
+                "INSERT INTO records (kind, document_version, written_at_ms, \
+                 project_root, project_fingerprint, document) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    kind.as_str(),
+                    i64::from(sure_protocol::DOCUMENT_VERSION),
+                    written_at_ms,
+                    project_root,
+                    project_fingerprint,
+                    text
+                ],
+            )
+            .map_err(|error| self.open_error(error))?;
+        Ok(connection.last_insert_rowid())
     }
 
     /// Run one write as a single transaction.

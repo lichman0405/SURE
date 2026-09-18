@@ -150,6 +150,15 @@ mod tests {
             hook.get_subcommands().any(|sub| sub.get_name() == "ingest"),
             "`sure hook` no longer accepts `ingest`"
         );
+        // `hook allow-once` is in the doc's table beside `hook ingest`, and the
+        // two are the whole of what the entry point a harness calls will do: one
+        // records an event, the other records the user's answer to a request the
+        // hook could not ask about.
+        assert!(
+            hook.get_subcommands()
+                .any(|sub| sub.get_name() == "allow-once"),
+            "`sure hook` no longer accepts `allow-once`"
+        );
         for optional in ["history", "config"] {
             let sub = command
                 .get_subcommands()

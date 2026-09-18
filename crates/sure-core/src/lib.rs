@@ -7,6 +7,7 @@
 //! first commit rather than introduced later.
 
 pub mod aggregation;
+pub mod allowance;
 pub mod analysis_provider;
 pub mod approval;
 pub mod browser;

@@ -3,14 +3,19 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T004` (implement protection rule engine) is dispatched from
-`93bef58` and is `in_progress`, with its brief at `target/tmp/brief-p13t004.md`.
-`P13-T003` was dispatched from `d2f4065`, has been verified and accepted, and its
-acceptance is commit `93bef58`. `P13-T003` (implement recording
-retention/deletion controls) is accepted as commit `acbc425`, verified at that
-sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry the
-numbers for it, and they include one sentence of shipped documentation that was
-false and was corrected at acceptance. `P13-T002` (implement privacy modes) is
+**In flight:** nothing. `P13-T004` (implement protection rule engine) was
+dispatched from `93bef58`, has been verified and accepted at this commit, and
+"What `P13-T004` added" and "Validation of `P13-T004`" below carry the numbers —
+including a defect that is not this task's: the contract tests' scratch
+allocator had exhausted its fixed 1,000-name pool, so the five gates were no
+longer reproducible on this machine until the pool was cleared. The next
+dispatch is the next READY task, `P13-T005` (implement dangerous shell/file/Git
+detectors). `P13-T003` was dispatched from `d2f4065`, has been verified and
+accepted, and its acceptance is commit `93bef58`. `P13-T003` (implement
+recording retention/deletion controls) is accepted as commit `acbc425`, verified
+at that sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry
+the numbers for it, and they include one sentence of shipped documentation that
+was false and was corrected at acceptance. `P13-T002` (implement privacy modes) is
 accepted as commit `2439c6f`, verified at that sha — "What `P13-T002` added" and
 "Validation of `P13-T002`" below carry the numbers. It found and recorded one
 defect in its own deliverable, a citation
@@ -30,8 +35,8 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 131 / 172 tasks accepted (counted from `progress/state.json` against
-`tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
+Progress: 132 / 172 tasks accepted (counted from `progress/state.json` against
+`tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
 `P7-T010`'s verification got owners (items 73 and 74), from 170 to 171 when
@@ -42,7 +47,7 @@ P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phas
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 3 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
+at 4 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -764,14 +769,66 @@ tree is or is not intact would be reading a claim the file does not make.
     and decides *whether* raw content is kept, never *how long*, and the duration
     is the hardcoded `DEFAULT_FULL_RECORDING_RETENTION_DAYS = 3`.
 
+88. A worker agent completed `P13-T003` — *Implement recording
+    retention/deletion controls* — as commit `acbc425`, accepted after
+    independent verification. The whole `sure history` group now answers, a
+    delete removes rows rather than reporting that it did, and
+    `privacy.full_recording_retention_days` is arbitrated so a project may
+    shorten what the user allowed and may not extend it. Acceptance corrected
+    one sentence of `CONFIG_REFERENCE.md` that was false about `full_recording`
+    — the hook decides that consent from the project's own file alone, which is
+    `P13-T009`'s, and the document now says so. See "What `P13-T003` added" and
+    "Validation of `P13-T003`".
+
+89. The next dispatch was the next READY task, `P13-T004` (implement protection
+    rule engine), whose brief sits at `target/tmp/brief-p13t004.md`. Reading the
+    tree for it established the shape the criterion is really about:
+    `ProtectionMode` occurred in exactly three files, all under
+    `crates/sure-core/src/config/` — 28 occurrences and zero anywhere else in
+    either crate — while the decision path in `hook_protection.rs` consulted
+    `ExecutionMode` and `ExecutionPermissions` and did not take the mode as a
+    parameter at all. `standard` and `strict` were two names for one behaviour.
+    The brief's central trap: the same "second rule engine" prohibition that
+    `safety.rs` and `hook_protection.rs` state in their own module docs.
+
+90. A worker agent completed `P13-T004` — *Implement protection rule engine* — as
+    commit `1454c8e`, accepted after independent verification. The two modes now
+    answer the same request differently, every decision carries a sentence in the
+    user's terms, and the mode reaches the decision through `Authority::load`, so
+    a project file can raise it and cannot lower it. See "What `P13-T004` added"
+    and "Validation of `P13-T004`".
+
+91. `P13-T004`'s verification found a defect that is not `P13-T004`'s and made
+    the five gates unreproducible: `crates/sure-cli/tests/cli_contract.rs`'s
+    `a_directory_of_our_own` allocates from a fixed pool of 1,000 candidate names
+    (`{what}-{NEXT}`, unique by `create_dir`, never cleared) and panics when they
+    all collide with leftovers. Measured: all 1,000 of `store-0` … `store-999`
+    existed — 1,340 directories, every one `store-N` or `project-N`, no files —
+    so `the_protection_mode_a_project_names_is_the_one_sure_decides_under` failed
+    alone and would have failed in a full run. The accepted gate run at `1454c8e`
+    was green and consumed the last headroom. One full suite run allocates about
+    123 names, so this recurs after roughly eight runs. The scratch subtree was
+    cleared (git-ignored, regenerated by the tests) and the gates re-ran green at
+    the same commit. The durable fix is the allocator and it has no owner yet.
+
+92. `P13-T004`'s verification also produced a fourth variant of the instrument
+    error this file keeps recording, and it is the first one caused by the shell
+    rather than by the way the shell was read: `Start-Process -ArgumentList` joins
+    an array with spaces and does **not** quote the elements, so a scratch path
+    containing a space was split into several arguments and all 26 runs of the
+    first probe reached `sure.exe` as a clap status-2 usage error. The label was
+    in the directory name, which is why the error text named the label. The call
+    operator was used instead and the scratch names sanitised. The same run also
+    learned that `Remove-Item -Recurse` on the directory the shell is standing in
+    fails on Windows while still emptying it.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T002` was accepted, is
-`P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`,
-`P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T003` (implement
-recording retention/deletion controls) is the first of those and is the next
-dispatch; its brief sits at `target/tmp/brief-p13t003.md`. Its base commit is to
-be pinned at dispatch, since `P13-T002` landed after the brief was written. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T004` was accepted, is
+`P13-T005`, `P13-T006`, `P13-T007`, `P13-T009`, `P14-T004`, `P14-T005`,
+`P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`,
+`P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T005`
+(implement dangerous shell/file/Git detectors) is the first of those and is the
+next dispatch; its base commit is the `P13-T004` acceptance commit. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
@@ -931,6 +988,90 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T004` added
+
+`ProtectionMode` was parsed, validated, arbitrated across the two configuration
+layers, and read by nothing. The commit makes it a parameter of the one decision
+path that already existed, `crates/sure-core/src/hook_protection.rs`:
+`decide_request` asks the existing engine first, returns a refusal it reached
+unchanged, and puts only an allowed action to the mode. No second rule engine,
+which the module's own doc comment and `safety.rs` both require.
+
+`strict` holds the four categories `docs/security/PROTECTION_MODE.md` names —
+migrations, CI/CD configuration, secret/config areas and broad filesystem
+changes — as *changes*, and holds a **read** only where the read is the
+sensitive act, which is credentials. `standard` holds none of them. Both
+integrations get the mode through `Authority::load`, so a project file can raise
+it and cannot lower what the user set.
+
+Every decision the rule reaches now carries a sentence, allows included
+(`ProtectionDecision::allow_with`), in the user's terms: "This would read a file
+that holds credentials or keys. Reading one is enough to put the secret in the
+agent's context, where it can come back out in what the agent writes." No
+sentence names a setting. `ProtectionDecision::allow()` keeps `reason: None` and
+now means exactly one thing — no request was put to the rule at all, a lifecycle
+event rather than a verdict.
+
+Documents changed: `docs/security/PROTECTION_MODE.md` (custom is not
+implemented, and what a hook does when it meets the value anyway, or a settings
+file it cannot read at all), `docs/architecture/CONFIG_REFERENCE.md` (the
+`protection` table), `docs/architecture/CONFIG_AUTHORITY.md` (the third thing
+that routes through the layer, and why the hook is the one caller that does not
+stop), `docs/architecture/CLI.md` (the exit-status rows for `sure hook ingest`),
+`docs/security/THREAT_MODEL.md` (T13, with the advisory limit stated).
+
+## Validation of `P13-T004`
+
+The criterion — Standard/Strict/Custom modes return action + plain-language
+reason — verified by driving `target\debug\sure.exe` into scratch stores outside
+the repository with payloads the supervisor wrote, 28 cases
+(`target/tmp/sup-p13t004-probe.ps1`, output `sup-p13t004-probe.txt`), all through
+`sure hook ingest`, which is the command the integrations' launchers run.
+
+`Read` of `.env`: `allow` at exit 0 under `standard`, `block` at exit 1 under
+`strict`, with the sentence above. `strict`'s read rule is credentials and
+nothing wider — `src/lib.rs`, `migrations/001_init.sql` and
+`.github/workflows/ci.yml` are all allowed under `strict`, while `.env`, a
+Windows `.ssh/id_rsa` path, `.ENV`, `SECRETS\x.txt` and `config/credentials.json`
+are blocked. A read naming no path is allowed; a change naming no path is held.
+`protection: mode: custom` blocks `.env` with the *credentials* sentence and
+allows `src/lib.rs` with the *strict* one, which is the documented fallback to
+the firmest implemented mode.
+
+The honest limit, measured: **every write, delete and shell request is refused by
+the execution mode in both modes**, with one identical sentence — the protection
+rule is never asked, because `Permission::WriteProject` is granted by no
+configuration path in this build (`hook.rs` sets only `run_project_code`,
+`install_dependencies` and `network` from `inspect_only()`; `grep -rn
+write_project crates/` finds `true` only in tests). The three categories that are
+changes are therefore demonstrated at unit level only.
+
+Two limits and one gap, recorded rather than smoothed: the user-stricter
+direction needs a file at `%APPDATA%\SURE\sure.yaml`, which does not exist on
+this machine and was not created, so it is unit-covered through
+`Paths::from_roots`; nothing was blocked in reality, because both integrations
+are capability tier 1 and a decision states what SURE would do; and a settings
+file SURE cannot read leaves the hook deciding under `strict` with 0 bytes on
+stderr and nothing in the frame saying a file failed to load — documented as
+deliberate, and the silence is now owned by `P13-T007`.
+
+The guard proven able to fail: removing the case folding from the path rule made
+`paths_are_matched_without_regard_to_separator_or_case` and
+`strict_holds_a_change_in_the_documents_areas_and_nothing_else` fail by name —
+the second on **`Jenkinsfile`**, whose real spelling is capitalised while the CI
+constant is lowercase. Driven through the rebuilt binary, `strict Read .ENV` and
+`strict Read SECRETS/x.txt` both went from block to **allow** while the lowercase
+spellings still blocked. Restored, hash-verified, tree clean, module green.
+
+A defect found while verifying, not this task's: `cli_contract.rs`'s
+`a_directory_of_our_own` allocates from a fixed pool of 1,000 names and never
+clears up, and by the time of the isolated re-run all 1,000 of `store-0` …
+`store-999` existed, so that test failed **alone and would have failed in a full
+run**. The accepted gate run at `1454c8e` was green and consumed the last of the
+headroom; one full suite run allocates about 123 names, so it recurs after
+roughly eight runs. The scratch subtree was cleared and the five gates re-ran
+green at the same commit. Not fixed here — the durable fix is the allocator.
 
 ## What `P13-T003` added
 

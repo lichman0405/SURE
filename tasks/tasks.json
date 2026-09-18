@@ -2464,6 +2464,21 @@
     "notes": ""
   },
   {
+    "id": "P15-T015",
+    "phase": "P15",
+    "title": "Stop the contract tests running out of scratch directories",
+    "required": true,
+    "depends_on": [],
+    "acceptance": [
+      "No sequence of suite runs exhausts the helper: after the pool that exists today has been deliberately filled, a fresh run still gets a directory rather than panicking, observed by filling it and running the suite rather than by reading the allocator.",
+      "The names stay unique across processes and across two suites running at once, so two concurrent runs cannot be handed the same directory.",
+      "The reason the helper never clears a fixed path — cleaning and then treating the path as fresh fails on Windows, where a deletion can fail silently, and the test then describes a directory that was never emptied — is either preserved or replaced by something that states why it is now safe.",
+      "Whatever space the scratch occupies is bounded or reclaimed, so a developer machine does not accumulate a directory per call for the life of the repository."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-19 by the supervisor, from P13-T004's verification. crates/sure-cli/tests/cli_contract.rs's a_directory_of_our_own allocates from a fixed pool of 1,000 candidates — `{what}-{NEXT}`, NEXT per-process from 0, made unique by create_dir — and the helper's own doc comment says it is never cleared, for a good reason (clearing a fixed path and then treating it as fresh fails on Windows, where a deletion can fail silently, and the test then describes a directory that was never emptied). The two together are the defect: never clearing is right, a fixed 1,000-name budget is not, and when every candidate collides the helper panics with \"no free directory under ...\". Measured at P13-T004's acceptance: all 1,000 of store-0 .. store-999 existed — 1,340 directories, every one named store-N or project-N, no files — so the_protection_mode_a_project_names_is_the_one_sure_decides_under failed when run alone and would have failed in a full run. The accepted gate run at 1454c8e was green and consumed the last headroom; one full suite run allocates about 123 names, so it recurs after roughly eight runs. The supervisor cleared the scratch subtree and the gates re-ran green, which buys about eight runs and fixes nothing. This is the verification instrument, not the product: the failure is loud and on a correct tree, and the damage it does is to make a worker doubt its own change or edit product code around it. It belongs beside P15-T010 (cross-platform CI matrix) and P16-T003 (final cross-platform core gates), both of which need the suite to run repeatedly on one machine."
+  },
+  {
     "id": "P16-T001",
     "phase": "P16",
     "title": "Run clean native Windows validation",

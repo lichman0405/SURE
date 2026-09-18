@@ -3,14 +3,30 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing. `P13-T004` (implement protection rule engine) was
-dispatched from `93bef58`, has been verified and accepted at this commit, and
-"What `P13-T004` added" and "Validation of `P13-T004`" below carry the numbers —
-including a defect that is not this task's: the contract tests' scratch
-allocator had exhausted its fixed 1,000-name pool, so the five gates were no
-longer reproducible on this machine until the pool was cleared. The next
-dispatch is the next READY task, `P13-T005` (implement dangerous shell/file/Git
-detectors). `P13-T003` was dispatched from `d2f4065`, has been verified and
+**In flight:** `P13-T005` (implement dangerous shell/file/Git detectors), the
+first READY task, dispatched from base commit `56d2e63` — the `P13-T004`
+acceptance commit — with its brief at `target/tmp/brief-p13t005.md`. The brief
+carries a map of the existing detection machinery the supervisor verified in the
+tree rather than inferred: `safety.rs` already detects force push (`:756`) and
+destructive delete (`:1053-1062`), but `safety::classify`'s only shipping caller
+is `consent.rs:258` and `PermissionPlan::new` has no shipping caller at all, so
+none of it reaches a user; the hook never reads a command line
+(`hook.rs:175-179`) although both normalisers carry `args.command` straight to
+that point; and no one-time override exists anywhere in the repository. The
+brief names the four things that make the task hard, including the one that must
+not be solved by accident — turning a shell string into program-plus-argv is the
+act `safety.rs:240-247` refuses to perform. `P13-T004` (implement protection rule
+engine) was dispatched from `93bef58`, has been verified and accepted at commit
+`56d2e63`, and "What `P13-T004` added" and "Validation of `P13-T004`" below carry
+the numbers — including a defect that is not that task's: the contract tests'
+scratch allocator had exhausted its fixed 1,000-name pool, so the five gates were
+no longer reproducible on this machine until the pool was cleared. That defect
+now has an owner, `P15-T015` (added 2026-09-19, after `P15-T014`), which is why
+the graph is 173 tasks rather than 172; `P15-T015` is deliberately **not** the
+next dispatch — the READY order is `tasks/tasks.json`'s order and `P13-T005`
+comes first — and the exact diagnosis is in `P13-T005`'s brief so that a worker
+who hits the panic clears the scratch pool instead of editing product code
+around it. `P13-T003` was dispatched from `d2f4065`, has been verified and
 accepted, and its acceptance is commit `93bef58`. `P13-T003` (implement
 recording retention/deletion controls) is accepted as commit `acbc425`, verified
 at that sha — "What `P13-T003` added" and "Validation of `P13-T003`" below carry
@@ -35,19 +51,22 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 132 / 172 tasks accepted (counted from `progress/state.json` against
+Progress: 132 / 173 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
 `P7-T010`'s verification got owners (items 73 and 74), from 170 to 171 when
 `P7-T011`'s verification gave the corpus's own record of what the detectors do an
 owner (item 75), and from 171 to 172 when `P12-T007`'s verification found that
-recorded events never reach the verdict's capability tier (item 77)). **Phase
+recorded events never reach the verdict's capability tier (item 77), and from
+172 to 173 on 2026-09-19 when `P13-T004`'s verification found that the contract
+tests' scratch allocator had exhausted its fixed pool and made the five gates
+unreproducible (item 93)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 4 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
+at 4 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 15; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -821,14 +840,34 @@ tree is or is not intact would be reading a claim the file does not make.
     operator was used instead and the scratch names sanitised. The same run also
     learned that `Remove-Item -Recurse` on the directory the shell is standing in
     fails on Windows while still emptying it.
+93. `P13-T004`'s verification found the scratch-pool defect recorded at item 91
+    and gave it an owner rather than fixing it in place. The reasoning is worth
+    keeping because it is the first time this loop has added a task it chose not
+    to dispatch: `P15-T015` was inserted after `P15-T014` so the array's order
+    stays the READY order, which means §14 still hands the next dispatch to
+    `P13-T005` and the mitigation has to be that a worker cannot *misdiagnose*
+    the panic rather than that it cannot *hit* it. So the brief carries the exact
+    diagnosis — the helper's path, the size of the pool, the number of names one
+    full run consumes, the fact that clearing is right and the fixed budget is
+    wrong, and an explicit "do not edit the allocator and do not edit product
+    code around it" — and the task itself is written to be verified by filling
+    the pool deliberately and re-running, not by reading the allocator. The
+    general rule: when the supervisor declines to reorder work, it inherits an
+    obligation to make the un-dispatched hazard non-misleading for whoever meets
+    it first.
 
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T004` was accepted, is
-`P13-T005`, `P13-T006`, `P13-T007`, `P13-T009`, `P14-T004`, `P14-T005`,
-`P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`,
-`P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T005`
-(implement dangerous shell/file/Git detectors) is the first of those and is the
-next dispatch; its base commit is the `P13-T004` acceptance commit. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T004` was accepted and
+after `P15-T015` joined the graph, is `P13-T005`, `P13-T006`, `P13-T007`,
+`P13-T009`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
+`P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`, `P7-T013`, in the order
+`tasks/tasks.json` lists them. `P13-T005` (implement dangerous shell/file/Git
+detectors) is the first of those and is in flight; its base commit is the
+`P13-T004` acceptance commit `56d2e63`. `P15-T015` does not appear in that list
+because it is queued behind work that precedes it in the array — it is
+deliberately placed in the P15 block rather than at the front, so the READY
+order stays the file's order and the task that fixes the gates is dispatched on
+the same rule as every other task. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.

@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 93 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 94 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9), phase P8 complete (11/11). Phase P9 complete (5/5).** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
@@ -23,7 +23,8 @@ accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T00
 `b7068a4`. `P8-T011` is accepted as commit `5bf6ee1`. `P9-T001` is accepted as commit
 `0982310`. `P9-T002` is accepted as commit `a398107`. `P9-T003` is accepted as commit
 `d1fd41b`. `P9-T004` is accepted as commit `df84d7f`. `P9-T005` is accepted as commit
-`3c56d5b`. `P5-T005` received two follow-up security fixes in
+`3c56d5b`. `P9-T006` is accepted as commit
+`a4679f8`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
@@ -264,6 +265,12 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     re-check checks pass, keeps findings open when evidence or checks are
     missing, and stores every run's findings and check results so old runs
     remain auditable.
+40. A worker agent completed `P9-T006` — *Implement repair-regression guard* — as
+    commit `a4679f8`. The supervisor verified all quality gates and accepted the
+    task. `repair_regression_guard.rs` in `crates/sure-core/tests/` is the
+    mandatory `repair-regression` adversarial fixture: it proves that when a
+    repair's contract recheck passes but a selected regression check fails, the
+    original finding stays open and the project cannot turn green.
 
 **Phase P9 complete (5/5).** The READY list is now
 `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
@@ -14158,6 +14165,37 @@ absent text.
 - `crates/sure-core/src/lib.rs` — registered the new `recheck_lifecycle` module.
 
 ## Validation of `P9-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P9-T006` added
+
+- `crates/sure-core/tests/repair_regression_guard.rs` (new) — mandatory
+  `repair-regression` adversarial fixture.
+  - Builds a realistic repair contract for an "Email not sent" finding with a
+    recheck check and evidence anchored at `src/email/send.rs`.
+  - Builds a schedule containing the recheck, an affected check at the same
+    location, and a serious deterministic regression check at
+    `src/payment/charge.rs` that runs project code.
+  - Calls `select_impacted_checks` and verifies all three checks are selected.
+  - Simulates the adversarial repair: the recheck and affected check pass, but
+    the regression check fails.
+  - Calls `reconcile` and asserts the original finding stays open and is never
+    resolved, so the project cannot turn green.
+  - Includes a control test proving the same fixture resolves when every
+    selected check passes.
+  - Asserts `fixtures/adversarial/repair-regression/scenario.json` is marked
+    `implemented`.
+- `fixtures/adversarial/repair-regression/scenario.json` — `fixture_status`
+  updated from `to_be_implemented_by_task_graph` to `implemented`.
+
+## Validation of `P9-T006`
 
 | Gate | Result |
 | --- | ------ |

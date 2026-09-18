@@ -333,9 +333,11 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     gates and accepted the task. `sure hook ingest --source cursor` now reads
     stdin, normalizes events, persists them, and evaluates `preToolUse` requests
     through the existing execution-safety machinery, returning structured
-    `allow`/`warn`/`block` decisions. The capability tier is kept honest as
-    Observed (Tier 1) because Cursor's hook schema does not confirm it will
-    honour a block response.
+    `allow`/`block` decisions. A post-acceptance security-review follow-up
+    (commit `b5bffab`) corrected `ExecutionDecision::NeedsConsent` from `warn`
+    to `block` so the hook fails closed when it cannot obtain consent. The
+    capability tier is kept honest as Observed (Tier 1) because Cursor's hook
+    schema does not confirm it will honour a block response.
 
 **Phase P11 is open at 6 of 9; Phase P10 is open at 3 of 8.** The READY list is now
 `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`, `P13-T004`, `P14-T001`,
@@ -361,7 +363,10 @@ concrete action.
 - `crates/sure-core/src/hook_protection.rs` — new protection decision adapter:
   maps Cursor tool names (`Shell`, `Read`, `Write`, `Delete`) to
   `ActionKind`, then uses the existing domain `decide` function with the
-  current `ExecutionMode` and `ExecutionPermissions` to produce `Allow`/`Warn`/`Block`.
+  current `ExecutionMode` and `ExecutionPermissions` to produce `Allow`/`Block`.
+  `ExecutionDecision::NeedsConsent` is mapped to `Block` because a pre-action
+  hook that cannot ask the user for consent must fail closed; a post-acceptance
+  security-review follow-up corrected an earlier `Warn` mapping.
 - `crates/sure-core/src/lib.rs` — added `pub mod hook_protection;`.
 - `crates/sure-core/src/normalizer/cursor.rs` — minor adjustments to expose
   fields needed by the hook ingest path.

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P11",
-  "last_updated": "2026-09-18T06:38:03.570Z",
+  "last_updated": "2026-09-18T06:54:52.264Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1279,13 +1279,13 @@
       "notes": "Supervisor review: worker implemented Cursor session evidence ingestion in commit f878581; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T005": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T06:39:11.014Z",
+      "finished_at": "2026-09-18T06:54:52.264Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Supervisor review: worker implemented Cursor repair handoff in commit 2062077; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T006": {
       "status": "queued",

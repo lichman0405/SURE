@@ -3,20 +3,24 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing. The next dispatch is `P15-T017` (make the non-Windows
-configuration checkable from Windows), which is the first READY task by the rule
-this file applies everywhere else — the order `tasks/tasks.json` lists them,
-filtered by `scripts/taskctl.mjs`'s predicate — and it is first because
-`P15-T016`, its only dependency, landed. **Its brief is not written yet** and
-writing it is the first thing the next turn does, in the shape
-`target/tmp/brief-p13t005.md` established: what is already true in the tree, what
-was already measured, and which of the acceptance criteria this machine can and
-cannot meet. Two measurements already exist and belong in it rather than being
-re-derived: `cargo clippy -p sure-testkit --all-targets --target
-x86_64-unknown-linux-gnu -- -D warnings` runs on this Windows box and works,
-while the same command on `sure-core` or `sure-cli` fails inside `cc-rs` with
-`failed to find tool "x86_64-linux-gnu-gcc"` — so the answer is a
-`rustup target add` plus a per-crate boundary, or a reason why not.
+**In flight:** `P15-T017` (make the non-Windows configuration checkable from
+Windows), dispatched from base commit `9294c4a` — the `P13-T006` acceptance —
+with its brief at `target/tmp/brief-p15t017.md`. It is the first READY task by
+the rule this file applies everywhere else — the order `tasks/tasks.json` lists
+them, filtered by `scripts/taskctl.mjs`'s predicate — and it is first because
+`P15-T016`, its only dependency, landed. The brief carries the funnel this task
+was narrowed to by measurement rather than by argument: both unix targets are
+already installed, cross-target clippy already reaches `sure-domain`,
+`sure-protocol` and `sure-testkit` on both, and it fails on `sure-core` and
+`sure-cli` inside `cc-rs` with `failed to find tool "x86_64-linux-gnu-gcc"`
+because a bundled SQLite is C that has to be compiled for the target. **That
+boundary is the whole difficulty and the brief states it as one**: of the four
+files the three recorded defects name, three are in `sure-core`, the crate the
+command cannot reach — so a check scoped to the three crates that work is worth
+having and must not be described as covering the class. The cost is measured
+too, because criterion 3 asks for it: **1.7 s warm and 7.3 s cold** for the
+three-crate command, taken with `CARGO_TARGET_DIR=target/cold-probe` so the warm
+cache was not disturbed.
 `P13-T006` (implement protection audit history) was dispatched from
 base commit `a752fdc` — the `P15-T016` acceptance — with its brief at
 `target/tmp/brief-p13t006.md`, handed back as `72365b9`, verified independently

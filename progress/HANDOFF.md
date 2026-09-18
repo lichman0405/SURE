@@ -413,12 +413,111 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `docs/adr/0013-no-typescript-extension-for-v01.md`, recording that
     plugins/hooks satisfy v0.1 and no TypeScript extension is needed unless a
     concrete missing capability is demonstrated later.
+61. A worker agent completed `P12-T002` — *Implement disabled/no-model provider*
+    — as commit `4612f01`. The supervisor re-ran the full gate set and accepted
+    the task. Added `NotCheckedReason::AnalysisProviderDisabled`, a
+    `disabled_result` helper, and reduced-coverage caveats in the human, JSON,
+    and portable reports so SURE remains useful and reports reduced semantic
+    coverage honestly when no model is configured.
+62. The supervisor completed `P12-T003` — *Implement user-owned Claude CLI
+    provider* — as commit `9604bd6`. Reviewed the implementation contributed
+    during the redaction task, ran the full gate set, and accepted the task.
+    Replaced the placeholder with a bounded provider that runs `claude -p
+    <prompt>` in the project root, redacts the prompt before it leaves SURE,
+    bounds stdout/stderr, and returns the result as a model assessment.
+63. A worker agent completed `P13-T001` — *Implement secret redaction engine* —
+    as commit `36a7db3`. The supervisor re-ran the full gate set and accepted
+    the task. Added a configurable `Redactor` with built-in detectors (URL
+    userinfo, credential-shaped name=value, known token prefixes, bearer tokens,
+    PEM private-key blocks) and user-configurable literal/regex redaction,
+    validated regex patterns at config load time, and wired redaction into
+    diagnostics and the store.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 2 of 10.** The READY list is now
-`P12-T002`, `P12-T003`, `P12-T004`, `P12-T009`, `P13-T001`,
-`P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007`, `P14-T009` and `P14-T010`. The lowest-numbered READY task is
-`P12-T002`, which is the next concrete action.
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 4 of 10; Phase P13 is open at 1 of 9.** The READY list is now
+`P12-T004`, `P12-T009`, `P13-T004`, `P14-T001`,
+`P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
+`P14-T010`. The lowest-numbered READY task is
+`P12-T004`, which is the next concrete action.
+
+## What `P12-T003` added
+
+- `crates/sure-core/src/analysis_provider/mod.rs` — replaced the placeholder
+  `ClaudeCliAnalyzer` with a real provider.
+  - Runs `claude -p <prompt>` in the project root using the bounded process
+    runner (`crate::process`).
+  - Redacts the prompt via `crate::redact::redact` before passing it to the
+    external CLI.
+  - Bounds stdout and stderr to `DEFAULT_OUTPUT_BYTES` so a runaway CLI cannot
+    fill memory.
+  - Maps non-zero exits, timeouts, and cancellations to
+    `AnalysisError::ClaudeCliFailed` with a plain-language message.
+  - Returns stdout as an `AnalysisResponse` classified as a model assessment,
+    not deterministic evidence.
+- Added tests for dispatch, successful execution, prompt redaction, and
+  non-zero exit handling.
+
+## Validation of `P12-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P13-T001` added
+
+- `crates/sure-core/src/redact.rs` — expanded into a configurable `Redactor`
+  with:
+  - Built-in detectors for URL userinfo passwords, credential-shaped
+    `name=value`, known token prefixes, bearer tokens, and PEM private-key
+    blocks.
+  - User-configurable literal secrets and compiled regex patterns.
+  - A `redact(input: &str) -> String` entry point and structured JSON redaction.
+- `crates/sure-core/src/config/values.rs` and `config/mod.rs` — added
+  `RedactionConfig` with validation that invalid regex patterns stop the run
+  with a clear `InvalidPattern` error.
+- `crates/sure-core/src/plain_language_finding.rs` and `store/mod.rs` — wired
+  redaction into human-readable finding text and structured store writes.
+- `sure.example.yaml` — documented the new `redaction` section defaults.
+- Tests cover literal/regex redaction, built-in detectors, false positives, and
+  structured JSON redaction.
+
+## Validation of `P13-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P12-T002` added
+
+- `crates/sure-domain/src/status.rs` — added `NotCheckedReason::AnalysisProviderDisabled`
+  and a `disabled_result` helper for analysis requests when the provider is
+  `AnalysisProvider::Disabled`.
+- `crates/sure-core/src/analysis_provider/mod.rs` — wired the disabled path
+  through the provider abstraction so it returns the new `NotCheckedReason`.
+- `crates/sure-core/src/project_verdict.rs` — added reduced-coverage caveat
+  logic for the disabled provider path.
+- `crates/sure-cli/src/human_report.rs`, `json_report.rs`, `portable_report.rs` —
+  render the reduced-coverage caveat so users see that model-backed semantic
+  checks did not run.
+- `schemas/report.schema.json` and `crates/sure-domain/tests/wire_contract.rs` —
+  updated the wire contract to include the new not-checked reason.
+
+## Validation of `P12-T002`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P12-T001` added
 

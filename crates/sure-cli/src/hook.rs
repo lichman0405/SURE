@@ -25,7 +25,7 @@ use sure_core::full_recording::{self, FullRecordingConsent};
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::{decide_claude_code_tool, decide_cursor_tool};
 use sure_core::ids::EventId;
-use sure_core::normalizer::{claude_code, cursor};
+use sure_core::normalizer::{claude_code, codex, cursor};
 use sure_core::paths::Paths;
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::Store;
@@ -43,16 +43,32 @@ pub fn run(action: &HookAction) -> Report {
                 return failed("SURE could not read standard input.", error.to_string());
             }
 
-            if stdin.trim().is_empty() {
+            let event_text = without_byte_order_mark(&stdin);
+            if event_text.trim().is_empty() {
                 return failed(
                     "No event was read from standard input.",
                     "The harness did not provide an event.".to_owned(),
                 );
             }
 
-            run_ingest(source.as_deref(), event_kind.as_deref(), &stdin)
+            run_ingest(source.as_deref(), event_kind.as_deref(), event_text)
         }
     }
+}
+
+/// The event text as SURE should read it off standard input.
+///
+/// Windows PowerShell 5.1 writes a UTF-8 byte-order mark in front of every
+/// payload it pipes to a native command, whatever `$OutputEncoding` is set to
+/// (measured 2026-09-18 against `powershell.exe`, with standard input as a pipe
+/// and as a redirected file: the first three bytes were `EF BB BF`, while
+/// `pwsh` 7 wrote none). A byte-order mark is not JSON, so without this every
+/// event arriving from the Windows default shell would be refused as invalid —
+/// and the Codex, Cursor and Claude Code launchers all reach SURE through that
+/// pipe. The mark says nothing about the event, so dropping a leading one
+/// invents nothing; everything after it is passed on exactly as it arrived.
+fn without_byte_order_mark(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
 fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Report {
@@ -81,6 +97,16 @@ fn run_ingest_with_paths(
             Err(error) => return failed("The event could not be normalised.", error.to_string()),
         },
         Some("claude-code") => match claude_code::normalize(stdin) {
+            Ok(envelope) => envelope,
+            Err(error) => return failed("The event could not be normalised.", error.to_string()),
+        },
+        // Codex's payload carries `hook_event_name`, so `--source codex` needs
+        // no event-kind argument: the event names itself and SURE reads the
+        // name Codex sent rather than one the manifest repeated. Four of the
+        // twelve events Codex sends map; the rest are refused by name, with the
+        // reason, in `crates/sure-core/src/normalizer/codex.rs` and in the table
+        // in `integrations/codex/README.md`.
+        Some("codex") => match codex::normalize(stdin) {
             Ok(envelope) => envelope,
             Err(error) => return failed("The event could not be normalised.", error.to_string()),
         },
@@ -140,7 +166,16 @@ fn run_ingest_with_paths(
         let (mode, permissions) = load_execution_config(&project_root);
 
         let decision = match source {
-            Some("claude-code") => decide_claude_code_tool(tool, mode, &permissions),
+            // Codex is documented to name its shell tool `Bash` and to match its
+            // patch tool as `Edit` or `Write`, which is the vocabulary this
+            // classifier already recognises. A Codex name outside it — a local
+            // function such as `update_plan`, or an MCP tool — falls to the
+            // classifier's unknown branch, which fails closed rather than
+            // passing. `integrations/codex/README.md` records that limitation
+            // and why the decision is advisory on this harness.
+            Some("claude-code" | "codex") => decide_claude_code_tool(tool, mode, &permissions),
+            // `Some("cursor")`, and anything else: the match above has already
+            // refused a source SURE does not know.
             _ => decide_cursor_tool(tool, mode, &permissions),
         };
         return Report::HookDecision(decision);
@@ -867,5 +902,287 @@ mod tests {
             recordings.is_empty(),
             "no full recording should exist when opt-in is false (default)"
         );
+    }
+
+    // --- codex --------------------------------------------------------------
+    //
+    // Every test here runs through `run_ingest_with_paths` with a scratch
+    // `Paths`, like the two round trips above, so none of them open or write
+    // the machine's real store. `sure hook ingest` has no way to point its
+    // store elsewhere (`P1-T012`), which is why the process-level run in
+    // `integrations/codex/README.md` is a documented manual step rather than a
+    // test: it is the one thing here that writes `%LOCALAPPDATA%\SURE\sure.db`.
+
+    fn codex_fixture(name: &str) -> String {
+        let path = repository_root()
+            .join("integrations")
+            .join("codex")
+            .join("fixtures")
+            .join(name);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    }
+
+    /// A Codex fixture with its `cwd` pointed at a real scratch directory.
+    ///
+    /// The payload's `cwd` becomes the event's project root, and the store keys
+    /// a session by project, so a fixture pointed at a path that does not exist
+    /// would persist nothing and prove nothing. The field names still come from
+    /// the fixture; only the value of `cwd` is replaced.
+    fn codex_event_at(name: &str, project_root: &str) -> String {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&codex_fixture(name)).expect("fixture is JSON");
+        value["cwd"] = serde_json::Value::String(project_root.to_owned());
+        value.to_string()
+    }
+
+    #[test]
+    fn codex_session_start_allows_without_a_decision() {
+        let tmp = scratch_hook_dir("codex-session-start");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+
+        let report = run_ingest_with_paths(
+            Some("codex"),
+            None,
+            &codex_event_at("session-start.json", &tmp.to_string_lossy()),
+            &paths,
+        );
+        let decision = match &report {
+            Report::HookDecision(d) => d,
+            other => panic!("expected HookDecision, got {other:?}"),
+        };
+        assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn codex_pre_tool_use_gets_a_protection_decision() {
+        let tmp = scratch_hook_dir("codex-pre-tool-use");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+
+        // Codex's documented shell tool name is `Bash`, which the shared
+        // classifier already knows. The scratch project has no `sure.yaml`, so
+        // the mode is the safest one and a shell command is blocked.
+        let report = run_ingest_with_paths(
+            Some("codex"),
+            None,
+            &codex_event_at("pre-tool-use.json", &tmp.to_string_lossy()),
+            &paths,
+        );
+        let decision = match &report {
+            Report::HookDecision(d) => d,
+            other => panic!("expected HookDecision, got {other:?}"),
+        };
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn codex_tool_name_outside_the_classifier_vocabulary_fails_closed() {
+        let tmp = scratch_hook_dir("codex-unknown-tool");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+
+        // A Codex local function tool, not one of the names the classifier was
+        // written for. It must not read as "nothing to object to".
+        let mut value: serde_json::Value =
+            serde_json::from_str(&codex_fixture("pre-tool-use.json")).expect("fixture is JSON");
+        value["cwd"] = serde_json::Value::String(tmp.to_string_lossy().into_owned());
+        value["tool_name"] = serde_json::Value::String("update_plan".to_owned());
+
+        let report = run_ingest_with_paths(Some("codex"), None, &value.to_string(), &paths);
+        let decision = match &report {
+            Report::HookDecision(d) => d,
+            other => panic!("expected HookDecision, got {other:?}"),
+        };
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+    }
+
+    #[test]
+    fn codex_stop_is_refused_and_writes_nothing() {
+        let tmp = scratch_hook_dir("codex-stop-refused");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+        let project_root = project.to_string_lossy().into_owned();
+
+        // `Stop` ends a turn, not a session, and SURE has no turn-end event
+        // type. The refusal has to be visible and it has to leave no row
+        // behind: an event SURE cannot mean must not become evidence.
+        let refused = run_ingest_with_paths(
+            Some("codex"),
+            None,
+            &codex_event_at("stop-not-mapped.json", &project_root),
+            &paths,
+        );
+        match &refused {
+            Report::Failed(failure) => {
+                assert!(
+                    failure.detail.contains("turn"),
+                    "the refusal must name why: {}",
+                    failure.detail
+                );
+                assert!(
+                    failure.detail.contains("Nothing was recorded"),
+                    "the refusal must say nothing was recorded: {}",
+                    failure.detail
+                );
+            }
+            other => panic!("expected Failed for Stop, got {other:?}"),
+        }
+
+        // One mapped event, then read the store back: exactly one row, and it
+        // is the mapped one.
+        let accepted = run_ingest_with_paths(
+            Some("codex"),
+            None,
+            &codex_event_at("session-end.json", &project_root),
+            &paths,
+        );
+        assert!(
+            matches!(accepted, Report::HookDecision(_)),
+            "expected the mapped event to ingest, got {accepted:?}"
+        );
+
+        let store = Store::open(&paths, &project).expect("store opens");
+        let session_store = SessionEventStore::new(&store);
+        let sessions = session_store
+            .sessions_past_retention(i64::MAX)
+            .expect("query sessions");
+        assert_eq!(sessions.len(), 1, "one session should exist");
+        let stored = session_store
+            .events_for_session(sessions[0].row_id)
+            .expect("query events");
+        assert_eq!(stored.len(), 1, "Stop must not have left a row behind");
+        assert_eq!(stored[0].event_type, "session.stopped");
+    }
+
+    #[test]
+    fn codex_session_events_round_trip_into_one_session() {
+        let tmp = scratch_hook_dir("codex-e2e-round-trip");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+        let project_root = project.to_string_lossy().into_owned();
+
+        // No event-kind argument: this is what `integrations/codex/hooks/hooks.json`
+        // invokes, because the payload carries `hook_event_name` itself.
+        for name in [
+            "session-start.json",
+            "pre-tool-use.json",
+            "post-tool-use.json",
+            "session-end.json",
+        ] {
+            let report = run_ingest_with_paths(
+                Some("codex"),
+                None,
+                &codex_event_at(name, &project_root),
+                &paths,
+            );
+            assert!(
+                matches!(report, Report::HookDecision(_)),
+                "{name} should have ingested, got {report:?}"
+            );
+        }
+
+        let store = Store::open(&paths, &project).expect("store opens");
+        let session_store = SessionEventStore::new(&store);
+        let sessions = session_store
+            .sessions_past_retention(i64::MAX)
+            .expect("query sessions");
+        assert_eq!(
+            sessions.len(),
+            1,
+            "all four events share one Codex session id, so they are one session"
+        );
+        assert_eq!(
+            sessions[0].harness_session_id.as_deref(),
+            Some("codex-session-001")
+        );
+
+        let mut stored = session_store
+            .events_for_session(sessions[0].row_id)
+            .expect("query events");
+        assert_eq!(stored.len(), 4, "all four mapped events should be stored");
+        stored.reverse();
+        let types: Vec<&str> = stored.iter().map(|e| e.event_type.as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "session.started",
+                "tool.requested",
+                "tool.completed",
+                "session.stopped"
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_leading_byte_order_mark_is_not_part_of_the_event() {
+        assert_eq!(without_byte_order_mark("\u{feff}{}"), "{}");
+        assert_eq!(without_byte_order_mark("{}"), "{}");
+        // One inside the payload belongs to the payload, and is left alone.
+        assert_eq!(
+            without_byte_order_mark("{\"text\":\"\u{feff}\"}"),
+            "{\"text\":\"\u{feff}\"}"
+        );
+    }
+
+    #[test]
+    fn codex_payload_behind_a_byte_order_mark_still_ingests() {
+        let tmp = scratch_hook_dir("codex-byte-order-mark");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+
+        // What Windows PowerShell 5.1 pipes in front of the event, measured on
+        // 2026-09-18: a UTF-8 byte-order mark, then the payload.
+        let marked = format!(
+            "\u{feff}{}",
+            codex_event_at("session-start.json", &project.to_string_lossy())
+        );
+
+        // Handed over as-is it is not JSON, which is the failure `run()` exists
+        // to avoid.
+        match run_ingest_with_paths(Some("codex"), None, &marked, &paths) {
+            Report::Failed(failure) => assert!(
+                failure.detail.contains("not valid JSON"),
+                "a byte-order mark should be the reason the payload is refused: {}",
+                failure.detail
+            ),
+            other => panic!("expected the marked payload to be refused, got {other:?}"),
+        }
+
+        // Handed over the way `run()` hands it over, it ingests, and the store
+        // holds the one event.
+        let report = run_ingest_with_paths(
+            Some("codex"),
+            None,
+            without_byte_order_mark(&marked),
+            &paths,
+        );
+        assert!(
+            matches!(report, Report::HookDecision(_)),
+            "the payload behind the mark should ingest, got {report:?}"
+        );
+        let store = Store::open(&paths, &project).expect("store opens");
+        let session_store = SessionEventStore::new(&store);
+        let sessions = session_store
+            .sessions_past_retention(i64::MAX)
+            .expect("query sessions");
+        assert_eq!(sessions.len(), 1, "the marked payload is one session");
+        let stored = session_store
+            .events_for_session(sessions[0].row_id)
+            .expect("query events");
+        assert_eq!(stored.len(), 1, "and one event");
     }
 }

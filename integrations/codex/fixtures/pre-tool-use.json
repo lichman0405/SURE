@@ -1,0 +1,14 @@
+{
+  "session_id": "codex-session-001",
+  "transcript_path": "C:\\Users\\dev\\.codex\\sessions\\2026\\09\\18\\codex-session-001.jsonl",
+  "cwd": "C:\\Users\\dev\\sample-project",
+  "hook_event_name": "PreToolUse",
+  "model": "codex-example-model",
+  "permission_mode": "example-mode",
+  "turn_id": "turn-001",
+  "tool_name": "Bash",
+  "tool_use_id": "tool-use-001",
+  "tool_input": {
+    "command": "npm test"
+  }
+}

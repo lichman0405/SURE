@@ -16,6 +16,10 @@
 //!    response — spending a one-time allowance the user recorded for exactly
 //!    this request, if there is one, and answering with what SURE would then do
 //!    (see [`with_any_allowance`]).
+//! 6. Write that decision down beside the event it was about, so that it is
+//!    still there after this process exits (see [`record_the_decision`]):
+//!    `sure history` shows it and `sure history delete` removes it with the
+//!    session it belongs to.
 //!
 //! `sure hook allow-once` is the other half of step 5: it is the command a
 //! person runs to give the answer a hook cannot ask for, and it writes one row
@@ -37,12 +41,13 @@ use sure_core::full_recording::{
 };
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::{
-    Assessment, ProtectionDecision, ToolRequest, allowance_reason, allowance_unreadable_reason,
-    assess_claude_code_tool, assess_cursor_tool,
+    Assessment, Danger, ProtectionDecision, ToolRequest, allowance_reason,
+    allowance_unreadable_reason, assess_claude_code_tool, assess_cursor_tool,
 };
-use sure_core::ids::EventId;
+use sure_core::ids::{EventId, FingerprintId};
 use sure_core::normalizer::{claude_code, codex, cursor};
 use sure_core::paths::Paths;
+use sure_core::protection_history::{DecisionRecord, NotRecorded, not_recorded_reason};
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::Store;
 
@@ -326,8 +331,14 @@ fn run_ingest_with_paths(
 
     // Best-effort persistence. The harness cares most about the decision for
     // pre-tool-use; a store failure should not block the operation.
+    //
+    // The result is kept rather than discarded because the *decision* row, two
+    // steps below, hangs from this event and needs the fingerprint it was
+    // written with. A discarded result here would mean a second fingerprinting
+    // of the same project, and a decision row whose `project_fingerprint` could
+    // differ from the event's for the same moment.
     let event_id = EventId::generate();
-    let _ = persist_event_with_paths(&ingested, &project_root, &event_id, paths);
+    let event_write = persist_event_with_paths(&ingested, &project_root, &event_id, paths);
 
     // Evaluate protection for pre-tool-use events.
     let is_pre_tool_use =
@@ -375,9 +386,12 @@ fn run_ingest_with_paths(
             // refused a source SURE does not know.
             _ => assess_cursor_tool(&request, mode, &permissions, protection),
         };
-        return Report::HookDecision(with_any_allowance(
-            &assessment,
-            &request,
+        return Report::HookDecision(record_the_decision(
+            with_any_allowance(&assessment, &request, &project_root, paths),
+            assessment.danger,
+            request.tool,
+            &event_id,
+            &event_write,
             &project_root,
             paths,
         ));
@@ -385,6 +399,21 @@ fn run_ingest_with_paths(
 
     // For non-pre-tool-use events, report success.
     Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow())
+}
+
+/// A decision, and the one-time allowance it spent if it spent one.
+///
+/// The two travel together because the second is the only thing that tells an
+/// allow-once from an ordinary allow: both are
+/// [`ProtectionDecisionKind::Allow`](sure_core::hook_protection::ProtectionDecisionKind::Allow),
+/// so a caller that lost the row id could not tell them apart afterwards
+/// (`sure_core::protection_history`). Nothing else about the decision depends on
+/// it, and the exit code never does.
+struct Decided {
+    /// What SURE would do about the request.
+    decision: ProtectionDecision,
+    /// The row id of the grant this decision spent, if it spent one.
+    allowance: Option<i64>,
 }
 
 /// The decision, with a recorded one-time allowance spent on it when one covers
@@ -412,14 +441,22 @@ fn with_any_allowance(
     request: &ToolRequest<'_>,
     project_root: &str,
     paths: &Paths,
-) -> ProtectionDecision {
+) -> Decided {
+    let unspent = |decision: ProtectionDecision| Decided {
+        decision,
+        allowance: None,
+    };
     let (Some(danger), Some(subject)) = (assessment.danger, request.subject()) else {
-        return assessment.decision.clone();
+        return unspent(assessment.decision.clone());
     };
 
     let store = match Store::open(paths, Path::new(project_root)) {
         Ok(store) => store,
-        Err(_) => return ProtectionDecision::block(allowance_unreadable_reason(danger)),
+        Err(_) => {
+            return unspent(ProtectionDecision::block(allowance_unreadable_reason(
+                danger,
+            )));
+        }
     };
 
     match store.spend_allowance(
@@ -428,9 +465,95 @@ fn with_any_allowance(
         subject,
         Timestamp::now().as_millis(),
     ) {
-        Ok(Some(_)) => ProtectionDecision::allow_with(allowance_reason(danger)),
-        Ok(None) => assessment.decision.clone(),
-        Err(_) => ProtectionDecision::block(allowance_unreadable_reason(danger)),
+        Ok(Some(grant)) => Decided {
+            decision: ProtectionDecision::allow_with(allowance_reason(danger)),
+            allowance: Some(grant),
+        },
+        Ok(None) => unspent(assessment.decision.clone()),
+        Err(_) => unspent(ProtectionDecision::block(allowance_unreadable_reason(
+            danger,
+        ))),
+    }
+}
+
+/// The decision a harness is answered with, with the audit row written beside it.
+///
+/// Every decision the rule reached for a tool request is written down — allows
+/// included, and that is a decision rather than an oversight. A row only for
+/// what was held would leave the question a user actually asks (`what has SURE
+/// been letting through here?`) answerable only by absence, and absence is also
+/// what a decision SURE never reached looks like. One rule with no exceptions is
+/// the one a reader can check.
+///
+/// **It is written after the decision, never as part of it.** The exit code a
+/// launcher reads comes from the kind ([`crate::report`]), so a row this
+/// function could not write must not become a status the harness acts on:
+/// losing the record is bad, and turning a warn or an allow into a failure
+/// because a bookkeeping write failed is a hook that fails closed on a machine
+/// whose store is full. The kind is therefore copied through untouched and the
+/// failure is *said*, in the reason the user reads, by
+/// [`sure_core::protection_history::not_recorded_reason`]. The silence the brief
+/// warns about — "the record is missing and nothing said so" — is the one
+/// outcome this function cannot produce: every path that does not write the row
+/// adds a sentence saying it did not.
+///
+/// A success adds nothing to the reason. The sentence a user reads is about the
+/// request, and "SURE also wrote this down" on every one of a session's tool
+/// calls would be a line of noise in a harness's transcript; `sure history` is
+/// the surface for what was kept.
+#[allow(clippy::too_many_arguments)]
+fn record_the_decision(
+    decided: Decided,
+    danger: Option<Danger>,
+    tool: &str,
+    event_id: &EventId,
+    event_write: &Result<FingerprintId, String>,
+    project_root: &str,
+    paths: &Paths,
+) -> ProtectionDecision {
+    let Decided {
+        decision,
+        allowance,
+    } = decided;
+
+    let Ok(fingerprint) = event_write else {
+        return not_recorded(decision, NotRecorded::EventMissing);
+    };
+
+    let store = match Store::open(paths, Path::new(project_root)) {
+        Ok(store) => store,
+        // The same store the event went into, over the same paths: a failure
+        // here is one an event write would have hit too, but it is reported
+        // rather than assumed.
+        Err(_) => return not_recorded(decision, NotRecorded::WriteFailed),
+    };
+
+    let record = DecisionRecord::of(event_id.clone(), &decision, danger, tool, allowance);
+    match SessionEventStore::new(&store).persist_decision(&record, project_root, fingerprint) {
+        Ok(Some(_)) => decision,
+        // The event is not in the store, so there is nothing for the decision to
+        // hang from and the row is not written — see `persist_decision`.
+        Ok(None) => not_recorded(decision, NotRecorded::EventMissing),
+        Err(_) => not_recorded(decision, NotRecorded::WriteFailed),
+    }
+}
+
+/// The same decision, with a sentence about the audit row added to its reason.
+///
+/// The reason and nothing else: the kind is the answer, and it is returned
+/// unchanged so that the exit code a launcher reads is the one the rule reached.
+/// A decision with no reason of its own gets this sentence as its reason, which
+/// is the only honest thing to put there — the alternative is a block that says
+/// nothing at all.
+fn not_recorded(decision: ProtectionDecision, why: NotRecorded) -> ProtectionDecision {
+    let note = not_recorded_reason(why);
+    let reason = match decision.reason {
+        Some(reason) => format!("{reason}\n\n{note}"),
+        None => note.to_owned(),
+    };
+    ProtectionDecision {
+        decision: decision.decision,
+        reason: Some(reason),
     }
 }
 
@@ -548,7 +671,9 @@ fn failed(what: &'static str, detail: String) -> Report {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use sure_core::hook_protection::{Danger, ProtectionDecisionKind, allowance_reason};
+    use sure_core::hook_protection::{
+        Danger, ProtectionDecisionKind, allowance_reason, danger_reason,
+    };
     use sure_testkit::repository_root;
 
     fn fixture(name: &str) -> String {
@@ -1987,6 +2112,71 @@ mod tests {
             "an allowance let through a request SURE never named as dangerous"
         );
         assert!(!reason.contains("one-time allowance"), "{reason}");
+    }
+
+    #[test]
+    fn a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_so() {
+        // `record_the_decision`'s two ways of not writing the row, called rather
+        // than reached: a store SURE cannot open fails the event write too, so
+        // an integration test can only ever reach the first arm — and the second
+        // is the one a full disk or a store somebody else holds the lock on
+        // takes. What both must keep is the decision, because the kind is what
+        // [`crate::report`] turns into the number a launcher reads.
+        let (project, paths) =
+            a_project_with("p13t006-unrecorded", "execution:\n  mode: host_confirmed\n");
+        let project_root = project.to_string_lossy().into_owned();
+        let held = || ProtectionDecision::block(danger_reason(Danger::BroadDelete));
+
+        let no_event = record_the_decision(
+            Decided {
+                decision: held(),
+                allowance: None,
+            },
+            Some(Danger::BroadDelete),
+            "Shell",
+            &EventId::generate(),
+            &Err("the store refused the event".to_owned()),
+            &project_root,
+            &paths,
+        );
+        assert_eq!(
+            no_event.decision,
+            ProtectionDecisionKind::Block,
+            "a row that could not be written changed the answer a launcher reads"
+        );
+        let reason = no_event.reason.expect("a reason");
+        assert!(
+            reason.contains("was not stored") && reason.contains("The decision above stands."),
+            "a decision with nothing to hang from is not explained: {reason}"
+        );
+
+        // The event went in and the store will not open for the row: the store
+        // inside the project is refused by `Paths::ensure_outside`, which is the
+        // one way this path fails that a test can arrange without a broken disk.
+        let inside =
+            Paths::from_roots(project.join("data"), project.join("config")).expect("paths");
+        let refused = record_the_decision(
+            Decided {
+                decision: ProtectionDecision::allow(),
+                allowance: None,
+            },
+            None,
+            "Read",
+            &EventId::generate(),
+            &Ok(FingerprintId::generate()),
+            &project_root,
+            &inside,
+        );
+        assert_eq!(
+            refused.decision,
+            ProtectionDecisionKind::Allow,
+            "a store SURE could not open turned an allow into something else"
+        );
+        assert_eq!(
+            refused.reason.as_deref(),
+            Some(not_recorded_reason(NotRecorded::WriteFailed)),
+            "a decision with no reason of its own does not get the sentence about the missing row"
+        );
     }
 
     #[test]

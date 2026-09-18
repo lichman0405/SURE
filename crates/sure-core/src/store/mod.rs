@@ -974,8 +974,10 @@ pub(crate) fn is_busy(error: &rusqlite::Error) -> bool {
 /// `docs/security/SECRET_REDACTION.md` is explicit that detection is imperfect
 /// and this module does not claim otherwise. What this guarantees is narrower
 /// and true: nothing reaches the file without having been through
-/// [`crate::redact::redact`], and `tests/store_lifecycle.rs` checks that against
-/// the bytes on disk.
+/// [`crate::redact::redact`], and the test in this file —
+/// `a_secret_in_a_document_does_not_reach_the_file`, beside the other store
+/// tests rather than in a `tests/` file that does not exist — checks that
+/// against the bytes on disk.
 pub(crate) fn redact_document(value: &Value) -> Value {
     redact::redact_value(value)
 }

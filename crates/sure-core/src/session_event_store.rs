@@ -24,8 +24,9 @@ use sure_protocol::documents::DocumentKind;
 use sure_protocol::event::EventEnvelope;
 
 use crate::harness_event::IngestedEvent;
+use crate::protection_history::DecisionRecord;
 use crate::redact;
-use crate::store::{RecordKind, Store, StoreError};
+use crate::store::{RecordKind, Store, StoreError, StoredRecord};
 
 /// Default retention for raw events: 30 days.
 pub const DEFAULT_EVENT_RETENTION_DAYS: i64 = 30;
@@ -219,7 +220,7 @@ impl SessionScope<'_> {
 
 /// What one delete removed, counted by table.
 ///
-/// Three numbers rather than one, because they are three different claims: the
+/// Five numbers rather than one, because they are five different claims: the
 /// sessions are what the user asked to be rid of, the events are what was
 /// recorded inside them, and the records are the envelopes those events wrote.
 /// A single total would let a delete that removed nothing but rows already
@@ -232,6 +233,16 @@ pub struct DeletedSessions {
     pub events: u64,
     /// Rows removed from `records`, which those events owned.
     pub records: u64,
+    /// Rows removed from `records` of kind `decision`.
+    ///
+    /// Counted apart from [`DeletedSessions::records`], and the counts are
+    /// disjoint by construction: this one holds the rows a
+    /// [`crate::protection_history::DecisionRecord`] was written as, which the
+    /// user asked the history for, and `records` holds the event envelopes the
+    /// events owned. A user asking *is the verdict SURE reached about my project
+    /// still here* is asking about these, and one total would let a delete that
+    /// removed the events and left every decision behind read as complete.
+    pub decisions: u64,
     /// Rows removed from `records` of kind `recording`.
     ///
     /// Counted apart from [`DeletedSessions::records`] because they are a
@@ -246,7 +257,11 @@ impl DeletedSessions {
     /// Whether nothing at all was removed.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.sessions == 0 && self.events == 0 && self.records == 0 && self.recordings == 0
+        self.sessions == 0
+            && self.events == 0
+            && self.records == 0
+            && self.decisions == 0
+            && self.recordings == 0
     }
 }
 
@@ -369,6 +384,63 @@ impl<'a> SessionEventStore<'a> {
         })
     }
 
+    /// Record the protection decision SURE reached about one event.
+    ///
+    /// Returns the row id of the decision that was written, or `None` when the
+    /// event it belongs to is not in the store — which is an answer, not a
+    /// failure: see below.
+    ///
+    /// # Why the event is looked for first, inside the transaction
+    ///
+    /// A decision is not a session record the way an event is: nothing in the
+    /// schema points at it, and the event id inside its own document is the only
+    /// thing that ties it to the session it came from (the same join
+    /// [`crate::protection_history`] and [`Self::delete_sessions`] describe). A
+    /// row written for an event that is not there would therefore be a row
+    /// **outside `sure history`, outside `sure history delete` and outside
+    /// session retention** — one the user can neither see nor remove, which is
+    /// the shape of record `docs/security/PRIVACY.md` does not allow SURE to
+    /// keep. So it is not written, and the caller is told by the return value.
+    ///
+    /// The look and the insert are one `BEGIN IMMEDIATE` transaction, so a
+    /// `sure history delete` running at the same moment either commits before
+    /// this read — and this returns `None` — or waits for this commit and then
+    /// removes both rows. There is no interleaving in which the decision row
+    /// outlives its event with nothing to delete it by.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionEventStoreError`] if the document cannot be built or the write
+    /// fails. A caller that cannot write this row is expected to say so rather
+    /// than to swallow it: [`crate::protection_history::not_recorded_reason`] is
+    /// the sentence for that, and the decision itself is not changed by it.
+    pub fn persist_decision(
+        &self,
+        record: &DecisionRecord,
+        project_root: &str,
+        fingerprint: &FingerprintId,
+    ) -> Result<Option<i64>, SessionEventStoreError> {
+        self.in_transaction(|connection| {
+            if !self.event_exists_in_connection(connection, &record.event_id)? {
+                return Ok(None);
+            }
+
+            let document =
+                serde_json::to_value(record).map_err(|error| SessionEventStoreError::Store {
+                    message: format!("could not serialize the decision: {error}"),
+                })?;
+
+            let id = self.insert_record_in_tx(
+                connection,
+                RecordKind::Decision,
+                &document,
+                project_root,
+                fingerprint,
+            )?;
+            Ok(Some(id))
+        })
+    }
+
     /// Run one write as a single transaction.
     ///
     /// `BEGIN IMMEDIATE` rather than `BEGIN`, for `sure_core::store`'s reason:
@@ -451,6 +523,65 @@ impl<'a> SessionEventStore<'a> {
             events.push(row.map_err(|error| self.write_error(error))?);
         }
         Ok(events)
+    }
+
+    /// Read the protection decisions recorded for a session's events.
+    ///
+    /// # Why this is a query of its own
+    ///
+    /// A decision is a `records` row of kind `decision` and **nothing links it
+    /// to the `session_events` row it is about**: no column, no foreign key —
+    /// `PRAGMA foreign_keys` is not set anywhere in this store, so a `REFERENCES`
+    /// clause would be documentation rather than a link. The event id is copied
+    /// into the decision's document (`"event_id"`), and that is the join. It is
+    /// read with `json_extract` for the same reason [`Self::delete_sessions`]
+    /// reads a full recording that way, and it is the *same* join, so a decision
+    /// cannot be shown under one event and deleted under another.
+    ///
+    /// In the order SURE wrote them — the row id — like every other listing in
+    /// this module. The ids are read in one query and the rows through
+    /// [`Store::record`], so a row this build cannot describe stops the read
+    /// rather than being skipped.
+    ///
+    /// [`Store::record`]: crate::store::Store::record
+    ///
+    /// # Errors
+    ///
+    /// [`SessionEventStoreError`] if the query fails or a row cannot be read.
+    pub fn decisions_for_session(
+        &self,
+        session_row_id: i64,
+    ) -> Result<Vec<StoredRecord>, SessionEventStoreError> {
+        let connection = self.store.connection();
+        let ids = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id FROM records WHERE kind = ?1 \
+                     AND json_extract(document, '$.event_id') IN \
+                     (SELECT event_id FROM session_events WHERE session_row_id = ?2) \
+                     ORDER BY id ASC",
+                )
+                .map_err(|error| self.write_error(error))?;
+            let rows = statement
+                .query_map(
+                    rusqlite::params![RecordKind::Decision.as_str(), session_row_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| self.write_error(error))?;
+            let mut ids = Vec::new();
+            for row in rows {
+                ids.push(row.map_err(|error| self.write_error(error))?);
+            }
+            ids
+        };
+
+        let mut records = Vec::new();
+        for id in ids {
+            if let Some(record) = self.store.record(id)? {
+                records.push(record);
+            }
+        }
+        Ok(records)
     }
 
     /// Read the recorded sessions, newest first.
@@ -562,7 +693,7 @@ impl<'a> SessionEventStore<'a> {
     /// whether or not the pragma is ever turned on, which is why the order is
     /// stated rather than inherited from a constraint that is not in force.
     ///
-    /// # Why the full recordings are in here
+    /// # Why the full recordings and the decisions are in here
     ///
     /// A full recording is a second `records` row — kind `recording`, written by
     /// [`crate::full_recording::persist_full_recording`] — and **nothing links
@@ -579,6 +710,16 @@ impl<'a> SessionEventStore<'a> {
     /// the report saying the delete succeeded. `docs/security/PRIVACY.md` allows
     /// raw content only on an explicit opt-in, and the delete the user asked for
     /// has to reach it.
+    ///
+    /// A decision SURE reached about one of those events is the same shape of
+    /// row — a `records` row of kind `decision`, hanging from the event id in its
+    /// own document ([`crate::protection_history`]) — and it goes by the same
+    /// join for the same reason. A verdict is not raw content, but it is
+    /// something this machine recorded about the user's work, and the promise is
+    /// about what SURE keeps and not only about the parts of it the user would
+    /// most want gone. It is one clause rather than an omission, and
+    /// `a_delete_reaches_the_decision_recorded_about_its_session_event` is what
+    /// holds it.
     ///
     /// # What does not go
     ///
@@ -669,26 +810,19 @@ impl<'a> SessionEventStore<'a> {
                     .map_err(|error| self.write_error(error))?,
             };
 
-            // The full recordings those same events wrote. `event_id` is the
-            // only thing the two rows share — see the module-level note above
-            // `delete_sessions` — so it is what the join is made of. The ids are
-            // bound rather than interpolated: they are text out of the store,
-            // and a text value is the one kind that can end a SQL literal.
-            let recordings = if event_ids.is_empty() {
-                0
-            } else {
-                let placeholders = vec!["?"; event_ids.len()].join(", ");
-                let sql = format!(
-                    "DELETE FROM records WHERE kind = ? \
-                     AND json_extract(document, '$.event_id') IN ({placeholders})"
-                );
-                let mut values: Vec<SqlValue> =
-                    vec![SqlValue::Text(RecordKind::Recording.as_str().to_owned())];
-                values.extend(event_ids.into_iter().map(SqlValue::Text));
-                connection
-                    .execute(&sql, rusqlite::params_from_iter(values))
-                    .map_err(|error| self.write_error(error))?
-            };
+            // The full recordings and the protection decisions those same events
+            // wrote. `event_id` is the only thing either row shares with its
+            // event — see the note above `delete_sessions` — so it is what the
+            // join is made of. Both keep the ids bound rather than interpolated:
+            // they are text out of the store, and a text value is the one kind
+            // that can end a SQL literal.
+            let decisions =
+                self.delete_records_joined_to_events(connection, RecordKind::Decision, &event_ids)?;
+            let recordings = self.delete_records_joined_to_events(
+                connection,
+                RecordKind::Recording,
+                &event_ids,
+            )?;
 
             let sessions = connection
                 .execute(
@@ -701,6 +835,7 @@ impl<'a> SessionEventStore<'a> {
                 sessions: u64::try_from(sessions).unwrap_or(0),
                 events: u64::try_from(events).unwrap_or(0),
                 records: u64::try_from(records).unwrap_or(0),
+                decisions: u64::try_from(decisions).unwrap_or(0),
                 recordings: u64::try_from(recordings).unwrap_or(0),
             })
         })
@@ -907,6 +1042,44 @@ impl<'a> SessionEventStore<'a> {
             )
             .map_err(|error| self.write_error(error))?;
         Ok(count > 0)
+    }
+
+    /// Delete the `records` rows of one kind that a set of events wrote.
+    ///
+    /// The join is the event id inside the row's own document, which is the only
+    /// thing a full recording and a protection decision share with the
+    /// `session_events` row they came from. One helper rather than the same
+    /// `DELETE` written out twice: the two kinds must be reached by the *same*
+    /// join, or a delete would be complete for one of them and partial for the
+    /// other, and that difference would be invisible in a count.
+    ///
+    /// The ids and the kind are bound, never interpolated — they are text out of
+    /// the store, and a text value is the one kind that can end a SQL literal.
+    /// The placeholder list is the one thing built from a length, and it is a
+    /// list of `?` and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionEventStoreError::Store`] if the delete fails.
+    fn delete_records_joined_to_events(
+        &self,
+        connection: &Connection,
+        kind: RecordKind,
+        event_ids: &[String],
+    ) -> Result<usize, SessionEventStoreError> {
+        if event_ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = vec!["?"; event_ids.len()].join(", ");
+        let sql = format!(
+            "DELETE FROM records WHERE kind = ? \
+             AND json_extract(document, '$.event_id') IN ({placeholders})"
+        );
+        let mut values: Vec<SqlValue> = vec![SqlValue::Text(kind.as_str().to_owned())];
+        values.extend(event_ids.iter().cloned().map(SqlValue::Text));
+        connection
+            .execute(&sql, rusqlite::params_from_iter(values))
+            .map_err(|error| self.write_error(error))
     }
 
     fn insert_record_in_tx(
@@ -1502,5 +1675,127 @@ mod tests {
         let max = i64::MAX;
         let result = retention_deadline_ms(max, 1);
         assert_eq!(result, i64::MAX);
+    }
+
+    /// One event of the shape `sure hook ingest` writes for a tool request,
+    /// which is the only thing a decision is ever written about.
+    fn ingest_one_event(store: &Store, event_id: &EventId, fingerprint: &FingerprintId) {
+        let envelope = valid_envelope("tool.requested")
+            .with_payload(json!({"tool": "Bash", "args": {"command": "rm -rf build/"}}));
+        let ingested = IngestedEvent {
+            envelope,
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        };
+        SessionEventStore::new(store)
+            .persist(&ingested, "C:\\work\\my project", fingerprint, event_id)
+            .expect("the event is written");
+    }
+
+    fn a_decision(event_id: &EventId, allowance: Option<i64>) -> DecisionRecord {
+        let decision = crate::hook_protection::ProtectionDecision::block(
+            crate::hook_protection::danger_reason(crate::hook_protection::Danger::BroadDelete),
+        );
+        DecisionRecord::of(
+            event_id.clone(),
+            &decision,
+            Some(crate::hook_protection::Danger::BroadDelete),
+            "Bash",
+            allowance,
+        )
+    }
+
+    fn decision_rows(store: &Store) -> Vec<StoredRecord> {
+        store
+            .history(
+                &HistoryFilter {
+                    project_fingerprint: None,
+                    kind: Some(RecordKind::Decision),
+                    include_recordings: false,
+                },
+                crate::allowance::SCAN_LIMIT,
+            )
+            .expect("the rows read back")
+    }
+
+    #[test]
+    fn a_decision_written_for_an_event_is_read_back_with_its_session() {
+        let store = store_in("decision_read_back");
+        let fingerprint = FingerprintId::generate();
+        let event_id = EventId::generate();
+        ingest_one_event(&store, &event_id, &fingerprint);
+
+        let ses = SessionEventStore::new(&store);
+        let session = ses.sessions(1).expect("the session")[0].clone();
+        let written = ses
+            .persist_decision(
+                &a_decision(&event_id, Some(11)),
+                "C:\\work\\my project",
+                &fingerprint,
+            )
+            .expect("the decision is written");
+        assert!(written.is_some(), "the event was there to hang from");
+
+        let read = ses
+            .decisions_for_session(session.row_id)
+            .expect("the decisions of a session this test wrote");
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert_eq!(
+            crate::protection_history::read_back(read[0].clone()).expect("readable"),
+            a_decision(&event_id, Some(11))
+        );
+    }
+
+    /// The row a decision would be is a row nothing could show or delete, so it
+    /// is not written — and the caller is told, because "the store refused" and
+    /// "there was no event" are different sentences for the user.
+    #[test]
+    fn a_decision_for_an_event_that_is_not_there_is_not_written() {
+        let store = store_in("decision_without_event");
+        let ses = SessionEventStore::new(&store);
+        let absent = EventId::generate();
+
+        let written = ses
+            .persist_decision(
+                &a_decision(&absent, None),
+                "C:\\work\\my project",
+                &FingerprintId::generate(),
+            )
+            .expect("nothing failed: there was simply nothing to hang from");
+        assert_eq!(written, None);
+        assert!(
+            decision_rows(&store).is_empty(),
+            "a decision row with no event points at nothing and is outside every path that \
+             could show or delete it"
+        );
+    }
+
+    #[test]
+    fn a_delete_reaches_the_decision_recorded_about_its_session_event() {
+        let store = store_in("decision_deleted");
+        let fingerprint = FingerprintId::generate();
+        let event_id = EventId::generate();
+        ingest_one_event(&store, &event_id, &fingerprint);
+
+        let ses = SessionEventStore::new(&store);
+        let row = ses
+            .persist_decision(
+                &a_decision(&event_id, None),
+                "C:\\work\\my project",
+                &fingerprint,
+            )
+            .expect("the decision is written")
+            .expect("the event was there to hang from");
+
+        let deleted = ses
+            .delete_sessions(SessionScope::All)
+            .expect("the delete runs");
+        assert_eq!(deleted.decisions, 1, "{deleted:?}");
+        assert_eq!(deleted.records, 1, "the event's own row, counted apart");
+        assert!(!deleted.is_empty());
+        assert!(
+            store.record(row).expect("a lookup").is_none(),
+            "the decision survived a delete that reported removing it"
+        );
     }
 }

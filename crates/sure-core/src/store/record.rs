@@ -59,6 +59,11 @@ pub const APPROVAL: &str = "approval";
 /// A constant for the same reason the other two are.
 pub const ALLOWANCE: &str = "allowance";
 
+/// The name [`RecordKind::Decision`] is stored under.
+///
+/// A constant for the same reason the other three are.
+pub const DECISION: &str = "decision";
+
 /// One thing the store can hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordKind {
@@ -105,6 +110,25 @@ pub enum RecordKind {
     /// this row exists to answer, and a permission nobody can read back is not
     /// auditable. [`crate::allowance`] is what is in the document.
     Allowance,
+    /// A protection decision SURE reached about one request.
+    ///
+    /// **The fifth shape a stored row can have, and it is a stale one if nothing
+    /// writes it.** `P13-T006`'s acceptance is that a warn, a block and an allow
+    /// that came from a one-time allowance are recorded locally without secrets,
+    /// and `P13-T005` wrote the vocabulary for the verdict and the danger. What
+    /// was missing is a row: the decision lived only as long as the process that
+    /// took it, so after the hook exited it did not exist anywhere.
+    /// [`crate::protection_history`] is what is in the document, and
+    /// `SessionEventStore::persist_decision` is the one writer.
+    ///
+    /// Its kind is its own rather than [`Self::Allowance`]'s or
+    /// [`Self::Approval`]'s for the reason those two are apart: each kind's
+    /// reader decodes every row of it as one shape, so a second shape under one
+    /// name stops the audit trail instead of skipping what it does not know. A
+    /// decision is also not a *statement about a project state* the way an
+    /// approval is — it is about one request, and it hangs from the event that
+    /// request produced.
+    Decision,
 }
 
 impl RecordKind {
@@ -124,6 +148,7 @@ impl RecordKind {
         RecordKind::Recording,
         RecordKind::Approval,
         RecordKind::Allowance,
+        RecordKind::Decision,
     ];
 
     /// The stable name, used as the value of the `kind` column.
@@ -134,6 +159,7 @@ impl RecordKind {
             Self::Recording => RECORDING,
             Self::Approval => APPROVAL,
             Self::Allowance => ALLOWANCE,
+            Self::Decision => DECISION,
         }
     }
 
@@ -154,6 +180,9 @@ impl RecordKind {
         if name == ALLOWANCE {
             return Some(Self::Allowance);
         }
+        if name == DECISION {
+            return Some(Self::Decision);
+        }
         documents::ALL
             .iter()
             .copied()
@@ -163,18 +192,19 @@ impl RecordKind {
 
     /// The document this kind stores, if it stores one.
     ///
-    /// A recording, an approval and an allowance have no schema, and this is
-    /// where that shows: there is nothing to validate them against, which is
-    /// why the write path treats them separately rather than as a document with
-    /// a missing schema. **The absence is not a gap — none of the three is a
-    /// statement about a project in the protocol's sense.** A recording is not
-    /// a statement at all, and an approval and an allowance are statements
-    /// about SURE's own authority, which `sure-protocol` does not describe.
+    /// A recording, an approval, an allowance and a decision have no schema, and
+    /// this is where that shows: there is nothing to validate them against,
+    /// which is why the write path treats them separately rather than as a
+    /// document with a missing schema. **The absence is not a gap — none of the
+    /// four is a statement about a project in the protocol's sense.** A recording
+    /// is not a statement at all, and an approval, an allowance and a decision
+    /// are statements about SURE's own behaviour and authority, which
+    /// `sure-protocol` does not describe.
     #[must_use]
     pub const fn document(self) -> Option<DocumentKind> {
         match self {
             Self::Document(kind) => Some(kind),
-            Self::Recording | Self::Approval | Self::Allowance => None,
+            Self::Recording | Self::Approval | Self::Allowance | Self::Decision => None,
         }
     }
 
@@ -194,6 +224,12 @@ impl RecordKind {
     #[must_use]
     pub const fn is_allowance(self) -> bool {
         matches!(self, Self::Allowance)
+    }
+
+    /// Whether this is a recorded protection decision rather than a document.
+    #[must_use]
+    pub const fn is_decision(self) -> bool {
+        matches!(self, Self::Decision)
     }
 
     /// Whether SURE will write this as a record about a project.
@@ -316,7 +352,7 @@ mod tests {
 
     #[test]
     fn the_name_of_an_allowance_is_the_name_of_nothing_else() {
-        // Three schema-less kinds share one column, and `from_name` picks by
+        // Four schema-less kinds share one column, and `from_name` picks by
         // name: two of them called the same thing would read back as whichever
         // came first in the match.
         for &kind in documents::ALL {
@@ -324,6 +360,42 @@ mod tests {
         }
         assert_ne!(ALLOWANCE, RECORDING);
         assert_ne!(ALLOWANCE, APPROVAL);
+        assert_ne!(ALLOWANCE, DECISION);
+    }
+
+    #[test]
+    fn the_name_of_a_decision_is_the_name_of_nothing_else() {
+        // The same rule again for the fourth name, because `from_name` is what
+        // turns a row's `kind` column back into a kind, and a collision would
+        // make a decision read as an allowance rather than as a row nothing
+        // understands. `"decision"` is the word a person would reach for, so it
+        // is also the one most likely to be chosen for something else later.
+        for &kind in documents::ALL {
+            assert_ne!(kind.as_str(), DECISION);
+        }
+        assert_ne!(DECISION, RECORDING);
+        assert_ne!(DECISION, APPROVAL);
+        assert_ne!(DECISION, ALLOWANCE);
+    }
+
+    #[test]
+    fn a_decision_is_kept_in_history_rather_than_kept_out_of_it() {
+        // A verdict is the thing a user asks the history for, so a kind the
+        // default filter excluded would be an audit trail nobody could read —
+        // the failure mode `P13-T006` names, where the row exists and never
+        // answers anything.
+        assert!(!RecordKind::Decision.is_recording());
+        assert!(!RecordKind::Decision.is_approval());
+        assert!(!RecordKind::Decision.is_allowance());
+        assert!(RecordKind::Decision.is_decision());
+        assert!(RecordKind::Decision.is_storable());
+        assert!(RecordKind::Decision.document().is_none());
+
+        let filter = crate::store::HistoryFilter::default();
+        assert!(
+            !filter.include_recordings,
+            "the default filter is the privacy default, and it excludes recordings only"
+        );
     }
 
     #[test]
@@ -392,16 +464,20 @@ mod tests {
     }
 
     #[test]
-    fn only_the_three_recorded_kinds_lack_a_schema() {
-        // The drift guard, and it has already done its job twice: adding
+    fn only_the_four_recorded_kinds_lack_a_schema() {
+        // The drift guard, and it has already done its job three times: adding
         // `Approval` broke the version of this test that said `is_recording`,
-        // and adding `Allowance` broke the version that said two. What it now
-        // pins is that the schema-less kinds are exactly the three that were
-        // chosen rather than the three that happened to be there.
+        // adding `Allowance` broke the version that said two, and adding
+        // `Decision` broke the version that said three. What it now pins is that
+        // the schema-less kinds are exactly the four that were chosen rather
+        // than the four that happened to be there.
         for &kind in RecordKind::ALL {
             assert_eq!(
                 kind.document().is_none(),
-                kind.is_recording() || kind.is_approval() || kind.is_allowance(),
+                kind.is_recording()
+                    || kind.is_approval()
+                    || kind.is_allowance()
+                    || kind.is_decision(),
                 "{kind} disagrees with itself about whether it has a schema"
             );
         }
@@ -410,8 +486,8 @@ mod tests {
                 .iter()
                 .filter(|kind| kind.document().is_none())
                 .count(),
-            3,
-            "a fourth schema-less kind arrived without this test being read"
+            4,
+            "a fifth schema-less kind arrived without this test being read"
         );
     }
 

@@ -55,7 +55,9 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 use sure_core::diagnostics::Timestamp;
+use sure_core::hook_protection::Danger;
 use sure_core::paths::Paths;
+use sure_core::protection_history::{self, DecisionRecord};
 use sure_core::redact::escape_control_characters;
 use sure_core::session_event_store::{
     DeletedSessions, SessionEventStore, SessionScope, StoredEvent, StoredSession,
@@ -136,17 +138,28 @@ pub enum HistoryOutcome {
     },
 }
 
-/// One event, and the record it wrote.
+/// One event, the record it wrote, and what SURE decided about it.
 ///
-/// The pair rather than the event alone, because `session_events.record_row_id`
-/// is a number a user cannot resolve, and a listing of numbers nobody can look
-/// up is not an inspection surface. `None` means the event owns no record.
+/// The one-event-per-event's-record pair rather than the event alone, because
+/// `session_events.record_row_id` is a number a user cannot resolve, and a
+/// listing of numbers nobody can look up is not an inspection surface. `None`
+/// means the event owns no record.
+///
+/// `decision` is the third thing, and it is not the same thing as the record: the
+/// record is the event as SURE stored it, and the decision is what SURE said
+/// about it — the verdict, the danger, the sentence the user was shown, and
+/// whether a one-time allowance bought it
+/// (`sure_core::protection_history`). An event SURE reached no decision about
+/// (anything that is not a tool request) has none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShownEvent {
     /// The event row.
     pub event: StoredEvent,
     /// The `records` row this event owns, when there is one.
     pub record: Option<StoredRecord>,
+    /// The protection decision SURE recorded about this event, when there is
+    /// one.
+    pub decision: Option<DecisionRecord>,
 }
 
 /// The name a user sees for a `sure history` invocation.
@@ -316,16 +329,44 @@ fn showing(command: &'static str, paths: &Paths, id: &str) -> Report {
     // answer to be wrong. A record that cannot be read stops the whole listing:
     // a session shown without the record it wrote is a session with a hole in
     // it, and it would look complete.
+    //
+    // The decisions are read for the same reason and in one query for the whole
+    // session rather than one per event: the verdict is the thing a reader came
+    // for, and a listing that quietly left out one it could not read would be
+    // the same hole in a different place.
+    let decisions = match sessions.decisions_for_session(session.row_id) {
+        Ok(rows) => rows,
+        Err(error) => return read_failed(command, error),
+    };
+
     let mut events = Vec::with_capacity(rows.len());
     for event in rows {
         let record = match event.record_row_id {
             None => None,
             Some(row) => match store.record(row) {
                 Ok(record) => record,
-                Err(error) => return store_failed(command, paths, error),
+                Err(error) => return record_unreadable(command, paths, error),
             },
         };
-        events.push(ShownEvent { event, record });
+        let decision = decisions
+            .iter()
+            .find(|row| {
+                row.document.get("event_id").and_then(Value::as_str)
+                    == Some(event.event_id.as_str())
+            })
+            .cloned();
+        let decision = match decision {
+            None => None,
+            Some(row) => match protection_history::read_back(row) {
+                Ok(decision) => Some(decision),
+                Err(error) => return record_unreadable(command, paths, error),
+            },
+        };
+        events.push(ShownEvent {
+            event,
+            record,
+            decision,
+        });
     }
 
     Report::History(Box::new(HistoryReport {
@@ -482,6 +523,25 @@ fn store_failed(command: &'static str, paths: &Paths, error: StoreError) -> Repo
     )
 }
 
+/// A store that opened, and a record inside it that would not read back.
+///
+/// A sentence of its own rather than [`store_failed`]'s: the store opened, so
+/// "could not open it" would be the wrong fact about a real problem, and the row
+/// is what a user would have to look at. The store's own reader refuses to skip
+/// a row it cannot describe, and this is that refusal reaching the user.
+fn record_unreadable(command: &'static str, paths: &Paths, error: StoreError) -> Report {
+    failed(
+        command,
+        "Nothing was read from the history, and nothing was deleted.",
+        format!(
+            "SURE read {} and could not make sense of one of the records in it: {}. Nothing was \
+             skipped: a session shown with a record missing from it would look complete.",
+            escape_control_characters(&paths.store_file().display().to_string()),
+            error
+        ),
+    )
+}
+
 /// A read that started and could not finish.
 fn read_failed(
     command: &'static str,
@@ -583,8 +643,8 @@ pub fn human(report: &HistoryReport, out: &mut impl Write) -> io::Result<()> {
                 writeln!(out)?;
                 writeln!(
                     out,
-                    "The scope matched no row in this store, so no session, event, record or \
-                     full recording was removed."
+                    "The scope matched no row in this store, so no session, event, record, \
+                     decision or full recording was removed."
                 )?;
             } else {
                 writeln!(out, "SURE deleted what the scope named.")?;
@@ -594,6 +654,7 @@ pub fn human(report: &HistoryReport, out: &mut impl Write) -> io::Result<()> {
             row(out, "sessions", &deleted.sessions.to_string())?;
             row(out, "events", &deleted.events.to_string())?;
             row(out, "records", &deleted.records.to_string())?;
+            row(out, "decisions", &deleted.decisions.to_string())?;
             row(out, "full recordings", &deleted.recordings.to_string())?;
             row(out, "store", &clean(&report.store))?;
             writeln!(out)?;
@@ -674,7 +735,47 @@ fn write_event(shown: &ShownEvent, out: &mut impl Write) -> io::Result<()> {
         }
         None => row(out, "record", "none")?,
     }
+    write_decision(shown.decision.as_ref(), out)?;
     writeln!(out)
+}
+
+/// What SURE decided about one event.
+///
+/// Printed under the event it was about, and in the words the user was shown:
+/// the verdict comes from `ProtectionDecisionKind::as_str`, the danger from
+/// `Danger::as_str`, and the reason is the sentence the harness was answered
+/// with. Nothing here re-reads a request or re-decides anything — this is the
+/// row that was written when the decision was taken, or it is absent.
+///
+/// An event with no decision prints nothing extra rather than a line saying
+/// "none": most events are not tool requests, and SURE reaching no decision about
+/// them is not a fact about the user's project. The two cases are told apart by
+/// the event type printed above, which is where a reader looks for them anyway.
+fn write_decision(decision: Option<&DecisionRecord>, out: &mut impl Write) -> io::Result<()> {
+    let Some(decision) = decision else {
+        return Ok(());
+    };
+    row(out, "decision", decision.decision.as_str())?;
+    if let Some(danger) = decision.danger {
+        row(out, "danger", danger.as_str())?;
+    }
+    row(out, "tool", &clean(&decision.tool))?;
+    if let Some(grant) = decision.allowance {
+        // The row id rather than the grant's words: the grant is a row of its
+        // own, and the reason line below already says what this request was
+        // allowed to do. What a reader cannot get any other way is *which*
+        // allowance paid for it.
+        row(
+            out,
+            "allowance",
+            &format!("grant {grant} was spent by this request"),
+        )?;
+    }
+    match &decision.reason {
+        Some(reason) => row(out, "reason", &clean(reason))?,
+        None => row(out, "reason", "none")?,
+    }
+    Ok(())
 }
 
 /// The sentence that keeps a deadline from being read as a deletion.
@@ -778,6 +879,10 @@ pub fn machine(report: &HistoryReport) -> Value {
                                     .and_then(Value::as_i64),
                             }),
                         };
+                        value["decision"] = match &shown.decision {
+                            None => Value::Null,
+                            Some(decision) => decision_json(decision),
+                        };
                         value
                     })
                     .collect::<Vec<_>>()
@@ -789,11 +894,30 @@ pub fn machine(report: &HistoryReport) -> Value {
                 "sessions": deleted.sessions,
                 "events": deleted.events,
                 "records": deleted.records,
+                "decisions": deleted.decisions,
                 "recordings": deleted.recordings,
             });
         }
     }
     details
+}
+
+/// One decision row, as a script reads it.
+///
+/// The names are the ones the row stores — `"block"`, `"broad_delete"` — rather
+/// than the sentences [`write_decision`] prints, because a script compares and a
+/// person reads. The reason is passed through as it was written: it is prose, and
+/// a machine form that rewrote it would be a second place for the sentence to be
+/// wrong.
+fn decision_json(decision: &DecisionRecord) -> Value {
+    json!({
+        "event_id": decision.event_id.as_str(),
+        "decision": decision.decision.as_str(),
+        "danger": decision.danger.map(Danger::wire_name),
+        "tool": &decision.tool,
+        "reason": &decision.reason,
+        "allowance": decision.allowance,
+    })
 }
 
 /// One session row, as a script reads it.

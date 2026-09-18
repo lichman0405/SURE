@@ -55,6 +55,7 @@ pub mod probe;
 pub mod process;
 pub mod project_intent;
 pub mod project_verdict;
+pub mod protection_history;
 pub mod recheck_lifecycle;
 pub mod recording_projection;
 pub mod redact;

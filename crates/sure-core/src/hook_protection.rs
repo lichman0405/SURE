@@ -474,7 +474,14 @@ fn assess_request(
 /// code already reaches — [`safety::classify`]'s own `Source::Rule` and its
 /// `Destructive` class for the first two, strict mode's credential rule for the
 /// third — and a danger is only ever attached to a request that was held.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The serde name is the one a stored decision records
+/// ([`crate::protection_history`]), and it is not [`Danger::as_str`]: that is
+/// the sentence a person reads, and a record keeps the name that does not change
+/// when the sentence is reworded. There is one name and one place it is defined,
+/// and `every_danger_has_one_stored_name` holds the two spellings together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Danger {
     /// The request would delete across a whole location rather than the files
     /// it names: a command the classifier calls destructive whose operands name
@@ -503,6 +510,23 @@ impl Danger {
             Self::BroadDelete => "delete a whole location",
             Self::ForcePush => "overwrite published commits",
             Self::SensitiveRead => "read a file of credentials",
+        }
+    }
+
+    /// The name a stored decision gives this danger.
+    ///
+    /// [`Danger::as_str`] is a sentence a person reads and may be reworded; this
+    /// is the value written into a record and read back by a script, so it is
+    /// the one that must not change. The two are not two vocabularies: the
+    /// serde name is this same enum's, declared by the attribute on it, and
+    /// `every_danger_has_one_stored_name` is what keeps this accessor and that
+    /// attribute the same string.
+    #[must_use]
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::BroadDelete => "broad_delete",
+            Self::ForcePush => "force_push",
+            Self::SensitiveRead => "sensitive_read",
         }
     }
 
@@ -1726,6 +1750,30 @@ mod tests {
                     "policy jargon reached a user: {sentence}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn every_danger_has_one_stored_name() {
+        // The accessor and the serde attribute are two spellings of one name, and
+        // this is where they are held together: a stored decision written by one
+        // and read by the other must not be a decision this build cannot name.
+        for danger in Danger::ALL {
+            let written = serde_json::to_value(danger).expect("a unit variant serialises");
+            assert_eq!(
+                written,
+                serde_json::Value::String(danger.wire_name().to_owned()),
+                "{danger:?} has a different serde name from its wire name"
+            );
+            assert_eq!(
+                serde_json::from_value::<Danger>(written).expect("and reads back"),
+                *danger
+            );
+            assert_ne!(
+                danger.wire_name(),
+                danger.as_str(),
+                "{danger:?}: the sentence a user reads is not the name a record keeps"
+            );
         }
     }
 

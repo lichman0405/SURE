@@ -50,9 +50,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sure_core::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS;
+use sure_core::hook_protection::{Danger, ProtectionDecisionKind};
 use sure_core::paths::Paths;
+use sure_core::protection_history;
 use sure_core::session_event_store::SessionEventStore;
-use sure_core::store::{HistoryFilter, RecordKind, Store};
+use sure_core::store::{HistoryFilter, RecordKind, Store, StoredRecord};
 
 /// The binary this package builds, as cargo hands it to its integration tests.
 const SURE: &str = env!("CARGO_BIN_EXE_sure");
@@ -1983,6 +1985,537 @@ fn the_protection_mode_a_project_names_is_the_one_sure_decides_under() {
     );
 
     assert_untouched(&machine, "by ingests that named a store");
+}
+
+// --- the audit trail of protection decisions (P13-T006) -----------------
+
+/// One Cursor `preToolUse` shell request, in the shape a harness sends.
+///
+/// Built with `serde_json` rather than a `format!` string for the reason
+/// [`ingest_a_read`] is: one field is a path, and a path escaped by hand on one
+/// platform is a test about a project that does not exist on another.
+fn shell_request(project: &Path, harness_session: &str, command: &str) -> String {
+    serde_json::json!({
+        "event": "preToolUse",
+        "harness_session_id": harness_session,
+        "project_root": project.to_string_lossy(),
+        "tool": "Shell",
+        "args": {"command": command},
+        "timestamp_utc": "2026-09-19T09:30:00Z",
+        "source": "cursor",
+    })
+    .to_string()
+}
+
+/// One Cursor `preToolUse` read of one path, in the shape a harness sends.
+fn read_request(project: &Path, harness_session: &str, path: &str) -> String {
+    serde_json::json!({
+        "event": "preToolUse",
+        "harness_session_id": harness_session,
+        "project_root": project.to_string_lossy(),
+        "tool": "Read",
+        "path": path,
+        "timestamp_utc": "2026-09-19T09:31:00Z",
+        "source": "cursor",
+    })
+    .to_string()
+}
+
+/// One `sure hook ingest`, with `payload` on standard input.
+///
+/// `machine` picks the frame a harness reads. The human form is what a person
+/// runs by hand, and one test below checks that a sentence about a record that
+/// could not be written reaches both — a harness that reads the frame and a user
+/// who reads the sentence are two different readers of the same decision.
+fn ingest_payload(store: &Path, payload: &str, machine: bool) -> Run {
+    let mut command = sure_in_a_store(store);
+    if machine {
+        command.args(["--format", "json"]);
+    }
+    command.args(["hook", "ingest", "--source", "cursor", "pre-tool-use"]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a child process");
+    let mut stdin = child.stdin.take().expect("the pipe");
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
+    drop(stdin);
+    Run::of(&child.wait_with_output().expect("the child exits"))
+}
+
+/// The `sure_session_id` the session a named harness session produced.
+///
+/// Read out of the history rather than carried out of the ingest: the id is
+/// SURE's, assigned by the run that recorded the session, and a test that made
+/// one up would be asking about a session nothing wrote.
+fn session_named(store: &Path, harness_session: &str) -> String {
+    let listed = history_frame(store, &[]);
+    listed["details"]["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|session| session["harness_session_id"].as_str() == Some(harness_session))
+        .and_then(|session| session["sure_session_id"].as_str())
+        .unwrap_or_else(|| panic!("no session for {harness_session} in {listed}"))
+        .to_owned()
+}
+
+/// The `sessions` row id for one `SURE_SESSION_ID`, read from the file.
+fn session_row_id(store: &Path, sure_session_id: &str) -> i64 {
+    SessionEventStore::new(&open_the_store(store))
+        .session_by_sure_id(sure_session_id)
+        .expect("a lookup")
+        .unwrap_or_else(|| panic!("no session {sure_session_id} in {}", store.display()))
+        .row_id
+}
+
+/// The decision rows one session wrote, read by this process from the file.
+///
+/// The store rather than the report: `sure history` says what it shows, and a
+/// test that believed it would be checking a sentence against itself.
+fn decisions_of_session(store: &Path, session_row_id: i64) -> Vec<StoredRecord> {
+    SessionEventStore::new(&open_the_store(store))
+        .decisions_for_session(session_row_id)
+        .expect("the decisions of a session this test wrote")
+}
+
+#[test]
+fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delete_it() {
+    // P13-T006, through the command a harness runs: a request SURE held, the
+    // answer the harness was given, and the row that answer left behind — read
+    // back from the file, shown by `sure history`, and reached by
+    // `sure history delete`.
+    //
+    // The project's own file is what makes this a decision *about* something.
+    // Under the default mode the request is held by the mode before the rule has
+    // anything to name, so the row would carry no danger; `host_confirmed` is
+    // the mode a user who agreed to run project code is in, and `rm -rf build/`
+    // is the classifier's own broad-delete row. The answer below therefore names
+    // a danger, and the row has one to carry.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\n",
+    )
+    .expect("write the project's settings");
+
+    let held = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t006-held", "rm -rf build/"),
+        true,
+    );
+    assert_eq!(
+        held.status, 1,
+        "a held request is `not_green`, which is 1 — the number a launcher reads:\n{}",
+        held.stdout
+    );
+    let frame: serde_json::Value = serde_json::from_str(held.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", held.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
+
+    let id = session_named(&store, "p13t006-held");
+
+    // What a person reads.
+    let shown = run_in_a_store(&store, &["history", "show", &id]);
+    assert_eq!(shown.status, 0, "{}", shown.stderr);
+    for expected in ["decision", "block", "Shell", "names a whole location"] {
+        assert!(
+            shown.stdout.contains(expected),
+            "`sure history show` does not say {expected:?}:\n{}",
+            shown.stdout
+        );
+    }
+
+    // What a script reads, and the event the decision hangs from.
+    let machine_frame = history_frame(&store, &["show", &id]);
+    let event = &machine_frame["details"]["events"][0];
+    let decision = &event["decision"];
+    assert_eq!(
+        decision["decision"].as_str(),
+        Some("block"),
+        "{machine_frame}"
+    );
+    assert_eq!(
+        decision["danger"].as_str(),
+        Some("broad_delete"),
+        "the row does not name the danger the hold was about: {machine_frame}"
+    );
+    assert_eq!(decision["tool"].as_str(), Some("Shell"), "{machine_frame}");
+    assert!(
+        decision["allowance"].is_null(),
+        "a request that spent no allowance carries one: {machine_frame}"
+    );
+    assert_eq!(
+        decision["event_id"].as_str(),
+        event["event_id"].as_str(),
+        "the decision does not name the event it hangs from: {machine_frame}"
+    );
+
+    // The row itself, as this process reads it out of the file.
+    let rows = decisions_of_session(&store, session_row_id(&store, &id));
+    assert_eq!(
+        rows.len(),
+        1,
+        "the ingest wrote {} decision rows",
+        rows.len()
+    );
+    assert_eq!(rows[0].kind, RecordKind::Decision);
+    let record = protection_history::read_back(rows[0].clone()).expect("a decision SURE wrote");
+    assert_eq!(record.decision, ProtectionDecisionKind::Block);
+    assert_eq!(record.danger, Some(Danger::BroadDelete));
+    assert_eq!(record.tool, "Shell");
+    assert!(record.allowance.is_none());
+    assert_eq!(
+        record.event_id.as_str(),
+        event["event_id"].as_str().expect("the event names itself")
+    );
+    // The request's own words are not in this row. They are in the event payload
+    // it hangs from — redacted, once — and a second copy is the surface the
+    // brief's "without secrets" is about.
+    let document = rows[0].document.to_string();
+    assert!(
+        !document.contains("rm -rf build/"),
+        "the decision row carries the request's words as well as the event: {document}"
+    );
+
+    // And a delete reaches it, counts it, and removes it. The count is read from
+    // the frame and the removal from the file, because a report and the thing it
+    // reports on are the two halves a test of a delete needs.
+    let decision_row = rows[0].id;
+    let deleted = history_frame(&store, &["delete", "--session", &id]);
+    assert_eq!(
+        deleted["details"]["deleted"]["decisions"].as_u64(),
+        Some(1),
+        "the delete did not report removing the decision row: {deleted}"
+    );
+    assert!(
+        open_the_store(&store)
+            .record(decision_row)
+            .expect("a lookup")
+            .is_none(),
+        "the decision row survived a delete that reported removing it"
+    );
+    assert_untouched(&machine, "by an ingest and a delete that named a store");
+}
+
+#[test]
+fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
+    // The third hard point of the task: an allow that happened because a
+    // one-time allowance was spent and an allow that happened because nothing
+    // was dangerous are the same kind — `ProtectionDecisionKind` has three
+    // variants and this is one of them. The two runs below are that pair, and
+    // what tells them apart is the allowance the row names, carried from the
+    // decision SURE already took rather than re-decided here.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\n",
+    )
+    .expect("write the project's settings");
+
+    // The user records an allowance for exactly this request, from the command
+    // line, because a hook cannot ask about it.
+    let granted = run_in_a_store(
+        &store,
+        &[
+            "--format",
+            "json",
+            "hook",
+            "allow-once",
+            "--project",
+            &project.to_string_lossy(),
+            "--tool",
+            "Shell",
+            "--command",
+            "rm -rf build/",
+        ],
+    );
+    assert_eq!(granted.status, 0, "{}", granted.stderr);
+    let frame: serde_json::Value =
+        serde_json::from_str(granted.stdout.trim()).unwrap_or_else(|error| {
+            panic!("allow-once is not valid JSON: {error}\n{}", granted.stdout)
+        });
+    let grant = frame["details"]["grant"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("the allowance has no row id to spend: {frame}"));
+
+    // The request it was recorded for is let through, and the answer says which
+    // allowance did it.
+    let spent = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t006-spent", "rm -rf build/"),
+        true,
+    );
+    assert_eq!(
+        spent.status, 0,
+        "an allowed request exits 0, so the launcher proceeds:\n{}",
+        spent.stdout
+    );
+    let frame: serde_json::Value = serde_json::from_str(spent.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", spent.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("allow"), "{frame}");
+    assert!(
+        frame["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("one-time allowance")),
+        "the allow does not say it came from an allowance: {frame}"
+    );
+
+    let spent_id = session_named(&store, "p13t006-spent");
+    let spent_row = decisions_of_session(&store, session_row_id(&store, &spent_id));
+    assert_eq!(spent_row.len(), 1, "the ingest wrote no decision row");
+    let spent_record =
+        protection_history::read_back(spent_row[0].clone()).expect("a decision SURE wrote");
+    assert_eq!(spent_record.decision, ProtectionDecisionKind::Allow);
+    assert_eq!(
+        spent_record.danger,
+        Some(Danger::BroadDelete),
+        "an allowance covers one request SURE itself named as dangerous"
+    );
+    assert_eq!(
+        spent_record.allowance,
+        Some(grant),
+        "the row does not name the allowance that was spent"
+    );
+
+    // The other allow: an ordinary read, which the rule allowed because it found
+    // nothing in it. Same kind, no danger, no allowance — and that difference is
+    // the whole of what tells the two apart afterwards.
+    let ordinary = ingest_payload(
+        &store,
+        &read_request(&project, "p13t006-ordinary", "src/lib.rs"),
+        true,
+    );
+    assert_eq!(ordinary.status, 0, "{}", ordinary.stdout);
+    let ordinary_id = session_named(&store, "p13t006-ordinary");
+    let ordinary_rows = decisions_of_session(&store, session_row_id(&store, &ordinary_id));
+    assert_eq!(ordinary_rows.len(), 1, "the ingest wrote no decision row");
+    let ordinary_record =
+        protection_history::read_back(ordinary_rows[0].clone()).expect("a decision SURE wrote");
+    assert_eq!(ordinary_record.decision, ProtectionDecisionKind::Allow);
+    assert_eq!(
+        ordinary_record.danger, None,
+        "an ordinary read was recorded as a danger"
+    );
+    assert_eq!(
+        ordinary_record.allowance, None,
+        "an ordinary read was recorded as spending an allowance"
+    );
+
+    // And the user can see both, told apart in the words they read.
+    let shown = run_in_a_store(&store, &["history", "show", &spent_id]);
+    assert_eq!(shown.status, 0, "{}", shown.stderr);
+    assert!(
+        shown.stdout.contains("grant") && shown.stdout.contains("was spent by this request"),
+        "the allow-once does not read as one:\n{}",
+        shown.stdout
+    );
+    let shown = run_in_a_store(&store, &["history", "show", &ordinary_id]);
+    assert_eq!(shown.status, 0, "{}", shown.stderr);
+    assert!(
+        !shown.stdout.contains("was spent by this request"),
+        "an ordinary allow reads as an allowance that was spent:\n{}",
+        shown.stdout
+    );
+
+    // The delete reaches both rows, and the frame says how many went.
+    let deleted = history_frame(&store, &["delete", "--all"]);
+    assert_eq!(
+        deleted["details"]["deleted"]["decisions"].as_u64(),
+        Some(2),
+        "the delete did not report removing both decision rows: {deleted}"
+    );
+    assert_untouched(&machine, "by runs that named a store");
+}
+
+#[test]
+fn a_decision_row_holds_the_decision_and_none_of_the_credentials_the_request_carried() {
+    // The acceptance's "without secrets", in the shape that can fail: a request
+    // whose words carry a credential, the decision SURE took about it, and every
+    // byte of the store afterwards.
+    //
+    // What makes the absence an absence is the redacted form being *there*: the
+    // command really did arrive carrying a token, SURE really did look at those
+    // words, and what is stored is the request with the credential rewritten.
+    // Without that half, a store holding nothing about the request at all would
+    // pass the same test.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\n",
+    )
+    .expect("write the project's settings");
+
+    let secret = "ghp_0123456789abcdefghij";
+    let command = format!("git push --force https://user:{secret}@github.com/acme/app.git");
+    let run = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t006-secret", &command),
+        true,
+    );
+    assert_eq!(run.status, 1, "a force push is held:\n{}", run.stdout);
+    let frame: serde_json::Value = serde_json::from_str(run.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", run.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
+    assert!(
+        frame["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("replace commits")),
+        "the hold is not the one this request produced: {frame}"
+    );
+
+    let id = session_named(&store, "p13t006-secret");
+    let shown = history_frame(&store, &["show", &id]);
+    let decision = &shown["details"]["events"][0]["decision"];
+    assert_eq!(decision["danger"].as_str(), Some("force_push"), "{shown}");
+    assert!(
+        !decision.to_string().contains(secret),
+        "the decision row carries the credential: {decision}"
+    );
+
+    // Every file under the store directory, as bytes: the credential is in none
+    // of them, and the request is in one of them in its redacted form.
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&store).expect("the store directory this test made") {
+        let path = entry.expect("an entry").path();
+        if path.is_file() {
+            files.push(path);
+        }
+    }
+    assert!(
+        !files.is_empty(),
+        "the ingest wrote no store at all, so this test would prove nothing"
+    );
+    let mut redacted = false;
+    for path in &files {
+        let bytes = std::fs::read(path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        assert!(
+            !text.contains(secret),
+            "{} holds the credential the request carried",
+            path.display()
+        );
+        redacted |= text.contains("https://***@github.com/acme/app.git");
+    }
+    assert!(
+        redacted,
+        "the credential-bearing command is not in the store in its redacted form either, so \
+         nothing here shows that SURE saw the request this test is about"
+    );
+    assert_untouched(&machine, "by an ingest that named a store");
+}
+
+#[test]
+fn a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_the_record_is_missing() {
+    // The fourth hard point of the task: the row is bookkeeping about an answer
+    // a launcher acts on, so a write that failed must not become a status the
+    // launcher reads — and must not be silent either.
+    //
+    // A file where the store goes is the one way to fail this that a test can
+    // arrange without a broken disk. It fails the event write too, so the row
+    // has nothing to hang from; that is the case the sentence is about, and it
+    // is reached here through the command rather than through the function.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\n",
+    )
+    .expect("write the project's settings");
+    std::fs::write(store_file(&store), "this is not a database")
+        .expect("a file where the store belongs");
+
+    let held = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t006-unwritable", "rm -rf build/"),
+        true,
+    );
+    assert_eq!(
+        held.status, 1,
+        "a store SURE could not write changed the answer a launcher reads:\n{}",
+        held.stdout
+    );
+    let frame: serde_json::Value = serde_json::from_str(held.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", held.stdout));
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
+    assert_eq!(frame["exit_code"].as_i64(), Some(1), "{frame}");
+    let reason = frame["reason"]
+        .as_str()
+        .expect("a held request carries a reason");
+    assert!(
+        reason.contains("could not record this decision in the local history"),
+        "a decision that was not recorded said nothing about it: {reason}"
+    );
+    assert!(
+        reason.contains("The decision above stands."),
+        "the sentence does not say the answer is unaffected: {reason}"
+    );
+    assert!(
+        reason.contains("names a whole location"),
+        "the sentence about the record replaced the reason the rule reached: {reason}"
+    );
+
+    // The other direction: an allow whose row could not be written exits 0, and
+    // says the record is missing rather than losing it in silence. A failed
+    // write that turned an allow into a non-zero status would be a hook failing
+    // closed on a machine whose store is full.
+    let allowed = ingest_payload(
+        &store,
+        &read_request(&project, "p13t006-unwritable-allow", "src/lib.rs"),
+        true,
+    );
+    assert_eq!(
+        allowed.status, 0,
+        "a failed write turned an allow into a status a launcher reads as a refusal:\n{}",
+        allowed.stdout
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(allowed.stdout.trim()).unwrap_or_else(|error| {
+            panic!("hook ingest is not valid JSON: {error}\n{}", allowed.stdout)
+        });
+    assert_eq!(frame["decision"].as_str(), Some("allow"), "{frame}");
+    // The store could not be opened, so the event is not in it either and the
+    // sentence is the one about an event that was not stored. The other arm —
+    // the store open and refusing the row — is what `hook.rs`'s own test calls
+    // `record_the_decision` to reach.
+    assert!(
+        frame["reason"].as_str().is_some_and(|reason| {
+            reason.contains("could not record this decision in the local history")
+                && reason.contains("The decision above stands.")
+        }),
+        "an allow SURE could not record said nothing about it: {frame}"
+    );
+
+    // The human form a person runs says it too, whichever way the decision went.
+    let human = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t006-unwritable-human", "rm -rf build/"),
+        false,
+    );
+    assert_eq!(human.status, 1, "{}", human.stderr);
+    assert!(
+        human.stdout.contains("SURE blocks this tool request"),
+        "the human form is not the decision: {}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("could not record this decision in the local history"),
+        "the human form does not say the record is missing:\n{}",
+        human.stdout
+    );
+    assert_untouched(&machine, "by ingests whose store could not be written");
 }
 
 #[test]

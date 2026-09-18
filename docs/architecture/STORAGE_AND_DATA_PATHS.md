@@ -106,19 +106,21 @@ so users can see/delete what is stored. All of these exist except
 fourth history action and is also not implemented).
 
 The delete is the row-level answer to "clearly distinguishable and deletable"
-below. `sessions` and `session_events` are two tables and a full recording is a
-third thing again — a `records` row of kind `recording`, written when the
-project asked for `privacy.full_recording` and the user's configuration agreed,
-with no foreign key to the event it came from. `sure history delete` finds it by
-the event id inside the recording's own document, so a session delete reaches
-the transcript it wrote instead of leaving it behind. The store is opened with
-`Store::open_at` rather than `Store::open`: this command reports on records this
-machine holds rather than on a project being checked, so there is no project
-tree it could be put inside.
+below. `sessions` and `session_events` are two tables, and a full recording and a
+protection decision are each a `records` row of their own kind — a `recording`
+written when the project asked for `privacy.full_recording` and the user's
+configuration agreed, and a `decision` written for every request the rule
+answered since P13-T006 — with no foreign key to the event either came from.
+`sure history delete` finds them by the event id inside each row's own document,
+so a session delete reaches the transcript and the audit trail it wrote instead
+of leaving them behind. The store is opened with `Store::open_at` rather than
+`Store::open`: this command reports on records this machine holds rather than on
+a project being checked, so there is no project tree it could be put inside.
 
-The four counts a delete reports — sessions, events, records, full recordings —
-are reported separately on purpose. One total would let a delete that removed
-the session row and left the raw transcript behind read as complete.
+The five counts a delete reports — sessions, events, records, decisions, full
+recordings — are reported separately on purpose. One total would let a delete
+that removed the session row and left the raw transcript behind read as
+complete.
 
 ## Storage rules
 

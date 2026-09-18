@@ -62,14 +62,19 @@ Both are commands as of P13-T003, and neither answers about a project:
 - `sure history` lists the sessions this machine has recorded — which project
   and harness each came from, and how long it is kept —
   and `sure history show <SURE_SESSION_ID>` prints one session with the events
-  in it and the record each event wrote.
+  in it, the record each event wrote, and the decision SURE reached about it
+  where the event asked for one: the action, the danger it named, the tool, the
+  reason the user was given, and the allowance it spent if it spent one. The
+  request's own words are not repeated there — they are already in the event the
+  decision hangs from, redacted once — so the decision is a row about the
+  decision rather than a second copy of what was asked.
 - `sure history delete --session <SURE_SESSION_ID>`, `--project <ROOT>` or
   `--all` removes what the scope names: the `sessions` row, its
-  `session_events`, the `records` those events own, and any full recording
-  written for one of them. It reports each count separately, because "the raw
-  transcript is gone too" is a different claim from "the session row is gone".
-  All of it goes in one transaction: a delete that stops partway removes
-  nothing.
+  `session_events`, the `records` those events own, the decision rows recorded
+  for them, and any full recording written for one of them. It reports each
+  count separately, because "the raw transcript is gone too" is a different
+  claim from "the session row is gone". All of it goes in one transaction: a
+  delete that stops partway removes nothing.
 
 Three properties are part of the promise, not of the implementation:
 

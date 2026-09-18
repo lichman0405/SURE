@@ -123,6 +123,20 @@ fn the_repair_contract_names_its_issue_the_way_the_schema_does() {
 }
 
 #[test]
+fn a_repair_contract_carries_its_identity_and_recheck_list() {
+    // The schema and the type must agree on the fields that make a contract
+    // actionable: its own id and the checks to re-run after repair.
+    let document = serde_json::to_value(repair()).expect("a repair contract serializes");
+    assert!(document.get("id").is_some(), "{document}");
+    let recheck = document
+        .get("recheck")
+        .expect("recheck is present")
+        .as_array()
+        .expect("recheck is an array");
+    assert!(!recheck.is_empty(), "{document}");
+}
+
+#[test]
 fn a_check_result_says_how_it_was_established_and_which_state_it_is_about() {
     // The second regression. `evidence_class` and `project_fingerprint` are
     // what keep a file read and a live run from being summarised into the same

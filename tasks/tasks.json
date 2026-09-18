@@ -2645,5 +2645,42 @@
     ],
     "outputs": [],
     "notes": "Added 2026-09-18 by the supervisor, from P7-T010's verification. P7-T010 records stage 11 as not-run and passes `rechecks: &[]` to stage 12, each with a written reason: `RepairContract::from_finding` needs the checks that can observe a finding, `repair_impact::select_impacted_checks` takes the contract it would be helping to build, and nothing writes a finding today so stage 12 has nothing to compare against. Both are honest records of a real gap rather than a false green, and the gap is what the product's repair/re-check promise (priority 8) and the queued fixture task P14-T009 are waiting on."
+  },
+  {
+    "id": "P14-T013",
+    "phase": "P14",
+    "title": "Bring the corpus's record of detector severity back in line with the detectors",
+    "required": true,
+    "depends_on": [
+      "P7-T011"
+    ],
+    "acceptance": [
+      "Every `detector_severity_today` value in `fixtures/adversarial/*/scenario.json` states what the named detector yields today, measured by running it — or the field is replaced by a statement of where the current value is measured. The historic fact that the required and the delivered severity were once different is not deleted: it lives in `adversarial_fixture_detection.rs`'s `SEVERITY_BEFORE_P7T011` and in git, and this task keeps it.",
+      "A test fails when a `detector_severity_today` value disagrees with the severity the detector produces, so the field cannot go stale again. It reads the fixture's own text and runs the detector; a hand-kept list of expected values in the test would be a second place to keep the same fact.",
+      "The `notes` sentences that say every detector here emits `Severity::Note`, and that `adversarial_fixture_detection.rs` \"pins the gap\", are corrected to what the tree now does — that test asserts the manifest's severity now, and says so.",
+      "Where a per-outcome `required_severity` cannot be met by the detector that owns the outcome, the corpus says so deliberately: `fake-auth` requires `must_fix` for `CandidateCategory::Todo` at `src/auth.js` while `demo-analytics` requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. Each such outcome either restates its requirement in terms its detector can meet, or carries the reason it stands unmet and what would have to change for it to be met.",
+      "`required_severity` for the release-blocking cases is not lowered to match today's implementation, and `evaluation/acceptance-manifest.json` is unchanged by this task. A corpus edited to agree with the code is the false green this repository exists to catch, one level up."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor, from P7-T011's verification. P7-T011 gave detector findings the severity the corpus required, and in doing so made the corpus's own record of what the detectors do false: `fixtures/adversarial/{fake-payment,fake-auth,fake-email,dead-button,route-mismatch,demo-analytics}/scenario.json` still carry `detector_severity_today: \"note\"`, and their `notes` sentences still say every detector emits `Severity::Note` and that `adversarial_fixture_detection.rs` pins the gap between that and the requirement. No `.rs` file reads the field, so nothing depended on it — which is exactly why it could go stale unnoticed. The same verification measured the finer statement that remains unmet: in those fixtures the `candidate_scanner` outcomes land at `can_fix_later` while their per-outcome `required_severity` says `must_fix`, and the release-blocking severity arrives through the detector that saw the substituted action itself. `finding_gravity`'s module doc records why the `Todo` case cannot be satisfied by both fixtures at once. P7-T011 deliberately did not edit any of this: the fixtures were off-limits to its worker because a task that measures against a requirement should not be the task that rewrites it afterwards."
+  },
+  {
+    "id": "P7-T013",
+    "phase": "P7",
+    "title": "Let the check report read the capability tier from the project's recorded events",
+    "required": true,
+    "depends_on": [
+      "P7-T010",
+      "P12-T007"
+    ],
+    "acceptance": [
+      "`sure check` on a project whose store holds a session's harness events reports the tier those events earn, and with no events it still reports the snapshot tier — both observed by running the command against a project with recorded events and one without, not by a report about them.",
+      "The tier comes from `capability_report::report_from_events`, which computes it from the events SURE actually received and refuses a self-reported `Protected` tier; the pipeline does not grow a second rule, and the adapter's own claim is never taken upward.",
+      "The blind spots that module already computes are reported beside the tier, so a tier says what it does not cover rather than reading as completeness.",
+      "The capability line names what it counted — which harnesses the events came from and over what window — so a reader can tell 'no events were recorded' from 'events exist and were not counted'.",
+      "Every document that states a tier claim for a harness (`integrations/*/README.md`, `docs/architecture/MCP_BRIDGE.md`, `docs/architecture/CLI.md`) matches what the report now says, including the case where the events exist but the tier did not rise."
+    ],
+    "outputs": [],
+    "notes": "Added 2026-09-18 by the supervisor, from P12-T007's verification. The Codex bridge now reaches Tier 1 on ingest — four events normalised, stored and readable — while `sure check` still prints \"capability tier 0, snapshot\" for a project that has them, because the pipeline takes the tier from the command line and `crates/sure-core/src/capability_report.rs::report_from_events` has no callers. The same holds for the Claude Code and Cursor bridges (P10-T003, P11-T004), whose accepted work mapped events to a tier the report does not read. This is the safe direction — understating what SURE knows — but it means each integration's tier table promises something the verdict does not deliver, and a reader who records a session and then checks the project is told nothing changed. Related, and separate: `agent.claim` and `user.request` have no production caller, which is why Codex's `Stop` and prompt submissions are refused rather than mapped; giving claims a consumer is its own task and is not required for this one."
   }
 ]

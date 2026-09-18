@@ -3,25 +3,25 @@
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
 
-**In flight on 2026-09-18, not accepted:** `P7-T011` (severity calibration) and
-`P12-T007` (Codex evidence bridge) are dispatched and marked `in_progress` in
-`progress/state.json`, from briefs at `target/tmp/brief-p7t011.md` and
-`target/tmp/brief-p12t007.md`. The tree may hold their uncommitted work, so read
-`git status` before trusting the file list above. `P7-T011` owns the five
-false-completion detectors, `false_completion_aggregator.rs` and the severity
-rule; `P12-T007` owns the Codex event normaliser, `sure-cli`'s hook source
-registration and `integrations/codex/`.
-Progress: 125 / 170 tasks accepted (counted from `progress/state.json` against
+**Nothing is in flight:** `P7-T011` (severity calibration) and `P12-T007` (Codex
+evidence bridge) are both accepted — "What `P7-T011` added", "Validation of
+`P7-T011`", "What `P12-T007` added" and "Validation of `P12-T007`" below carry
+the numbers. The tree is clean and the next dispatch is the lowest-numbered READY
+task, `P1-T012`.
+Progress: 127 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
-below record why — and from 168 to 170 on the same day, when two gaps found by
-`P7-T010`'s verification got owners: items 73 and 74 below record why). **Phase
+below record why — from 168 to 170 on the same day, when two gaps found by
+`P7-T010`'s verification got owners (items 73 and 74), from 170 to 171 when
+`P7-T011`'s verification gave the corpus's own record of what the detectors do an
+owner (item 75), and from 171 to 172 when `P12-T007`'s verification found that
+recorded events never reach the verdict's capability tier (item 77)). **Phase
 P0 complete (9/9), phase P1 is open at
 11 of 12, phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
-10 of 12, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
-(9/9), phase P11 complete (9/9). Phase P12 is open at 8 of 10; Phase P13 is open
-at 1 of 9; Phase P14 is open at 3 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
+(9/9), phase P11 complete (9/9). Phase P12 is open at 9 of 10; Phase P13 is open
+at 1 of 9; Phase P14 is open at 3 of 13.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -53,6 +53,8 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
 `20649d3` with its acceptance recorded in `a5eabb9`. `P12-T009` is accepted as
 commit `60cb152`, with `6ccab01` correcting a stale row in
 `docs/architecture/CLI.md`. `P7-T010` is accepted as commit `5af79c7`.
+`P7-T011` is accepted as commit `80e98b2`. `P12-T007` is accepted as commit
+`d41d085`.
 
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -552,16 +554,52 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
     and one that predates `P7-T010`. Both were added by the supervisor with the
     evidence in the task notes, in the same way `P7-T010` and `P7-T011` were
     added (items 68 and 69).
+75. A worker agent completed `P7-T011` — *Calibrate finding severity and evidence
+    class against the acceptance corpus* — as commit `80e98b2`. The supervisor
+    re-ran all five gates from PowerShell, measured the corpus itself with a
+    scratch test of its own rather than reading the worker's harness, ran the
+    shipped binary over four fixture apps and hashed the real store before and
+    after, and counted the severity literals in the shipping halves of the seven
+    files with a script of its own. Accepted; "Validation of `P7-T011`" below
+    carries the numbers. The rule now lives in one place,
+    `crates/sure-core/src/finding_gravity.rs`, and its own verification turned up
+    a consequence it deliberately did not fix: the corpus's `scenario.json` files
+    still record `detector_severity_today: "note"` for detectors that now answer
+    `must_fix`, so the graph went from 170 to 171 tasks and `P14-T013` owns it.
+76. A worker agent completed `P12-T007` — *Implement Codex evidence bridge where
+    public surface permits* — as commit `d41d085`. The supervisor re-ran all five
+    gates from PowerShell, drove the refusal path through the real binary with the
+    store hashed before and after, rendered `hooks.json` itself, re-measured the
+    README's command table with the shipped binary, and read the event mapping,
+    the refusal reasons and the provenance fields in source. Accepted; "Validation
+    of `P12-T007`" below carries the numbers. Codex now reaches Tier 1 on ingest
+    for the four events its public surface carries, and refuses the other eight by
+    name with a reason and nothing stored.
+77. `P12-T007`'s verification found a gap it did not create and could not close
+    inside its own acceptance: recording a session's events does not change what
+    `sure check` says, because the pipeline reads the capability tier from the
+    command line while `capability_report::report_from_events` — which computes
+    the tier from the events SURE actually received — has no callers. The graph
+    went from 171 to 172 tasks and `P7-T013` owns it; the Claude Code and Cursor
+    bridges (`P10-T003`, `P11-T004`) mapped events to the same tier the report
+    does not read. The same verification measured two defects in files other
+    tasks own and recorded them there rather than here: the hook path reports
+    `outcome: ok` when a store failure left the event unwritten (`P13-T007`), and
+    the Claude Code and Cursor launchers cannot deliver an event under PowerShell
+    5.1 (`P10-T002`, `P11-T002`, and `P15-T008` ships them).
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
-`P7-T011`, `P7-T012`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`,
-`P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
-`P14-T010`, `P15-T008`, `P1-T012` and `P7-T012`. The
-lowest-numbered READY task is `P7-T011` (severity calibration against the
-acceptance corpus), which `P7-T010`'s acceptance just unblocked along with
-everything else that was waiting on a pipeline. `P12-T010` wires the MCP bridge
-into the plugin packages, and its brief carries the `--format json` deviation
-recorded below.
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list, read from
+`node scripts/taskctl.mjs ready` on 2026-09-18 after `P7-T011` and `P12-T007`
+were accepted, is `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`,
+`P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`,
+`P1-T012`, `P7-T012`, `P14-T013`, `P7-T013`; nothing is `in_progress`. The
+lowest-numbered READY task is `P1-T012` (give the store a location a caller
+can choose) — `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012`, `P7-T011`
+is accepted, `P14-T013` joined the list when that acceptance gave the
+corpus's own record an owner, and `P7-T013` joined it when `P12-T007`'s
+verification found that recorded events never reach the verdict's tier.
+`P12-T010` wires the MCP bridge into the plugin
+packages, and its brief carries the `--format json` deviation recorded below.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
@@ -687,6 +725,182 @@ platform does start and name it by full path, which also gives
 workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P12-T007` added
+
+`crates/sure-core/src/normalizer/codex.rs`, and with it the first harness whose
+ingest is measured against its own public surface. Codex documents twelve hook
+events; SURE maps four and refuses eight, and the refusal is the larger half of
+the deliverable:
+
+| Codex event | SURE | Why |
+| --- | --- | --- |
+| `SessionStart` | `session.started` | |
+| `PreToolUse` | `tool.requested` | |
+| `PostToolUse` | `tool.completed` | |
+| `SessionEnd` | `session.stopped` | |
+| `Stop` | refused | ends one turn, not the session; the completion message is an agent claim and no integration maps claims yet |
+| `PermissionRequest` | refused | SURE answers permissions, it does not ask for them |
+| `UserPromptSubmit` | refused | would record a person's prompt as a SURE event |
+| `PreCompact`, `PostCompact` | refused | SURE's compactions are its own |
+| `SubagentStart`, `SubagentStop` | refused | no subagent model in the event store |
+| `Interrupt` | refused | an interruption is not a session stop |
+
+Refused means exit 5 and a written sentence — "Codex sends 'Stop', and SURE has
+no event type for what it means: …" — not a silent drop. `UnknownEventType`
+stays a separate variant, so "a Codex event SURE will not record" and "not a
+Codex event" cannot be confused in the log. Provenance is set where the payload
+is built (`codex_event`, `codex_source`, `codex_reason`, and `timestamp_source:
+"sure_ingest_clock"` — Codex sends no timestamp, so the recorded instant is
+SURE's read time and the payload says so rather than implying it came from the
+harness).
+
+`crates/sure-cli/src/hook.rs` drops a leading byte-order mark before reading the
+event, because PowerShell 5.1 prefixes every native-command pipe with one
+whatever `$OutputEncoding` is set to; a BOM inside the payload is left alone and
+a test asserts it. `integrations/codex/` gains a `hooks.json` carrying exactly
+the four mapped events, a launcher pair, and a README that states Tier 1 with the
+hooks and **not** Tier 2, with the reason (no Codex binary has been run, no deny
+path observed, hooks require review and trust by hash) and a "Not verified"
+section naming every unexercised half.
+
+**The gap it disclosed rather than closed.** Recording a session's events does
+not change what `sure check` says: the pipeline reads the capability tier from
+the command line, while `capability_report::report_from_events` — which computes
+the tier from the events SURE actually received and refuses a self-reported
+`Protected` — has no callers. That is the safe direction, but every integration's
+tier table promises a tier the verdict does not deliver, so `P7-T013` owns it.
+
+## Validation of `P12-T007`
+
+Supervisor, 2026-09-18, from PowerShell. Commit `d41d085`; the five gates at that
+commit, all exit 0: fmt, clippy, `cargo test --workspace --all-features
+--no-fail-fast` (73 test targets, 2396 passes, 0 failures), bootstrap (`17
+phases, 171 tasks`), taskctl (`state OK: 171 tasks`). Log at
+`target/tmp/sup-p12t007-gates.txt`. `git show --name-only` lists twelve files,
+all under `crates/sure-cli/src/hook.rs`, `crates/sure-core/src/normalizer/` and
+`integrations/codex/` — nothing under `evaluation/`, `fixtures/adversarial/`,
+`progress/`, `tasks/` or `SHA256SUMS.txt`.
+
+The commit amends an earlier attempt, and the record says so: the original
+`41b67c8` is no longer in the log and `41b67c8..d41d085` is +40 lines in
+`codex.rs`. The first gate run was taken at `41b67c8` and re-run at `d41d085`.
+
+Driven through the shipped binary by the supervisor, not read from the report:
+`Get-Content integrations/codex/fixtures/stop-not-mapped.json -Raw |
+target\debug\sure.exe hook ingest --source codex` exits 5 with the reason
+sentence above and the status legend that separates 5 from "cannot carry out"
+and from a wrong command line. `${PLUGIN_ROOT}` substituted the way the README
+prescribes produces JSON whose four keys are exactly the mapped events. The
+README's command table was re-measured: `check`, `repair` and `recheck` each exit
+1 with `not_green`, "capability tier 0, snapshot" and `"checked": 0`; stage 11
+answers "no check produced a finding…", stage 12 "no earlier run left anything
+open for this project."; `mcp serve` with stdin closed exits 0 with
+`"answered": 0`; a relative path is refused with exit 5. The store
+(`%LOCALAPPDATA%\SURE\sure.db`, 348160 bytes, 324 records) was byte-identical
+across all of those runs.
+
+Not verified: no mapped ingest was run against the real store by the supervisor —
+the mapped path rests on the committed `hook.rs` tests through
+`run_ingest_with_paths` with a scratch `Paths`, which were run, plus reading the
+payload builder. The worker ran it once through the launcher and reported the
+store going 302 → 303; its README records that the run wrote the real store and
+names `P1-T012` as the reason it had to. The worker's claim that `check`/`repair`/
+`recheck` "record runs" is not reproducible from the measurements above and was
+not written down as fact. No Codex binary exists in this repository, so nothing
+here is evidence that Codex invokes the hook, accepts the rendered `hooks.json`
+or acts on a deny.
+
+Two defects this verification measured and gave owners rather than fixed here.
+`sure hook ingest` answers `{"outcome":"ok","exit_code":0,"decision":"allow"}`
+for a payload whose `cwd` is relative while **nothing is stored** — store
+byte-identical, record count still 324 — because `crates/sure-cli/src/hook.rs:150-153`
+persists inside `let _ =` under the comment "a store failure should not block the
+operation". Failing open on the harness's decision is deliberate; reporting
+SURE's own work as ok when nothing was recorded is a false green in the evidence
+path, and it belongs to `P13-T007`. And the Claude Code and Cursor launchers
+still carry a `param` block, which PowerShell 5.1 binds from the piped event so
+the event never arrives; the BOM half is fixed at SURE's end by this commit, the
+launcher half belongs to `P10-T002` and `P11-T002`, with `P15-T008` shipping
+them.
+
+## What `P7-T011` added
+
+The severity of a detector finding has one home:
+`crates/sure-core/src/finding_gravity.rs::gravity_of(reason, evidence_class,
+reach, gap)`. It answers the same question `CheckProposal::severity` asks — *how
+bad is it if this check is not satisfied* — and it can only lower an answer:
+
+| condition | severity |
+| --- | --- |
+| the reason names nothing, or its anchor is missing or uncheckable | `note` |
+| the evidence class is `unknown` | `note` |
+| the finding cannot reach a user (`Reach::NotProduction`) | `note` |
+| the finding is about declared intent (`GapKind::DeclaredIntent`) | `note` |
+| `GapKind::UnfinishedMarker`, reachable | `can_fix_later` |
+| `GapKind::UnrealContent`, reachable | `should_fix_first` |
+| `GapKind::SubstitutedAction`, reachable | `must_fix` |
+
+The six detectors ask it instead of writing `Severity::Note` into their own
+category tables (23 shipping literals before, 0 after), and
+`false_completion_aggregator::is_style_noise` is now
+`is_informational(severity) && !critical` rather than a second copy of the same
+decision spelled as a conjunction of three fields. What did **not** move: the
+evidence class (`must_fix` here is still `Inference` when the detector only
+pattern-matched, which is what the fixtures require beside the severity),
+`critical` (nothing sets it, and `CheckResult::blocks_green` reads it, so no
+verdict flips), and `evaluation/acceptance-manifest.json`.
+
+**The gap it disclosed rather than closed.** The severity the manifest names is
+met at the fixture level, by the detector that saw the substituted action itself.
+The finer per-outcome `required_severity` inside `scenario.json` is not met by
+the scanner that owns each outcome: `candidate_scanner`'s `Todo`, `Mock` and
+`Placeholder` proposals land at `can_fix_later`. `finding_gravity`'s module doc
+states why no function of a proposal's own fields can do better — `fake-auth`
+requires `must_fix` for `CandidateCategory::Todo` at `src/auth.js` while
+`demo-analytics` requires `should_fix_first` for the same category in the same
+context — so the rule takes the honest one and the corpus keeps the record of the
+difference. The cost is written at the detectors too: a hard-coded `status: 200`
+in a healthy project now reads as a `must_fix` candidate.
+
+## Validation of `P7-T011`
+
+Supervisor, 2026-09-18, from PowerShell unless stated. Commit `80e98b2`; the five
+gates re-run at the then-HEAD `41b67c8` (which contains it), all exit 0: fmt,
+clippy, `cargo test --workspace --all-features --no-fail-fast` (73 test targets,
+2395 passes, 0 failures), bootstrap (`17 phases, 170 tasks`), taskctl
+(`state OK: 170 tasks`). Log at `target/tmp/sup-p7t011-gates.txt`.
+
+The corpus was measured by the supervisor, not read from the worker's report: a
+scratch test written, run and deleted, output kept at
+`target/tmp/sup-p7t011-measure.txt`. All six release-blocking cases with a
+fixture app reach `must_fix` — fake-payment, fake-auth, fake-email,
+dead-button and route-mismatch through the five scanners, missing-migration
+through `db_migrations` — while `demo-analytics` reaches `should_fix_first` and
+stops, and `external-unverified`, `missing-config`, `rust-tests-fail` and
+`rust-tests-pass` produce nothing from those scanners at all. Every proposal
+behind those severities is `Inference` with `critical = false`.
+
+From the product's front door: `target\debug\sure.exe --format json check
+<absolute fixture>` exits 1 and reports "N candidate(s) worth acting on, 0 that
+are style noise" — 5 for fake-payment, 3 for dead-button, 1 for route-mismatch, 6
+for demo-analytics — and `%LOCALAPPDATA%\SURE\sure.db` was byte-identical before
+and after all eight runs (`C3F869D7…F6433`, 339968 bytes).
+
+The guard's ground truth was counted independently: in the shipping half (text
+before the first `#[cfg(test)]`) of the six detectors, `Severity::` literals = 0
+and `gravity_of(` = 1 each; the same measurement on `80e98b2^` found 23 literals
+in those halves. `tests/finding_severity_rule.rs` proves its own guard can fail —
+substituting `Severity::Note` for `gravity.severity()` in the real
+`noop_heuristics.rs` yields exactly one violation, and renaming `gravity_of(`
+yields exactly one — and the corpus test reads the manifest as text, checks the
+case count it parsed against the count of `release_blocking` fields in the same
+text, and pins the measured id set so a case gaining or losing a fixture app
+fails rather than silently narrowing what it covers.
+
+Not verified: `benign-test-mocks` has no fixture directory, so "no test-only mock
+becomes `must_fix`" rests on the rule's exhaustive `(gap, reach)` match returning
+informational for `Reach::NotProduction`, not on a measurement of that case.
 
 ## What `P7-T010` added
 

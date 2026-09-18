@@ -23,6 +23,7 @@ pub mod execution;
 pub mod finding;
 pub mod ids;
 pub mod intent;
+pub mod repair;
 pub mod severity;
 pub mod status;
 pub mod variants;

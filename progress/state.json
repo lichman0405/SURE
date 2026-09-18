@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P13",
-  "last_updated": "2026-09-18T20:13:59.230Z",
+  "last_updated": "2026-09-18T20:20:21.128Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2064,7 +2064,7 @@
       "started_at": "2026-09-18T19:35:44.539Z",
       "finished_at": "2026-09-18T20:12:41.695Z",
       "base_sha": "7e021ae",
-      "head_sha": null,
+      "head_sha": "853d7de",
       "evidence": [
         "853d7de \"P15-T016: make the ubuntu and macos jobs reach their tests, and answer the path question\" — `git show --stat 853d7de` reads 5 files changed, 281 insertions(+), 13 deletions(-): crates/sure-core/src/candidate_context.rs (96), crates/sure-core/src/recheck_lifecycle.rs (80), crates/sure-core/src/recording_projection.rs (71), crates/sure-core/tests/browser_driver.rs (34), crates/sure-testkit/tests/integration_thinness.rs (13). `git diff --stat 7e021ae 853d7de` reads 9 files / 532 insertions / 28 deletions because the range starts at the base and therefore also contains the dispatch commit's SHA256SUMS.txt, progress/HANDOFF.md, progress/state.json and tasks/tasks.json.",
         "cargo fmt --all -- --check, run by the supervisor from native PowerShell on 853d7de: exit 0",

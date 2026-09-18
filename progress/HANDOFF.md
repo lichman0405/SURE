@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
+
+**In flight on 2026-09-18, not accepted:** `P7-T011` (severity calibration) and
+`P12-T007` (Codex evidence bridge) are dispatched and marked `in_progress` in
+`progress/state.json`, from briefs at `target/tmp/brief-p7t011.md` and
+`target/tmp/brief-p12t007.md`. The tree may hold their uncommitted work, so read
+`git status` before trusting the file list above. `P7-T011` owns the five
+false-completion detectors, `false_completion_aggregator.rs` and the severity
+rule; `P12-T007` owns the Codex event normaliser, `sure-cli`'s hook source
+registration and `integrations/codex/`.
 Progress: 125 / 170 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69

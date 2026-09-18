@@ -25,7 +25,7 @@ mod values;
 pub mod authority;
 pub mod error;
 
-pub use authority::{Authority, Layer, Privilege, Resolved};
+pub use authority::{Authority, ExecutionSettings, Layer, Privilege, Resolved};
 pub use error::{ConfigError, ErrorKind, Location};
 pub use values::{
     AnalysisProvider, CheckPreference, PrivacyMode, ProjectRequest, ProtectionMode,

@@ -79,12 +79,14 @@ asking for either produces a refusal in `Authority::privileges()` rather than a
 grant.
 
 `telemetry` cannot take effect at all in this release, because nothing implements
-it. **`full_recording` can, and one step short of that rule is where it is
-enforced today:** `sure hook ingest` decides whether to write a recording from
-the project's own file alone (`crates/sure-cli/src/hook.rs`), so a repository the
-user merely opened turns recording on. The *duration* named below is arbitrated
-properly between the two files; putting the consent itself through `Authority`
-is `P13-T009`.
+it. `full_recording` can, and since `P13-T009` both halves of it are arbitrated:
+`sure hook ingest` takes the consent from `Authority::full_recording()` and the
+duration from `Authority::full_recording_retention_days()`, so a project file
+asking for a recording gets a refusal in `Authority::privileges()` rather than a
+recording, and a project file that asks to keep one longer than the user allowed
+gets a refusal rather than the shorter period. Before that, the consent was read
+from the project's own file, and a repository the user merely opened turned
+recording on.
 
 `full_recording_retention_days` is how long the raw content a full recording
 kept is kept for. It is an integer number of days, `0` means "until the moment

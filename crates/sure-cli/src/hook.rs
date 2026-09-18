@@ -31,7 +31,6 @@ use std::path::Path;
 
 use sure_core::allowance;
 use sure_core::config::Authority;
-use sure_core::config::Config;
 use sure_core::config::ProtectionMode;
 use sure_core::diagnostics::Timestamp;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
@@ -577,11 +576,24 @@ fn persist_event_with_paths(
         .map_err(|e| e.to_string())?;
 
     // Best-effort full recording. Failure must not affect the hook decision.
-    let consent = match Config::load(project_path) {
-        Ok(loaded) if loaded.config.privacy.full_recording => FullRecordingConsent::Full,
-        _ => FullRecordingConsent::ProjectionOnly,
-    };
-    // How long the recording is kept, arbitrated the way every other setting in
+    //
+    // Both recording settings are read through one `Authority::load`, because
+    // they are two questions about the same two files and reading them is the
+    // same read: whether to record at all, and how long to keep it. A second
+    // load would be a second chance for the two answers to come from different
+    // reads of files that can change under a long-running process.
+    //
+    // The consent is `Authority::full_recording`, and not the project's own
+    // `privacy.full_recording`, because recording more is not running more: the
+    // setting is a *request*, and only the user's own file can grant it. A
+    // repository the user merely opened would otherwise turn the recording of
+    // their own machine's activity on — the sentence
+    // `docs/architecture/CONFIG_REFERENCE.md` used to carry about this call
+    // site. A project's `true` leaves a refused
+    // `ProjectRequest::FullRecording` in `Authority::privileges`, which is where
+    // a report reads what was asked for.
+    //
+    // The retention is arbitrated the way every other setting in
     // `sure_core::config` is: the user may name any duration, and a project may
     // only shorten it. A project asking to keep the data for longer is not
     // obeyed and does not raise the number — `Authority` records it as a refused
@@ -589,13 +601,20 @@ fn persist_event_with_paths(
     // period. "Recording more is not running more", and keeping it longer is not
     // either.
     //
-    // The fallback is the *default*, and it is the only thing here that resolves
-    // on failure. A configuration file that will not parse is a run whose
-    // settings SURE does not know, and the safe direction is the shorter one:
-    // falling back to nothing at all would be the same as the default, but
-    // falling back to whatever the project asked for would let an unreadable
-    // user file become a longer retention than SURE's own.
-    let retention_days = Authority::load(project_path, &paths.user_config_file())
+    // The fallbacks are the *defaults*, and they are the only thing here that
+    // resolves on failure. A configuration file that will not parse is a run
+    // whose settings SURE does not know, and the safe direction for both of
+    // these is the lesser one: falling back to the projection is the same as the
+    // default, but falling back to whatever the project asked for would let an
+    // unreadable user file become a longer retention than SURE's own, or a full
+    // recording of a session the user never agreed to.
+    let settings = Authority::load(project_path, &paths.user_config_file()).ok();
+    let consent = match settings.as_ref() {
+        Some(authority) if authority.full_recording() => FullRecordingConsent::Full,
+        _ => FullRecordingConsent::ProjectionOnly,
+    };
+    let retention_days = settings
+        .as_ref()
         .map_or(DEFAULT_FULL_RECORDING_RETENTION_DAYS, |authority| {
             authority.full_recording_retention_days().value
         });
@@ -630,27 +649,32 @@ fn persist_event_with_paths(
 /// implements, and it is still an answer where stopping would be none — a hook
 /// that failed outright would leave a Tier 1 harness to fall open.
 ///
-/// The execution settings are still read from the project's file alone. That
-/// gap is `P13-T009`'s, not this function's: the mode a *user* chose is the one
-/// this task had to make reach the decision.
+/// The execution settings are arbitrated here too, and they are the sharper half
+/// of the same rule. `execution.mode: host_confirmed` and
+/// `execution.allow_network: true` in a project file are *requests*
+/// (`Config::requested_privileges`), and a project file cannot grant itself one:
+/// [`Authority::execution_mode`] answers the user's own mode and
+/// [`Authority::permissions`] the permissions the two files add up to, so a
+/// project that asks to run code on a machine whose user never allowed it is
+/// refused in the same place every other request is refused. Before this, this
+/// function built the permission set by hand out of the project's own file, and
+/// a repository the user merely opened decided that their hooks ran its code.
+///
+/// The failure arm is the same shape as the protection arm and for the same
+/// reason: an unreadable file is a run whose settings SURE does not know, and
+/// the answer to "what may run" is then `inspect_only` — the mode SURE uses
+/// unasked — rather than the project's ask.
 fn load_execution_config(
     project_root: &str,
     paths: &Paths,
 ) -> (ExecutionMode, ExecutionPermissions, ProtectionMode) {
     let path = Path::new(project_root);
     match Authority::load(path, &paths.user_config_file()) {
-        Ok(authority) => {
-            let config = authority.project();
-            let mut permissions = ExecutionPermissions::inspect_only();
-            permissions.run_project_code = config.execution.mode.runs_project_code();
-            permissions.install_dependencies = config.execution.allow_dependency_install;
-            permissions.network = config.execution.allow_network;
-            (
-                config.execution.mode,
-                permissions,
-                authority.protection().value,
-            )
-        }
+        Ok(authority) => (
+            authority.execution_mode(),
+            authority.permissions(),
+            authority.protection().value,
+        ),
         Err(_) => (
             ExecutionMode::InspectOnly,
             ExecutionPermissions::inspect_only(),
@@ -870,38 +894,118 @@ mod tests {
         ingest_event_str(&envelope.to_json().expect("envelope serialises")).expect("event ingests")
     }
 
-    #[test]
-    fn full_recording_is_stored_when_opted_in() {
-        let tmp = scratch_hook_dir("hook-full-recording-opted-in");
+    /// Persist one event into a project whose settings files the caller wrote,
+    /// and read back the full recordings that came of it.
+    ///
+    /// The recordings and not the decision: a projection is written through this
+    /// call whether or not a full recording was consented to, so "was the
+    /// transcript kept" is a question only these rows answer. The row also
+    /// carries the retention that was decided when it was written, which is the
+    /// only way to see the number rather than the setting.
+    fn recordings_after_one_event(
+        name: &str,
+        user_yaml: Option<&str>,
+        project_yaml: &str,
+    ) -> Vec<sure_core::full_recording::StoredFullRecording> {
+        let tmp = scratch_hook_dir(name);
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("create scratch");
 
         let project = tmp.join("project");
         std::fs::create_dir_all(&project).expect("create project");
-        std::fs::write(
-            project.join("sure.yaml"),
-            "privacy:\n  full_recording: true\n",
-        )
-        .expect("write config");
+        std::fs::write(project.join("sure.yaml"), project_yaml).expect("write config");
 
-        let data = tmp.join("data");
-        let config = tmp.join("config");
-        let paths = Paths::from_roots(data, config).expect("paths are valid");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+        if let Some(user_yaml) = user_yaml {
+            let user_config = paths.user_config_file();
+            std::fs::create_dir_all(
+                user_config
+                    .parent()
+                    .expect("the settings file lives in a directory"),
+            )
+            .expect("create settings directory");
+            std::fs::write(&user_config, user_yaml).expect("write the user's own settings");
+        }
 
         let ingested = make_claude_event(&project);
         let event_id = EventId::generate();
-
         let fingerprint =
             persist_event_with_paths(&ingested, &project.to_string_lossy(), &event_id, &paths)
                 .expect("persist succeeds");
 
         let store = Store::open_at(&paths.store_file()).expect("store opens");
         let recordings = full_recordings_for_project(&store, &fingerprint, 10).expect("query");
+        if !recordings.is_empty() {
+            assert_eq!(recordings[0].event_type, "tool.completed");
+            assert_eq!(recordings[0].source, "claude-code");
+            assert_eq!(recordings[0].event_id, Some(event_id.as_str().to_owned()));
+        }
+        recordings
+    }
 
-        assert_eq!(recordings.len(), 1, "one full recording should exist");
-        assert_eq!(recordings[0].event_type, "tool.completed");
-        assert_eq!(recordings[0].source, "claude-code");
-        assert_eq!(recordings[0].event_id, Some(event_id.as_str().to_owned()));
+    #[test]
+    fn full_recording_is_stored_when_the_user_opted_in() {
+        // The consent is the user's own, in the user's own file — which is what
+        // `privacy.full_recording` being a *request* means
+        // (`Authority::full_recording`).
+        let recordings = recordings_after_one_event(
+            "hook-full-recording-opted-in",
+            Some("privacy:\n  full_recording: true\n"),
+            "",
+        );
+        assert_eq!(
+            recordings.len(),
+            1,
+            "the user asked for a full recording and none was kept"
+        );
+    }
+
+    #[test]
+    fn a_project_file_cannot_turn_on_full_recording() {
+        // The other half of the same rule, and the half that used to be wrong:
+        // this call site read `privacy.full_recording` out of the project's file
+        // alone, so a repository the user merely opened turned the recording of
+        // their own machine's activity on.
+        let recordings = recordings_after_one_event(
+            "hook-full-recording-project-only",
+            None,
+            "privacy:\n  full_recording: true\n",
+        );
+        assert!(
+            recordings.is_empty(),
+            "a project file turned full recording on"
+        );
+    }
+
+    #[test]
+    fn a_project_file_cannot_outlast_the_users_retention() {
+        // Retention, the setting beside it, through the same call and the same
+        // single `Authority::load`: the user's file names three days and the
+        // project's names thirty, and the deadline on the row that was written
+        // is the user's. A build that obeyed the project would write thirty and
+        // a build that silently kept three while reporting thirty would pass a
+        // test that only read `Authority::full_recording_retention_days`.
+        let recordings = recordings_after_one_event(
+            "hook-retention-arbitrated",
+            Some("privacy:\n  full_recording: true\n  full_recording_retention_days: 3\n"),
+            "privacy:\n  full_recording: true\n  full_recording_retention_days: 30\n",
+        );
+        assert_eq!(
+            recordings.len(),
+            1,
+            "the user opted in and nothing was kept"
+        );
+
+        // 3 days = 259_200_000 ms, with a minute of tolerance for clock drift.
+        let now = Timestamp::now().as_millis();
+        let three_days = now + 259_200_000;
+        assert!(
+            recordings[0].retained_until_ms >= three_days - 60_000
+                && recordings[0].retained_until_ms <= three_days + 60_000,
+            "the recording is kept until {} — the project's thirty days, not the \
+             user's three",
+            recordings[0].retained_until_ms
+        );
     }
 
     #[test]
@@ -1666,6 +1770,32 @@ mod tests {
         (project, paths)
     }
 
+    /// Name host execution in the **user's** own settings file, inside the
+    /// scratch directory the test owns.
+    ///
+    /// This is where `execution.mode` comes from and nowhere else. A project's
+    /// `sure.yaml` naming `host_confirmed` is a *request*
+    /// (`Config::requested_privileges`) and this build refuses it like every
+    /// other request, so a test that wrote the mode into the project's file
+    /// would be testing a machine on which no project code runs —
+    /// `a_project_asking_to_run_its_own_code_is_refused` is that test, and it is
+    /// the one that keeps this helper honest.
+    ///
+    /// The file goes to `paths.user_config_file()`, which `Paths::from_roots`
+    /// has put inside the scratch directory: on a real machine it is
+    /// `%APPDATA%\SURE\sure.yaml`, which belongs to the person running the suite.
+    fn a_user_who_allowed_project_code(paths: &Paths) {
+        let user_config = paths.user_config_file();
+        std::fs::create_dir_all(
+            user_config
+                .parent()
+                .expect("the settings file lives in a directory"),
+        )
+        .expect("create settings directory");
+        std::fs::write(&user_config, "execution:\n  mode: host_confirmed\n")
+            .expect("write the user's own settings");
+    }
+
     /// A Cursor `preToolUse` event naming one tool and, when it names one, one
     /// path: the request the rule is asked about, in the shape the harness sends.
     fn cursor_request_at(project: &std::path::Path, tool: &str, path: Option<&str>) -> String {
@@ -1812,6 +1942,96 @@ mod tests {
         assert!(reason.contains("credentials"), "{reason}");
     }
 
+    // --- the execution settings, arbitrated before a hook decides --------------
+    //
+    // `execution.mode` and the permission set are the user's to grant and the
+    // project's to ask for (`Authority::execution_mode`, `Authority::permissions`),
+    // and the pair is computed in one place so that a decision cannot be taken
+    // under one file's mode and another file's permissions. These two tests are
+    // the same request answered both ways, which is what makes the first
+    // attributable to the configuration rather than to a rule that refuses
+    // everything.
+
+    #[test]
+    fn a_project_asking_to_run_its_own_code_is_refused() {
+        // The defect this task exists for, at the boundary a harness reaches: a
+        // project file naming `host_confirmed`, `allow_dependency_install` and
+        // `allow_network` asks for three permissions and gets none of them. The
+        // answer is the execution-mode refusal, not the danger hold — a
+        // repository cannot be run on a machine whose user never agreed to run
+        // anything by naming a mode in `sure.yaml`.
+        let (project, paths) = a_project_with(
+            "p13t009-project-only",
+            "execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n  \
+             allow_network: true\n",
+        );
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("does not permit this action"),
+            "the ask was not answered as a refusal: {reason}"
+        );
+        assert!(
+            !reason.contains("names a whole location"),
+            "the mode refused, and the reason names a danger SURE only reads off a \
+             consent hold: {reason}"
+        );
+
+        // And an allowance is not a way round it. The writer records one — the
+        // words are the user's own — and the very next identical request is still
+        // refused, with the allowance left unspent because there was no danger to
+        // name. This is the shape of the failure the fix closes: before it, this
+        // request needed only a one-time allowance to run the project's code.
+        allow_once(&paths, &project, "Shell", "rm -rf build/");
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "a recorded allowance let the project's code run under a mode the user \
+             never granted"
+        );
+        assert!(
+            reason.contains("does not permit this action"),
+            "the refusal changed shape after an allowance was recorded: {reason}"
+        );
+        assert_eq!(
+            outstanding_grants(&paths, &project).len(),
+            1,
+            "an allowance was spent on a request the mode had already refused"
+        );
+    }
+
+    #[test]
+    fn a_user_who_allowed_project_code_is_what_puts_the_hook_in_host_confirmed_mode() {
+        // The same project, the same request, and the user's own file naming the
+        // mode. Now the answer is the consent hold with the danger named — which
+        // is what makes the refusal above a statement about the configuration
+        // rather than about a rule that holds every shell request.
+        let (project, paths) = a_project_with(
+            "p13t009-user-granted",
+            "execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n  \
+             allow_network: true\n",
+        );
+        a_user_who_allowed_project_code(&paths);
+
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(action, ProtectionDecisionKind::Block);
+        assert!(
+            reason.contains("names a whole location"),
+            "the user allowed project code and the request was refused for the mode: \
+             {reason}"
+        );
+
+        allow_once(&paths, &project, "Shell", "rm -rf build/");
+        let (action, _) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Allow,
+            "the user granted the mode and the allowance was not honoured"
+        );
+    }
+
     // --- the three dangers, and the one-time allowance that answers one -------
     //
     // Everything here runs through `run_ingest_with_paths` and
@@ -1911,10 +2131,8 @@ mod tests {
         // names a whole location, and the mode is the one a user who has agreed
         // to run project code is in — so the answer before the allowance is the
         // consent hold, said in the user's terms.
-        let (project, paths) = a_project_with(
-            "p13t005-broad-delete",
-            "execution:\n  mode: host_confirmed\n",
-        );
+        let (project, paths) = a_project_with("p13t005-broad-delete", "");
+        a_user_who_allowed_project_code(&paths);
 
         let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
         assert_eq!(action, ProtectionDecisionKind::Block);
@@ -1959,10 +2177,8 @@ mod tests {
 
     #[test]
     fn an_allowance_covers_one_request_and_not_its_neighbours() {
-        let (project, paths) = a_project_with(
-            "p13t005-one-request",
-            "execution:\n  mode: host_confirmed\n",
-        );
+        let (project, paths) = a_project_with("p13t005-one-request", "");
+        a_user_who_allowed_project_code(&paths);
         allow_once(&paths, &project, "Shell", "rm -rf build/");
 
         // A different command, the same tool.
@@ -1990,8 +2206,8 @@ mod tests {
 
     #[test]
     fn a_force_push_is_held_and_an_allowance_for_it_lets_one_through() {
-        let (project, paths) =
-            a_project_with("p13t005-force-push", "execution:\n  mode: host_confirmed\n");
+        let (project, paths) = a_project_with("p13t005-force-push", "");
+        a_user_who_allowed_project_code(&paths);
 
         let (action, reason) = run_shell_request(&project, &paths, "Shell", "git push --force");
         assert_eq!(action, ProtectionDecisionKind::Block);
@@ -2076,8 +2292,8 @@ mod tests {
         // cover it — the answer is the consent hold it has always been. This is
         // the limit of the override stated as a test: a command line with more
         // than one reading is never let through by a grant.
-        let (project, paths) =
-            a_project_with("p13t005-unreadable", "execution:\n  mode: host_confirmed\n");
+        let (project, paths) = a_project_with("p13t005-unreadable", "");
+        a_user_who_allowed_project_code(&paths);
         for line in [
             "rm -rf \"my dir\"",
             "rm -rf / && echo done",
@@ -2122,8 +2338,8 @@ mod tests {
         // is the one a full disk or a store somebody else holds the lock on
         // takes. What both must keep is the decision, because the kind is what
         // [`crate::report`] turns into the number a launcher reads.
-        let (project, paths) =
-            a_project_with("p13t006-unrecorded", "execution:\n  mode: host_confirmed\n");
+        let (project, paths) = a_project_with("p13t006-unrecorded", "");
+        a_user_who_allowed_project_code(&paths);
         let project_root = project.to_string_lossy().into_owned();
         let held = || ProtectionDecision::block(danger_reason(Danger::BroadDelete));
 
@@ -2190,13 +2406,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let project = tmp.join("project");
         std::fs::create_dir_all(&project).expect("create project");
-        std::fs::write(
-            project.join("sure.yaml"),
-            "execution:\n  mode: host_confirmed\n",
-        )
-        .expect("write project config");
+        std::fs::write(project.join("sure.yaml"), "").expect("write project config");
         let paths = Paths::from_roots(project.join("data"), project.join("config"))
             .expect("the roots are absolute");
+        // The user's own file, in the config root this test made a *part of the
+        // project* so that every store it opens is refused. The mode still has to
+        // be the user's, because a request that needs consent is the only kind an
+        // allowance can be recorded for.
+        a_user_who_allowed_project_code(&paths);
 
         let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
         assert_eq!(action, ProtectionDecisionKind::Block);

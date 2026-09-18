@@ -226,6 +226,7 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         project,
         purpose,
         config: &loaded.config,
+        execution: authority.execution(),
         store: store.as_ref(),
         goal,
     }
@@ -1400,6 +1401,132 @@ mod tests {
         assert!(
             !fixture.paths().store_file().exists(),
             "a refused configuration left a history behind"
+        );
+    }
+
+    // --- the execution settings the pipeline plans under (P13-T009) --------
+
+    /// A project file asking for everything a project's own file can ask for.
+    ///
+    /// A mode that would run the project's code, the two permissions that only
+    /// exist under such a mode, the loosest protection mode there is, and a full
+    /// recording kept for no time at all. Every one of these is a *request*
+    /// (`docs/adr/0011-project-configuration-is-a-request.md`): the project says
+    /// what it would like, and the user's own file decides.
+    const A_PROJECT_ASKING_FOR_EVERYTHING: &str = "\
+execution:
+  mode: host_confirmed
+  allow_dependency_install: true
+  allow_network: true
+protection:
+  mode: standard
+privacy:
+  full_recording: true
+  full_recording_retention_days: 0
+";
+
+    #[test]
+    fn a_project_file_cannot_choose_the_mode_the_pipeline_plans_under() {
+        // P13-T009, the pipeline half (the brief's D3), measured on the two
+        // values stage 4 actually uses rather than on the file that named them.
+        //
+        // Before the change `sure check` handed `authority.project_file().config`
+        // into the pipeline and stage 4 read `config.execution`, so this
+        // fixture — a project whose own `sure.yaml` says `host_confirmed` — had
+        // its checks planned under a mode and a permission set the user's own
+        // file had never granted. `RunOutcome::mode` and `::permissions` are the
+        // run's own account of what it decided under, so this is a statement
+        // about the plan and not about the settings file.
+        //
+        // What it cannot be is an assertion about a *run*: this build has no
+        // runner for a planned check (`pipeline.rs`), so a check the mode allows
+        // is recorded as one nothing carried out. What the mode changes here is
+        // which checks are refused, and that is observable — so the second half
+        // below reads the refusal this mode produced.
+        let fixture = Fixture::new("pipeline-project-mode");
+        a_rust_project(&fixture);
+        fixture.write("sure.yaml", A_PROJECT_ASKING_FOR_EVERYTHING);
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let run = checked(&report).run.run.as_ref().expect("a verdict");
+
+        assert_eq!(
+            run.mode,
+            sure_core::execution::ExecutionMode::InspectOnly,
+            "a project's own file chose the mode the pipeline planned under"
+        );
+        assert_eq!(
+            run.permissions,
+            sure_core::execution::ExecutionPermissions::inspect_only(),
+            "a project's own file granted itself permissions the user's file did not"
+        );
+        assert_eq!(machine_of(&report)["mode"], json!("inspect_only"));
+
+        // And the plan really was made under that mode: the checks this project's
+        // shape would run are refused with the vocabulary's own reason, which is
+        // the difference the mode makes to what a reader sees.
+        assert!(
+            run.report
+                .results()
+                .iter()
+                .any(|result| result.not_checked_reason
+                    == Some(sure_core::status::NotCheckedReason::ExecutionNotAuthorized)),
+            "no check was refused by the execution mode, so the run did not plan under one: {:?}",
+            run.report.results()
+        );
+    }
+
+    #[test]
+    fn the_users_own_file_is_what_moves_the_mode_the_pipeline_plans_under() {
+        // The other direction, and the one that shows `Authority::permissions()`
+        // reaches stage 4 rather than a set built on the way: the user's own file
+        // grants a mode and a permission no project file can, and the run's own
+        // outcome says so.
+        //
+        // `install_dependencies` is the sharpest of the six to assert, because
+        // nothing else in this build can grant it: the old hand-built set in the
+        // hook copied `allow_dependency_install` straight out of the project's
+        // file, and the pipeline never had a permission set at all.
+        //
+        // The user's file is written under the fixture's own config root, which
+        // is why `Paths::from_roots` exists: the machine's real configuration
+        // directory is read through `SHGetKnownFolderPath` and cannot be moved by
+        // a flag or an environment variable, so a test that used it would be a
+        // test of whoever's machine it ran on.
+        let fixture = Fixture::new("pipeline-user-grant");
+        a_rust_project(&fixture);
+        fixture.write_user_config(
+            "execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n",
+        );
+
+        let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
+        let run = checked(&report).run.run.as_ref().expect("a verdict");
+
+        assert_eq!(
+            run.mode,
+            sure_core::execution::ExecutionMode::HostConfirmed,
+            "the user's own file named a mode and the run did not plan under it"
+        );
+        assert!(run.permissions.run_project_code);
+        assert!(
+            run.permissions.install_dependencies,
+            "the user's own file granted this permission and the run did not plan under it"
+        );
+        assert_eq!(machine_of(&report)["mode"], json!("host_confirmed"));
+
+        // The plan moved with it: under the default mode this project's own
+        // checks are refused as unauthorised, and under the mode the user granted
+        // there is nothing to refuse them for. Asserted as an absence of that one
+        // reason rather than as a count, because a check that is not refused is
+        // still not a check that ran — nothing in this build carries one out.
+        assert!(
+            !run.report
+                .results()
+                .iter()
+                .any(|result| result.not_checked_reason
+                    == Some(sure_core::status::NotCheckedReason::ExecutionNotAuthorized)),
+            "a check the user's own mode authorised was refused as unauthorised: {:?}",
+            run.report.results()
         );
     }
 

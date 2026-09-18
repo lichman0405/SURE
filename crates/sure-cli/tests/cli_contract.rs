@@ -47,9 +47,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use sure_core::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS;
 use sure_core::hook_protection::{Danger, ProtectionDecisionKind};
 use sure_core::paths::Paths;
 use sure_core::protection_history;
@@ -1258,22 +1256,31 @@ fn a_delete_reaches_a_full_recording_that_its_session_event_wrote() {
 }
 
 #[test]
-fn a_project_that_shortens_the_recording_retention_is_what_the_recording_says() {
-    // Criterion: "Full recording retention configurable" — at the process rather
-    // than at the function. The tests beside `persist_full_recording` prove that
-    // the number handed in is the number written down; what they cannot prove is
-    // that `sure hook ingest` hands in the *arbitrated* number instead of the
-    // default, and that seam is where a regression would really happen, because
-    // the hook is the only writer of recordings in this build.
+fn a_project_that_asks_for_full_recording_does_not_get_one() {
+    // Criterion 1 as it reaches the recording. `privacy.full_recording` is a
+    // *request* — the setting says "record more", and recording more is not
+    // running more — so only the user's own file may grant it
+    // (`Authority::full_recording`, `Layer::can_grant`). Before P13-T009 the
+    // hook read this setting out of the project's file alone (`Config::load`,
+    // beside the `Authority::load` that already arbitrated the retention one
+    // line away in the same function), so a repository the user merely opened
+    // turned recording on.
     //
-    // The project names **zero** days, and that is what makes this the same test
-    // on every machine. A project may only shorten, and it is measured against
-    // the user's own settings file at the platform's real config path — a file no
-    // test can redirect and no test may write. Zero is shorter than, or equal to,
-    // whatever that file says, so the resolved number is zero either way: named
-    // by the project when the user allowed more, named by the user when the user's
-    // file says zero too. A test naming one day would pass on a machine whose
-    // user file says nothing and fail on one whose user file says zero.
+    // What the process is asked here is everything a project can ask for, and
+    // the difference is the whole test: the event is recorded and the store
+    // holds no recording.
+    //
+    // **The retention number is not observable from here**, and that is said
+    // rather than left for a reader to assume. A recording is written only when
+    // the user's own file asked for one; that file is
+    // `%APPDATA%\SURE\sure.yaml` on this machine, no flag and no environment
+    // variable can move it (`Paths::discover_at` moves the store and not the
+    // settings) and no test may write it — so no process on a machine without
+    // one can be made to write a recording at all, let alone read its
+    // `retained_until_ms` back. `hook.rs`'s
+    // `a_project_file_cannot_outlast_the_users_retention` covers the number
+    // in-process, through `Paths::from_roots`, with a user file it writes
+    // itself.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     std::fs::write(
@@ -1284,38 +1291,38 @@ fn a_project_that_shortens_the_recording_retention_is_what_the_recording_says() 
     record_one_event(&store, &project, "cursor-session-retention");
 
     let store = open_the_store(&store);
-    let recordings = store
+
+    // The event itself was recorded, so "no recording" is an absence beside
+    // something rather than an empty store: SURE read the request, and what the
+    // project asked for is the only thing that is missing.
+    let everything = store
         .history(
             &HistoryFilter {
-                project_fingerprint: None,
-                kind: Some(RecordKind::Recording),
                 include_recordings: true,
+                ..HistoryFilter::default()
             },
             10,
         )
-        .expect("the recording the hook was asked to write");
+        .expect("the store this test's hook wrote");
     assert_eq!(
-        recordings.len(),
+        everything.len(),
         1,
-        "the hook did not write the full recording this test is about, so it would prove nothing"
+        "the hook recorded no event at all, so this test would pass for the wrong reason"
     );
-    let until = recordings[0].document["retained_until_ms"]
-        .as_i64()
-        .expect("a recording says when it is kept until");
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_millis() as i64;
-    let a_minute = 60_000;
-    assert!(
-        (until - now).abs() <= a_minute,
-        "a recording asked to be kept for no time at all is kept until {until}, which is {} ms \
-         from now",
-        until - now
+    assert_ne!(
+        everything[0].kind,
+        RecordKind::Recording,
+        "the one row in this store is the recording this test says was refused"
     );
+
+    let recordings = store
+        .history(&HistoryFilter::recordings(), 10)
+        .expect("a store this build can read");
     assert!(
-        until < now + DEFAULT_FULL_RECORDING_RETENTION_DAYS * 86_400_000 - a_minute,
-        "the project's number was ignored and the default was written instead"
+        recordings.is_empty(),
+        "a project's own file turned the full recording on, which only the user's file may do: \
+         {} recording(s) were written",
+        recordings.len()
     );
 }
 
@@ -2045,6 +2052,17 @@ fn ingest_payload(store: &Path, payload: &str, machine: bool) -> Run {
     Run::of(&child.wait_with_output().expect("the child exits"))
 }
 
+/// The one JSON frame a `--format json` hook run answered with.
+///
+/// A panic rather than an `Option`: a frame that will not parse is a run that
+/// said nothing a launcher could read, and every caller here is about to compare
+/// two of them. The stdout is quoted, because the reason it would not parse is
+/// usually in it.
+fn hook_frame(run: &Run) -> serde_json::Value {
+    serde_json::from_str(run.stdout.trim())
+        .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", run.stdout))
+}
+
 /// The `sure_session_id` the session a named harness session produced.
 ///
 /// Read out of the history rather than carried out of the ingest: the id is
@@ -2088,24 +2106,26 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     // back from the file, shown by `sure history`, and reached by
     // `sure history delete`.
     //
-    // The project's own file is what makes this a decision *about* something.
-    // Under the default mode the request is held by the mode before the rule has
-    // anything to name, so the row would carry no danger; `host_confirmed` is
-    // the mode a user who agreed to run project code is in, and `rm -rf build/`
-    // is the classifier's own broad-delete row. The answer below therefore names
-    // a danger, and the row has one to carry.
+    // What makes this a decision *about* something is a danger on the row, and
+    // this file can only produce one the user's own settings do not have to
+    // grant: a request that needs consent because the *mode* refused it carries
+    // no danger by design (`hook_protection::assess_request`), and the mode that
+    // would hold a shell request for consent is `host_confirmed`, which since
+    // P13-T009 only the user's own file can name. The user's file is at
+    // `%APPDATA%\SURE\sure.yaml` on this machine, which no test may write and
+    // which no flag or environment variable can redirect
+    // (`Paths::discover_at`). So the danger here is the one a project *can*
+    // raise: `protection: mode: strict` holds a read of a secret, and
+    // `danger_of` names that a `sensitive_read`.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
-    std::fs::write(
-        project.join("sure.yaml"),
-        "execution:\n  mode: host_confirmed\n",
-    )
-    .expect("write the project's settings");
+    std::fs::write(project.join("sure.yaml"), "protection:\n  mode: strict\n")
+        .expect("write the project's settings");
 
     let held = ingest_payload(
         &store,
-        &shell_request(&project, "p13t006-held", "rm -rf build/"),
+        &read_request(&project, "p13t006-held", ".env"),
         true,
     );
     assert_eq!(
@@ -2122,7 +2142,7 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     // What a person reads.
     let shown = run_in_a_store(&store, &["history", "show", &id]);
     assert_eq!(shown.status, 0, "{}", shown.stderr);
-    for expected in ["decision", "block", "Shell", "names a whole location"] {
+    for expected in ["decision", "block", "Read", "credentials"] {
         assert!(
             shown.stdout.contains(expected),
             "`sure history show` does not say {expected:?}:\n{}",
@@ -2141,10 +2161,10 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     );
     assert_eq!(
         decision["danger"].as_str(),
-        Some("broad_delete"),
+        Some("sensitive_read"),
         "the row does not name the danger the hold was about: {machine_frame}"
     );
-    assert_eq!(decision["tool"].as_str(), Some("Shell"), "{machine_frame}");
+    assert_eq!(decision["tool"].as_str(), Some("Read"), "{machine_frame}");
     assert!(
         decision["allowance"].is_null(),
         "a request that spent no allowance carries one: {machine_frame}"
@@ -2166,8 +2186,8 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     assert_eq!(rows[0].kind, RecordKind::Decision);
     let record = protection_history::read_back(rows[0].clone()).expect("a decision SURE wrote");
     assert_eq!(record.decision, ProtectionDecisionKind::Block);
-    assert_eq!(record.danger, Some(Danger::BroadDelete));
-    assert_eq!(record.tool, "Shell");
+    assert_eq!(record.danger, Some(Danger::SensitiveRead));
+    assert_eq!(record.tool, "Read");
     assert!(record.allowance.is_none());
     assert_eq!(
         record.event_id.as_str(),
@@ -2175,11 +2195,12 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     );
     // The request's own words are not in this row. They are in the event payload
     // it hangs from — redacted, once — and a second copy is the surface the
-    // brief's "without secrets" is about.
+    // brief's "without secrets" is about. For a read the request's words are the
+    // path, which `DecisionRecord`'s own note says it never carries.
     let document = rows[0].document.to_string();
     assert!(
-        !document.contains("rm -rf build/"),
-        "the decision row carries the request's words as well as the event: {document}"
+        !document.contains(".env"),
+        "the decision row carries the path the request named as well as the event: {document}"
     );
 
     // And a delete reaches it, counts it, and removes it. The count is read from
@@ -2208,16 +2229,22 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
     // one-time allowance was spent and an allow that happened because nothing
     // was dangerous are the same kind — `ProtectionDecisionKind` has three
     // variants and this is one of them. The two runs below are that pair, and
+    // The two runs below are that pair, and
     // what tells them apart is the allowance the row names, carried from the
     // decision SURE already took rather than re-decided here.
+    //
+    // The danger this project can raise is the one strict mode holds, because
+    // the mode that holds a shell request for consent is `host_confirmed` and
+    // since P13-T009 only the user's own settings file can name it — a file at
+    // `%APPDATA%\SURE\sure.yaml` on this machine that no test may write and no
+    // flag can redirect. `protection: mode: strict` is a project's own file
+    // answering, and `danger_of` names a read of a secret a `sensitive_read`,
+    // which is one of the three an allowance may be spent on.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
-    std::fs::write(
-        project.join("sure.yaml"),
-        "execution:\n  mode: host_confirmed\n",
-    )
-    .expect("write the project's settings");
+    std::fs::write(project.join("sure.yaml"), "protection:\n  mode: strict\n")
+        .expect("write the project's settings");
 
     // The user records an allowance for exactly this request, from the command
     // line, because a hook cannot ask about it.
@@ -2231,9 +2258,9 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
             "--project",
             &project.to_string_lossy(),
             "--tool",
-            "Shell",
-            "--command",
-            "rm -rf build/",
+            "Read",
+            "--path",
+            ".env",
         ],
     );
     assert_eq!(granted.status, 0, "{}", granted.stderr);
@@ -2249,7 +2276,7 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
     // allowance did it.
     let spent = ingest_payload(
         &store,
-        &shell_request(&project, "p13t006-spent", "rm -rf build/"),
+        &read_request(&project, "p13t006-spent", ".env"),
         true,
     );
     assert_eq!(
@@ -2275,7 +2302,7 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
     assert_eq!(spent_record.decision, ProtectionDecisionKind::Allow);
     assert_eq!(
         spent_record.danger,
-        Some(Danger::BroadDelete),
+        Some(Danger::SensitiveRead),
         "an allowance covers one request SURE itself named as dangerous"
     );
     assert_eq!(
@@ -2345,14 +2372,18 @@ fn a_decision_row_holds_the_decision_and_none_of_the_credentials_the_request_car
     // words, and what is stored is the request with the credential rewritten.
     // Without that half, a store holding nothing about the request at all would
     // pass the same test.
+    //
+    // The request is held, and the hold is the execution mode's: a shell request
+    // needs a permission the default mode does not grant, and the mode that
+    // would grant it is `host_confirmed`, which since P13-T009 only the user's
+    // own settings file can name. So the danger field on the row is `null` here,
+    // and that is the honest record of what happened — SURE refused the request
+    // before any classifier looked at its words. What is *not* affected is the
+    // redaction: the event payload is written the same way whatever the decision,
+    // and the credential is in the words SURE stored.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
-    std::fs::write(
-        project.join("sure.yaml"),
-        "execution:\n  mode: host_confirmed\n",
-    )
-    .expect("write the project's settings");
 
     let secret = "ghp_0123456789abcdefghij";
     let command = format!("git push --force https://user:{secret}@github.com/acme/app.git");
@@ -2361,21 +2392,28 @@ fn a_decision_row_holds_the_decision_and_none_of_the_credentials_the_request_car
         &shell_request(&project, "p13t006-secret", &command),
         true,
     );
-    assert_eq!(run.status, 1, "a force push is held:\n{}", run.stdout);
+    assert_eq!(
+        run.status, 1,
+        "a request SURE refuses is held:\n{}",
+        run.stdout
+    );
     let frame: serde_json::Value = serde_json::from_str(run.stdout.trim())
         .unwrap_or_else(|error| panic!("hook ingest is not valid JSON: {error}\n{}", run.stdout));
     assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
     assert!(
         frame["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("replace commits")),
+            .is_some_and(|reason| reason.contains("does not permit this action")),
         "the hold is not the one this request produced: {frame}"
     );
 
     let id = session_named(&store, "p13t006-secret");
     let shown = history_frame(&store, &["show", &id]);
     let decision = &shown["details"]["events"][0]["decision"];
-    assert_eq!(decision["danger"].as_str(), Some("force_push"), "{shown}");
+    assert!(
+        decision["danger"].is_null(),
+        "a request refused before its words were classified was recorded as a named danger: {shown}"
+    );
     assert!(
         !decision.to_string().contains(secret),
         "the decision row carries the credential: {decision}"
@@ -2424,20 +2462,25 @@ fn a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_the_record_is
     // arrange without a broken disk. It fails the event write too, so the row
     // has nothing to hang from; that is the case the sentence is about, and it
     // is reached here through the command rather than through the function.
+    //
+    // The hold has to be one the *rule* reached, or the last assertion below
+    // would be vacuous: a request the execution mode refused carries the mode's
+    // own sentence and never reaches the protection branch, and the mode a
+    // project's file could name to change that is inert since P13-T009. Strict
+    // mode is a project's own decision, and a read of `.env` under it is held
+    // for a danger — so the sentence the rule reached is there to be found
+    // underneath the sentence about the missing record.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
-    std::fs::write(
-        project.join("sure.yaml"),
-        "execution:\n  mode: host_confirmed\n",
-    )
-    .expect("write the project's settings");
+    std::fs::write(project.join("sure.yaml"), "protection:\n  mode: strict\n")
+        .expect("write the project's settings");
     std::fs::write(store_file(&store), "this is not a database")
         .expect("a file where the store belongs");
 
     let held = ingest_payload(
         &store,
-        &shell_request(&project, "p13t006-unwritable", "rm -rf build/"),
+        &read_request(&project, "p13t006-unwritable", ".env"),
         true,
     );
     assert_eq!(
@@ -2461,7 +2504,7 @@ fn a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_the_record_is
         "the sentence does not say the answer is unaffected: {reason}"
     );
     assert!(
-        reason.contains("names a whole location"),
+        reason.contains("credentials"),
         "the sentence about the record replaced the reason the rule reached: {reason}"
     );
 
@@ -2499,7 +2542,7 @@ fn a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_the_record_is
     // The human form a person runs says it too, whichever way the decision went.
     let human = ingest_payload(
         &store,
-        &shell_request(&project, "p13t006-unwritable-human", "rm -rf build/"),
+        &read_request(&project, "p13t006-unwritable-human", ".env"),
         false,
     );
     assert_eq!(human.status, 1, "{}", human.stderr);
@@ -2843,14 +2886,14 @@ fn a_hook_answer_reaches_stdout_in_the_shape_the_launcher_asked_for() {
     // difference between "SURE refused" and "SURE could not say".
     //
     // Asserted at the process level because that is where a harness meets it.
+    //
+    // The request is a shell command, and the hold it gets is the default
+    // execution mode's: since P13-T009 a project's own `execution.*` settings are
+    // inert, so this test no longer writes a `sure.yaml` naming a mode — one
+    // would change nothing here and would read as though it had.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
-    std::fs::write(
-        project.join("sure.yaml"),
-        "execution:\n  mode: host_confirmed\n",
-    )
-    .expect("write the project's settings");
     let held = shell_request(&project, "p13t007-shape", "rm -rf build/");
 
     // A verdict, human: one sentence on stdout, exit 1. `--format human` is the
@@ -2940,6 +2983,478 @@ fn a_hook_answer_reaches_stdout_in_the_shape_the_launcher_asked_for() {
         "the machine form of a failure carries a decision SURE never made: {frame}"
     );
     assert_untouched(&machine, "by the runs whose shapes this test pins");
+}
+
+// --- what a project's own files cannot decide (P13-T009) ----------------
+
+/// A project file asking for everything a project's own file can ask for.
+///
+/// A mode that would run the project's code, the two permissions that only exist
+/// under such a mode, the loosest protection mode there is, and a full recording
+/// kept for no time at all. Each is a *request*
+/// (`docs/adr/0011-project-configuration-is-a-request.md`), and a test claiming
+/// a project cannot weaken the user's policy has to have a project that tried.
+const A_PROJECT_ASKING_FOR_EVERYTHING: &str = "\
+execution:
+  mode: host_confirmed
+  allow_dependency_install: true
+  allow_network: true
+protection:
+  mode: standard
+privacy:
+  full_recording: true
+  full_recording_retention_days: 0
+";
+
+#[test]
+fn a_projects_execution_settings_do_not_move_a_hook_decision() {
+    // Criterion 1 through the command a harness runs, at the status a launcher
+    // reads: two projects — one with no `sure.yaml` at all, one asking for
+    // everything — and the same shell request sent to each. The two answers must
+    // be the same answer.
+    //
+    // **This is the test that fails on the old code.** Before the change the
+    // second project's `execution.mode: host_confirmed` *was* the mode the hook
+    // decided under (`load_execution_config` read `authority.project()` and
+    // nothing else), so the request became one that needs consent and the reason
+    // became the sentence about the command's own danger. The frames differed.
+    //
+    // The request is a shell command because that is the one whose permission the
+    // `execution.*` settings decide. A read is allowed under every setting either
+    // file can name, so a read would produce equal frames whether or not the fix
+    // was in place — a test that passes by matching nothing.
+    //
+    // **What this cannot show on this machine, and does not claim.** The other
+    // half of the rule is that the *user's* own file can put the hook in
+    // host-confirmed mode. That file is `%APPDATA%\SURE\sure.yaml` here, and
+    // `Paths::discover_at` moves the store and never the settings, so a test
+    // cannot write it and no flag can point at one — the same limit
+    // `the_two_paths_disagree_about_nothing_that_matters` records for the data
+    // and config directories. So the sentence below is asserted to be *the same
+    // in both frames* and never to be a particular sentence: on a machine whose
+    // user file grants host-confirmed execution, both frames carry the rule's own
+    // reason instead, and they still have to agree. `hook.rs`'s
+    // `a_user_who_allowed_project_code_is_what_puts_the_hook_in_host_confirmed_mode`
+    // observes the user's half in-process, through `Paths::from_roots`.
+    let store = a_store_of_our_own();
+    let machine = the_store_on_this_machine();
+
+    let silent = a_project_of_our_own();
+    let demanding = a_project_of_our_own();
+    std::fs::write(demanding.join("sure.yaml"), A_PROJECT_ASKING_FOR_EVERYTHING)
+        .expect("write the project's settings");
+
+    let silent_run = ingest_payload(
+        &store,
+        &shell_request(&silent, "p13t009-silent", "rm -rf build/"),
+        true,
+    );
+    let demanding_run = ingest_payload(
+        &store,
+        &shell_request(&demanding, "p13t009-demanding", "rm -rf build/"),
+        true,
+    );
+
+    // Both refused, and neither a failure to answer: a `failed` frame carries no
+    // `decision`, so equality between two of those would say nothing about the
+    // settings.
+    assert_eq!(
+        silent_run.status, demanding_run.status,
+        "{}",
+        demanding_run.stdout
+    );
+    assert_eq!(silent_run.status, 1, "{}", silent_run.stdout);
+    let silent_frame = hook_frame(&silent_run);
+    let demanding_frame = hook_frame(&demanding_run);
+
+    for field in ["outcome", "command", "decision", "reason", "exit_code"] {
+        assert_eq!(
+            silent_frame[field], demanding_frame[field],
+            "a project's own file moved the {field} of the decision a harness was given:\n\
+             silent: {silent_frame}\ndemanding: {demanding_frame}"
+        );
+    }
+    assert_eq!(
+        silent_frame["decision"].as_str(),
+        Some("block"),
+        "the request was not held, so the comparison above is about two allows: {silent_frame}"
+    );
+    assert!(
+        silent_frame["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()),
+        "a block that says nothing about why: {silent_frame}"
+    );
+
+    // The recording half of the same claim (D2). The demanding project asked for
+    // a full recording; the store holds the two events and no recording. The
+    // events are asserted first, so this is an absence beside something rather
+    // than an empty store answering for it.
+    let store = open_the_store(&store);
+    let everything = store
+        .history(
+            &HistoryFilter {
+                include_recordings: true,
+                ..HistoryFilter::default()
+            },
+            10,
+        )
+        .expect("the store these ingests wrote");
+    assert!(
+        !everything.is_empty(),
+        "neither ingest wrote a row, so the absence below would prove nothing"
+    );
+    assert!(
+        everything
+            .iter()
+            .all(|row| row.kind != RecordKind::Recording),
+        "a project's own file turned the full recording on, which only the user's file may do"
+    );
+    assert!(
+        everything
+            .iter()
+            .any(|row| row.kind == RecordKind::Decision),
+        "no decision was recorded, so this test is not about a decision SURE reached: {everything:?}"
+    );
+    assert_untouched(&machine, "by ingests that named a store");
+}
+
+#[test]
+fn a_projects_execution_settings_do_not_move_the_mode_a_check_reports() {
+    // The same claim on the other path this task routes (D3), read from the frame
+    // a script reads. `sure check` needs no harness: the two runs below are the
+    // real binary against two real projects, and `details.mode` is the arbitrated
+    // mode the run planned under.
+    //
+    // What it cannot do is show the mode changing anything: this build has no
+    // runner for a planned check (`pipeline.rs`), so the only observable is the
+    // plan and the stage text, and the brief says not to write a test whose
+    // passing depends on a run that never happens. The plan's own observable —
+    // which checks the mode refused — is asserted in `check.rs`, where a user
+    // file can be written.
+    let silent = a_project_of_our_own();
+    let demanding = a_project_of_our_own();
+    std::fs::write(demanding.join("sure.yaml"), A_PROJECT_ASKING_FOR_EVERYTHING)
+        .expect("write the project's settings");
+
+    let silent_run = run(&[
+        "--format",
+        "json",
+        "check",
+        silent.to_str().expect("a path"),
+    ]);
+    let demanding_run = run(&[
+        "--format",
+        "json",
+        "check",
+        demanding.to_str().expect("a path"),
+    ]);
+
+    assert_eq!(
+        silent_run.status, demanding_run.status,
+        "{}",
+        demanding_run.stdout
+    );
+    assert_ne!(
+        silent_run.status, 3,
+        "this build cannot check a project, which is not what this test is about:\n{}",
+        silent_run.stderr
+    );
+    let silent_frame: serde_json::Value = serde_json::from_str(silent_run.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "`sure check` is not one frame: {error}\n{}",
+                silent_run.stdout
+            )
+        });
+    let demanding_frame: serde_json::Value = serde_json::from_str(demanding_run.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "`sure check` is not one frame: {error}\n{}",
+                demanding_run.stdout
+            )
+        });
+
+    let silent_details = &silent_frame["details"];
+    let demanding_details = &demanding_frame["details"];
+    assert_eq!(
+        silent_details["state"], demanding_details["state"],
+        "a project's own file changed whether the run finished: {silent_details} vs \
+         {demanding_details}"
+    );
+    assert!(
+        silent_details["mode"].is_string(),
+        "the run produced no mode to compare:\n{silent_frame}"
+    );
+    assert_eq!(
+        silent_details["mode"], demanding_details["mode"],
+        "a project's own file moved the execution mode a check ran under: {} then {}",
+        silent_details["mode"], demanding_details["mode"]
+    );
+    assert_eq!(
+        silent_details["privacy"]["mode"], demanding_details["privacy"]["mode"],
+        "a project's own file moved the privacy mode a check ran under"
+    );
+}
+
+// --- what a project's own cache directory cannot do (P13-T009) ---------
+
+/// Every file under `directory`, with its path relative to `directory` and the
+/// bytes it holds.
+///
+/// A panic when a directory cannot be read, and sorted so that two walks of the
+/// same tree compare equal: the assertion this is built for is "the bytes are
+/// what they were", and a list that came back empty would make that true of a
+/// directory nobody had looked at.
+fn bytes_under(directory: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    fn walk(root: &Path, directory: &Path, into: &mut Vec<(PathBuf, Vec<u8>)>) {
+        let entries = std::fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("{}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                walk(root, &path, into);
+            } else {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("a path under the directory being read")
+                    .to_path_buf();
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                into.push((relative, bytes));
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(directory, directory, &mut found);
+    found.sort();
+    found
+}
+
+/// A `.sure` directory a project wrote for itself.
+///
+/// This build has no writer for the directory (`paths/mod.rs`: *"Nothing
+/// authoritative may be written here, and the type carries no way to ask for
+/// it"*), so the only `.sure` there can be is one the project made. The two
+/// files are the two things a project could hope a cache would do for it:
+/// settings asking for more than a project may have, and a record saying the
+/// project passed.
+fn a_hand_written_cache_directory(project: &Path) {
+    let cache = project.join(".sure");
+    std::fs::create_dir_all(&cache).unwrap_or_else(|error| panic!("{}: {error}", cache.display()));
+    std::fs::write(cache.join("sure.yaml"), A_PROJECT_ASKING_FOR_EVERYTHING)
+        .expect("a cache file this test wrote");
+    std::fs::write(
+        cache.join("last-run.json"),
+        "{\"state\": \"finished\", \"green\": true, \"stopped_at\": null}\n",
+    )
+    .expect("a cache file this test wrote");
+}
+
+#[test]
+fn a_project_cannot_write_its_own_answer_into_the_cache_directory() {
+    // Criterion 3, in the terms §3 D4 sets. `.sure` has no writer in this build
+    // and nothing reads it, so what can be tested is what poisoning it *cannot*
+    // do. The same project is asked the same two questions either side of a
+    // hand-written `.sure/` appearing in it:
+    //
+    //   * the decision a harness is given for one shell request;
+    //   * the verdict `sure check --goal` reaches, the state it finished in, and
+    //     the digest of the project state the goal was recorded against.
+    //
+    // The digest and not the fingerprint the report carries: `project_fingerprint`
+    // is a `FingerprintId::generate()` per run (`sure-domain/src/vocabulary.rs`),
+    // so two runs of one unchanged project differ in it by construction and
+    // comparing it would fail whatever `.sure` held. The digest is the field that
+    // is the project's state rather than an identifier for this run of it.
+    //
+    // What this does *not* establish. The other two halves of D4 are rules about
+    // what SURE does with a path under `.sure`, and both are already tested where
+    // the rule is: `hook_protection.rs`'s
+    // `strict_holds_a_change_in_the_documents_areas_and_nothing_else` holds a
+    // `Write` to `.sure/cache.json` under strict and allows it under standard,
+    // and `scan_project.rs`'s `sure_own_cache_inside_the_project_is_left_out`
+    // with `fingerprint_content.rs`'s `churn_in_every_excluded_kind_of_directory_
+    // changes_nothing` show the scanner skipping it. They are not repeated here,
+    // because at this level they are not reachable: a `Write` to `.sure/…` needs
+    // the `WriteProject` permission, which no configuration file can grant
+    // (`Authority::permissions`), so under the inspect-only mode every project
+    // gets, the request is refused before the configuration-area rule is asked.
+    let store = a_store_of_our_own();
+    let machine = the_store_on_this_machine();
+    let project = a_project_of_our_own();
+    let goal = "make the upload reject a file over 10 MB instead of failing silently";
+
+    let clean_hook = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t009-cache", "rm -rf build/"),
+        true,
+    );
+    let clean_check = run_in_a_store(
+        &store,
+        &[
+            "--format",
+            "json",
+            "check",
+            "--goal",
+            goal,
+            project.to_str().expect("a path"),
+        ],
+    );
+    assert_eq!(
+        clean_check.status, 1,
+        "the check before the cache directory existed did not reach a verdict, so there would be \
+         nothing for the poisoning to move:\nstdout:\n{}\nstderr:\n{}",
+        clean_check.stdout, clean_check.stderr
+    );
+    let clean_frame: serde_json::Value = serde_json::from_str(clean_check.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "`sure check --format json` is not one frame: {error}\n{}",
+                clean_check.stdout
+            )
+        });
+    let clean_digest = clean_frame["details"]["recorded_goal"]["project_state"]["digest"].clone();
+    assert!(
+        clean_digest.is_string(),
+        "the run reported no project state, so the digest comparison below would be between two \
+         absences:\n{clean_frame}"
+    );
+
+    a_hand_written_cache_directory(&project);
+    let written = bytes_under(&project.join(".sure"));
+    assert_eq!(
+        written.len(),
+        2,
+        "the poisoning wrote something other than the two files this test names: {written:?}"
+    );
+
+    let poisoned_hook = ingest_payload(
+        &store,
+        &shell_request(&project, "p13t009-cache", "rm -rf build/"),
+        true,
+    );
+    let poisoned_check = run_in_a_store(
+        &store,
+        &[
+            "--format",
+            "json",
+            "check",
+            "--goal",
+            goal,
+            project.to_str().expect("a path"),
+        ],
+    );
+
+    // The decision. A `failed` frame carries no `decision` at all, and two of
+    // those would compare equal while saying nothing about the poisoning.
+    let clean_decision = hook_frame(&clean_hook);
+    let poisoned_decision = hook_frame(&poisoned_hook);
+    assert_eq!(
+        clean_hook.status, 1,
+        "a shell request was not held before the poisoning, so the comparison below is about two \
+         frames that agree for a reason of their own:\n{}",
+        clean_hook.stdout
+    );
+    assert_eq!(
+        clean_decision["decision"].as_str(),
+        Some("block"),
+        "the decision compared below is not a decision SURE reached: {clean_decision}"
+    );
+    assert_eq!(
+        clean_hook.status, poisoned_hook.status,
+        "{}",
+        poisoned_hook.stdout
+    );
+    for field in ["outcome", "command", "decision", "reason", "exit_code"] {
+        assert_eq!(
+            clean_decision[field], poisoned_decision[field],
+            "a `.sure` the project wrote moved the {field} of the decision a harness was given:\n\
+             before: {clean_decision}\nafter: {poisoned_decision}"
+        );
+    }
+
+    // The verdict and the state it was reached against.
+    assert_eq!(
+        poisoned_check.status, clean_check.status,
+        "a `.sure` the project wrote changed the status of a check:\n{}",
+        poisoned_check.stderr
+    );
+    let poisoned_frame: serde_json::Value = serde_json::from_str(poisoned_check.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "`sure check --format json` is not one frame: {error}\n{}",
+                poisoned_check.stdout
+            )
+        });
+    let clean_details = &clean_frame["details"];
+    let poisoned_details = &poisoned_frame["details"];
+    for field in ["state", "green", "stopped_at", "mode"] {
+        assert_eq!(
+            clean_details[field], poisoned_details[field],
+            "a `.sure` the project wrote moved the {field} of a check:\n{clean_details}\n\
+             {poisoned_details}"
+        );
+    }
+    assert!(
+        clean_details["report"].is_object(),
+        "the check produced no verdict to compare, so the equality above is about two runs that \
+         stopped:\n{clean_frame}"
+    );
+    for field in ["aggregate", "totals", "not_checked", "findings"] {
+        assert_eq!(
+            clean_details["report"][field], poisoned_details["report"][field],
+            "a `.sure` the project wrote changed the {field} of the verdict:\n{clean_details}\
+             \n{poisoned_details}"
+        );
+    }
+    assert_eq!(
+        poisoned_details["recorded_goal"]["project_state"]["digest"], clean_digest,
+        "a `.sure` the project wrote moved the project state a goal is recorded against, so the \
+         next run would be checking a different state than the one the user's goal was about"
+    );
+
+    // The control, and it is the whole reason the digest equality above means
+    // anything: a digest that never moved would satisfy it. One source file the
+    // fingerprint does *not* have a rule for, and the same run reports a
+    // different state.
+    std::fs::write(
+        project.join("src.rs"),
+        "pub fn add(a: u32, b: u32) -> u32 { a + b }\n",
+    )
+    .expect("a source file this test wrote");
+    let controlled = run_in_a_store(
+        &store,
+        &[
+            "--format",
+            "json",
+            "check",
+            "--goal",
+            goal,
+            project.to_str().expect("a path"),
+        ],
+    );
+    let controlled_frame: serde_json::Value = serde_json::from_str(controlled.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "`sure check --format json` is not one frame: {error}\n{}",
+                controlled.stdout
+            )
+        });
+    assert_ne!(
+        controlled_frame["details"]["recorded_goal"]["project_state"]["digest"], clean_digest,
+        "a source file added to the project left the recorded state where it was, so this test's \
+         digest comparisons are about a value that does not track the project"
+    );
+
+    // Nothing read it and nothing wrote it: the files are the bytes this test
+    // left, after two hook runs and three checks.
+    assert_eq!(
+        bytes_under(&project.join(".sure")),
+        written,
+        "a run wrote into the project's cache directory, which this build has no writer for"
+    );
+    assert_untouched(&machine, "by runs over a project with a hand-written .sure");
 }
 
 // --- the source scan ----------------------------------------------------

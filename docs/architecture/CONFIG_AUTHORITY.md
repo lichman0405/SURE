@@ -43,20 +43,34 @@ neither `Layer` nor `ConsentGrantor` offers a way to name it — a source a call
 can name but never obtain is how a documented feature becomes a believed one.
 
 Read plainly: this layer decides what the two files, together, are allowed to
-mean. **Three things route through it.** Since P7-T010 `sure check` reads its
+mean. **Four things route through it.** Since P7-T010 `sure check` reads its
 settings through `Authority::load`, which is where the arbitrated privacy mode
 and the statement about models come from; since P13-T003 `sure hook ingest` reads
 `Authority::full_recording_retention_days` for the same reason — how long a full
 recording is kept is a restriction, and a restriction resolved anywhere else
-would be a second rule; and since P13-T004 it takes the **protection mode in
-force** from `Authority::protection()` before it decides a pre-action tool
-request, so a project's file can raise the mode and cannot lower the one the
-user set. The execution mode and permissions a hook decides under are still read
-from the project's file alone; that restraint is not yet routed, and it belongs
-to P13-T009 with the rest of the wiring. Wiring the layer in front of the check
-pipeline is also P13-T009. Until that lands, everything else is built and tested
-on its own, and a report that claimed a project's request had been refused when
-nothing consulted the layer would be describing behaviour that has not run.
+would be a second rule — and since P13-T009 the consent a recording is made
+under at all is `Authority::full_recording()`, so a project's file can neither
+turn recording on nor outlast the user's own period; since P13-T004 it takes the
+**protection mode in force** from `Authority::protection()` before it decides a
+pre-action tool request, so a project's file can raise the mode and cannot lower
+the one the user set; and since P13-T009 the **execution mode and the permission
+set** come from `Authority::execution()` on both paths that plan work — `sure
+hook ingest` and the check pipeline. One value for the two, deliberately, so that
+`sure_domain::execution::decide` cannot be handed a mode from one file and
+permissions from another.
+
+The execution mode resolves by a rule of its own, and it is not "the stricter of
+the two wins". **The mode in force is the user's own mode, and only when the
+user's own file named a mode that runs project code; otherwise it is
+`inspect_only`.** A project file cannot move it in either direction. The reason
+is not caution but the shape of the two settings: `ExecutionConfig::default()` is
+inspect-only and `ExecutionMode` has no `Default`, so a project's *silence* and a
+project's `execution.mode: inspect_only` are the same parsed value. "The stricter
+of the two" would then read a project that said nothing as a project that asked
+for nothing to run, which lets a project's silence settle a question its words
+could not. A project that names `host_confirmed` is refused and recorded as a
+`ProjectRequest::RunProjectCode` in `Authority::privileges()`, so a report can
+say what was asked for.
 
 ## The two answers
 
@@ -97,7 +111,9 @@ puts it.
 `Authority::permissions()` is the permission set those grants add up to. It is
 not the answer to whether an action may run: that is
 `sure_domain::execution::decide`, which also needs a mode and treats a command it
-cannot classify as needing its own consent in every mode.
+cannot classify as needing its own consent in every mode. `Authority::execution()`
+is the two of them together — this set and the mode — so that a caller cannot
+take one from each file.
 
 ### Restrictions: the stricter of the two wins
 

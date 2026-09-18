@@ -78,6 +78,7 @@ use crate::claim_checker::{self, CheckedClaim};
 use crate::components::ComponentGraph;
 use crate::config::AnalysisProvider;
 use crate::config::Config;
+use crate::config::ExecutionSettings;
 use crate::coverage_summary::{CoverageNotCheckedSummary, summarize};
 use crate::demo_data_heuristics::DemoDataHeuristics;
 use crate::discover::{self, DiscoverOptions, Discovery, Ecosystem, Findings};
@@ -552,6 +553,16 @@ pub struct Pipeline<'a> {
     pub purpose: Purpose,
     /// The settings in effect, already read from the project.
     pub config: &'a Config,
+    /// What SURE may do, and how, already arbitrated between the two files.
+    ///
+    /// Not read from [`Self::config`] here, and that is the point: this run
+    /// plans checks under the mode and the permissions a *hook* would decide
+    /// under, and the authority layer is the one place either is worked out
+    /// (`Authority::execution`). A stage 4 that read `config.execution` would
+    /// plan under whatever the project's own file asked for, including on a
+    /// machine whose user never allowed any of it — the defect P13-T009 exists
+    /// to close, in the one place `check` can observe it.
+    pub execution: ExecutionSettings,
     /// The history to compare against, when there is one.
     ///
     /// Never opened here: see the module comment.
@@ -668,8 +679,8 @@ impl Pipeline<'_> {
 
         // ---- 4. Plan ---------------------------------------------------------
         let graph = ComponentGraph::of(&discovery);
-        let mode = self.config.execution.mode;
-        let permissions = permissions_for(mode, self.config);
+        let mode = self.execution.mode;
+        let permissions = self.execution.permissions.clone();
         let mut builder = PlanBuilder::new(mode, permissions.clone());
         let planned = propose_everything(
             &discovery,
@@ -1260,23 +1271,6 @@ fn summarize_proposal(proposal: &CheckProposal) -> CandidateSummary {
         critical: proposal.critical(),
         because: proposal.reason().plain_description(),
     }
-}
-
-/// The permissions a mode is granted for one run.
-///
-/// The mode's own baseline, narrowed by what the project's file asked for: a
-/// `sure.yaml` that turns dependency installation off cannot turn it on, and one
-/// that asks for it does not get it unless the mode reaches that far. The file is
-/// a request and the mode is the grant — this is the one line where the two meet.
-fn permissions_for(mode: ExecutionMode, config: &Config) -> ExecutionPermissions {
-    let mut permissions = mode.baseline_permissions();
-    if !config.execution.allow_dependency_install {
-        permissions.install_dependencies = false;
-    }
-    if !config.execution.allow_network {
-        permissions.network = false;
-    }
-    permissions
 }
 
 fn node_of(discovery: &Discovery) -> Option<crate::discover::NodeProject> {

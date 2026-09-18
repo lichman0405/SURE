@@ -334,7 +334,7 @@ impl ModelUse {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::config::{Config, ConfigSource, LoadedConfig};
+    use crate::config::{Config, ConfigSource, ExecutionSettings, LoadedConfig};
     use crate::pipeline::{Pipeline, Purpose, StageRecord};
     use std::path::{Path, PathBuf};
 
@@ -521,6 +521,7 @@ mod tests {
             project: Path::new("this-project-does-not-exist"),
             purpose: Purpose::Check,
             config: &Config::default(),
+            execution: ExecutionSettings::inspect_only(),
             store: None,
             goal: None,
         }

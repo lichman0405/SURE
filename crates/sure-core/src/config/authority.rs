@@ -21,7 +21,7 @@
 //! them in terms of the files they wrote. So there is no `Authority::effective()
 //! -> Config`.
 //!
-//! What there is instead is two answers that *are* well defined:
+//! What there is instead is three answers that *are* well defined:
 //!
 //! 1. [`Authority::privileges`] — every behaviour any layer asked for, and who,
 //!    if anyone, was able to grant it. A project file that asks for network
@@ -30,11 +30,16 @@
 //! 2. [`Authority::protection`] and [`Authority::privacy_mode`] — restrictions,
 //!    where the answer is the stricter of the two layers, because taking the
 //!    stricter restriction never turns a statement into a permission.
+//! 3. [`Authority::execution`] — the mode in force and the permissions the
+//!    configuration grants, as one value. The mode is the user's own and a
+//!    project file cannot move it in either direction; a fuller statement of the
+//!    rule, and of why "the stricter of the two" is not available for it, is on
+//!    [`Authority::execution_mode`].
 //!
-//! Everything else in a project file is read from the project's own settings:
-//! the project is the authority on which of its own checks apply, what its own
-//! goal is, and how its own components fit together. `Config::scope_reductions`
-//! is read that way, and it is *reported* rather than overridden — a project
+//! What is left of a project file is read from the project's own settings: the
+//! project is the authority on which of its own checks apply, what its own goal
+//! is, and how its own components fit together. `Config::scope_reductions` is
+//! read that way, and it is *reported* rather than overridden — a project
 //! turning a check off cannot be told apart from one that never mentioned it when
 //! the value it names is the default, so a claim that the user's file overrode
 //! it would be a claim SURE cannot support.
@@ -51,7 +56,7 @@
 
 use std::path::Path;
 
-use sure_domain::execution::{ConsentGrantor, ExecutionPermissions};
+use sure_domain::execution::{ConsentGrantor, ExecutionMode, ExecutionPermissions};
 use sure_domain::variants::variants;
 
 use super::values::{PrivacyMode, ProjectRequest, ProtectionMode};
@@ -173,6 +178,38 @@ impl Privilege {
     #[must_use]
     pub fn is_refused_escalation(&self) -> bool {
         !self.is_granted() && self.asked_by.contains(&Layer::Project)
+    }
+}
+
+/// What SURE may do in a run, and how: the two execution answers together.
+///
+/// One type rather than two arguments, because
+/// [`sure_domain::execution::decide`] reads both and a caller that passed a
+/// permission set from one file with a mode from another would be describing a
+/// build that does not exist. `Authority::execution` is the only thing that
+/// builds one, so the two halves come from the same read of the same two files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionSettings {
+    /// The mode in force, from [`Authority::execution_mode`].
+    pub mode: ExecutionMode,
+    /// The permissions the configuration grants, from [`Authority::permissions`].
+    pub permissions: ExecutionPermissions,
+}
+
+impl ExecutionSettings {
+    /// What SURE runs under unasked: inspection, and nothing more.
+    ///
+    /// The value a caller uses when it has no configuration to read — the
+    /// failure arm of a hook, or a test that is about something else. It is not
+    /// a `Default`: `ExecutionMode` has none on purpose
+    /// (`docs/architecture/EXECUTION_SAFETY.md`), and a `Default` here would put
+    /// the same value back within reach of a derive.
+    #[must_use]
+    pub const fn inspect_only() -> Self {
+        Self {
+            mode: ExecutionMode::InspectOnly,
+            permissions: ExecutionPermissions::inspect_only(),
+        }
     }
 }
 
@@ -395,6 +432,33 @@ impl Authority {
         }
     }
 
+    /// Whether a full recording of a session may be written.
+    ///
+    /// # Why this is not `privacy.full_recording` read from either file
+    ///
+    /// Recording more is not running more, so `full_recording` is a request and
+    /// not a restriction: it is decided by [`Layer::can_grant`] and not by
+    /// [`resolve`]. Reading it from the project's file alone would let a
+    /// repository the user merely opened turn the recording of their own
+    /// machine's activity on; reading it from `resolve` would be worse, because
+    /// `resolve` takes the stricter value and a project's `true` would then be
+    /// reported as an escalation that had already happened rather than as a
+    /// request that was refused.
+    ///
+    /// So the answer is [`Authority::privilege`]'s answer: true exactly when a
+    /// layer that can grant it asked for it, which is the user's own file.
+    /// A project's `true` leaves a refused [`ProjectRequest::FullRecording`] in
+    /// [`Authority::privileges`] instead — a refusal a report can print.
+    ///
+    /// This is the boolean in front of [`Authority::full_recording_retention_days`],
+    /// and the two are separate settings: turning recording on and keeping it
+    /// longer are different asks, and both are refused to the project.
+    #[must_use]
+    pub fn full_recording(&self) -> bool {
+        self.privilege(ProjectRequest::FullRecording)
+            .is_some_and(|privilege| privilege.is_granted())
+    }
+
     /// The request with this name, as it was resolved.
     ///
     /// `None` when no layer asked for it.
@@ -428,6 +492,85 @@ impl Authority {
             }
         }
         permissions
+    }
+
+    /// The execution mode in force: the user's own, and nothing else's.
+    ///
+    /// # The rule
+    ///
+    /// `execution.mode` is read from the user's file when the user's file named
+    /// a mode that runs project code, and is [`ExecutionMode::InspectOnly`]
+    /// otherwise. **A project file cannot move it in either direction.**
+    ///
+    /// # Where the rule comes from
+    ///
+    /// Four statements in this repository, which agree with each other:
+    ///
+    /// - `docs/architecture/CONFIG_AUTHORITY.md` lists, under what a project may
+    ///   not do silently, "enable host execution if the user did not allow it".
+    /// - `docs/architecture/CONFIG_REFERENCE.md` says of
+    ///   `execution.mode: host_confirmed` that it "is a request to run project
+    ///   code; it does not grant it".
+    /// - [`Config::requested_privileges`] is that sentence as code: a mode other
+    ///   than `inspect_only` becomes
+    ///   [`ProjectRequest::RunProjectCode`](super::values::ProjectRequest::RunProjectCode),
+    ///   which is a request like any other and is granted only by
+    ///   [`Layer::can_grant`]'s one layer.
+    /// - `a_project_file_cannot_grant_itself_anything` in this module's tests
+    ///   asserts the consequence: a project file asking for everything at once,
+    ///   `host_confirmed` included, leaves
+    ///   [`Authority::permissions`] equal to
+    ///   [`ExecutionPermissions::inspect_only`].
+    ///
+    /// # Why the project cannot lower it either
+    ///
+    /// The tempting second half — "the stricter of the two modes wins" — is not
+    /// available here, and the reason is the reason ADR 0011 rejected a merge.
+    /// [`ExecutionConfig::default`] is `inspect_only` and
+    /// [`ExecutionMode`] has no `Default` on purpose, so a project file that
+    /// never mentioned its mode and one that wrote `mode: inspect_only` produce
+    /// the same field. A rule that took the stricter mode would let the *silence*
+    /// of any `sure.yaml` at all void a grant the user made, which is
+    /// `a_higher_layer_request_is_not_downgraded_by_a_silent_project` turned
+    /// around. Lowering what SURE does is not an escalation, but it is not a
+    /// decision this layer can attribute to a file either, so it is not taken:
+    /// the mode is a request, and only the user's file can make it.
+    ///
+    /// # What a user sees
+    ///
+    /// A project asking for `host_confirmed` is not silent about it: it leaves a
+    /// refused [`ProjectRequest::RunProjectCode`](super::values::ProjectRequest::RunProjectCode)
+    /// in [`Authority::privileges`], so a report can say what was asked for. This
+    /// method answers only what is in force.
+    ///
+    /// [`ExecutionConfig::default`]: super::ExecutionConfig
+    #[must_use]
+    pub fn execution_mode(&self) -> ExecutionMode {
+        // The permission is what is granted or refused; the mode is what the
+        // user's own file said to do with it. Both come from the same list, so
+        // the two cannot disagree about who asked.
+        if !self.permissions().run_project_code {
+            return ExecutionMode::InspectOnly;
+        }
+        self.user()
+            .map(|config| config.execution.mode)
+            .filter(|mode| mode.runs_project_code())
+            .unwrap_or(ExecutionMode::InspectOnly)
+    }
+
+    /// The execution settings in force: the mode and the permissions together.
+    ///
+    /// The pair [`sure_domain::execution::decide`] needs, from one read of the
+    /// two files, so that a decision cannot be taken under one file's mode and
+    /// another's permission set. The rule for each half is on
+    /// [`Authority::execution_mode`] and [`Authority::permissions`]; what this
+    /// adds is that they are answered together.
+    #[must_use]
+    pub fn execution(&self) -> ExecutionSettings {
+        ExecutionSettings {
+            mode: self.execution_mode(),
+            permissions: self.permissions(),
+        }
     }
 
     /// The protection in effect: the firmer of the two layers.
@@ -612,6 +755,84 @@ analysis:
             authority.permissions(),
             ExecutionPermissions::inspect_only(),
             "a project file widened what SURE may do"
+        );
+    }
+
+    #[test]
+    fn a_project_file_cannot_choose_the_execution_mode() {
+        // `execution.mode: host_confirmed` in a project file is a request, so it
+        // is refused like every other request — and the mode in force is the one
+        // a project file cannot produce.
+        let authority = project_only(ASKS_FOR_EVERYTHING);
+
+        assert_eq!(
+            authority.execution_mode(),
+            ExecutionMode::InspectOnly,
+            "a project file moved the execution mode"
+        );
+        let ask = authority
+            .privilege(ProjectRequest::RunProjectCode)
+            .expect("the project asked to run its own code and left no record");
+        assert!(ask.is_refused_escalation(), "the ask was granted: {ask:?}");
+    }
+
+    #[test]
+    fn the_users_own_mode_is_the_one_in_force() {
+        // The other direction, so the test above is not satisfied by a build
+        // that never runs anything. The project asks for a mode of its own and
+        // gets the user's, which is the whole rule: the mode is the user's file's
+        // to name, including when the project names a different one.
+        let authority = both(
+            "execution:\n  mode: container\n",
+            "execution:\n  mode: host_confirmed\n",
+        );
+
+        assert_eq!(authority.execution_mode(), ExecutionMode::Container);
+        assert!(
+            authority
+                .privilege(ProjectRequest::RunProjectCode)
+                .is_some(),
+            "both layers asked to run project code and the list is empty"
+        );
+    }
+
+    #[test]
+    fn a_project_file_cannot_lower_the_mode_the_user_chose() {
+        // The half of the rule that is easy to get wrong. Taking the stricter of
+        // the two modes would read as the safe answer and is not available: a
+        // project that never mentioned its mode is `inspect_only` too
+        // (`ExecutionConfig::default`), so the stricter-of-the-two rule would let
+        // the silence of any `sure.yaml` at all void the user's grant. Nothing a
+        // project file can write moves this value, in either direction.
+        let authority = both(
+            "execution:\n  mode: host_confirmed\n",
+            "execution:\n  mode: inspect_only\n",
+        );
+
+        assert_eq!(authority.execution_mode(), ExecutionMode::HostConfirmed);
+    }
+
+    #[test]
+    fn a_project_file_cannot_turn_on_full_recording() {
+        // Recording more is not running more, so this is a request and not a
+        // restriction: the stricter-of-the-two rule does not reach it, and the
+        // refused ask is on the record rather than dropped.
+        let refused = project_only(ASKS_FOR_EVERYTHING);
+        assert!(
+            !refused.full_recording(),
+            "a project file turned full recording on"
+        );
+        assert!(
+            refused
+                .privilege(ProjectRequest::FullRecording)
+                .is_some_and(|privilege| privilege.is_refused_escalation()),
+            "the project asked to record everything and left no record"
+        );
+
+        let granted = both("privacy:\n  full_recording: true\n", "");
+        assert!(
+            granted.full_recording(),
+            "the user's own file asked for a full recording and did not get one"
         );
     }
 

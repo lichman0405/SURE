@@ -3,20 +3,25 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P15-T016` (make the ubuntu and macos jobs green again, and keep
-them read), dispatched from base commit `7e021ae`. **This is the first time this
-loop has deliberately reordered its own work**: the two previous insertions
+**In flight:** nothing. `P15-T016` (make the ubuntu and macos jobs green again,
+and keep them read) was dispatched from base commit `7e021ae`, handed back as
+`853d7de`, verified independently and **accepted**; "What `P15-T016` added" and
+"Validation of `P15-T016`" below carry the numbers. **It was the first time this
+loop deliberately reordered its own work**: the two previous insertions
 (`P15-T015`, `P13-T010`) were placed after the last task of their phase precisely
 so that §14 would still hand the next dispatch to the lowest-numbered READY task,
-and `P15-T016` is instead placed immediately before `P13-T006` so that it *is*
-the next dispatch. The reason is a stop-the-line condition and not a preference,
-and it is recorded as item 99 below: the `ci` workflow has failed on 75
-consecutive runs, the run table in this file stops *before* the last green run,
-and on Linux and macOS the test step does not execute at all because clippy
-aborts the job first — so every acceptance since `717fc0ad` has recorded five
-green Windows gates over an unstated caveat on two of the three platforms that
-`CLAUDE.md` requires the core to stay portable to. `P13-T006` (implement
-protection audit history) is next after it and its brief is already written at
+and `P15-T016` was instead placed immediately before `P13-T006` so that it *was*
+the next dispatch. The reason was a stop-the-line condition and not a preference,
+and it is recorded as item 99 below: the `ci` workflow had failed on 75
+consecutive runs, the run table in this file stopped *before* the last green run,
+and on Linux and macOS the test step did not execute at all because clippy
+aborted the job first — so every acceptance since `717fc0ad` recorded five green
+Windows gates over an unstated caveat on two of the three platforms that
+`CLAUDE.md` requires the core to stay portable to. **That condition is closed**:
+run `35389096745` on `853d7de` is the first all-five-jobs-green `ci` run since
+`35193436468`, the streak ended at 76, and the closing record is at the end of
+the census section below. `P13-T006` (implement protection audit history) is the
+next dispatch and its brief is already written at
 `target/tmp/brief-p13t006.md`; the map it rests on is the supervisor's own,
 re-checked in the tree. `P13-T005` (implement dangerous shell/file/Git detectors) was dispatched
 from `56d2e63`, has been verified and accepted at commit `64dd7da`, and "What
@@ -62,7 +67,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 133 / 176 tasks accepted (counted from `progress/state.json` against
+Progress: 134 / 178 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -78,12 +83,17 @@ the project's own settings make unspendable (item 97), and from 174 to 175 on th
 same day when a check of the branch's own CI runs found that two of the three
 platforms had been failing unread for 75 runs (item 99), and from 175 to 176 when
 the investigation of that streak showed the class is structurally invisible from
-Windows and got an owner (item 99 again, and P15-T017)). **Phase
+Windows and got an owner (item 99 again, and P15-T017), and from 176 to 177 on
+2026-09-19 when `P15-T016`'s verification found that `recheck_lifecycle` decides
+whether two paths are one file by asking the operating system rather than the
+volume (item 100), and from 177 to 178 on the same day when the third occurrence
+of the `Text file busy` race in this repository's own fixtures showed that it had
+been recorded three times and owned by nobody (item 101)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 17; Phase P16
+at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 1 of 19; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -1024,19 +1034,89 @@ tree is or is not intact would be reading a claim the file does not make.
     exists to refuse. The record-keeping half is the supervisor's, and it is
     done below rather than promised.
 
+    **Closed on 2026-09-19.** `P15-T016` was accepted and the streak is over:
+    run `35389096745` on `853d7de` has all five jobs green, the first since
+    `35193436468`. Every one of the seven defects above is accounted for in
+    "What `P15-T016` added" — the three that matter were all real and all fixed
+    in the source, defect (ii) turned out to be the *test* being wrong rather
+    than the reconciler, and the four left alone are characterised there with
+    the measurements that decided it. The count moved once more before the
+    green: `35388375372` (`3c8c25b`) failed clippy the same way, so **the streak
+    is 76 runs and the census section's 75 is a reading taken before the last
+    one**, which the closing subsection below records rather than edits.
+
+100. **The reconciler asks the operating system whether two paths are one file,
+    and the question belongs to the volume.** Found on 2026-09-19 while
+    verifying `P15-T016`, and found by reading the code the task's own fix left
+    behind rather than by a failure: `recheck_lifecycle.rs:57-67`'s
+    `normalise_path` returns `trimmed.to_lowercase()` under `#[cfg(windows)]`
+    and `trimmed.to_owned()` otherwise, and it is called from `FindingKey::new`
+    for both `location` and `locator` — so the key that decides whether a
+    previous finding is *this run's* finding is case-folded on Windows and
+    case-preserving everywhere else, including on macOS, whose default volume is
+    case-**insensitive**. `P15-T016`'s worker measured the consequence on a
+    case-sensitive filesystem rather than reasoning about it:
+    `keys_match_case_insensitively_on_windows` reports two findings where
+    Windows reports one, and the previous finding is carried open beside this
+    run's copy of it rather than matched. That is correct on Linux and is the
+    open question on macOS, where the same two spellings name one file. **It is
+    not a false green** — it is duplicate material and a missed match, not a
+    pass — which is why it is a task with its own acceptance rather than a
+    stop-the-line. Given an owner, `P15-T018`, which requires the premise to be
+    measured before anything is changed, because a task whose premise is "macOS
+    is case-insensitive" is the same mistake in the other direction.
+
+101. **A race in this repository's own test fixtures has been recorded three
+    times and owned by nobody.** `Text file busy (os error 26)` at
+    `execve`: first in run `35086572733`'s failed first attempt
+    (`a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` in
+    `runtime_start.rs` and `a_service_that_is_dropped_is_stopped_anyway` in
+    `service_supervisor.rs`), then in `35087849335`
+    (`a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange`),
+    and now in `35389096745`'s failed first attempt — the third distinct
+    occurrence, in the first run whose tree lets the ubuntu test step execute at
+    all. The mechanism is derived and written in the section under "External
+    blockers": `fs::copy` holds the destination open for writing for the whole
+    copy of a multi-megabyte binary, `fork` duplicates that descriptor into a
+    child, and `execve` of that inode inside the window is refused; the fix is
+    to copy to a unique temporary name, close, and rename into place, plus a
+    bounded retry, because the fork window is not removable. The section names
+    the falsifier — *the task that next touches either fixture makes the change
+    and records n runs clean rather than the word fixed* — and **no task touches
+    either fixture**, which is a falsifier aimed at nobody. It now has an owner,
+    `P15-T019`, whose first criterion is that the fixture count be taken from
+    the tree: the section names two call sites and
+    `grep -rn "fs::copy" crates/*/tests/` finds four, of which three execute
+    what they copy and one copies fixture sources. Deliberately **not** placed
+    first, and the reasoning is in the task's notes: every recorded occurrence
+    is the product reporting `Error` rather than a pass, the failure names
+    itself in the log with an errno and a path nothing else produces, and the
+    fix is verified by CI runs that arrive one push at a time whenever it is
+    dispatched — so moving it ahead of `P13-T006` would buy nothing but a delay.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P15-T016` was inserted
-ahead of `P13-T006`, is `P15-T016`, `P13-T006`, `P13-T007`, `P13-T009`,
-`P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
-`P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`, `P7-T013`, in the order
-`tasks/tasks.json` lists them. `P15-T016` (make the ubuntu and macos jobs green
-again, and keep them read) is the first of those and is in flight; its base
-commit is `7e021ae`. `P13-T006` (implement protection audit history) is next and
-its brief is written. `P15-T015` does not appear in that list
-because it is queued behind work that precedes it in the array — it is
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P15-T016` was accepted and
+`P15-T018` and `P15-T019` were added, is `P13-T006`, `P13-T007`, `P13-T009`,
+`P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T008`,
+`P14-T009`, `P14-T010`, `P15-T008`, `P15-T015`, `P15-T018`, `P15-T019`,
+`P7-T012`, `P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them.
+`P13-T006` (implement protection audit history) is the first of those and its
+brief is written. **`P15-T016` leaves the list rather than rearranging it**, and
+the two tasks its verification added join it: `P15-T015` does not appear at the
+front because it is queued behind work that precedes it in the array — it is
 deliberately placed in the P15 block rather than at the front, so the READY
 order stays the file's order and the task that fixes the gates is dispatched on
-the same rule as every other task. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+the same rule as every other task — and `P15-T018` and `P15-T019` are placed the
+same way, after the last task of the block, so that neither of them displaces
+`P13-T006`. That is the opposite of the placement `P15-T016` was given, and the
+reason is written in each task's own notes: `P15-T016` was a stop-the-line where
+two of three platforms were unverified, `P15-T018` is a question about what the
+product reports on a supported platform and `P15-T019` is a known race in this
+repository's own test fixtures whose fix is verified by CI runs that arrive one
+push at a time whenever it is dispatched. **The condition that would reopen the
+ordering for `P15-T019` is written into it**: if a genuine ubuntu failure is ever
+mistaken for that race, or if the race fails a tree that cannot be its cause
+twice more, this placement is to be reconsidered rather than defended. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
@@ -1132,7 +1212,43 @@ line it costs: the check for runs arriving back to back compared a difference in
 were within two minutes of each other, which is how a measurement comes back
 agreeing with a guess. The figure above is the same check with the units right.
 The count that matters for the record is still the one item 99 states: the last
-green run is `35193436468` and every run after it failed.
+green run is `35193436468` and every run after it failed — **until
+`35389096745`.**
+
+### The streak ended at 76, and the run that ended it
+
+The census above was read at 75 and the number moved twice after it was written,
+so both movements are recorded here rather than folded into it. The table is a
+reading taken at a moment, and rewriting its rows to match a later count would
+destroy the only thing it is good for — that a number was produced by a command
+on a date.
+
+**One more run failed, and it is not in the table.** `35388375372` (`3c8c25b`,
+2026-09-18T19:52:45Z) failed the same way the last twelve rows do: `cargo clippy`
+on macos-latest and ubuntu-latest. That commit is the supervisor's own census
+bookkeeping — `SHA256SUMS.txt`, `progress/HANDOFF.md`, `progress/state.json`,
+`tasks/tasks.json` — and clippy is green on Windows locally and on the CI
+windows job, so the redness is a property of the inherited tree and not of
+anything it changed, which is the same reading the P5-T003 accept row needed. So
+**the streak is 76 runs, not 75**, from `35196110213` (`717fc0a`) to
+`35388375372` (`3c8c25b`).
+
+**The next run is green, and it is the one that matters.** `35389096745`
+(`853d7de`, 2026-09-18T20:00:44Z) has all five jobs `success` — the first green
+`ci` run since `35193436468`, forty-eight hours and, by the count above,
+seventy-six consecutive failures later. `853d7de` is `P15-T016`'s hand-back, so
+what ended the streak is the fix the census gave an owner to. **The green is on
+the second attempt**, and that is written down here for the reason the P5-T003
+row gives about its own re-run: `gh run rerun --failed` re-runs a job *inside* a
+run, so the failure is replaced in the run's own state and a reader of the run
+alone would see only the green. The attempt it replaced failed one test on
+ubuntu — `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure`
+at `crates/sure-core/tests/runtime_start.rs:1450`, `left: Error` against
+`right: Fail`, with `The operating system said: Text file busy (os error 26)`
+inside SURE's own sentence — and the log as it stood before the re-run replaced
+it is kept at `target/tmp/ci-35389096745-ubuntu.log`. It is the third occurrence
+of the race recorded under "External blockers", it is not this commit's, and it
+now has an owner: `P15-T019`.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
@@ -1289,6 +1405,136 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T016` added
+
+Four causes of a red `ci` workflow, each read out of a run log rather than
+inferred from a red mark, and every one of them fixed in the source rather than
+in the workflow. The task's own subject is the census above: 75 consecutive red
+runs, in which two of the three platforms `CLAUDE.md` requires the core to stay
+portable to were never tested at all.
+
+**Three helpers in `sure-testkit`'s `integration_thinness.rs` were dead code on
+Unix.** They are used only by Windows-gated tests, so `cargo clippy -- -D
+warnings` failed the job on ubuntu and macos *before* the test step — which is
+the whole reason the Unix tests had not run since `752489c`, and the reason the
+state of everything else was unknown rather than known-bad. The helpers are now
+gated with the tests that use them. This is the cause that has to be fixed first
+and it is the one that made the other three invisible: a job that dies at clippy
+tells you nothing about the tests behind it, and the census is a record of how
+long that reads as "the tests are failing".
+
+**Two tests asserted that a Windows path reads the same on Unix**, and it does
+not and cannot: on Unix `tests\foo.rs` is one file name. `recording_projection`'s
+`basename_of` was reading a harness payload path with the local platform's
+parser, so a recording made on Unix named a file the way no reader of the event
+would; it now folds the separators first, which is what a path that arrived as
+text from another machine needs. The classification question is answered in
+`classify_path`'s own doc comment rather than left to be guessed: its argument is
+a `Path` SURE produced itself, so it is read with the platform's own separators,
+and text from a harness is folded once where it arrives — the rule
+`hook_protection`'s `folded` already states. Both platform branches of the test
+now assert what their own `Path` does, and the path shape SURE actually produces
+is asserted on every platform.
+
+**`recheck_lifecycle`'s Unix branch was asserting the wrong thing, and the
+reconciler was right.** `keys_match_case_insensitively_on_windows` expects an
+empty `kept_open` for a previous finding that did not reappear, but `reconcile`
+pushes every previous finding that is still open into `kept_open` at three sites
+— two of which the Unix branch reaches on *every* platform — and `pipeline.rs`
+prints that length as "N earlier finding(s) stayed open". The assertion is what
+changed. This is worth separating from the other three: it is the one place where
+the CI was telling the truth about a test rather than about the platform, and
+loosening it would have hidden a real claim. What is now asserted outside the
+platform blocks are the claims that hold everywhere; the only Unix-only claim
+left is the finding count.
+
+**The browser tests' budgets were below what a cold browser needs on a loaded
+runner.** `BRIEF` 20s → 30s and `PATIENT` 30s → 45s, with the measurements
+written beside them: run `35365324422` failed on ubuntu at 19.999964s while the
+four tests beside it, against the same `/usr/bin/chromium`, launched inside 30s;
+run `35351409364` failed on windows at 29.999205s and 29.999266s while the four
+runs around it were green. A budget that is still too small still fails, and a
+browser that still cannot be driven still reports `DriverWouldNotStart`, so this
+raises a threshold without turning anything green.
+
+**Nothing was made not to look.** No job skips a test, continues on error or runs
+a narrower command; no platform left the matrix; `--no-fail-fast` stays. That is
+criterion 5 of the task and it is checked against the tree rather than the
+commit message — see below.
+
+**What it deliberately did not answer** is the case-folding question: whether two
+spellings of one path are one file is decided by `recheck_lifecycle`'s
+`normalise_path` with `#[cfg(windows)]`, which is a statement about an operating
+system where the question is about a volume. That is `P15-T018`, added by this
+verification, and it is not a defect this task found and declined — it is a
+decision with evidence of its own, because the fix moves what the product reports
+on a supported platform.
+
+## Validation of `P15-T016`
+
+**The five gates, run by the supervisor from native PowerShell on `853d7de`, not
+taken from the hand-back**: `cargo fmt --all -- --check` exit 0;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0;
+`cargo test --workspace --all-features --no-fail-fast` exit 0 with **73 `test
+result:` lines — 58 `Running` and 5 `Doc-tests` headers, ten of the lines printed
+by children of `store_concurrency` — 2504 passed, 0 failed, 12 ignored**;
+`node scripts/validate-bootstrap.mjs` exit 0; `node scripts/taskctl.mjs validate`
+exit 0. The result lines were counted with their headers attributed rather than
+by a bare number, because `cargo test <filter>` matching nothing prints
+`test result: ok. 0 passed` and exits 0, which is the shape that makes a green
+test step say nothing.
+
+**Criterion 5 is checked against the tree and not against the message.**
+`git diff 7e021ae 853d7de -- .github/` is empty, so the workflows are
+byte-identical across the task. The worker's commit `853d7de` touches five files
+— `crates/sure-core/src/candidate_context.rs`,
+`crates/sure-core/src/recheck_lifecycle.rs`,
+`crates/sure-core/src/recording_projection.rs`,
+`crates/sure-core/tests/browser_driver.rs` and
+`crates/sure-testkit/tests/integration_thinness.rs` — and `git diff --stat
+7e021ae 853d7de` reads `9 files changed, 532 insertions(+), 28 deletions(-)`
+because the range starts at the base and therefore contains the dispatch commit's
+own four bookkeeping files as well. Nothing was made to skip, continue on error
+or run narrower, and the check for that is the empty `.github/` diff rather than
+a reading of the yaml, because a workflow can be made narrower in ways a reading
+by eye does not catch and a diff cannot miss.
+
+**Criteria 3 and 4 are checked by reading the code the tests now assert
+against**, which is the only way to check them: the platform branches say what
+they are asking and why, and `basename_of`'s folding is traced to the call sites
+that reach it from a harness payload rather than asserted from the diff's shape.
+
+**The run: `35389096745`, all five jobs green, and all five on the second
+attempt.** Windows **2504** / macOS **2495** / Ubuntu **2496** passed, **0
+failed**, **12 ignored**, **73 result lines** on each, **58 `Running` plus 5
+`Doc-tests` headers**, so criterion 2 holds on the platform it was written for:
+the ubuntu and macos logs contain result lines and passed counts rather than
+ending at clippy. **The local Windows figure and the CI Windows figure agree
+exactly at 2504**, which is the check that the local suite and the CI suite are
+the same suite. macOS is nine lower than Windows and Ubuntu eight, which is the
+platform-gated tests and is expected rather than investigated — the claim being
+made is only that both Unix platforms ran the suite and neither failed.
+
+**The first attempt of that run was red on ubuntu, and it is recorded rather than
+erased.** It failed exactly one test — `a_service_that_outlives_the_window_and_
+then_ends_is_still_a_failure` at `crates/sure-core/tests/runtime_start.rs:1450`,
+`left: Error` against `right: Fail`, with `Text file busy (os error 26)` in
+SURE's sentence about the program it could not start. **Neither the file nor the
+test is this commit's**, `--no-fail-fast` carried the rest of the suite to
+completion so the run's ubuntu failure is exactly that one test, and the re-run
+of that job came back green. The log as it stood before the re-run replaced it is
+kept at `target/tmp/ci-35389096745-ubuntu.log`. This is the third occurrence of a
+race this file already records twice, and unlike the first two it now has an
+owner: **`P15-T019`**, whose acceptance requires the fixture count to be taken
+from the tree rather than from this file's prose — the record names two call
+sites and `grep -rn "fs::copy" crates/*/tests/` finds four, of which three
+execute what they copy.
+
+**One thing this acceptance owes and cannot pay here**: the run for the accept
+commit that carries this record. It is read in this session and reported in the
+next entry, because a commit cannot contain the run of itself. The chain rule at
+the top of the older run table applies unchanged.
 
 ## What `P13-T005` added
 

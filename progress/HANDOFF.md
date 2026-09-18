@@ -322,12 +322,41 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     honestly reports capability tier as Observed (Tier 1) because pre-action
     decision/response is not yet implemented, and includes error-case and
     end-to-end ingestion tests.
+48. A worker agent completed `P11-T005` — *Implement Cursor repair handoff* — as
+    commit `2062077`. The supervisor re-verified all quality gates and accepted
+    the task. The Cursor `fix.md` command prompt now explicitly instructs the
+    workflow to run `sure repair` to obtain the repair contract, then load it,
+    implement the required fix while preserving listed behavior, run acceptance
+    checks, and invoke `sure recheck`; a thinness test guards the handoff wording.
 
-**Phase P11 is open at 4 of 9; Phase P10 is open at 3 of 8.** The READY list is now
-`P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
-`P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
-`P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P11-T005`, *"Implement Cursor repair handoff"*, which is the next concrete action.
+**Phase P11 is open at 5 of 9; Phase P10 is open at 3 of 8.** The READY list is now
+`P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`, `P13-T004`,
+`P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`
+and `P14-T010`. The lowest-numbered READY task is
+`P11-T006`, *"Implement Cursor protection where supported"*, which is the next
+concrete action.
+
+## What `P11-T005` added
+
+- `integrations/cursor/commands/fix.md` — updated the repair handoff prompt to
+  explicitly tell Cursor to run `sure repair` to obtain the repair contract,
+  load it, implement only the required repair while preserving listed behavior,
+  run acceptance checks, and then invoke `sure recheck`. Kept the existing
+  binary-resolution instructions and safe-failure wording.
+- `crates/sure-testkit/tests/integration_thinness.rs` — new
+  `cursor_repair_handoff_references_repair_and_recheck` test asserting the
+  Cursor repair handoff references both `sure repair` and `sure recheck` and
+  does not copy the frozen `NO_TRUSTED_INTENT_LIMITATION` sentence.
+
+## Validation of `P11-T005`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T004` added
 

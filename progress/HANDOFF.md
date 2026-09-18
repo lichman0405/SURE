@@ -2,10 +2,11 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 95 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 96 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11). Phase P9 complete (5/5). Phase P11 is open at 1 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11). Phase P9 complete (5/5). Phase P10 complete
+(1/1). Phase P11 is open at 1 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -24,7 +25,8 @@ accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T00
 `0982310`. `P9-T002` is accepted as commit `a398107`. `P9-T003` is accepted as commit
 `d1fd41b`. `P9-T004` is accepted as commit `df84d7f`. `P9-T005` is accepted as commit
 `3c56d5b`. `P9-T006` is accepted as commit
-`a4679f8`. `P11-T001` is accepted as commit
+`a4679f8`. `P10-T001` is accepted as commit
+`76f5464`. `P11-T001` is accepted as commit
 `7813a55`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
@@ -272,7 +274,13 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     mandatory `repair-regression` adversarial fixture: it proves that when a
     repair's contract recheck passes but a selected regression check fails, the
     original finding stays open and the project cannot turn green.
-41. A worker agent completed `P11-T001` — *Validate current Cursor Plugin/hooks
+41. A worker agent completed `P10-T001` — *Validate current Claude Code
+    plugin/hook schemas* — as commit `76f5464`. The supervisor verified all
+    quality gates and accepted the task. The Claude Code plugin manifest was
+    updated to reference commands, hooks and MCP files, and synthetic raw event
+    fixtures for `SessionStart`, `PreToolUse`, `PostToolUse` and `Stop` were
+    added under `integrations/claude-code/fixtures/`.
+42. A worker agent completed `P11-T001` — *Validate current Cursor Plugin/hooks
     schema* — as commit `7813a55`. The supervisor verified all quality gates and
     accepted the task. The Cursor hook manifest was updated to the nested schema
     used by current Cursor third-party hook conventions, and synthetic raw event
@@ -280,11 +288,12 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `postToolUseFailure`, `afterFileEdit` and `stop` were added under
     `integrations/cursor/fixtures/`.
 
-**Phase P11 is open at 1 of 9.** The READY list is now
-`P12-T001`, `P12-T008`, `P12-T009`,
+**Phase P10 complete (1/1). Phase P11 is open at 1 of 9.** The READY list is now
+`P11-T002`, `P11-T003`, `P12-T001`, `P12-T008`, `P12-T009`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P12-T001`, which is the next concrete action.
+`P11-T002`, *"Implement Cursor hook launcher/normalizer"*, which is the next
+concrete action.
 
 ## What `P5-T007` added
 
@@ -14203,6 +14212,31 @@ absent text.
   updated from `to_be_implemented_by_task_graph` to `implemented`.
 
 ## Validation of `P9-T006`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P10-T001` added
+
+- `integrations/claude-code/.claude-plugin/plugin.json` — updated to reference
+  `commands/`, `hooks/hooks.json` and `.mcp.json`, matching current Claude Code
+  plugin conventions.
+- `integrations/claude-code/fixtures/` (new directory) — four synthetic raw
+  event fixtures showing the JSON payloads Claude Code hooks would forward to
+  SURE: `session-start.json`, `pre-tool-use.json`, `post-tool-use.json`,
+  `stop.json`. Each fixture includes `event`, `harness_session_id` and
+  `source: "claude-code"`.
+- `crates/sure-testkit/tests/integration_thinness.rs` — added
+  `claude_code_synthetic_fixtures_are_valid_json_with_expected_shape`, which
+  asserts every `.json` fixture is valid, is an object, contains the required
+  keys, and declares `source` as `claude-code`.
+
+## Validation of `P10-T001`
 
 | Gate | Result |
 | --- | ------ |

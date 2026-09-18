@@ -5,17 +5,37 @@
 //! > *Fake payment/auth/email/dead button/route/demo cases runnable with
 //! > expected outcomes.*
 //!
-//! Three words in that sentence are checkable without running SURE at all, and
+//! `P14-T002` added a second sentence for the same corpus:
+//!
+//! > *Missing config/migration/fake integration cases runnable.*
+//!
+//! Three words in each sentence are checkable without running SURE at all, and
 //! this file checks them:
 //!
-//! - **runnable** — the fixture has a start command a reviewer with nothing but
-//!   Node installed can run, it names a file that exists, and it needs no
-//!   package installed first;
+//! - **runnable** — the fixture has a start command a reviewer with nothing
+//!   installed can run, it names a file that exists, and it needs no package
+//!   installed first. The Node half runs `node <file>`; the Python half runs
+//!   `python <file>`, which is the interpreter name the fixtures are recorded
+//!   against — `python3` is not on `PATH` on the machines this ships to, so
+//!   an entry point that uses it is refused here rather than discovered by a
+//!   reviewer whose shell answers with a Microsoft Store stub;
 //! - **expected outcomes** — the fixture carries a `scenario.json` that parses
-//!   and satisfies `schemas/fixture-expectation.schema.json`, and that agrees
-//!   with `evaluation/acceptance-manifest.json` about how serious the case is;
+//!   and satisfies `schemas/fixture-expectation.schema.json`, and, where the
+//!   release manifest has a case for it, that agrees with
+//!   `evaluation/acceptance-manifest.json` about how serious the case is;
 //! - **the false-green rule** — a release-blocking fixture says, in machine
 //!   readable form, that "passing" is an outcome SURE must not produce.
+//!
+//! # The one fixture with no manifest case
+//!
+//! `missing-config` is a `P14-T002` fixture that `evaluation/acceptance-manifest.json`
+//! has no case for, and that file is the release contract rather than a place
+//! to add rows. [`FIXTURES_WITHOUT_A_MANIFEST_CASE`] names it once, with the
+//! reason, and
+//! `the_only_fixture_without_a_manifest_case_is_the_one_named_here` proves the
+//! exemption is still true — an entry there for a case the manifest *does*
+//! have fails, so the list cannot silently widen and let a graded fixture out
+//! of the severity agreement above.
 //!
 //! What is deliberately **not** here: whether the defect is actually detected.
 //! That claim needs SURE's scanners, which this crate cannot see, and it lives
@@ -29,7 +49,8 @@
 //! function returning the reasons it rejected a value, and every one of them is
 //! fed a hand-built case that it **must** reject. A checker that returned no
 //! violations for everything would fail those cases, so it cannot pass by being
-//! vacuous.
+//! vacuous. `the_python_runnable_checker_rejects_a_project_that_is_not_stdlib_only`
+//! is the Python half of that rule.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -50,8 +71,45 @@ const TYPESCRIPT_FIXTURES: &[&str] = &[
     "route-mismatch",
 ];
 
+/// The `P14-T002` fixtures, named for the same reason as the list above.
+const PYTHON_FIXTURES: &[&str] = &["missing-migration", "external-unverified", "missing-config"];
+
+/// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
+/// and why each one does not have to.
+///
+/// An entry here is a claim that the release contract does not grade this
+/// fixture, and `the_only_fixture_without_a_manifest_case_is_the_one_named_here`
+/// checks the claim against the manifest rather than trusting it. Nothing else
+/// in this file reads this list as an exemption: a fixture named here is still
+/// checked for the schema, the false-green rule and runnability, and only the
+/// severity agreement is waived — because there is no manifest row to agree
+/// with.
+const FIXTURES_WITHOUT_A_MANIFEST_CASE: &[(&str, &str)] = &[(
+    "missing-config",
+    "the manifest's case list is the release contract and P14-T002 was not asked to add a row to it; \
+     the nearest case, `external-unverified`, is a different defect and is not claimed to cover this one",
+)];
+
 /// The marker the task graph leaves on a fixture that is still a stub.
 const NOT_IMPLEMENTED: &str = "to_be_implemented_by_task_graph";
+
+/// Every module a Python fixture may import.
+///
+/// Deliberately a list rather than a rule read out of the interpreter: the
+/// fixtures are stdlib-only, and a name outside this list is refused so that
+/// adding one is a decision someone makes here, in writing, instead of an
+/// import that works on the machine it was written on. `app` is not here
+/// because it is the fixtures' own package, and a file in the fixture is
+/// treated as local — see [`python_imports`].
+const ALLOWED_PYTHON_MODULES: &[&str] = &["dataclasses", "os", "pathlib", "sqlite3", "sys"];
+
+/// The interpreter name the Python fixtures are recorded against.
+///
+/// `python3` is a Microsoft Store alias on the machines this project is
+/// developed on: it opens the Store instead of running the file, so an entry
+/// point spelled that way is not runnable there even though it reads as though
+/// it is.
+const PYTHON: &str = "python ";
 
 fn root() -> PathBuf {
     sure_testkit::repository_root()
@@ -114,6 +172,24 @@ fn shipped_fixture_ids() -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+/// Every fixture the two tasks named in this file implemented, both halves.
+///
+/// One list for the checks that are about a fixture rather than about a
+/// language: the schema, the false-green rule, the check module and the
+/// directory all apply to a Python fixture exactly as they apply to a Node one.
+fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
+    TYPESCRIPT_FIXTURES.iter().chain(PYTHON_FIXTURES).copied()
+}
+
+/// Why this fixture does not have to agree with the release manifest, if it
+/// does not.
+fn manifest_exemption(id: &str) -> Option<&'static str> {
+    FIXTURES_WITHOUT_A_MANIFEST_CASE
+        .iter()
+        .find(|(exempt, _)| *exempt == id)
+        .map(|(_, reason)| *reason)
 }
 
 // --- the checkers --------------------------------------------------------
@@ -354,6 +430,197 @@ fn bare_requires(text: &str) -> Vec<String> {
     found
 }
 
+/// Every reason a Python fixture is not runnable with nothing installed.
+///
+/// The Python half of [`runnable_violations`], and the differences are the
+/// language's rather than this file's. There is no manifest that declares
+/// dependencies in one place, so the imports are read out of the source and
+/// compared against [`ALLOWED_PYTHON_MODULES`]; the entry points come out of
+/// the fixture's `scenario.json`, which is the same document the reviewers and
+/// the eval runner read, so the command checked here is the command they run.
+fn python_runnable_violations(dir: &Path) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    let package = dir.join("pyproject.toml");
+    if !package.is_file() {
+        violations.push("there is no pyproject.toml".to_owned());
+    } else {
+        for line in std::fs::read_to_string(&package)
+            .unwrap_or_default()
+            .lines()
+        {
+            // `dependencies = []` is the only shape that needs nothing
+            // installed; a name in the list is something a reviewer would have
+            // to fetch, and one of these fixtures is about a provider whose
+            // client a real deployment would declare here.
+            let line = line.trim();
+            if line.starts_with("dependencies")
+                && !line.replace(' ', "").ends_with("dependencies=[]")
+            {
+                violations.push(format!(
+                    "pyproject.toml declares a dependency, so the fixture is not runnable without an install: `{line}`"
+                ));
+            }
+        }
+    }
+
+    let entry_points = python_entry_points(dir);
+    if entry_points.is_empty() {
+        violations.push("scenario.json declares no entry point to run".to_owned());
+    }
+    for (role, command) in entry_points {
+        let Some(entry) = command.strip_prefix(PYTHON) else {
+            violations.push(format!(
+                "the {role} command must run `python` directly, and it says `{command}` \
+                 (`python3` is a Microsoft Store alias where these fixtures run, and it runs nothing)"
+            ));
+            continue;
+        };
+        let entry = entry.split_whitespace().next().unwrap_or_default();
+        if !dir.join(entry).is_file() {
+            violations.push(format!(
+                "the {role} command names {entry}, which is not a file in the fixture"
+            ));
+        }
+    }
+
+    for source in python_files(dir) {
+        let text = std::fs::read_to_string(&source).unwrap_or_default();
+        for module in python_imports(&text, dir) {
+            violations.push(format!(
+                "{} imports `{module}`, which is not in ALLOWED_PYTHON_MODULES and is not a file in the fixture",
+                source
+                    .strip_prefix(dir)
+                    .unwrap_or(source.as_path())
+                    .display()
+            ));
+        }
+    }
+
+    violations
+}
+
+/// The commands a Python fixture's `scenario.json` says a reviewer runs, in the
+/// order the file spells them.
+fn python_entry_points(dir: &Path) -> Vec<(String, String)> {
+    let path = dir.join("scenario.json");
+    if !path.is_file() {
+        return Vec::new();
+    }
+    let document = read_json(&path);
+    let Some(entries) = document.get("entry_points").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, String)> = entries
+        .iter()
+        .filter_map(|(role, command)| {
+            command
+                .as_str()
+                .map(|command| (role.clone(), command.to_owned()))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// Every `.py` file under a directory, sorted, so a run is reproducible.
+fn python_files(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "py") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The top-level modules a Python file imports that are neither the fixture's
+/// own nor on [`ALLOWED_PYTHON_MODULES`].
+///
+/// The analogue of [`bare_requires`], with the one difference the language
+/// imposes: Python has no `node:` marker, so a top-level name is either a
+/// standard-library module, a module of the project, or something that would
+/// have to be installed. The first is the list, the second is a file or package
+/// in the fixture, and anything else is refused.
+fn python_imports(text: &str, dir: &Path) -> Vec<String> {
+    let local = local_python_modules(dir);
+    let mut found = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let modules = if let Some(rest) = line.strip_prefix("from ") {
+            match rest.split_once(" import") {
+                Some((module, _)) => module.trim(),
+                None => continue,
+            }
+        } else if let Some(rest) = line.strip_prefix("import ") {
+            rest.split('#').next().unwrap_or_default().trim()
+        } else {
+            continue;
+        };
+        for name in modules.split(',') {
+            let name = name.split_whitespace().next().unwrap_or_default();
+            let top = name.split('.').next().unwrap_or_default();
+            if top.is_empty()
+                || top.starts_with('.')
+                || top == "__future__"
+                || ALLOWED_PYTHON_MODULES.contains(&top)
+                || local.iter().any(|module| module == top)
+            {
+                continue;
+            }
+            found.push(top.to_owned());
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Every module name the fixture itself provides: a `.py` file's stem, or a
+/// directory holding an `__init__.py`.
+fn local_python_modules(dir: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        let entries: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect();
+        let is_package_dir = current != dir
+            && entries
+                .iter()
+                .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"));
+        if is_package_dir && let Some(name) = current.file_name().and_then(|name| name.to_str()) {
+            names.push(name.to_owned());
+        }
+        for path in entries {
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "py")
+                && let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+            {
+                names.push(stem.to_owned());
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
 // --- the fixtures --------------------------------------------------------
 
 #[test]
@@ -375,7 +642,7 @@ fn every_typescript_fixture_is_a_directory_this_repository_ships() {
 #[test]
 fn every_fixture_scenario_parses_and_satisfies_the_expectation_schema() {
     let schema = expectation_schema();
-    for id in TYPESCRIPT_FIXTURES {
+    for id in every_fixture_this_task_implemented() {
         let document = scenario(id);
         let violations = schema_violations(&document, &schema);
         assert!(
@@ -392,7 +659,7 @@ fn no_fixture_this_task_implemented_is_still_marked_as_waiting_for_the_task_grap
     // The marker means "a stub a later task must replace". A fixture that ships
     // source, a start command and a README while still carrying it would be
     // graded by nothing and owned by nobody.
-    for id in TYPESCRIPT_FIXTURES {
+    for id in every_fixture_this_task_implemented() {
         let text = scenario_text(id);
         assert!(
             !text.contains(NOT_IMPLEMENTED),
@@ -405,17 +672,45 @@ fn no_fixture_this_task_implemented_is_still_marked_as_waiting_for_the_task_grap
 fn every_shipped_fixture_directory_corresponds_to_a_manifest_case() {
     // The other direction of the check below, and the one that catches a
     // fixture nobody grades: a directory with no manifest entry is a test whose
-    // result nothing reads.
+    // result nothing reads. The one exemption is named, with its reason, in
+    // `FIXTURES_WITHOUT_A_MANIFEST_CASE`, and
+    // `the_only_fixture_without_a_manifest_case_is_the_one_named_here` checks
+    // the exemption against the manifest rather than taking it on trust.
     let manifest = manifest();
     let cases = manifest["cases"]
         .as_array()
         .expect("the manifest lists cases");
     for id in shipped_fixture_ids() {
+        let graded = cases
+            .iter()
+            .any(|case| case["id"].as_str() == Some(id.as_str()));
         assert!(
-            cases
-                .iter()
-                .any(|case| case["id"].as_str() == Some(id.as_str())),
-            "fixtures/adversarial/{id} has no case in evaluation/acceptance-manifest.json"
+            graded || manifest_exemption(&id).is_some(),
+            "fixtures/adversarial/{id} has no case in evaluation/acceptance-manifest.json, \
+             and is not named in FIXTURES_WITHOUT_A_MANIFEST_CASE either"
+        );
+    }
+}
+
+#[test]
+fn the_only_fixture_without_a_manifest_case_is_the_one_named_here() {
+    // Both directions, so the list can neither widen nor go stale. An entry for
+    // an id the manifest *does* grade would be a graded fixture excused from
+    // the severity agreement below, and an entry that is not a shipped fixture
+    // would be a reason nothing reads.
+    let shipped = shipped_fixture_ids();
+    for (id, reason) in FIXTURES_WITHOUT_A_MANIFEST_CASE {
+        assert!(
+            !reason.trim().is_empty(),
+            "{id} is excused from the manifest agreement with no reason given"
+        );
+        assert!(
+            shipped.iter().any(|directory| directory == id),
+            "{id} is excused from the manifest agreement and is not a fixture this repository ships"
+        );
+        assert!(
+            manifest_case(id).is_none(),
+            "{id} is excused from the manifest agreement, and the manifest has a case for it"
         );
     }
 }
@@ -425,7 +720,7 @@ fn every_case_this_task_implements_has_a_fixture_directory() {
     // The forward direction: a case named here with no directory is a case
     // nothing can run.
     let shipped = shipped_fixture_ids();
-    for id in TYPESCRIPT_FIXTURES {
+    for id in every_fixture_this_task_implemented() {
         assert!(
             shipped.iter().any(|shipped| shipped == id),
             "{id} is claimed by this task and has no fixture directory"
@@ -435,15 +730,21 @@ fn every_case_this_task_implements_has_a_fixture_directory() {
 
 #[test]
 fn every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking() {
-    for id in TYPESCRIPT_FIXTURES {
+    for id in every_fixture_this_task_implemented() {
         let document = scenario(id);
-        let case = manifest_case(id).unwrap_or_else(|| panic!("{id} is not in the manifest"));
-
+        // The one exemption, and it is checked rather than assumed by the test
+        // above. Everything else here — the id the document claims — is
+        // asserted for every fixture whether the manifest grades it or not.
         assert_eq!(
             document["id"].as_str(),
-            Some(*id),
+            Some(id),
             "{id}/scenario.json names a different id"
         );
+        if manifest_exemption(id).is_some() {
+            continue;
+        }
+        let case = manifest_case(id).unwrap_or_else(|| panic!("{id} is not in the manifest"));
+
         assert_eq!(
             document["expected_severity"].as_str(),
             case["expected_severity"].as_str(),
@@ -459,7 +760,7 @@ fn every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking() {
 
 #[test]
 fn every_fixture_forbids_the_false_green_shape() {
-    for id in TYPESCRIPT_FIXTURES {
+    for id in every_fixture_this_task_implemented() {
         let document = scenario(id);
         let blocking = document["release_blocking"].as_bool().unwrap_or(false);
         let violations = false_green_violations(&document, blocking);
@@ -474,19 +775,28 @@ fn every_fixture_forbids_the_false_green_shape() {
 #[test]
 fn every_runnable_fixture_directory_is_named_in_this_file() {
     // The other adversarial directories are scenario stubs that later tasks
-    // (P14-T002, P14-T003 and the ones after them) fill in with their own
-    // language. A directory that ships a `package.json` is a Node application,
-    // and this task owns those: if one appears that is not named above, add it
-    // to TYPESCRIPT_FIXTURES so its entry point, its schema and its false-green
-    // rule are checked here too.
+    // (P14-T003 and the ones after them) fill in with their own language. A
+    // directory that ships a `package.json` is a Node application and this file
+    // owns those; one that ships a `pyproject.toml` or a `requirements.txt` is
+    // a Python application, and PYTHON_FIXTURES is where those are named. If
+    // one appears that is not named in either list, add it, so its entry point,
+    // its schema and its false-green rule are checked here too.
     for id in shipped_fixture_ids() {
-        if !fixture_dir(&id).join("package.json").is_file() {
-            continue;
+        let dir = fixture_dir(&id);
+        let node = dir.join("package.json").is_file();
+        let python = dir.join("pyproject.toml").is_file() || dir.join("requirements.txt").is_file();
+        if node {
+            assert!(
+                TYPESCRIPT_FIXTURES.contains(&id.as_str()),
+                "fixtures/adversarial/{id} is a runnable Node fixture that TYPESCRIPT_FIXTURES does not name"
+            );
         }
-        assert!(
-            TYPESCRIPT_FIXTURES.contains(&id.as_str()),
-            "fixtures/adversarial/{id} is a runnable Node fixture that TYPESCRIPT_FIXTURES does not name"
-        );
+        if python {
+            assert!(
+                PYTHON_FIXTURES.contains(&id.as_str()),
+                "fixtures/adversarial/{id} is a runnable Python fixture that PYTHON_FIXTURES does not name"
+            );
+        }
     }
 }
 
@@ -503,8 +813,42 @@ fn every_fixture_is_runnable_with_nothing_installed_but_node() {
 }
 
 #[test]
-fn every_fixture_names_the_check_it_expects_to_fire() {
+fn every_python_fixture_is_runnable_with_nothing_installed_but_python() {
+    for id in PYTHON_FIXTURES {
+        let violations = python_runnable_violations(&fixture_dir(id));
+        assert!(
+            violations.is_empty(),
+            "{id} is not runnable as shipped:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+}
+
+#[test]
+fn every_python_fixture_is_a_directory_this_repository_ships() {
+    for id in PYTHON_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md for a non-programmer to read"
+        );
+    }
     for id in TYPESCRIPT_FIXTURES {
+        assert!(
+            !PYTHON_FIXTURES.contains(id),
+            "{id} is in both lists, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn every_fixture_names_the_check_it_expects_to_fire() {
+    for id in every_fixture_this_task_implemented() {
         let document = scenario(id);
         let outcomes = document["required_outcomes"]
             .as_array()
@@ -674,4 +1018,91 @@ fn the_require_reader_sees_local_and_builtin_modules_and_not_packages() {
         bare_requires("require('left-pad');\nrequire(\"lodash\");"),
         ["left-pad".to_owned(), "lodash".to_owned()]
     );
+}
+
+#[test]
+fn the_python_import_reader_sees_local_and_stdlib_modules_and_not_packages() {
+    let fixture = fixture_dir("missing-config");
+
+    assert!(python_imports("import os\n", &fixture).is_empty());
+    assert!(python_imports("from pathlib import Path\n", &fixture).is_empty());
+    assert!(python_imports("from dataclasses import dataclass, field\n", &fixture).is_empty());
+    assert!(python_imports("import os, sys\n", &fixture).is_empty());
+    assert!(python_imports("from . import settings\n", &fixture).is_empty());
+    // The fixture's own package, which is a directory holding an `__init__.py`
+    // and not a name on the allowed list.
+    assert!(python_imports("from app import settings\n", &fixture).is_empty());
+    assert_eq!(
+        python_imports("import requests\n", &fixture),
+        ["requests".to_owned()]
+    );
+    assert_eq!(
+        python_imports("from stripe import Charge\nimport yaml\n", &fixture),
+        ["stripe".to_owned(), "yaml".to_owned()]
+    );
+}
+
+#[test]
+fn the_python_runnable_checker_rejects_a_project_that_is_not_stdlib_only() {
+    let scratch = root()
+        .join("target")
+        .join("tmp")
+        .join("fixture-apps-python-checker");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("app")).unwrap();
+    std::fs::write(scratch.join("app").join("__init__.py"), "").unwrap();
+    std::fs::write(scratch.join("app").join("main.py"), "import requests\n").unwrap();
+    std::fs::write(
+        scratch.join("scenario.json"),
+        "{\n  \"id\": \"x\",\n  \"required_outcomes\": [],\n  \"entry_points\": {\n    \"start\": \"python3 app/missing.py\",\n    \"test\": \"python app/missing.py\"\n  }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("pyproject.toml"),
+        "[project]\nname = \"x\"\ndependencies = [\"requests\"]\n",
+    )
+    .unwrap();
+
+    let violations = python_runnable_violations(&scratch);
+    assert!(
+        violations.iter().any(|v| v.contains("requests")),
+        "a third-party import must be refused: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("must run `python` directly")),
+        "an entry point that runs python3 must be refused: {violations:?}"
+    );
+    assert!(
+        violations.iter().any(|v| v.contains("missing.py")),
+        "an entry point naming a file that is not there must be refused: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("declares a dependency")),
+        "a declared dependency must be refused: {violations:?}"
+    );
+
+    // And the same project, fixed, passes — so the checker is not refusing
+    // everything it is shown.
+    std::fs::write(scratch.join("app").join("main.py"), "import sqlite3\n").unwrap();
+    std::fs::write(
+        scratch.join("scenario.json"),
+        "{\n  \"id\": \"x\",\n  \"required_outcomes\": [],\n  \"entry_points\": { \"start\": \"python app/main.py\" }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("pyproject.toml"),
+        "[project]\nname = \"x\"\ndependencies = []\n",
+    )
+    .unwrap();
+    assert!(
+        python_runnable_violations(&scratch).is_empty(),
+        "a stdlib-only project with a real entry point must pass: {:?}",
+        python_runnable_violations(&scratch)
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
 }

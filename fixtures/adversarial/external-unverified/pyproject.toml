@@ -1,0 +1,11 @@
+# The project's own manifest. It declares no dependencies: the app is written
+# against the standard library and the transport it talks to is in this
+# repository, so `python scripts/check.py` works on a machine with nothing
+# installed but Python itself. A real deployment would declare the provider's
+# own client here, and this project does not have one.
+[project]
+name = "sure-fixture-external-unverified"
+version = "0.0.0"
+description = "Adversarial fixture: the app presents a Stripe payment path and nothing verifies that Stripe is reached."
+requires-python = ">=3.9"
+dependencies = []

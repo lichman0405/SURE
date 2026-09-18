@@ -1,0 +1,9 @@
+# The project's own manifest. It declares no dependencies, because the app is
+# written against the standard library: `python scripts/check.py` works on a
+# machine with nothing installed but Python itself.
+[project]
+name = "sure-fixture-missing-migration"
+version = "0.0.0"
+description = "Adversarial fixture: the order model gained a column and no migration was written for it."
+requires-python = ">=3.9"
+dependencies = []

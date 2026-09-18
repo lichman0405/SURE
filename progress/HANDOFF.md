@@ -3,8 +3,10 @@
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
 
-**Nothing is in flight.** `P12-T010` (wire the MCP bridge into the Claude Code,
-Cursor and Agent plugin packages) is accepted as commit `752489c` — "What
+**In flight:** `P13-T002` (implement privacy modes) is dispatched as of `56e869a`
+and is `in_progress`, with its brief at `target/tmp/brief-p13t002.md`. `P12-T010`
+(wire the MCP bridge into the Claude Code, Cursor and Agent plugin packages) is
+accepted as commit `752489c` — "What
 `P12-T010` added" and "Validation of `P12-T010`" below carry the numbers. Before
 it, `P1-T012` (give the store a location a caller can choose), `P7-T011`
 (severity calibration) and `P12-T007` (Codex evidence bridge) are accepted, with

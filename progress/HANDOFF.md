@@ -2,11 +2,11 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 97 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 98 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9), phase P8 complete (11/11). Phase P9 complete (5/5). Phase P10 complete
-(1/1). Phase P11 is open at 2 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(1/1). Phase P11 is open at 3 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -28,7 +28,8 @@ accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T00
 `a4679f8`. `P10-T001` is accepted as commit
 `76f5464`. `P11-T001` is accepted as commit
 `7813a55`. `P11-T002` is accepted as commit
-`f2e0f06`. `P5-T005` received two follow-up security fixes in
+`f2e0f06`. `P11-T003` is accepted as commit
+`dc27ae8`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
@@ -295,13 +296,44 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     message to stderr when SURE is missing, and launcher stdin/stdout/exit-code
     contract fixtures were recorded under
     `integrations/cursor/fixtures/launcher/`.
+44. A worker agent completed `P11-T003` — *Implement Cursor commands/UI
+    surfaces* — as commit `dc27ae8`. The supervisor re-verified all quality
+    gates and accepted the task. The Cursor plugin now exposes
+    `check`/`status`/`fix`/`recheck` command definitions that explicitly tell
+    Cursor how to resolve the local SURE binary and fail safely when it is
+    missing, plus a thinness test guarding against duplicated core wording.
 
-**Phase P11 is open at 2 of 9.** The READY list is now
-`P11-T003`, `P12-T001`, `P12-T008`, `P12-T009`,
+**Phase P11 is open at 3 of 9.** The READY list is now
+`P10-T002`, `P10-T004`, `P11-T004`, `P11-T006`, `P12-T001`, `P12-T008`, `P12-T009`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P11-T003`, *"Implement Cursor commands/UI surfaces"*, which is the next
+`P10-T002`, *"Implement Claude hook event launcher/normalizer"*, which is the next
 concrete action.
+
+## What `P11-T003` added
+
+- `integrations/cursor/commands/check.md` — updated to tell Cursor to invoke the
+  local SURE binary via `SURE_BIN`, PATH, or `%LOCALAPPDATA%\SURE\bin\sure.exe`,
+  fail safely when SURE is missing, and present results faithfully.
+- `integrations/cursor/commands/status.md` — same binary-resolution instructions
+  and safe-failure wording for the `sure history` / status read path.
+- `integrations/cursor/commands/fix.md` — same for the `sure repair` handoff path.
+- `integrations/cursor/commands/recheck.md` — new command definition for
+  `sure recheck`, completing the check/status/fix/recheck surface exposed to Cursor.
+- `crates/sure-testkit/tests/integration_thinness.rs` — new
+  `cursor_command_files_exist_and_are_thin` test asserting all four command files
+  exist, reference the local SURE invocation path, and do not copy the core-owned
+  frozen `NO_TRUSTED_INTENT_LIMITATION` sentence.
+
+## Validation of `P11-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P5-T007` added
 

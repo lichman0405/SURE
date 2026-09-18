@@ -2,10 +2,10 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 89 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 90 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11). Phase P9 is open at 1 of 5.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11). Phase P9 is open at 2 of 5.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -21,7 +21,7 @@ accepted as commit `bc01d99`. `P7-T009` is accepted as commit `129f766`.
 commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
 accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted as commit
 `b7068a4`. `P8-T011` is accepted as commit `5bf6ee1`. `P9-T001` is accepted as commit
-`0982310`. `P5-T005` received two follow-up security fixes in
+`0982310`. `P9-T002` is accepted as commit `a398107`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
@@ -236,12 +236,18 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `sure_domain::vocabulary`; this change completes `schemas/repair.schema.json`
     to declare `id` and `recheck`, and adds a conformance test ensuring the
     serialized contract carries both.
+36. A worker agent completed `P9-T002` — *Generate repair contract from grounded
+    finding* — as commit `a398107`. The supervisor verified all quality gates and
+    accepted the task. `RepairContract::from_finding` in
+    `crates/sure-domain/src/repair.rs` rejects ungrounded findings and empty
+    re-check lists, copies the finding's evidence without inventing new facts, and
+    produces observable acceptance conditions tied to the supplied re-checks.
 
-**Phase P9 is open at 1 of 5.** The READY list is now
-`P9-T002`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
+**Phase P9 is open at 2 of 5.** The READY list is now
+`P9-T003`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P9-T002`, *"Generate repair contract from grounded finding"*, which is the next
+`P9-T003`, *"Implement harness-neutral repair envelope"*, which is the next
 concrete action.
 
 ## What `P5-T007` added
@@ -14011,6 +14017,37 @@ absent text.
   array, matching both the schema and the `is_actionable` rule.
 
 ## Validation of `P9-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P9-T002` added
+
+- `crates/sure-domain/src/repair.rs` (new) — `RepairContract::from_finding` and
+  `RepairContract::from_finding_with_one_check`.
+- `RepairFromFindingError` distinguishes two failure modes:
+  - `NotGrounded` — the finding is not grounded in checkable evidence, so a
+    contract would have to invent facts.
+  - `NoRechecks` — no checks were supplied to re-run, so SURE could not observe
+    whether the fix worked.
+- The generated contract copies the finding's title, user impact, next step, and
+  evidence; it does not add new evidence or invent new facts.
+- Acceptance conditions are observable: re-run the supplied check(s) and confirm
+  they pass; for observed-fact evidence with a concrete anchor, the fix must also
+  be visible at that anchor.
+- Forbidden shortcuts warn against test-only fixes for deterministic-check
+  findings and symptom-hiding for observed-fact findings.
+- `crates/sure-domain/src/lib.rs` — exposes `pub mod repair`.
+- Inline tests cover grounded-finding generation, ungrounded rejection, empty
+  re-check rejection, observable acceptance, no invented evidence, and
+  claim-contradiction findings.
+
+## Validation of `P9-T002`
 
 | Gate | Result |
 | --- | ------ |

@@ -149,7 +149,10 @@ harness to fall open; so a settings file it cannot read — unparseable, or nami
 `protection.mode: custom`, which this release refuses — leaves it deciding under
 `strict` rather than under the default. The firmer implemented answer is a real
 answer and the weaker one is not, and which of the two a harness does with it is
-documented per integration (P13-T007).
+documented per integration (P13-T007) in
+`docs/integrations/HOOK_FAILURE_SEMANTICS.md`, one row per harness per event its
+manifest wires — including the events where the answer is that this repository
+cannot confirm the harness's side and what would settle it.
 
 ## What this deliberately does not do
 

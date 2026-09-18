@@ -61,6 +61,12 @@ SURE infers a likely feature/goal and incorrectly calls it a user requirement.
 ## T18 — hook fail-open/fail-closed confusion
 A protection hook crashes and the user incorrectly assumes the action was blocked.
 
+Addressed per harness and per event in `docs/integrations/HOOK_FAILURE_SEMANTICS.md`,
+which keeps "what SURE emits" (measured here) apart from "what the harness does
+with it" (quoted upstream, or `cannot confirm`). It records one unresolved case
+rather than closing it: `integrations/copilot/` promises to fail open while
+`--source copilot` exits 5 for every event.
+
 ## T19 — local event tampering
 Project code or an agent modifies SURE history/evidence to fabricate a pass.
 

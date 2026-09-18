@@ -2718,6 +2718,230 @@ fn a_doctor_report_says_which_store_location_the_run_is_using() {
     assert_untouched(&machine, "by a doctor run that named no store");
 }
 
+// --- hook failure semantics (P13-T007) ----------------------------------
+
+/// One `sure hook ingest` started the way a launcher starts it, or the way a
+/// person would.
+///
+/// `args` is the whole argument vector after the program name, so a test can
+/// leave `--source` out or name one SURE does not know without this helper
+/// having an opinion about it.
+fn ingest_argv(store: &Path, args: &[&str], payload: &str) -> Run {
+    let mut command = sure_in_a_store(store);
+    command.args(args);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a child process");
+    let mut stdin = child.stdin.take().expect("the pipe");
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
+    drop(stdin);
+    Run::of(&child.wait_with_output().expect("the child exits"))
+}
+
+#[test]
+fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
+    // `crates/sure-cli/src/hook.rs` asserts each of these as a `Report` value,
+    // which is a statement about a function. A launcher does not talk to a
+    // function; it talks to a process, and what it relays is the status. These
+    // four are the inputs a harness produces by accident — a payload it did not
+    // send, a source SURE does not know, an event SURE has no mapping for —
+    // and the status they must produce is 5 (`report::exit::FAILED`: SURE tried
+    // and did not finish), never 0 and never 1.
+    //
+    // Never 0 is the whole point: 0 is what a launcher passes back to a harness
+    // that then proceeds, and a hook that answered nothing while reading as
+    // "SURE looked and said yes" is the false green this repository exists to
+    // refuse. Never 1 matters just as much for the opposite reason: 1 is SURE's
+    // `block`, and an event SURE could not read is not a refusal.
+    let project = a_project_of_our_own();
+    let known = serde_json::json!({
+        "event": "preToolUse",
+        "harness_session_id": "p13t007-failure",
+        "project_root": project.to_string_lossy(),
+        "tool": "Shell",
+        "args": {"command": "echo hello"},
+        "timestamp_utc": "2026-09-19T09:30:00Z",
+        "source": "cursor",
+    })
+    .to_string();
+    let unknown_event = serde_json::json!({
+        "event": "somethingElseEntirely",
+        "harness_session_id": "p13t007-failure",
+        "project_root": project.to_string_lossy(),
+        "tool": "Shell",
+        "args": {"command": "echo hello"},
+        "timestamp_utc": "2026-09-19T09:30:00Z",
+        "source": "cursor",
+    })
+    .to_string();
+
+    let cases: [(&str, Vec<&str>, &str); 4] = [
+        (
+            "empty stdin",
+            vec!["hook", "ingest", "--source", "cursor", "pre-tool-use"],
+            "",
+        ),
+        (
+            "stdin that is not JSON",
+            vec!["hook", "ingest", "--source", "cursor", "pre-tool-use"],
+            "this is not an event",
+        ),
+        (
+            "a source SURE does not know",
+            vec!["hook", "ingest", "--source", "copilot", "pre-tool-use"],
+            &known,
+        ),
+        (
+            "an event type with no mapping",
+            vec!["hook", "ingest", "--source", "cursor", "pre-tool-use"],
+            &unknown_event,
+        ),
+    ];
+
+    for (what, args, payload) in cases {
+        let store = a_store_of_our_own();
+        let machine = the_store_on_this_machine();
+        let run = ingest_argv(&store, &args, payload);
+        assert_eq!(
+            run.status, 5,
+            "{what}: a hook event SURE could not read exited {} rather than 5. A launcher relays \
+             this status to a harness, so 0 would read as 'SURE looked and allowed it' and 1 as a \
+             refusal SURE never made.\nstdout:\n{}\nstderr:\n{}",
+            run.status, run.stdout, run.stderr
+        );
+        assert!(
+            !store_file(&store).exists(),
+            "{what}: the refused event wrote a store at {}",
+            store_file(&store).display()
+        );
+        let reported = history_frame(&store, &[]);
+        assert_eq!(
+            reported["details"]["total"].as_i64(),
+            Some(0),
+            "{what}: a refused event was recorded anyway: {reported}"
+        );
+        assert_eq!(
+            reported["details"]["store_present"].as_bool(),
+            Some(false),
+            "{what}: a refused event left a store behind: {reported}"
+        );
+        assert_untouched(&machine, "by a hook event SURE could not read");
+    }
+}
+
+#[test]
+fn a_hook_answer_reaches_stdout_in_the_shape_the_launcher_asked_for() {
+    // The launchers differ in one flag, and this is what it buys. Both of the
+    // packages that pass `--format json` (cursor and codex) read a frame; the
+    // claude-code launcher does not, and reads prose. Both shapes are part of
+    // the failure semantics, because a harness reads stdout and decides: the
+    // frame carries a `decision` field and the prose does not, and on the
+    // failure path the frame carries no `decision` at all, which is the
+    // difference between "SURE refused" and "SURE could not say".
+    //
+    // Asserted at the process level because that is where a harness meets it.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\n",
+    )
+    .expect("write the project's settings");
+    let held = shell_request(&project, "p13t007-shape", "rm -rf build/");
+
+    // A verdict, human: one sentence on stdout, exit 1. `--format human` is the
+    // default the claude-code launcher gets by passing no format flag.
+    let human = ingest_argv(
+        &store,
+        &["hook", "ingest", "--source", "cursor", "pre-tool-use"],
+        &held,
+    );
+    assert_eq!(human.status, 1, "{}", human.stderr);
+    assert!(
+        human.stdout.contains("SURE blocks this tool request"),
+        "the human form of a block is not on stdout: {}",
+        human.stdout
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(human.stdout.trim()).is_err(),
+        "the human form is JSON after all, so a harness would read a decision it was not sent: {}",
+        human.stdout
+    );
+
+    // A verdict, machine: one JSON object, and its `decision` is the field a
+    // harness looks for.
+    let machine_form = ingest_argv(
+        &store,
+        &[
+            "--format",
+            "json",
+            "hook",
+            "ingest",
+            "--source",
+            "cursor",
+            "pre-tool-use",
+        ],
+        &held,
+    );
+    assert_eq!(machine_form.status, 1, "{}", machine_form.stderr);
+    let frame: serde_json::Value =
+        serde_json::from_str(machine_form.stdout.trim()).unwrap_or_else(|error| {
+            panic!(
+                "the machine form is not JSON: {error}\n{}",
+                machine_form.stdout
+            )
+        });
+    assert_eq!(frame["decision"].as_str(), Some("block"), "{frame}");
+    assert_eq!(frame["exit_code"].as_i64(), Some(1), "{frame}");
+
+    // A failure, human: nothing on stdout, the sentence on stderr. A harness
+    // that reads stdout sees no answer at all.
+    let failed_human = ingest_argv(
+        &store,
+        &["hook", "ingest", "--source", "nope", "pre-tool-use"],
+        &held,
+    );
+    assert_eq!(failed_human.status, 5, "{}", failed_human.stderr);
+    assert!(
+        failed_human.stdout.is_empty(),
+        "the human form of a failure wrote to stdout: {}",
+        failed_human.stdout
+    );
+    assert!(
+        failed_human.stderr.contains("could not finish"),
+        "the human form of a failure said nothing on stderr: {}",
+        failed_human.stderr
+    );
+
+    // A failure, machine: a frame that says it failed, and **no `decision`
+    // field**. A harness that went looking for one would find nothing rather
+    // than something it could read as an answer.
+    let failed_machine = ingest_argv(
+        &store,
+        &["--format", "json", "hook", "ingest", "--source", "nope"],
+        &held,
+    );
+    assert_eq!(failed_machine.status, 5, "{}", failed_machine.stderr);
+    let frame: serde_json::Value = serde_json::from_str(failed_machine.stdout.trim())
+        .unwrap_or_else(|error| {
+            panic!(
+                "the machine form of a failure is not JSON: {error}\n{}",
+                failed_machine.stdout
+            )
+        });
+    assert_eq!(frame["outcome"].as_str(), Some("failed"), "{frame}");
+    assert_eq!(frame["exit_code"].as_i64(), Some(5), "{frame}");
+    assert!(
+        frame.get("decision").is_none(),
+        "the machine form of a failure carries a decision SURE never made: {frame}"
+    );
+    assert_untouched(&machine, "by the runs whose shapes this test pins");
+}
+
 // --- the source scan ----------------------------------------------------
 
 /// Every `.rs` file under a directory, with the text it holds.

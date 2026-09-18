@@ -103,3 +103,10 @@ then — the danger is named when a request arrives, and a grant no request ever
 matches is spent by nothing and expires.
 
 Every integration must document whether its hook failure behavior is fail-open or fail-closed for the relevant event.
+
+That documentation is `docs/integrations/HOOK_FAILURE_SEMANTICS.md`: one row per
+harness per event its manifest wires, the measured exit status and stream shape
+for the four ways a hook event can fail, and — separately, because the two are
+not the same kind of statement — what each harness is documented to do with a
+non-zero status. `crates/sure-testkit/tests/hook_failure_semantics.rs` reads that
+table and fails when a manifest wires an event the table does not answer for.

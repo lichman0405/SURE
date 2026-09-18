@@ -219,6 +219,7 @@ fn failed(what: &'static str, detail: String) -> Report {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_core::hook_protection::ProtectionDecisionKind;
     use sure_testkit::repository_root;
 
     fn fixture(name: &str) -> String {
@@ -610,6 +611,233 @@ mod tests {
 
         let expected_types = [
             "session.started",
+            "tool.requested",
+            "tool.completed",
+            "tool.requested",
+            "tool.completed",
+            "tool.requested",
+            "tool.completed",
+            "session.stopped",
+        ];
+
+        // events_for_session returns newest first, so reverse to match insertion order.
+        let mut ordered_events = stored_events;
+        ordered_events.reverse();
+
+        for (i, expected) in expected_types.iter().enumerate() {
+            assert_eq!(
+                ordered_events[i].event_type, *expected,
+                "event {i} should have type {expected}"
+            );
+        }
+
+        // Verify no full recordings were stored (default is off).
+        let fingerprint =
+            project_fingerprint(&project, &FingerprintOptions::default()).expect("fingerprint");
+        let recordings =
+            full_recordings_for_project(&store, &fingerprint.id, 10).expect("query recordings");
+        assert!(
+            recordings.is_empty(),
+            "no full recording should exist when opt-in is false (default)"
+        );
+    }
+
+    #[test]
+    fn cursor_check_repair_recheck_round_trip() {
+        let tmp = scratch_hook_dir("cursor-e2e-check-repair-recheck");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create scratch");
+
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
+
+        let data = tmp.join("data");
+        let config = tmp.join("config");
+        let paths = Paths::from_roots(data, config).expect("paths are valid");
+
+        let project_root = project.to_string_lossy().into_owned();
+        let session_id = "cursor-e2e-session";
+
+        let session_start = serde_json::json!({
+            "event": "sessionStart",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "timestamp_utc": "2026-09-18T12:00:00Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        // Read is allowed in InspectOnly.
+        let read_pre = serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Read",
+            "args": {"path": "src/lib.rs"},
+            "timestamp_utc": "2026-09-18T12:00:30Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let check_pre = serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Shell",
+            "args": {"command": "npm test", "workdir": &project_root},
+            "timestamp_utc": "2026-09-18T12:01:00Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let check_post = serde_json::json!({
+            "event": "postToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Shell",
+            "args": {"command": "npm test", "workdir": &project_root},
+            "error": {"exit_code": 1, "message": "tests failed"},
+            "timestamp_utc": "2026-09-18T12:01:05Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let repair_pre = serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Write",
+            "args": {"content": "good"},
+            "path": "src/lib.rs",
+            "timestamp_utc": "2026-09-18T12:02:00Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let repair_post = serde_json::json!({
+            "event": "postToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Write",
+            "args": {"content": "good"},
+            "path": "src/lib.rs",
+            "result": {"ok": true},
+            "timestamp_utc": "2026-09-18T12:02:05Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let recheck_pre = serde_json::json!({
+            "event": "preToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Shell",
+            "args": {"command": "npm test", "workdir": &project_root},
+            "timestamp_utc": "2026-09-18T12:03:00Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let recheck_post = serde_json::json!({
+            "event": "postToolUse",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "tool": "Shell",
+            "args": {"command": "npm test", "workdir": &project_root},
+            "result": {"exit_code": 0, "stdout": "Tests: 5 passed, 5 total", "stderr": ""},
+            "timestamp_utc": "2026-09-18T12:03:05Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let stop = serde_json::json!({
+            "event": "stop",
+            "harness_session_id": session_id,
+            "project_root": &project_root,
+            "timestamp_utc": "2026-09-18T12:04:00Z",
+            "source": "cursor",
+        })
+        .to_string();
+
+        let events = [
+            ("session-start", session_start, None),
+            (
+                "pre-tool-use",
+                read_pre,
+                Some(ProtectionDecisionKind::Allow),
+            ),
+            (
+                "pre-tool-use",
+                check_pre,
+                Some(ProtectionDecisionKind::Block),
+            ),
+            ("post-tool-use", check_post, None),
+            (
+                "pre-tool-use",
+                repair_pre,
+                Some(ProtectionDecisionKind::Block),
+            ),
+            ("post-tool-use", repair_post, None),
+            (
+                "pre-tool-use",
+                recheck_pre,
+                Some(ProtectionDecisionKind::Block),
+            ),
+            ("post-tool-use", recheck_post, None),
+            ("stop", stop, None),
+        ];
+
+        for (kind, json, expected) in &events {
+            let report = run_ingest_with_paths(Some("cursor"), Some(kind), json, &paths);
+            let decision = match &report {
+                Report::HookDecision(d) => d,
+                other => panic!("expected HookDecision for {kind}, got {other:?}"),
+            };
+
+            if let Some(expected_kind) = expected {
+                assert_eq!(
+                    decision.decision,
+                    *expected_kind,
+                    "{kind} should be {:?} in InspectOnly mode",
+                    expected_kind.as_str()
+                );
+                if *expected_kind == ProtectionDecisionKind::Block {
+                    assert!(
+                        decision.reason.is_some(),
+                        "blocked decision should have a reason"
+                    );
+                }
+            } else {
+                assert_eq!(
+                    decision.decision,
+                    ProtectionDecisionKind::Allow,
+                    "non-pre-tool-use should be allowed"
+                );
+            }
+        }
+
+        // Open the store and verify persisted events.
+        let store = Store::open(&paths, &project).expect("store opens");
+        let session_store = SessionEventStore::new(&store);
+
+        let sessions = session_store
+            .sessions_past_retention(i64::MAX)
+            .expect("query sessions");
+        assert_eq!(sessions.len(), 1, "exactly one session should exist");
+        assert_eq!(
+            sessions[0].harness_session_id.as_deref(),
+            Some(session_id),
+            "session id should match"
+        );
+
+        let stored_events = session_store
+            .events_for_session(sessions[0].row_id)
+            .expect("query events");
+        assert_eq!(stored_events.len(), 9, "all 9 events should be stored");
+
+        let expected_types = [
+            "session.started",
+            "tool.requested",
             "tool.requested",
             "tool.completed",
             "tool.requested",

@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P10",
-  "last_updated": "2026-09-18T10:08:58.216Z",
+  "current_phase": "P12",
+  "last_updated": "2026-09-18T10:19:08.049Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1306,9 +1306,9 @@
       "notes": "Supervisor review: worker implemented Cursor local-plugin installation/symlink flow in commit 69186ebd; supervisor re-ran cargo fmt, cargo clippy, cargo test --workspace --no-fail-fast, node scripts/validate-bootstrap.mjs and node scripts/taskctl.mjs validate, all green."
     },
     "P11-T008": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T10:12:57.741Z",
+      "finished_at": "2026-09-18T10:19:08.048Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
@@ -1324,8 +1324,8 @@
       "notes": ""
     },
     "P12-T001": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T10:14:42.251Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

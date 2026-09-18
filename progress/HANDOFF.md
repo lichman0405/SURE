@@ -3,18 +3,29 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T006` (implement protection audit history), dispatched from
+**In flight:** nothing. The next dispatch is `P15-T017` (make the non-Windows
+configuration checkable from Windows), which is the first READY task by the rule
+this file applies everywhere else — the order `tasks/tasks.json` lists them,
+filtered by `scripts/taskctl.mjs`'s predicate — and it is first because
+`P15-T016`, its only dependency, landed. **Its brief is not written yet** and
+writing it is the first thing the next turn does, in the shape
+`target/tmp/brief-p13t005.md` established: what is already true in the tree, what
+was already measured, and which of the acceptance criteria this machine can and
+cannot meet. Two measurements already exist and belong in it rather than being
+re-derived: `cargo clippy -p sure-testkit --all-targets --target
+x86_64-unknown-linux-gnu -- -D warnings` runs on this Windows box and works,
+while the same command on `sure-core` or `sure-cli` fails inside `cc-rs` with
+`failed to find tool "x86_64-linux-gnu-gcc"` — so the answer is a
+`rustup target add` plus a per-crate boundary, or a reason why not.
+`P13-T006` (implement protection audit history) was dispatched from
 base commit `a752fdc` — the `P15-T016` acceptance — with its brief at
-`target/tmp/brief-p13t006.md`. Its acceptance is *"warn/block/allow-once decision
-recorded locally without secrets"*, and the brief's job is to say what is already
-true in the tree so the worker does not re-derive it: the vocabulary
-(`ProtectionDecisionKind`, `ProtectionDecision`, `Danger`) already exists in
-`hook_protection.rs` and the gap is that nothing persists a decision, because
-`assess_request` is pure and its output dies with the process. The four points
-the brief names as the hard part are the subject half of "without secrets", where
-the row hangs so that a user can still delete it, how "allow-once" is told apart
-from an ordinary allow, and what a failed write does to the exit code a harness
-depends on. `P15-T016` (make the ubuntu and macos jobs green again,
+`target/tmp/brief-p13t006.md`, handed back as `72365b9`, verified independently
+and **accepted**; "What `P13-T006` added" and "Validation of `P13-T006`" below
+carry the numbers. It recorded every warn, block and allow-once SURE reaches,
+without secrets, in a row that hangs from the event it was about so that the
+user's delete still reaches it, and it leaves the exit-code contract for a
+harness untouched — checked by `crates/sure-cli/src/report.rs` being absent from
+the diff rather than by reading the message. `P15-T016` (make the ubuntu and macos jobs green again,
 and keep them read) was dispatched from base commit `7e021ae`, handed back as
 `853d7de`, verified independently and **accepted**; "What `P15-T016` added" and
 "Validation of `P15-T016`" below carry the numbers. **It was the first time this
@@ -78,7 +89,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 134 / 178 tasks accepted (counted from `progress/state.json` against
+Progress: 135 / 179 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -99,12 +110,15 @@ Windows and got an owner (item 99 again, and P15-T017), and from 176 to 177 on
 whether two paths are one file by asking the operating system rather than the
 volume (item 100), and from 177 to 178 on the same day when the third occurrence
 of the `Text file busy` race in this repository's own fixtures showed that it had
-been recorded three times and owned by nobody (item 101)). **Phase
+been recorded three times and owned by nobody (item 101), and from 178 to 179 on
+2026-09-19 when `P13-T006`'s verification measured that the checksum manifest is
+read by nothing while both bootstrap gates pass over a stale copy of it
+(item 102)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 1 of 19; Phase P16
+at 6 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 1 of 20; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -1105,14 +1119,85 @@ tree is or is not intact would be reading a claim the file does not make.
     fix is verified by CI runs that arrive one push at a time whenever it is
     dispatched — so moving it ahead of `P13-T006` would buy nothing but a delay.
 
+102. **The checksum manifest is verified by nothing, and the script that
+    maintains it is not in the repository.** Found on 2026-09-19 while accepting
+    `P13-T006`, when the worker's report said two entries of `SHA256SUMS.txt`
+    needed regenerating and the regeneration rewrote three — which raised the
+    question of what would have noticed. **Measured, not inferred**: with
+    `SHA256SUMS.txt` reverted to its committed content, three entries out of date
+    (`crates/sure-core/src/lib.rs` line 42,
+    `docs/architecture/STORAGE_AND_DATA_PATHS.md` line 72,
+    `docs/security/PRIVACY.md` line 97), `node scripts/validate-bootstrap.mjs`
+    exits **0** with `SURE bootstrap validation OK: 17 phases, 178 tasks.` and
+    `node scripts/taskctl.mjs validate` exits **0** with `state OK: 178 tasks`.
+    Both gates named "bootstrap validation" pass over a manifest that is wrong,
+    and `grep -rln "SHA256SUMS" . --exclude-dir=target --exclude-dir=.git`
+    returns exactly two paths, `progress/HANDOFF.md` and `progress/state.json`,
+    both prose about the file rather than code that reads it — so **no script, no
+    workflow, no test and no Rust code reads it**. The sharper half is the
+    maintenance side: the only tool that builds the file is
+    `target/tmp/regen-sums.mjs`, which lives in a gitignored directory, and
+    `find . -name "regen-sums*" -not -path "./target/*"` returns nothing — so a
+    contributor on a fresh clone cannot regenerate it, and the file is a
+    whole-tree assertion with no reader and no author. This project's own
+    discipline names the shape: a claim nothing can falsify reads exactly like a
+    claim that is verified, and this loop has already shipped one stale line in
+    it (`7d25c96`). Given an owner, `P15-T020`, placed after `P15-T019` so §14
+    still dispatches the first READY task. It is deliberately not a stop-the-line
+    — nothing here is a verdict about a user's project — and the decision it
+    forces, whether to give the file a reader or take it out of the tree, belongs
+    in a task with an acceptance rather than in a verification note, because
+    either answer changes what the repository promises about itself.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P15-T016` was accepted and
-`P15-T018` and `P15-T019` were added, is `P13-T006`, `P13-T007`, `P13-T009`,
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T006` was accepted and
+`P15-T020` was added, is `P15-T017`, `P13-T007`, `P13-T009`,
 `P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T008`,
 `P14-T009`, `P14-T010`, `P15-T008`, `P15-T015`, `P15-T018`, `P15-T019`,
-`P7-T012`, `P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them.
-`P13-T006` (implement protection audit history) is the first of those and its
-brief is written. **`P15-T016` leaves the list rather than rearranging it**, and
+`P15-T020`, `P7-T012`, `P14-T013`, `P7-T013`, in the order `tasks/tasks.json`
+lists them. **`P15-T017` (make the non-Windows configuration checkable from
+Windows) is the first of those and is the next dispatch.**
+
+**This paragraph printed a false list, and the error is worth more than the
+correction.** As it stood until now it named `P13-T006` as the front of the READY
+list "after `P15-T016` was accepted". It was not: accepting `P15-T016` is what
+made `P15-T017` READY, because `P15-T017`'s only dependency is `P15-T016`, and
+`P15-T017` sits **before** `P13-T006` in the array — placed there on purpose, so
+that it would be the next dispatch once the task it depends on landed. Recomputing
+the predicate `scripts/taskctl.mjs` uses against the two committed files
+(`git show 244dffb:tasks/tasks.json`, `git show 244dffb:progress/state.json`)
+gives `P15-T017`, `P13-T007`, `P13-T009`, … — `P15-T017` first, and no
+`P13-T006` at all, because the same commit had marked it in flight. The list that
+was written down is the one that existed *before* the acceptance it claims to
+follow, which is the previous paragraph's list with `P15-T016` struck out. **The
+dispatch of `P13-T006` was nonetheless correct, and it was correct for a reason
+that is not §14**: the operator's instruction for that turn named it — *"Next
+dispatch after that is `P13-T006` using `target/tmp/brief-p13t006.md`"* — and §14
+says *prefer*, which an explicit instruction outranks. What was wrong was the
+justification written beside it: the record claimed the ordering rule had chosen
+`P13-T006` when in fact a person had. A reader comparing these commits against
+`node scripts/taskctl.mjs ready` would have found a reordering with no cause
+written down, which is the shape this project's evidence discipline exists to
+refuse. The rule from here is the one the tool already implements: **the READY
+list is the array's order, filtered by the predicate, and it is recomputed from
+the committed files rather than carried forward in prose.** The earlier paragraph on this
+same subject — the one printed at `3c8c25b`, naming `P15-T016` first — was
+recomputed too, and the answer separates the two cases rather than excusing both.
+At `3c8c25b` and at its parent `68b4867` the predicate gives `P13-T006` first,
+because `P15-T016` is `in_progress` in both and a task in flight is not READY;
+`P15-T017` does not exist in `state.json` at the parent at all. So that paragraph
+described the list as it stood at the moment `P15-T016` was *dispatched*, one
+transition earlier, and printed it beside the commit that had since marked it in
+flight. **That is the correct thing for a dispatch commit to print and the wrong
+thing for an acceptance commit to print**, and the difference is the whole of
+this correction: a dispatch commit's justification is the list *before* it — the
+list that made this task the choice — while an acceptance commit's record has to
+be the list *after* it, because accepting is the event that unblocks a
+successor. `244dffb` is an acceptance's successor and printed the "before" list;
+`3c8c25b` is a dispatch's own commit and printed the "before" list; only one of
+those two is a fault.
+
+**`P15-T016` leaves the list rather than rearranging it**, and
 the two tasks its verification added join it: `P15-T015` does not appear at the
 front because it is queued behind work that precedes it in the array — it is
 deliberately placed in the P15 block rather than at the front, so the READY
@@ -1416,6 +1501,187 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T006` added
+
+**A protection decision now exists after the process that made it exits.** The
+acceptance is *"warn/block/allow-once decision recorded locally without secrets"*,
+and the gap it names was structural rather than missing vocabulary:
+`hook_protection::assess_request` is pure, its only shipping caller was
+`sure hook ingest`, and when that process returned the verdict it had just
+reached — the thing a user would want to look at a week later — was gone, because
+nothing persisted it. `P13-T005` gave the product three dangers it can name and
+`P13-T004` gave it a rule engine; this makes what they decide readable afterwards,
+and it is what turns "we detect dangerous commands" into a claim a user can check.
+
+**The row, and what is deliberately not in it.** `DecisionRecord`
+(`crates/sure-core/src/protection_history.rs`, new, 317 lines) holds `event_id`,
+`decision`, `danger`, `tool`, `reason` and `allowance` — and **no subject, no
+command line and no path**. The module doc states the rule the brief asked for: a
+grant stores its subject exactly as the user typed it, because a grant is matched
+against a request and something else could not be matched (`allowance.rs`'s own
+note on why it keeps the words), but **nothing matches against a decision**. It
+is read by a person afterwards, and the request's own words are already in the
+event payload this row hangs from, redacted once — so a second copy would buy a
+reader nothing and widen what a leak of this file hands over. That is the
+"without secrets" half answered by **storing less** rather than by redacting a
+copy of the command line, and it is checked by a test that reads back **every
+file the store directory holds** — asserting the token `ghp_0123456789abcdefghij`
+appears in no byte of any of them and that the redacted form
+`https://***@github.com/acme/app.git` does appear — so the absence is a
+measurement over a run that demonstrably wrote something rather than an empty
+loop. The test says why the second half is there in its own comment: without it,
+a store holding nothing about the request at all would pass the same assertion.
+
+**Where the row hangs, which is what keeps it deletable.** `event_id` is the
+join: `SessionEventStore::decisions_for_session` reads the rows back by it and
+`delete_sessions` removes them by it, exactly as they do for a recording — so a
+decision inherits the event's retention and the user's delete instead of sitting
+outside them. `SessionEventStore::persist_decision` (`:417`) refuses to write a
+row whose event is not in the store, checked **inside** the transaction rather
+than before it, because a decision with nothing to hang from would be a row no
+shipped command can show or remove — a row outside `docs/security/PRIVACY.md`'s
+promise. `DeletedSessions` gained a `decisions` count of its own rather than
+folding into `records`, with the reasoning written at `:236-244`: a user who
+deletes a session should be told how many verdicts went with it.
+
+**How an allow-once is told from an ordinary allow.** `ProtectionDecisionKind`
+has three variants, so an allow bought by a spent one-time allowance and an allow
+that happened because nothing was dangerous are the *same kind*. They are told
+apart by the two fields beside it — `danger` is `Some` only where SURE itself
+named the request dangerous, and `allowance` names the grant row that was spent —
+both carried from the decision SURE already took. Nothing in the module re-reads
+a command line or re-decides anything.
+
+**What a failed write does to the answer, which is the one place this could have
+gone wrong quietly.** `sure hook ingest` exits 0 for allow and warn and 1 for
+block, and a launcher depends on that. So a row that could not be written
+**changes neither the kind nor the exit code**; it adds a sentence to the reason
+the user is shown. `record_the_decision` (`crates/sure-cli/src/hook.rs:505`) is
+called unconditionally on the single `return` of the pre-tool-use path (`:389`),
+so every pre-tool-use event passes through it, and every path that does not write
+the row adds a sentence saying it did not — "the record is missing and nothing
+said so" is the one outcome this code cannot produce.
+
+**The reader.** `sure history` now prints the decision under the event it was
+about (`history.rs`'s `write_decision`), in the words the user was shown — the
+verdict through `ProtectionDecisionKind::as_str`, the danger through
+`Danger::as_str`, the reason as it was written — plus *"grant N was spent by this
+request"* when an allowance paid for it. The delete report gained a `decisions`
+row, and the machine form gained a `decision` object using the stored spellings
+rather than the sentences, because a script compares and a person reads. An event
+with no decision prints nothing extra rather than a line saying "none": most
+events are not tool requests, and SURE reaching no decision about them is not a
+fact about the user's project. A record that will not read back stops the whole
+listing rather than being skipped (`record_unreadable`), which is the same
+refusal `showing` already made for records.
+
+**Documentation corrected rather than appended.** `docs/security/PRIVACY.md`'s
+`history show` bullet now names the decision fields and states why the request's
+own words are not among them; its `history delete` bullet says the decision rows
+go too. `docs/architecture/STORAGE_AND_DATA_PATHS.md` moves from *"the four
+counts a delete reports"* to five, and its claim that `sure history delete` finds
+a recording by the event id inside the recording's own document now says the same
+for a decision. No sentence claims a capability the CLI does not have.
+
+## Validation of `P13-T006`
+
+**The five gates, run by the supervisor from native PowerShell on `72365b9`, not
+taken from the hand-back**: `cargo fmt --all -- --check` exit 0; `cargo clippy
+--workspace --all-targets --all-features -- -D warnings` exit 0; `cargo test
+--workspace --all-features --no-fail-fast` exit 0 with **73 `test result:` lines —
+58 `Running` and 5 `Doc-tests` headers — 2518 passed, 0 failed, 12 ignored**;
+`node scripts/validate-bootstrap.mjs` exit 0; `node scripts/taskctl.mjs validate`
+exit 0. The result lines were counted with their headers attributed rather than by
+a bare number, for the reason the `P15-T016` validation gives.
+
+**The five new tests were run by name with each count attributed to its own
+binary**, because `cargo test <filter>` matching nothing prints `test result: ok.
+0 passed` and exits 0: `cli_contract` reports **3 passed, 32 filtered** for the
+three `a_decision_*` tests, **1 passed, 34 filtered** for
+`an_allowance_that_was_spent_is_what_tells_one_allow_from_another`, and the
+`sure-cli` lib reports **1 passed, 174 filtered** for
+`hook::tests::a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_so`.
+Captures are at `target/tmp/p13t006-decisions-test.txt`,
+`target/tmp/p13t006-allowance-test.txt` and
+`target/tmp/p13t006-hooklib-test.txt`.
+
+**The claims that guard the acceptance are checked against the tree rather than
+against the message.** `crates/sure-cli/src/report.rs` is not in the diff
+(`git diff --name-only a752fdc 72365b9 | grep -c report.rs` is 0), so
+`Report::exit_code` cannot have changed and the exit-code contract in the third
+paragraph above is a fact about untouched code. `git diff -U0 a752fdc 72365b9 |
+grep -E "^\+.*cfg\((windows|not\(windows\)|unix|target_os|target_family)"` is
+empty, so nothing was made to depend on the platform it is built on — the class
+of defect `P15-T016` spent a task on. The writer is reached from the single
+`return` of the pre-tool-use path, so there is no branch of that path that skips
+it, which is the shape that would have made this a partial audit trail rather
+than an audit trail.
+
+**The drift guard was strengthened, not loosened, and that is checked by reading
+it.** `crates/sure-core/src/store/record.rs`'s schema-less-kind test was renamed
+to `only_the_four_recorded_kinds_lack_a_schema` and now asserts both that
+`document().is_none()` agrees with the four predicates and that the count of
+schema-less kinds is exactly 4. Adding a fifth `RecordKind` breaks the version
+that said three, which is the point: the assertion a new kind has to confront is
+still there rather than deleted to make room for `Decision`.
+
+**The run: `35392425989`, all five jobs green, and all five on the first
+attempt.** Windows **2518** / macOS **2509** / Ubuntu **2510** passed, **0
+failed**, **12 ignored**, **73 result lines** on each, **58 `Running` plus 5
+`Doc-tests` headers**, and **zero occurrences of `Text file busy`** on any of the
+three. **The local Windows figure and the CI Windows figure agree exactly at
+2518**, and both are 14 higher than the 2504 `P15-T016` measured, which is the
+five tests this task added plus the nine the branches beneath it had already
+added — a coincidence of arithmetic worth writing down only because it is the
+kind of number a reader would otherwise have to re-derive. This is the fourth
+consecutive green `ci` run and the third whose green is on the first attempt, so
+the census's streak is not being re-lit by anything here.
+
+**Two inaccuracies in the hand-back's own report, neither of them grounds for
+sending the task back.** First, the report claims *"`git diff -U0 | grep cfg(` is
+empty"*; that command returns one line, `+#[cfg(test)]`, so the quoted command
+does not say what the report says it says — **the substantive claim is true**,
+and the check above is the one that decides it. Second, the report says two
+entries in `SHA256SUMS.txt` needed regenerating and names lines 72 and 97;
+`target/tmp/regen-sums.mjs --write` rewrote **three**, because
+`crates/sure-core/src/lib.rs` (line 42) was stale as well — the worker's own
+commit added an `pub mod` line to it. The claim was about the wrong number, not
+about the wrong thing, and the number that shipped is the regenerated file. Both
+are recorded rather than corrected silently, because a hand-back that is right
+about its subject and loose about its instrument is the normal case and the
+instrument is the half that gets read later.
+
+**What this acceptance owes and cannot pay here**: the run for the commit that
+carries it. It is read in this session and reported in the next entry, because a
+commit cannot contain the run of itself. The four runs owed by earlier
+acceptances are paid below.
+
+**The backfill.** Four runs were read in the session that took `P15-T016`'s
+acceptance and could not be written into a commit at the time, because a commit
+cannot contain the run of itself:
+
+| Run | Commit | What it is | Result |
+| --- | --- | --- | --- |
+| `35390267642` | `a752fdc` | the `P15-T016` acceptance commit | all five jobs green, **attempt 1** |
+| `35390345009` | `244dffb` | the `P13-T006` dispatch commit | all five jobs green, **attempt 1** |
+| `35390944599` | `a5d5ec9` | the `head_sha` hand-back | all five jobs green, **attempt 1** |
+| `35392425989` | `72365b9` | `P13-T006`'s hand-back | all five jobs green, **attempt 1** |
+
+Each was read with `gh run watch` then
+`gh api repos/{owner}/{repo}/actions/runs/<id>/jobs`, and each was confirmed
+`run_attempt: 1` per job — so none of the four is a re-run whose earlier failure
+was replaced inside the run, which is the distinction the `P15-T016` entry draws
+about `35389096745`. The four ubuntu test-step executions among them contain no
+`Text file busy`, which is a sample of four and is **not** evidence that the race
+has stopped: `P15-T019` has not been dispatched and nothing about the fixtures
+changed. "External blockers" is left saying what it says — the race is real, the
+mechanism is derived rather than reproduced, and the rate is unknown beyond the
+three occurrences it records — because four clean runs are exactly the evidence
+this file has already ruled out once: *a flake that has stopped appearing has not
+thereby been explained*. Correcting that section's occurrence count and its
+statement of the rate is criterion 7 of `P15-T019` and belongs to whoever does
+that task, not to this acceptance.
 
 ## What `P15-T016` added
 

@@ -338,13 +338,47 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     to `block` so the hook fails closed when it cannot obtain consent. The
     capability tier is kept honest as Observed (Tier 1) because Cursor's hook
     schema does not confirm it will honour a block response.
+50. A worker agent completed `P11-T007` — *Cursor local-plugin
+    installation/symlink flow* — as commit `69186ebd`. The supervisor
+    re-verified all quality gates and accepted the task. The Cursor plugin now
+    has per-user `install.ps1`/`uninstall.ps1` scripts that resolve SURE, detect
+    (or force) copy vs symlink, require no admin rights, and are guarded by
+    contract and Windows integration tests.
 
-**Phase P11 is open at 6 of 9; Phase P10 is open at 3 of 8.** The READY list is now
-`P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`, `P13-T004`, `P14-T001`,
-`P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007` and `P14-T010`.
-The lowest-numbered READY task is
-`P11-T007`, *"Cursor local-plugin installation/symlink flow"*, which is the next
+**Phase P11 is open at 7 of 9; Phase P10 is open at 3 of 8.** The READY list is now
+`P10-T003`, `P10-T005`, `P10-T006`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`,
+`P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
+`P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P10-T003`, *"Implement Claude session evidence ingestion"*, which is the next
 concrete action.
+
+## What `P11-T007` added
+
+- `integrations/cursor/scripts/install.ps1` — new per-user install script:
+  resolves the SURE binary (`SURE_BIN` → PATH → `%LOCALAPPDATA%\SURE\bin\sure.exe`),
+  resolves the Cursor plugin directory (`CURSOR_PLUGIN_DIR` →
+  `%APPDATA%\Cursor\plugins`), creates a symlink if Windows Developer Mode is
+  detected, otherwise copies and renders `{{SURE_BIN}}` / `{{PLUGIN_ROOT}}`
+  placeholders. Supports `-ForceCopy` to skip the symlink attempt.
+- `integrations/cursor/scripts/uninstall.ps1` — new per-user uninstall script
+  that removes the installed `sure` plugin folder.
+- `integrations/cursor/README.md` — expanded with install/uninstall commands,
+  binary-resolution order, copy-vs-symlink behavior, and the plugin-directory
+  assumption.
+- `crates/sure-testkit/tests/integration_thinness.rs` — contract tests
+  asserting the install/uninstall scripts exist, reference `SURE_BIN` and
+  `LOCALAPPDATA`, support copy fallback, and two Windows-only integration tests
+  that run the scripts into temp directories.
+
+## Validation of `P11-T007`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T006` added
 

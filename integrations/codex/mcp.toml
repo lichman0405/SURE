@@ -1,0 +1,24 @@
+# SURE MCP bridge for Codex — configuration template.
+#
+# Paste this block into your Codex config file:
+#
+#   user-level:  %USERPROFILE%\.codex\config.toml
+#   project:     <repo>\.codex\config.toml   (trusted projects only)
+#
+# The Codex CLI, IDE extension and desktop app share this configuration, so a
+# server declared once is available in all of them.
+#
+# `command = "sure"` requires the SURE binary to be on PATH. If it is not,
+# replace it with the absolute path to the per-user install, for example
+# command = 'C:\Users\you\AppData\Local\SURE\bin\sure.exe'
+#
+# Equivalent one-line setup from the Codex CLI:
+#
+#   codex mcp add sure -- sure mcp serve
+#
+# SURE serves on stdio only. `sure mcp serve` opens no network listener, and it
+# follows the same execution/privacy rules as the `sure` CLI.
+
+[mcp_servers.sure]
+command = "sure"
+args = ["mcp", "serve"]

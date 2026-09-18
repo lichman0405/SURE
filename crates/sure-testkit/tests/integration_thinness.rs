@@ -978,6 +978,222 @@ fn agent_plugin_install_script_runs_into_temp_directory() {
     let _ = std::fs::remove_dir_all(&temp);
 }
 
+// --- codex --------------------------------------------------------------
+
+fn codex_path(relative: &str) -> PathBuf {
+    let mut path = sure_testkit::repository_root()
+        .join("integrations")
+        .join("codex");
+    for part in relative.split('/') {
+        path = path.join(part);
+    }
+    path
+}
+
+fn codex_text(relative: &str) -> String {
+    let path = codex_path(relative);
+    assert!(path.is_file(), "codex {relative} must exist");
+    std::fs::read_to_string(&path).expect("codex file readable")
+}
+
+/// The frozen sentence is the core's to say.
+///
+/// An integration that restates it owns a second copy that goes stale the next
+/// time the constant changes, which is the failure the thinness check exists to
+/// catch. `docs/product/UX_AND_LANGUAGE.md` owns the wording.
+fn assert_no_frozen_sentence(label: &str, text: &str) {
+    let normalised = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let frozen = sure_domain::status::NO_TRUSTED_INTENT_LIMITATION;
+    let frozen_normalised = frozen.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !normalised.contains(&frozen_normalised),
+        "{label} must not copy the frozen no-trusted-intent limitation sentence; the core owns that wording"
+    );
+}
+
+#[test]
+fn codex_skill_files_exist_and_are_thin() {
+    for name in ["sure-check", "sure-fix"] {
+        let relative = format!("skills/{name}/SKILL.md");
+        let text = codex_text(&relative);
+
+        // Codex reads skills from `.agents/skills` and requires both front
+        // matter keys; a SKILL.md without them is never offered.
+        assert!(
+            text.starts_with("---\n"),
+            "codex {relative} must open with YAML front matter"
+        );
+        assert!(
+            text.contains("name:") && text.contains("description:"),
+            "codex {relative} must carry the `name` and `description` front matter Codex requires"
+        );
+
+        let reaches_core = text.contains("SURE_BIN")
+            || text.contains("sure.exe")
+            || text.contains("sure check")
+            || text.contains("sure repair")
+            || text.contains("sure recheck");
+        assert!(
+            reaches_core,
+            "codex {relative} must reference local SURE invocation (SURE_BIN, sure.exe, or sure <subcommand>)"
+        );
+
+        assert_no_frozen_sentence(&format!("codex {relative}"), &text);
+    }
+}
+
+#[test]
+fn codex_check_prompt_preserves_uncertainty_and_is_thin() {
+    let text = codex_text("prompts/check.md");
+
+    let reaches_core =
+        text.contains("SURE_BIN") || text.contains("sure.exe") || text.contains("sure check");
+    assert!(
+        reaches_core,
+        "codex prompts/check.md must reference local SURE invocation (SURE_BIN, sure.exe, or sure check)"
+    );
+
+    // Honest uncertainty: every not-checked state stays visible and none of
+    // them may be turned into a pass. This is named in SURE's own vocabulary
+    // rather than by restating the core's frozen user-facing sentence.
+    for status in ["unknown", "skipped", "error", "cannot_confirm"] {
+        assert!(
+            text.contains(status),
+            "codex prompts/check.md must name `{status}` among the states not to soften"
+        );
+    }
+    assert!(
+        text.contains("into a pass"),
+        "codex prompts/check.md must forbid turning a not-checked state into a pass"
+    );
+
+    assert_no_frozen_sentence("codex prompts/check.md", &text);
+}
+
+#[test]
+fn codex_repair_handoff_references_repair_and_recheck() {
+    // Both surfaces carry the handoff: the deprecated `/prompts:` file and the
+    // current skill. Keeping them in one test is what stops one from drifting.
+    for relative in ["prompts/fix.md", "skills/sure-fix/SKILL.md"] {
+        let text = codex_text(relative);
+
+        assert!(
+            text.contains("sure repair"),
+            "codex {relative} must reference `sure repair` so the handoff can obtain the contract"
+        );
+        assert!(
+            text.contains("sure recheck"),
+            "codex {relative} must reference `sure recheck` so the handoff can close with evidence"
+        );
+        assert!(
+            text.contains("not evidence"),
+            "codex {relative} must say the agent's own completion message is not evidence"
+        );
+
+        assert_no_frozen_sentence(&format!("codex {relative}"), &text);
+    }
+}
+
+#[test]
+fn codex_mcp_template_names_sure_mcp_serve() {
+    let text = codex_text("mcp.toml");
+
+    assert!(
+        text.contains("[mcp_servers.sure]"),
+        "codex mcp.toml must declare the server as [mcp_servers.<name>], which is the key Codex reads"
+    );
+    assert!(
+        text.contains("sure mcp serve"),
+        "codex mcp.toml must name the `sure mcp serve` invocation"
+    );
+
+    // The template and the portable Agent Plugin must declare the same server,
+    // or the two packages silently describe two different SURE bridges.
+    let mcp_json = sure_testkit::repository_root()
+        .join("integrations")
+        .join("agent-plugin")
+        .join("mcp.json");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&mcp_json).expect("agent-plugin mcp.json readable"),
+    )
+    .expect("agent-plugin mcp.json must be valid JSON");
+    let sure = manifest
+        .get("mcpServers")
+        .and_then(|v| v.get("sure"))
+        .expect("agent-plugin mcp.json must declare a 'sure' server");
+    let command = sure
+        .get("command")
+        .and_then(|v| v.as_str())
+        .expect("agent-plugin sure server must name a command");
+    let args: Vec<&str> = sure
+        .get("args")
+        .and_then(|v| v.as_array())
+        .expect("agent-plugin sure server must list args")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+
+    assert!(
+        text.contains(&format!("command = \"{command}\"")),
+        "codex mcp.toml must name the same command the Agent Plugin declares ('{command}')"
+    );
+    let args_toml = format!(
+        "args = [{}]",
+        args.iter()
+            .map(|a| format!("\"{a}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert!(
+        text.contains(&args_toml),
+        "codex mcp.toml must carry `{args_toml}`, the same args the Agent Plugin declares"
+    );
+
+    assert_no_frozen_sentence("codex mcp.toml", &text);
+}
+
+#[test]
+fn codex_readme_documents_the_achieved_tier() {
+    let text = codex_text("README.md");
+
+    // The achieved tier is stated, and the tier that is deliberately not
+    // claimed is stated as unclaimed. A README that only lists ambitions is how
+    // a Tier 0 package gets read as a Tier 2 one.
+    for tier in ["Tier 0", "Tier 1", "Tier 2"] {
+        assert!(
+            text.contains(tier),
+            "codex README.md must name {tier} so the achieved tier is unambiguous"
+        );
+    }
+    assert!(
+        text.contains("not claimed"),
+        "codex README.md must say plainly which tier is not claimed"
+    );
+    assert!(
+        text.contains("cannot confirm") || text.contains("cannot say what Codex did"),
+        "codex README.md must state the blind spot behind the achieved tier"
+    );
+
+    // The documented binary resolution order, and the no-admin promise.
+    assert!(
+        text.contains("SURE_BIN") && text.contains("LOCALAPPDATA"),
+        "codex README.md must document the SURE_BIN / PATH / LOCALAPPDATA resolution order"
+    );
+    assert!(
+        text.to_ascii_lowercase().contains("no administrator")
+            || text.to_ascii_lowercase().contains("administrator rights"),
+        "codex README.md must state that installation needs no administrator rights"
+    );
+
+    // What it deliberately does not do.
+    assert!(
+        text.to_ascii_lowercase().contains("no checking logic"),
+        "codex README.md must state that the package contains no checking logic"
+    );
+
+    assert_no_frozen_sentence("codex README.md", &text);
+}
+
 #[cfg(windows)]
 #[test]
 fn agent_plugin_uninstall_script_removes_installed_plugin() {

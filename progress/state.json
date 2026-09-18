@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P9",
-  "last_updated": "2026-09-18T04:07:32.337Z",
+  "last_updated": "2026-09-18T04:14:04.404Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1153,9 +1153,9 @@
       "notes": "Resuming after session crash; switching from P10-T001 to lowest-numbered READY task per engineering loop"
     },
     "P9-T006": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T04:10:16.001Z",
+      "finished_at": "2026-09-18T04:14:04.404Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],

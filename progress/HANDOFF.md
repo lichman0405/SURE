@@ -2,14 +2,14 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 120 / 166 tasks accepted (counted from `progress/state.json` against
+Progress: 121 / 166 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file). **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
 (9/9), phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 7 of 10; Phase P13 is open
-at 1 of 9; Phase P14 is open at 0 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+at 1 of 9; Phase P14 is open at 1 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -456,8 +456,14 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
     integration* — as commit `20649d3`. The supervisor verified the delivered
     Codex surface independently (see "Validation of `P12-T006`" below), added a
     dated "What these commands answer in the current build" section to
-    `integrations/codex/README.md`, and accepted the task. `P14-T001` is being
-    done by a second worker in the same tree and is not yet reported.
+    `integrations/codex/README.md`, and accepted the task.
+67. A worker agent completed `P14-T001` — *Implement TypeScript adversarial
+    fixture apps* — as commit `69c7bee`. The supervisor re-ran both new test
+    binaries, ran all six fixtures, read the bypass the `fake-auth` fixture is
+    built on, and accepted the task. The worker also reported two failing
+    `cargo test --workspace` tests, which the supervisor reproduced and traced to
+    a defect of its own: see the shell-dependence note below. That fix is commit
+    `0c7bf90`.
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 7 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P12-T007`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`,
@@ -510,6 +516,110 @@ Until the owner decides, `P12-T009` is instructed to route every tool through
 the existing `Command::report` path so that there is exactly one engine path for
 the orchestrator to land on, and `P12-T007` is held back because an evidence
 bridge that feeds a check nobody can run would be built on sand.
+
+### Open plan-level risk: the detectors cannot reach the severities the corpus requires
+
+Found by the `P14-T001` worker, confirmed independently by the supervisor on
+2026-09-18, and recorded here because no task owns it either.
+
+`evaluation/acceptance-manifest.json` requires `expected_severity: "must_fix"`
+for `fake-payment`, `fake-auth`, `dead-button` and `route-mismatch`, and all four
+are `release_blocking: true`. Every detector that fires on those fixtures emits
+`Severity::Note` with `EvidenceClass::Inference` and `critical = false`
+(`crates/sure-core/src/noop_heuristics.rs` and its neighbours), and
+`crates/sure-core/src/false_completion_aggregator.rs::is_style_noise` is exactly
+`severity == Note && !critical && evidence_class == Inference` — so every one of
+those proposals is sorted into `style_noise`, and none of them can become the
+material a `must_fix` verdict is built from. The fixtures are right; the
+calibration between what the detectors emit and what the manifest asks for is
+missing. `P14-T012` says "Release-blocking corpus has zero false green", and a
+corpus whose fake payment app is filed as style noise is the shape that gap
+would hide behind.
+
+The fixtures record the gap rather than paper over it: each `scenario.json`
+carries `detector_severity_today` beside `required_severity`, and
+`crates/sure-core/tests/adversarial_fixture_detection.rs` pins it with a test
+named `what_is_detected_is_not_yet_what_the_manifest_requires`. No file in
+`evaluation/` was edited. Whoever owns the calibration owns this.
+
+### The gates were green for the wrong reason, and that is a process finding
+
+Two `analysis_provider` tests named a bare `echo` as the program to run. SURE
+completes a bare name to `.exe` and nothing else, so `echo` resolves on Windows
+only when `echo.exe` is on `PATH` — true under Git Bash, false under PowerShell.
+Measured: `cargo test -p sure-core --lib analysis_provider` reports 21 passed
+from Git Bash and 19 passed / 2 failed from PowerShell, same binary, same tree.
+
+Every acceptance gate recorded on this branch since `P12-T004` was run from the
+Bash tool, which is why this stayed green through four acceptances. The lesson is
+worth more than the fix: **a gate result is a fact about a shell as well as about
+the tree.** The fix is `0c7bf90` (the tests now write the smallest program each
+platform does start and name it by full path, which also gives
+`ClaudeCliAnalyzer` its first Windows happy-path coverage). Every future
+workspace-test claim in this file should be read as "from the shell named at the
+time", and the P16 gates should run `cargo test --workspace` from PowerShell,
+because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P14-T001` added
+
+Six runnable TypeScript fixture apps under `fixtures/adversarial/`, each a
+project that passes its own check while the feature it advertises is fake:
+
+| Fixture | The trap |
+| --- | --- |
+| `fake-payment` | Checkout reports a successful charge; `chargeCard` pushes to an in-process mock gateway and returns `{ok:true,status:200}`. |
+| `fake-auth` | `verifyPassword` never compares the password and returns `true`; any password signs in. |
+| `fake-email` | "Welcome email sent" is a `console.log` plus a hard-coded `200`. |
+| `dead-button` | The Buy button is bound to a real handler that calls a function returning `undefined` and creating nothing. |
+| `demo-analytics` | A dashboard labelled Live renders `demo_data` literals. |
+| `route-mismatch` | The frontend fetches `/api/orders`; the backend serves `/api/order`. `/api/health` is the control that must stay quiet. |
+
+Each has `package.json` (no dependencies), `scripts/check.js` (the project's own
+check, which passes on purpose — that is the trap), a plain-language `README.md`
+and a `scenario.json` carrying `required_outcomes` and `forbidden_outcomes`.
+
+Two test files, both new:
+
+- `crates/sure-testkit/tests/fixture_apps.rs` (677 lines, 14 tests) — the
+  artefact contract: schema, entry point, no install needed, agreement with
+  `evaluation/acceptance-manifest.json`, and the false-green rule, with every
+  checker paired with a case it must reject.
+- `crates/sure-core/tests/adversarial_fixture_detection.rs` (417 lines, 10
+  tests) — drives the real scanner modules over each fixture and asserts the
+  **exact** proposal set, including that `/api/health` produces nothing. This is
+  the file that makes "SURE detects this" a measurement instead of a claim; it
+  was not in the brief and the worker disclosed it as a deliberate addition.
+
+Two deviations, both disclosed by the worker and both kept: `route-mismatch`
+ships a small Express-shaped shim rather than real Express (SURE's route reader
+looks for `express()` plus statement-initial `app.get(...)`, and installing
+Express would break the zero-dependency rule), and two fixtures were written to
+stay silent where an incidental pattern would have produced a proposal nobody
+meant to test.
+
+## Validation of `P14-T001`
+
+The supervisor did not take the worker's report as evidence:
+
+1. `cargo test -p sure-testkit --test fixture_apps` — **14 passed**. `cargo test
+   -p sure-core --test adversarial_fixture_detection` — **10 passed**.
+2. `node scripts/check.js` was run by the supervisor in all six fixtures: six
+   exit 0, each printing its own trap summary and the words "PASS (on purpose)".
+   "Runnable" is measured, not claimed.
+3. `fixtures/adversarial/fake-auth/src/auth.js` was read: the account lookup
+   happens, the password argument is received, never compared, and `true` is
+   returned, with a TODO saying so. The bypass is real, which matters because no
+   detector reads it — that fixture fires on the mock/placeholder/TODO evidence
+   around the bypass, and the worker said so rather than implying coverage.
+4. The two `cargo test --workspace` failures in the worker's report were
+   reproduced and attributed: they are the shell-dependent `analysis_provider`
+   tests described above, not this worker's files. The worker was right to report
+   them instead of fixing them.
+5. The severity gap the worker reported was recomputed from the source rather
+   than accepted: detector severity and evidence class read from
+   `noop_heuristics.rs`, the sort rule read from `false_completion_aggregator.rs`,
+   and the required severities read from `evaluation/acceptance-manifest.json`.
+   All three agree with the report.
 
 ## What `P12-T006` added
 

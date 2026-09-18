@@ -384,7 +384,7 @@ anything about output or status: both are SURE's, and both have one home.
 | Both paths describe the same outcome | same file, `the_two_paths_disagree_about_nothing_that_matters` |
 | A doctor report's status, outcome and problems agree | same file, `a_doctor_report_is_an_answer_however_it_turns_out` |
 | No module outside `output.rs` writes to a stream | same file, `only_the_output_module_writes_to_a_stream` |
-| `sure hook ingest` does not read standard input | same file, `hook_ingest_does_not_read_standard_input` |
+| `sure hook ingest` reads the event from standard input and answers a protection decision | same file, `hook_ingest_reads_standard_input_and_evaluates_protection` |
 | The grammar is the list in this document | `crates/sure-cli/src/main.rs`, `the_grammar_is_the_one_docs_architecture_cli_md_lists` |
 | Every MCP tool answers with what the command line behind it answers | `crates/sure-cli/tests/mcp_protocol.rs`, `every_tool_answers_what_the_command_line_behind_it_answers` |
 | No MCP tool reports success for a project that was never checked | same file, `no_tool_reports_success_for_a_project_that_was_never_checked` |

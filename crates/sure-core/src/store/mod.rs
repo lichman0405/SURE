@@ -552,26 +552,104 @@ impl Store {
 
         let mut records = Vec::new();
         for row in rows {
-            let (id, kind, version, written_at_ms, root, fingerprint, document) =
-                row.map_err(|error| self.open_error(error))?;
-            let kind =
-                RecordKind::from_name(&kind).ok_or(StoreError::UnknownKind { id, name: kind })?;
-            let document: Value =
-                serde_json::from_str(&document).map_err(|error| StoreError::MalformedRow {
-                    id,
-                    message: error.to_string(),
-                })?;
-            records.push(StoredRecord {
-                id,
-                kind,
-                document_version: u32::try_from(version).unwrap_or(0),
-                written_at_ms,
-                project_root: root,
-                project_fingerprint: fingerprint,
-                document,
-            });
+            records.push(self.stored_record(row.map_err(|error| self.open_error(error))?)?);
         }
         Ok(records)
+    }
+
+    /// One record, by its row id.
+    ///
+    /// `None` when no row has that id — one that was deleted, or an id from
+    /// another store. Not an error: "there is no record 42 here" is an answer
+    /// about the store, and a caller that needs the row to exist is the one
+    /// that should decide what a missing one means.
+    ///
+    /// A separate read from [`Store::history`] because the id is the one thing
+    /// its filter cannot express, and the id is what a caller has: a
+    /// `session_events.record_row_id` names the record an event wrote, and
+    /// resolving that number to the row it names is how a user finds out what
+    /// SURE kept about them.
+    ///
+    /// It reads every kind, recordings included. That is not a relaxation of
+    /// [`HistoryFilter`]'s privacy rule — the rule is that a *listing* does not
+    /// hand over raw content unless it was asked for, and this is not a listing.
+    /// The caller already has the id, and it can only have got one from a row
+    /// that named it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::UnknownKind`] if the row names a kind this build does not
+    /// know, [`StoreError::MalformedRow`] if its document is not JSON, and
+    /// [`StoreError::Open`]-family errors from the query itself.
+    pub fn record(&self, id: i64) -> Result<Option<StoredRecord>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, kind, document_version, written_at_ms, project_root, \
+                 project_fingerprint, document FROM records WHERE id = ?1",
+            )
+            .map_err(|error| self.open_error(error))?;
+        let mut rows = statement
+            .query_map([id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|error| self.open_error(error))?;
+
+        match rows.next() {
+            None => Ok(None),
+            Some(row) => {
+                let raw = row.map_err(|error| self.open_error(error))?;
+                self.stored_record(raw).map(Some)
+            }
+        }
+    }
+
+    /// One row of `records`, as the tuple both readers select.
+    ///
+    /// Shared so that [`Store::history`] and [`Store::record`] cannot disagree
+    /// about what a row means — including the two refusals below, which are the
+    /// difference between a history with a hole in it and a read that stopped.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::UnknownKind`] if the kind is one this build does not know,
+    /// [`StoreError::MalformedRow`] if the document is not JSON.
+    fn stored_record(
+        &self,
+        (id, kind, version, written_at_ms, root, fingerprint, document): (
+            i64,
+            String,
+            i64,
+            i64,
+            Option<String>,
+            Option<String>,
+            String,
+        ),
+    ) -> Result<StoredRecord, StoreError> {
+        let kind =
+            RecordKind::from_name(&kind).ok_or(StoreError::UnknownKind { id, name: kind })?;
+        let document: Value =
+            serde_json::from_str(&document).map_err(|error| StoreError::MalformedRow {
+                id,
+                message: error.to_string(),
+            })?;
+        Ok(StoredRecord {
+            id,
+            kind,
+            document_version: u32::try_from(version).unwrap_or(0),
+            written_at_ms,
+            project_root: root,
+            project_fingerprint: fingerprint,
+            document,
+        })
     }
 
     /// How many records match.

@@ -39,7 +39,7 @@ process's argument vector and from nowhere else.
 | `sure check [PATH] [--goal TEXT]` | check a project and report what it found | works: the pipeline, a per-stage record, and a verdict |
 | `sure recheck [PATH]` | check again and compare with last time | works: the same run, carried on to the last stage, which compares it with what an earlier run left open |
 | `sure repair [PATH]` | turn what was found into instructions an agent can act on | checks, and reaches the repair-contract stage; this build cannot perform that stage and says so rather than inventing an acceptance test |
-| `sure history [list\|show\|delete\|export]` | show what SURE has recorded | recognised, not implemented |
+| `sure history [list\|show\|delete\|export]` | show what SURE has recorded | works, except `export`: the sessions this machine has recorded, one session's events, and the delete |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
 | `sure hook ingest` | record one event from a coding harness | works |
@@ -60,13 +60,14 @@ another.
 "Recognised, not implemented" is not a euphemism for a stub. The command parses
 its arguments, decides it cannot do its job, **exits with status 3**, and says in
 one sentence what it did not do. Nothing is half-done and nothing is reported as
-done. `check`, `recheck` and `repair` have left that list; `sure history`,
-`sure config` and `sure explain` are still on it.
+done. `check`, `recheck`, `repair` and `history` have left that list; `sure
+config` and `sure explain` are still on it, and so is `sure history export`,
+which is one action of a command whose other three work.
 
 Where a command is scheduled is `tasks/tasks.json`. That file is not quoted here
 on purpose: a phase number in a message a user reads is a promise the command
-cannot keep, and one command in the table above (`sure history`) has no owning
-task at all. A refusal that names a phase would be inventing one there.
+cannot keep, and the phase a command is scheduled for is not the phase a user
+cares about.
 
 ### Arguments arrive with the phase that can act on them
 
@@ -130,6 +131,52 @@ safe to paste into a bug report:
 `sure doctor` is also the first command whose status is not the same on every
 machine: 0 when it found nothing wrong, 1 when it did. That is the false-green
 rule applied to SURE's own installation — `sure doctor || fix it` has to work.
+
+## `sure history`
+
+The command the two harness integrations had been telling people to run since
+before it existed. It answers about **this machine**, not about a project: what
+SURE has recorded here, and how to be rid of it. `sure history` and
+`sure history show` never create the store — a machine where nothing has been
+recorded answers "SURE has recorded nothing on this machine yet" rather than
+printing an empty table, because an empty table and a store SURE could not read
+would otherwise look the same.
+
+| Form | What it does |
+| --- | --- |
+| `sure history` | every session SURE has recorded, most recently recorded first, with the project and harness each came from and how long it is kept. `--limit N` shortens the listing; the count of what there is stays the count |
+| `sure history show ID` | one session and the events in it, each with the record it wrote |
+| `sure history delete --all\|--session ID\|--project ROOT` | removes the rows the scope names, and says how many of each |
+| `sure history export` | not implemented in this build: status 3 |
+
+**The scope on the command line is the consent.** Nothing prompts, so a delete
+is scriptable by construction: exactly one of `--all`, `--session` and
+`--project` is required. Naming none or two is a usage error (status 2) rather
+than a default, and a delete with no scope can never be read as a delete of
+everything — the one mistake this command must not be able to make by omission.
+
+**A delete that matched nothing is an answer.** It exits 0 and says it removed
+nothing, because "there was nothing to remove" is a fact about the store rather
+than a failure of the command, and a script that treated it as an error would
+stop on the ordinary case. An id that is not in the store is different:
+`sure history show` on one cannot answer what was asked, so it exits 5 and says
+which store it looked in.
+
+**Nothing is removed because a date passed.** Every session carries a
+`kept until` date and this build has no job that acts on one; the listing says
+so in the same breath as the date, because a date printed alone reads as a
+retention policy that is being enforced. Deleting is something a user does.
+
+What a delete reaches is every table the session touched — `sessions`,
+`session_events`, the `records` those events own, and any full recording written
+for one of them — in one transaction. The counts are reported apart because
+"the transcript is gone too" is a different claim from "the session row is
+gone", and a single total would answer neither.
+
+`sure history` is also the first command here whose answer is **not about a
+project**, which is why it does not go through `Store::open`: there is no
+project to keep it out of, and a history that read one project's records would
+be answering a question nobody asked.
 
 ## `sure protocol`
 
@@ -504,12 +551,12 @@ configuration and its own record, not a report of traffic.
 
 | Status | Meaning | Who returns it |
 | --- | --- | --- |
-| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `--help`, `--version` |
+| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version` |
 | 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
 | 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
-| 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written; `mcp serve` when its stream could not be read or written; anything, including a result that could not be written out |
+| 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written; `mcp serve` when its stream could not be read or written; `history show` for an id that is not in the store, and any history command when the store is there and cannot be read; anything, including a result that could not be written out |
 
 **A check reaches 0 only through the pipeline's own answer**, and in this build
 no run does: a project SURE can plan for has stage 5 recorded as `unknown`
@@ -686,5 +733,7 @@ before and after, which is a measurement rather than a test and is recorded in
 - **How `sure doctor` decides what a problem is.** That is
   `crates/sure-core/src/doctor.rs`, which says what each state means and why a
   fresh installation is not one of them.
-- **Interactive prompting.** Nothing prompts yet. `sure history delete` will
-  need a non-interactive path for scripts, and that is its own decision.
+- **Interactive prompting.** Nothing prompts yet. `sure history delete` needs no
+  prompt: it is non-interactive by construction, and the scope on the command
+  line is the consent — see its section above. A command that deletes things has
+  to answer a script, and a prompt is the one answer a script cannot give.

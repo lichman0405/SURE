@@ -47,8 +47,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use sure_core::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS;
 use sure_core::paths::Paths;
+use sure_core::session_event_store::SessionEventStore;
+use sure_core::store::{HistoryFilter, RecordKind, Store};
 
 /// The binary this package builds, as cargo hands it to its integration tests.
 const SURE: &str = env!("CARGO_BIN_EXE_sure");
@@ -241,15 +245,20 @@ fn assert_untouched(before: &MachineStore, when: &str) {
 /// Every command `docs/architecture/CLI.md` lists, with arguments that reach it.
 ///
 /// A command that needs a subcommand is given one, so that this list tests the
-/// command rather than the grammar's refusal to run half of one.
+/// command rather than the grammar's refusal to run half of one — and a
+/// subcommand that needs an argument is given one for the same reason.
+/// `sure history delete` takes a scope and nothing else, and the scope here is
+/// `--all` against a store this file named and never wrote, so the invocation is
+/// destructive in shape and inert in fact.
 const EVERY_COMMAND: &[&[&str]] = &[
     &["check"],
     &["recheck"],
     &["repair"],
     &["history"],
     &["history", "list"],
-    &["history", "show"],
-    &["history", "delete"],
+    &["history", "list", "--limit", "1"],
+    &["history", "show", "no-such-session"],
+    &["history", "delete", "--all"],
     &["history", "export"],
     &["doctor"],
     &["config"],
@@ -262,44 +271,39 @@ const EVERY_COMMAND: &[&[&str]] = &[
     &["version"],
 ];
 
-/// The commands this build carries out.
+/// The commands this build cannot carry out.
 ///
-/// Every other command in [`EVERY_COMMAND`] answers `unavailable`, and the
-/// statuses below are only meaningful while that holds.
-const IMPLEMENTED: &[&[&str]] = &[
-    &["check"],
-    &["doctor"],
-    &["hook", "ingest"],
-    &["protocol"],
-    &["recheck"],
-    &["repair"],
-    &["version"],
+/// Every other command in [`EVERY_COMMAND`] runs, and what it answers is checked
+/// by a test of its own. What this list is *for* is the status: a command here
+/// must exit 3 and nothing else, and a command not here must never exit 3 —
+/// which is what stops a command quietly going back to refusing, and what stops
+/// a command that cannot run being reported as one that did.
+///
+/// `sure history list` and `sure history delete` were here, and are not any
+/// more: the inspect-and-delete surface is what a user needs most from a
+/// history, and it is now carried out. `sure history export` is the one
+/// subcommand of that surface still refused, and the reason is in
+/// `crate::history`.
+const REFUSED: &[&[&str]] = &[
+    &["history", "export"],
+    &["explain"],
+    &["config"],
+    &["config", "paths"],
+    &["config", "show"],
+    &["config", "validate"],
 ];
 
 /// The commands whose answer is the same on every machine, and so is a status
 /// this file can demand.
 ///
-/// `doctor` is not one of them, and that is the point of it: it reports on the
-/// machine it runs on, and a machine where SURE found something wrong about its
-/// own files earns status 1. Demanding 0 here would turn this file into a claim
-/// that the machine running it is clean, which is a claim about a machine and
-/// not about SURE.
+/// `doctor` and `history` are not, and that is the point of both: `doctor`
+/// reports on the machine it runs on, and a machine where SURE found something
+/// wrong about its own files earns status 1; `history` reports on what that
+/// machine has recorded, and a machine with nothing recorded is a different
+/// answer from one with sessions. Demanding 0 here would turn this file into a
+/// claim about the machine running it, which is a claim about a machine and not
+/// about SURE.
 const ALWAYS_OK: &[&[&str]] = &[&["protocol"], &["version"]];
-
-/// The commands that ran and answered nothing, used where a refusal is the
-/// subject rather than a report.
-///
-/// `check`, `recheck` and `repair` used to be here and are not any more: they
-/// answer with a verdict, and a verdict is an answer — it goes to standard
-/// output and it is what a person piping the report to a file wanted. What a
-/// refusal looks like is still worth testing, so the commands that *are* refused
-/// stay, including the destructive one whose wording a user needs most.
-const REFUSED: &[&[&str]] = &[
-    &["history", "list"],
-    &["history", "delete"],
-    &["explain"],
-    &["config"],
-];
 
 #[test]
 fn every_documented_command_parses() {
@@ -326,16 +330,13 @@ fn every_documented_command_parses() {
 }
 
 #[test]
-fn no_command_that_did_nothing_reports_success() {
+fn no_command_this_build_cannot_carry_out_reports_success() {
     // The criterion this file exists for. Every command here is recognised and
-    // none of them can do its job yet, so every one of them must say so with a
-    // non-zero status — including the ones that only *look* harmless, like
-    // printing a history that happens to be empty. A script that ran `sure
-    // check` in CI today must fail the build, not pass it.
-    for args in EVERY_COMMAND {
-        if IMPLEMENTED.contains(args) {
-            continue;
-        }
+    // cannot do its job yet, so every one of them must say so with the status
+    // that means "this build cannot carry that out" — never 0, and never a
+    // status that means something else. A script that ran `sure config validate`
+    // in CI today must fail the build, not pass it.
+    for args in REFUSED {
         let run = run(args);
         assert_ne!(
             run.status,
@@ -352,6 +353,39 @@ fn no_command_that_did_nothing_reports_success() {
              exists and cannot run:\n{}",
             args.join(" "),
             run.status,
+            run.stderr
+        );
+    }
+}
+
+#[test]
+fn every_command_this_build_carries_out_runs_rather_than_refusing() {
+    // The other half of the same criterion, and the half that did not exist
+    // while almost nothing ran: a command that is **not** on the refused list
+    // must not answer with a refusal. Without this the list above could grow a
+    // name it has no business holding — a command could go back to saying "this
+    // build cannot carry that out" and the test above would still pass, because
+    // it only ever looks at the names it was given.
+    //
+    // Status 3 and the refusal's sentence are checked separately, because they
+    // are two ways a user learns the same wrong thing: one from `$?` in a
+    // script, one from the terminal.
+    for args in EVERY_COMMAND {
+        if REFUSED.contains(args) {
+            continue;
+        }
+        let run = run(args);
+        assert_ne!(
+            run.status,
+            3,
+            "`sure {}` returned 3, which says this build cannot carry it out:\n{}",
+            args.join(" "),
+            run.stderr
+        );
+        assert!(
+            !run.stderr.contains("is not implemented in this build"),
+            "`sure {}` is worded as a command this build lacks:\n{}",
+            args.join(" "),
             run.stderr
         );
     }
@@ -666,6 +700,653 @@ fn a_goal_with_no_words_is_a_failure_and_not_a_wrong_command_line() {
     assert!(
         !store.join("sure.db-wal").exists() && !store.join("sure.db-shm").exists(),
         "a goal with no words in it left a journal beside where the store would go"
+    );
+}
+
+// --- the history: inspecting it, and being rid of it --------------------
+
+/// The store file a run given this directory writes.
+fn store_file(store: &Path) -> PathBuf {
+    store.join("sure.db")
+}
+
+/// `sure history`, as a script reads it.
+///
+/// The frame's `details`, which is where every field below is read from. The
+/// run is asserted to have answered rather than refused first, because a
+/// refusal's `details` is not a history and a test that read one would be
+/// asserting about the wrong object.
+fn history_frame(store: &Path, args: &[&str]) -> serde_json::Value {
+    let mut full: Vec<&str> = vec!["--format", "json", "history"];
+    full.extend_from_slice(args);
+    let run = run_in_a_store(store, &full);
+    assert_ne!(
+        run.status,
+        3,
+        "`sure history {}` says this build cannot carry it out:\n{}",
+        args.join(" "),
+        run.stderr
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(run.stdout.trim()).unwrap_or_else(|error| {
+            panic!(
+                "`sure --format json history {}` is not one frame: {error}\nstdout:\n{}",
+                args.join(" "),
+                run.stdout
+            )
+        });
+    assert_eq!(
+        frame["exit_code"].as_i64(),
+        Some(i64::from(run.status)),
+        "the frame and the process disagree about the same run: {frame}"
+    );
+    frame
+}
+
+/// Record one real event with `sure hook ingest`, in a session of its own.
+///
+/// The binary rather than a row written here: what the history has to be able to
+/// read is what SURE actually wrote, and an event this test inserted by hand
+/// would be the test's idea of an event.
+///
+/// `afterFileEdit` is not a `pre-tool-use` event, so the run records the event
+/// and allows — no protection decision, and therefore no second thing this
+/// helper's callers have to think about.
+fn record_one_event(store: &Path, project: &Path, harness_session: &str) {
+    let payload = serde_json::json!({
+        "event": "afterFileEdit",
+        "harness_session_id": harness_session,
+        "project_root": project.to_str().expect("this test's paths are utf-8"),
+        "timestamp_utc": "2026-09-19T12:01:00Z",
+        "source": "cursor",
+        "path": "src/lib.rs",
+    })
+    .to_string();
+
+    let mut command = sure_in_a_store(store);
+    command.args(["hook", "ingest", "--source", "cursor"]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a child process");
+    let mut stdin = child.stdin.take().expect("the pipe");
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("the child exits");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "`sure hook ingest` did not record the event, so there is no history to test:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The store, opened by this process.
+///
+/// Read back rather than taken on trust: `sure history` says what it removed,
+/// and a test that believed it would be checking a report against itself. What
+/// the assertions below read is the file the child process wrote.
+fn open_the_store(store: &Path) -> Store {
+    let file = store_file(store);
+    Store::open_at(&file).unwrap_or_else(|error| panic!("cannot open {}: {error}", file.display()))
+}
+
+#[test]
+fn a_history_with_nothing_in_it_says_so_rather_than_printing_an_empty_table() {
+    // The first thing a user does after reading that SURE keeps a history is
+    // look at it, and on a machine where nothing has been recorded that must be
+    // an answer rather than a blank page. "Nothing was recorded" and "SURE could
+    // not tell you" have to be different answers, and the second one is a
+    // failure with a status.
+    let store = a_store_of_our_own();
+    let machine = the_store_on_this_machine();
+
+    let human = run_in_a_store(&store, &["history"]);
+    assert_eq!(
+        human.status, 0,
+        "`sure history` on a machine with nothing recorded exited {}. An empty history is an \
+         answer, not a failure:\nstdout: {}\nstderr: {}",
+        human.status, human.stdout, human.stderr
+    );
+    assert!(
+        human.stderr.is_empty(),
+        "the answer went to standard error, so `sure history > history.txt` would leave the \
+         file empty:\n{}",
+        human.stderr
+    );
+    assert!(
+        human
+            .stdout
+            .contains("SURE has recorded nothing on this machine yet."),
+        "the empty history does not say it is empty:\n{}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains(&store_file(&store).display().to_string()),
+        "the empty history does not say which store it looked in, so a user who named one \
+         cannot tell whether it was used:\n{}",
+        human.stdout
+    );
+    assert!(
+        !human.stdout.contains("kept until"),
+        "an empty history printed the fields of a session that is not there:\n{}",
+        human.stdout
+    );
+
+    let frame = history_frame(&store, &[]);
+    assert_eq!(frame["outcome"].as_str(), Some("ok"), "{frame}");
+    assert_eq!(frame["details"]["total"].as_u64(), Some(0), "{frame}");
+    assert_eq!(
+        frame["details"]["sessions"],
+        serde_json::json!([]),
+        "{frame}"
+    );
+    assert_eq!(
+        frame["details"]["store_present"].as_bool(),
+        Some(false),
+        "a store that is not there was reported as present, or the other way round: {frame}"
+    );
+
+    // And it did not create the store it was reporting on. This is the assertion
+    // that makes the empty answer worth anything: a command that reported an
+    // empty history by making one would have changed the thing it was reporting,
+    // and the file it left would be the evidence of a run that claimed to find
+    // nothing.
+    assert!(
+        !store_file(&store).exists(),
+        "`sure history` created {} in a store directory it was asked to report on",
+        store_file(&store).display()
+    );
+    assert!(
+        !store.join("sure.db-wal").exists() && !store.join("sure.db-shm").exists(),
+        "`sure history` left a journal beside where the store would go"
+    );
+    assert_untouched(&machine, "by a history that found nothing");
+}
+
+#[test]
+fn a_recorded_session_is_visible_with_its_project_its_harness_and_how_long_it_is_kept() {
+    // The inspect half of the acceptance criterion, at the process. Before this
+    // task there was no way for a user to see that anything had been recorded at
+    // all: the store is a SQLite file in a per-user directory, and both harness
+    // integrations told people to run exactly this command.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    record_one_event(&store, &project, "cursor-session-inspect");
+
+    let human = run_in_a_store(&store, &["history"]);
+    assert_eq!(human.status, 0, "{}", human.stderr);
+    for field in [
+        "session",
+        "project",
+        "harness",
+        "started",
+        "kept for",
+        "kept until",
+    ] {
+        assert!(
+            human.stdout.contains(field),
+            "the listing does not say `{field}` for the one session that is there:\n{}",
+            human.stdout
+        );
+    }
+    assert!(
+        human.stdout.contains(&project.display().to_string()),
+        "the listing does not say which project the session was recorded against:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("cursor"),
+        "the listing does not say which harness sent the events:\n{}",
+        human.stdout
+    );
+    // The sentence that stops a deadline being read as a deletion. Nothing in
+    // this build removes a session because a date passed, and a listing that
+    // printed a date without saying so would leave a user believing their
+    // history was being cleaned up when it was not.
+    assert!(
+        human.stdout.contains("not a job it runs"),
+        "the listing prints a `kept until` date without saying that nothing acts on it:\n{}",
+        human.stdout
+    );
+
+    let frame = history_frame(&store, &[]);
+    assert_eq!(frame["details"]["total"].as_u64(), Some(1), "{frame}");
+    let session = &frame["details"]["sessions"][0];
+    assert_eq!(
+        session["project_root"].as_str(),
+        project.to_str(),
+        "{frame}"
+    );
+    assert_eq!(session["harness"].as_str(), Some("cursor"), "{frame}");
+    assert_eq!(
+        session["harness_session_id"].as_str(),
+        Some("cursor-session-inspect"),
+        "{frame}"
+    );
+    // The retention in force for the session row, which is the session event
+    // store's own and is not the setting this task made configurable: a session
+    // and its events are kept for `DEFAULT_SESSION_RETENTION_DAYS` whatever
+    // `privacy.full_recording_retention_days` says, because that setting is
+    // about the *recording*, which is a different row. Read from the frame and
+    // compared with the constant rather than with a 90 written here: the number
+    // is allowed to change, and a test that pinned it would have to be edited by
+    // whoever changed it rather than telling them.
+    assert_eq!(
+        session["retention_days"].as_i64(),
+        Some(sure_core::session_event_store::DEFAULT_SESSION_RETENTION_DAYS),
+        "the session was recorded with a retention that is not this build's default: {frame}"
+    );
+    assert!(
+        session["retained_until_ms"]
+            .as_i64()
+            .is_some_and(|until| until > 0),
+        "the session carries no retention deadline: {frame}"
+    );
+
+    // One session, and the events recorded in it.
+    let id = session["sure_session_id"]
+        .as_str()
+        .expect("a session carries SURE's own identifier")
+        .to_owned();
+    let shown = history_frame(&store, &["show", &id]);
+    assert_eq!(
+        shown["details"]["session"]["sure_session_id"].as_str(),
+        Some(id.as_str()),
+        "{shown}"
+    );
+    let events = shown["details"]["events"]
+        .as_array()
+        .expect("a shown session lists its events");
+    assert_eq!(events.len(), 1, "{shown}");
+    assert_eq!(
+        events[0]["event_type"].as_str(),
+        Some("file.edited"),
+        "{shown}"
+    );
+    assert!(
+        events[0]["record"]["id"].as_i64().is_some(),
+        "the event does not say which record it wrote, so a user cannot look one up: {shown}"
+    );
+
+    // An id that is not there is a run that did not finish — not a refusal, and
+    // not an empty listing under a name that promised one session.
+    let missing = run_in_a_store(&store, &["history", "show", "no-such-session"]);
+    assert_eq!(
+        missing.status, 5,
+        "`sure history show <id that is not there>` returned {}. 3 would say this build cannot \
+         show a session, and it can; 0 would be an answer to a question nobody answered:\n\
+         stdout: {}\nstderr: {}",
+        missing.status, missing.stdout, missing.stderr
+    );
+    assert!(
+        missing.stdout.is_empty(),
+        "a run with no answer wrote to standard output:\n{}",
+        missing.stdout
+    );
+    assert!(
+        missing.stderr.contains("could not finish"),
+        "the complaint does not say the run did not finish:\n{}",
+        missing.stderr
+    );
+    assert_untouched(&machine, "by a history that found one session");
+}
+
+#[test]
+fn a_delete_removes_the_session_its_events_and_its_records_and_says_how_many() {
+    // The delete half of the acceptance criterion, and the half that has to be
+    // checked against the file rather than against the sentence: a delete that
+    // reached `records` and stopped would leave the session and its events in
+    // `sessions` and `session_events`, and the report would still say a number.
+    //
+    // Two projects, because the scope has to mean something: a delete scoped to
+    // one of them may not touch the other, and the only way to check that is for
+    // there to be another one.
+    let store = a_store_of_our_own();
+    let kept = a_project_of_our_own();
+    let doomed = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    record_one_event(&store, &kept, "keep-me");
+    record_one_event(&store, &doomed, "delete-me");
+
+    assert_eq!(
+        history_frame(&store, &[])["details"]["total"].as_u64(),
+        Some(2),
+        "two ingests did not produce two sessions, so this test would prove nothing"
+    );
+
+    // The rows the delete has to reach, read from the store by this process, so
+    // that what is asserted afterwards is the absence of *those* rows rather
+    // than a number the command printed.
+    let (doomed_session, doomed_event) = {
+        let opened = open_the_store(&store);
+        let sessions = SessionEventStore::new(&opened);
+        let all = sessions.sessions(10).expect("the sessions this test wrote");
+        let doomed_session = all
+            .iter()
+            .find(|session| session.project_root == doomed.display().to_string())
+            .unwrap_or_else(|| panic!("no session for {}: {all:?}", doomed.display()))
+            .clone();
+        let events = sessions
+            .events_for_session(doomed_session.row_id)
+            .expect("the events of a session this test wrote");
+        assert_eq!(events.len(), 1, "the ingest did not write one event");
+        (doomed_session, events[0].clone())
+    };
+    let doomed_id = doomed_session.sure_session_id.as_str().to_owned();
+    let record_row = doomed_event
+        .record_row_id
+        .expect("every event in this build owns a record");
+
+    let deleted = history_frame(&store, &["delete", "--session", &doomed_id]);
+    assert_eq!(
+        deleted["details"]["removed"],
+        serde_json::json!(true),
+        "{deleted}"
+    );
+    assert_eq!(
+        deleted["details"]["deleted"]["sessions"].as_u64(),
+        Some(1),
+        "{deleted}"
+    );
+    assert_eq!(
+        deleted["details"]["deleted"]["events"].as_u64(),
+        Some(1),
+        "{deleted}"
+    );
+    assert_eq!(
+        deleted["details"]["deleted"]["records"].as_u64(),
+        Some(1),
+        "the delete reported removing a session and left the record it wrote: {deleted}"
+    );
+    assert_eq!(
+        deleted["details"]["deleted"]["recordings"].as_u64(),
+        Some(0),
+        "there was no full recording to remove: {deleted}"
+    );
+
+    // And the rows really went.
+    {
+        let opened = open_the_store(&store);
+        let sessions = SessionEventStore::new(&opened);
+        assert!(
+            sessions
+                .session_by_sure_id(&doomed_id)
+                .expect("a lookup")
+                .is_none(),
+            "the session is still in `sessions` after a delete that reported removing it"
+        );
+        assert!(
+            sessions
+                .events_for_session(doomed_session.row_id)
+                .expect("a lookup")
+                .is_empty(),
+            "the session's events are still in `session_events`"
+        );
+        assert!(
+            opened.record(record_row).expect("a lookup").is_none(),
+            "the record the event wrote is still in `records`"
+        );
+        assert_eq!(
+            sessions.session_count().expect("a count"),
+            1,
+            "the delete removed more than the scope it was given"
+        );
+    }
+
+    // The other project's session was not in the scope, and the second scope
+    // proves it is still there by removing it.
+    let remaining = history_frame(&store, &[]);
+    assert_eq!(
+        remaining["details"]["sessions"][0]["project_root"].as_str(),
+        kept.to_str(),
+        "the survivor is not the session the delete was not asked about: {remaining}"
+    );
+    let kept_root = kept.display().to_string();
+    let second = history_frame(&store, &["delete", "--project", &kept_root]);
+    assert_eq!(
+        second["details"]["deleted"]["sessions"].as_u64(),
+        Some(1),
+        "{second}"
+    );
+    assert_eq!(
+        history_frame(&store, &[])["details"]["total"].as_u64(),
+        Some(0),
+        "a delete scoped to a project left a session behind"
+    );
+
+    // A scope that matches nothing says it matched nothing, in those words and
+    // in the frame, rather than reporting a deletion that did not happen.
+    let nothing = run_in_a_store(&store, &["history", "delete", "--all"]);
+    assert_eq!(nothing.status, 0, "{}", nothing.stderr);
+    assert!(
+        nothing.stdout.contains("Nothing was deleted."),
+        "a delete that matched nothing did not say so:\n{}",
+        nothing.stdout
+    );
+    let again = history_frame(&store, &["delete", "--all"]);
+    assert_eq!(
+        again["details"]["removed"],
+        serde_json::json!(false),
+        "{again}"
+    );
+    assert_eq!(
+        again["details"]["deleted"]["sessions"].as_u64(),
+        Some(0),
+        "{again}"
+    );
+    assert_untouched(&machine, "by a delete that named a store");
+}
+
+#[test]
+fn a_delete_reaches_a_full_recording_that_its_session_event_wrote() {
+    // A full recording is a **second** `records` row, written beside the one the
+    // event owns, and nothing in the schema links the two: `session_events`
+    // holds the id of the record the event wrote, and the recording carries its
+    // event's id inside its JSON document. `PRAGMA foreign_keys` is not set
+    // anywhere in this workspace, so the `REFERENCES` clauses in the migrations
+    // are documentation rather than enforcement and there is no cascade to
+    // inherit. A delete that only walked the columns would therefore leave every
+    // full recording behind — the one thing a user deleting their history most
+    // wants gone.
+    //
+    // The rows are written here through the same functions `sure hook ingest`
+    // calls, with one `EventId` shared by both writes, because that sharing is
+    // the whole of the link and building it by hand is the only way to be sure
+    // the test is about it.
+    let store_dir = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let project_root = project.to_str().expect("this test's paths are utf-8");
+
+    let payload = serde_json::json!({
+        "event": "afterFileEdit",
+        "harness_session_id": "cursor-session-recording",
+        "project_root": project_root,
+        "timestamp_utc": "2026-09-19T12:01:00Z",
+        "source": "cursor",
+        "path": "src/lib.rs",
+    })
+    .to_string();
+    let envelope = sure_core::normalizer::cursor::normalize(&payload).expect("a cursor event");
+    let ingested = sure_core::harness_event::ingest_event_str(
+        &envelope
+            .to_json()
+            .expect("an envelope this build can serialise"),
+    )
+    .expect("a valid event");
+
+    let store = Store::open_at(&store_file(&store_dir)).expect("a store this test made");
+    let fingerprint = sure_core::fingerprint::project_fingerprint(
+        &project,
+        &sure_core::fingerprint::FingerprintOptions::default(),
+    )
+    .expect("a project this build can fingerprint")
+    .id;
+    let event_id = sure_core::ids::EventId::generate();
+    SessionEventStore::new(&store)
+        .persist(&ingested, project_root, &fingerprint, &event_id)
+        .expect("an event");
+    let recording_row = sure_core::full_recording::persist_full_recording(
+        &store,
+        &ingested,
+        &event_id,
+        project_root,
+        &fingerprint,
+        sure_core::full_recording::FullRecordingConsent::Full,
+        1,
+    )
+    .expect("a full recording");
+    let sure_session_id = SessionEventStore::new(&store)
+        .sessions(10)
+        .expect("the session this test wrote")[0]
+        .sure_session_id
+        .as_str()
+        .to_owned();
+    assert!(
+        store.record(recording_row).expect("a lookup").is_some(),
+        "this test did not manage to write a full recording, so it would prove nothing"
+    );
+
+    // The recording's own deadline is in the surface the user inspects, because
+    // `records` has no retention column and the document is where a recording
+    // says how long it is kept.
+    let shown = history_frame(&store_dir, &["show", &sure_session_id]);
+    let record = &shown["details"]["events"][0]["record"];
+    assert_eq!(record["kind"].as_str(), Some("event"), "{shown}");
+    assert!(
+        record["retained_until_ms"].is_null(),
+        "the record the event owns is not the recording: {shown}"
+    );
+
+    let deleted = history_frame(&store_dir, &["delete", "--all"]);
+    assert_eq!(
+        deleted["details"]["deleted"]["recordings"].as_u64(),
+        Some(1),
+        "the delete did not reach the full recording: {deleted}"
+    );
+    assert_eq!(
+        deleted["details"]["deleted"]["records"].as_u64(),
+        Some(1),
+        "the delete did not reach the record the event wrote: {deleted}"
+    );
+    assert!(
+        store.record(recording_row).expect("a lookup").is_none(),
+        "the full recording survived a delete that reported removing it"
+    );
+}
+
+#[test]
+fn a_project_that_shortens_the_recording_retention_is_what_the_recording_says() {
+    // Criterion: "Full recording retention configurable" — at the process rather
+    // than at the function. The tests beside `persist_full_recording` prove that
+    // the number handed in is the number written down; what they cannot prove is
+    // that `sure hook ingest` hands in the *arbitrated* number instead of the
+    // default, and that seam is where a regression would really happen, because
+    // the hook is the only writer of recordings in this build.
+    //
+    // The project names **zero** days, and that is what makes this the same test
+    // on every machine. A project may only shorten, and it is measured against
+    // the user's own settings file at the platform's real config path — a file no
+    // test can redirect and no test may write. Zero is shorter than, or equal to,
+    // whatever that file says, so the resolved number is zero either way: named
+    // by the project when the user allowed more, named by the user when the user's
+    // file says zero too. A test naming one day would pass on a machine whose
+    // user file says nothing and fail on one whose user file says zero.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "privacy:\n  full_recording: true\n  full_recording_retention_days: 0\n",
+    )
+    .expect("a project file this test wrote");
+    record_one_event(&store, &project, "cursor-session-retention");
+
+    let store = open_the_store(&store);
+    let recordings = store
+        .history(
+            &HistoryFilter {
+                project_fingerprint: None,
+                kind: Some(RecordKind::Recording),
+                include_recordings: true,
+            },
+            10,
+        )
+        .expect("the recording the hook was asked to write");
+    assert_eq!(
+        recordings.len(),
+        1,
+        "the hook did not write the full recording this test is about, so it would prove nothing"
+    );
+    let until = recordings[0].document["retained_until_ms"]
+        .as_i64()
+        .expect("a recording says when it is kept until");
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_millis() as i64;
+    let a_minute = 60_000;
+    assert!(
+        (until - now).abs() <= a_minute,
+        "a recording asked to be kept for no time at all is kept until {until}, which is {} ms \
+         from now",
+        until - now
+    );
+    assert!(
+        until < now + DEFAULT_FULL_RECORDING_RETENTION_DAYS * 86_400_000 - a_minute,
+        "the project's number was ignored and the default was written instead"
+    );
+}
+
+#[test]
+fn a_delete_without_a_scope_or_with_two_is_a_wrong_command_line() {
+    // The non-interactive decision, checked where a user meets it. Nothing
+    // prompts, so the scope on the command line *is* the consent — which means a
+    // command line that names no scope, or names two, has to be refused before
+    // anything runs. It is a wrong command line (2) and not a run that failed
+    // (5): SURE never looked at the store, so there is no run to describe.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    record_one_event(&store, &project, "cursor-session-scope");
+
+    let before = history_frame(&store, &[]);
+    assert_eq!(before["details"]["total"].as_u64(), Some(1));
+
+    for args in [
+        &["history", "delete"][..],
+        &["history", "delete", "--all", "--session", "x"][..],
+        &["history", "delete", "--session", "x", "--project", "y"][..],
+    ] {
+        let run = run_in_a_store(&store, args);
+        assert_eq!(
+            run.status,
+            2,
+            "`sure {}` returned {}. A delete that names no scope, or two, is a command line \
+             SURE cannot act on:\n{}",
+            args.join(" "),
+            run.status,
+            run.stderr
+        );
+        assert!(
+            run.stdout.is_empty(),
+            "a refused command line wrote to standard output:\n{}",
+            run.stdout
+        );
+    }
+
+    // Nothing went. A wrong command line that had deleted anyway would be the
+    // worst of both: a user told their command was refused, and a history that
+    // had lost a session.
+    let after = history_frame(&store, &[]);
+    assert_eq!(
+        after["details"]["total"].as_u64(),
+        Some(1),
+        "a refused delete removed a session anyway"
     );
 }
 

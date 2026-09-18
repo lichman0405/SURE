@@ -308,6 +308,18 @@ pub enum ProjectRequest {
     /// Send project content to a model service.
     #[serde(rename = "external_analysis")]
     ExternalAnalysis,
+    /// Keep recorded content for longer than the layer above allows.
+    ///
+    /// The one request on this list that is *relative*: whether it has been made
+    /// is not a property of the file that holds it, but of that file and the one
+    /// above it together. A project naming `privacy.full_recording_retention_days:
+    /// 30` asks for nothing at all when the user's own file already says 30 or
+    /// more, and asks to keep the user's activity for longer when it says less or
+    /// is not there. [`crate::config::Config::requested_privileges`] therefore
+    /// cannot produce it on its own — it sees one file — and
+    /// `Authority::privileges` is where it is decided.
+    #[serde(rename = "extended_retention")]
+    ExtendedRetention,
 }
 
 variants!(
@@ -318,7 +330,8 @@ variants!(
         Network,
         FullRecording,
         Telemetry,
-        ExternalAnalysis
+        ExternalAnalysis,
+        ExtendedRetention
     }
 );
 
@@ -333,6 +346,7 @@ impl ProjectRequest {
             Self::FullRecording => "full_recording",
             Self::Telemetry => "telemetry",
             Self::ExternalAnalysis => "external_analysis",
+            Self::ExtendedRetention => "extended_retention",
         }
     }
 
@@ -353,7 +367,9 @@ impl ProjectRequest {
             // licence to send source code anywhere, which is why the request is
             // still recorded separately.
             Self::ExternalAnalysis => Some(Permission::ConnectService),
-            Self::FullRecording | Self::Telemetry => None,
+            // Keeping data longer is not running more, for the same reason
+            // keeping transcripts is not: no execution permission covers it.
+            Self::FullRecording | Self::Telemetry | Self::ExtendedRetention => None,
         }
     }
 
@@ -367,6 +383,7 @@ impl ProjectRequest {
             Self::FullRecording => "keep full transcripts of the session",
             Self::Telemetry => "send usage data to SURE's authors",
             Self::ExternalAnalysis => "send project content to a model service",
+            Self::ExtendedRetention => "keep recorded content for longer than you allowed",
         }
     }
 }
@@ -479,6 +496,7 @@ mod tests {
                 "full_recording",
                 "telemetry",
                 "external_analysis",
+                "extended_retention",
             ]
         );
         assert_eq!(

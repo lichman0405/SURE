@@ -19,17 +19,23 @@
 //! that retyped "check" could name a command other than the one the user typed,
 //! and nothing would catch it. The one command whose name is not its own is
 //! `history`, which can be asked to do things with different consequences; see
-//! [`history_name`].
+//! [`crate::history::name`].
 //!
 //! # Why so few commands work
 //!
-//! Three do, and all three answer questions about SURE or about this machine
-//! rather than about a project: `version`, `protocol` and `doctor`. Every other
-//! command needs the engine, and the engine is what the phases after this one
-//! build. Saying so is not a gap in this task; it is the task.
+//! The ones that do answer questions about SURE or about this machine rather
+//! than about a project: `version`, `protocol` and `doctor`; then `hook`, which
+//! records what a harness sends; `mcp`, which is the bridge a harness speaks to;
+//! and `history`, which is what this machine has recorded. Every other command
+//! needs the check engine. Saying so is not a gap in this task; it is the task.
 //! `docs/architecture/CLI.md` records what each command is for, and this file is
 //! where the ones that cannot run say so to the user rather than to a reader of
 //! the docs.
+//!
+//! `history` is the one of those that a user reaches for *because* of what SURE
+//! kept, which makes it the one place where this build's output is about
+//! somebody's own data rather than about their project. `crate::history` is
+//! where what it may show, and what it may remove, is decided.
 //!
 //! # Where `sure mcp serve` sits
 //!
@@ -52,7 +58,7 @@ use std::path::Path;
 
 use sure_core::pipeline::Purpose;
 
-use crate::cli::{Command, HistoryAction};
+use crate::cli::Command;
 use crate::report::{NotYet, Report};
 
 /// The commands this build carries out.
@@ -78,7 +84,7 @@ use crate::report::{NotYet, Report};
 /// under the name a user types, which is what a caller comparing this list
 /// against `sure --help` will find there.
 pub const IMPLEMENTED: &[&str] = &[
-    "check", "doctor", "hook", "mcp", "protocol", "recheck", "repair", "version",
+    "check", "doctor", "history", "hook", "mcp", "protocol", "recheck", "repair", "version",
 ];
 
 /// The implemented commands that this build's own tests must not ask.
@@ -151,13 +157,14 @@ impl Command {
                 crate::check::run(Purpose::Repair, path.as_deref(), None, store)
             }
 
-            // Everything below is a real command with a real job and no
-            // implementation yet.
-            Self::History { action } => Report::Unavailable(NotYet {
-                command: history_name(action),
-                does: "show what SURE has recorded, on this machine and for this project",
-                instead: "Nothing was read from the history, and nothing was deleted.",
-            }),
+            // The whole inspect-and-delete surface. It goes through
+            // `crate::history` for `Self::Doctor`'s reason — the work belongs one
+            // level in and what comes back is a value — and for one more: what a
+            // session is, what a delete reaches, and what a retention deadline
+            // means are all questions about the store rather than about the
+            // command line, and the answers live in `sure_core` where the rest of
+            // the store's callers can reach them too.
+            Self::History { action } => crate::history::run(action.as_ref(), store),
             Self::Config { .. } => not_yet(
                 self,
                 "show the settings in effect and which layer each one came from",
@@ -202,21 +209,6 @@ fn not_yet(command: &Command, does: &'static str, instead: &'static str) -> Repo
     })
 }
 
-/// The name a user sees for a `sure history` invocation.
-///
-/// The subcommand is part of that name, and it has to be: a user who typed the
-/// destructive one and is answered about the harmless one has been told the
-/// wrong thing. Every arm is a literal, so nothing a project controls can reach
-/// this string.
-fn history_name(action: &Option<HistoryAction>) -> &'static str {
-    match action {
-        None | Some(HistoryAction::List) => "history",
-        Some(HistoryAction::Show { .. }) => "history show",
-        Some(HistoryAction::Delete) => "history delete",
-        Some(HistoryAction::Export) => "history export",
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -224,7 +216,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
-    use crate::cli::{ConfigAction, HookAction, McpAction};
+    use crate::cli::{ConfigAction, HistoryAction, HookAction, McpAction};
 
     /// A store directory this test names, so that nothing below reads or writes
     /// the store the machine running the suite really uses.
@@ -286,6 +278,25 @@ mod tests {
     /// The goal path is driven against a store the test names, in
     /// `crate::check`'s tests and in `tests/cli_contract.rs`.
     ///
+    /// `HistoryAction::Show` and `HistoryAction::Delete`, for two different
+    /// reasons, and neither is "history is not implemented" — the three
+    /// invocations above are here, and the name `history` is therefore in
+    /// [`IMPLEMENTED`] on their evidence.
+    ///
+    /// `Show` is out because against a store this test has never written it is a
+    /// status-5 failure by design: `sure history show` for an id that is not
+    /// there did try and did not finish, which is what status 5 is for. Every
+    /// invocation in this list is one that *answers*, and an invocation that
+    /// always fails would need an arm of its own in the match below — an
+    /// exception that would then hide a real failure if one appeared.
+    ///
+    /// `Delete` is out because it is the destructive one, and a list shared by
+    /// several tests is the wrong place for an invocation whose whole job is
+    /// removal: the day somebody gives `a_store_of_our_own` something to lose,
+    /// this list would start emptying it as a side effect of a check about
+    /// command names. It is driven in `crate::history`'s tests and in
+    /// `tests/cli_contract.rs`, against a store the test names and fills.
+    ///
     /// `Mcp`. Every command in this list is asked once and answers, but
     /// `sure mcp serve` reads standard input until its caller closes it — in a
     /// test binary whose stdin is not a pipe, adding it here would block the
@@ -298,13 +309,9 @@ mod tests {
         vec![
             Command::History { action: None },
             Command::History {
-                action: Some(HistoryAction::List),
-            },
-            Command::History {
-                action: Some(HistoryAction::Show { id: None }),
-            },
-            Command::History {
-                action: Some(HistoryAction::Delete),
+                action: Some(HistoryAction::List {
+                    limit: crate::history::DEFAULT_LIMIT,
+                }),
             },
             Command::History {
                 action: Some(HistoryAction::Export),
@@ -374,7 +381,17 @@ mod tests {
                 // What it answered is held to its own contract below, and to
                 // `a_command_that_runs_never_answers_a_question_it_was_not_asked`
                 // for the name it answers under.
-                Report::Version | Report::Protocol | Report::Handshake(_) | Report::Doctor(_) => {}
+                //
+                // `History` is in this arm and not in the one below because it
+                // really did answer: the three invocations in [`every_command`]
+                // read a store directory this test named, found no file there,
+                // and said so. That is an answer about this machine, and it is
+                // the one this build gives a user who has recorded nothing.
+                Report::Version
+                | Report::Protocol
+                | Report::Handshake(_)
+                | Report::Doctor(_)
+                | Report::History(_) => {}
                 // `hook ingest` reads stdin and may return a decision or a failure
                 // when stdin is empty. It is in this list because the grammar
                 // accepts it, and its own tests cover the success paths.
@@ -561,8 +578,8 @@ mod tests {
         //
         // The first word has to match, not the whole name: `sure history delete`
         // answers as "history delete", because the subcommand is part of what
-        // the user asked for and a refusal that dropped it would be answering
-        // about the wrong thing. See [`history_name`].
+        // the user asked for and a report that dropped it would be answering
+        // about the wrong thing. See [`crate::history::name`].
         let store = a_store_of_our_own();
         for command in every_command() {
             assert_eq!(
@@ -643,31 +660,120 @@ mod tests {
     }
 
     #[test]
-    fn a_history_subcommand_is_refused_under_its_own_name() {
+    fn a_history_subcommand_is_answered_under_its_own_name() {
         // A user who typed the destructive one must not be answered about the
-        // harmless one.
+        // harmless one. Driven through the dispatch rather than through the
+        // naming helper, because what matters is the name the user actually
+        // reads — in the first line of a refusal and in the `command` field of
+        // the machine frame — and a test of the helper alone would pass while
+        // the dispatch passed something else.
+        //
+        // The store is one this test named and has never written, so `sure
+        // history` here answers that there is nothing, and `delete` finds
+        // nothing to remove: the invocation is destructive in shape and inert in
+        // fact, which is the only way an invocation of it belongs in a test whose
+        // subject is a string.
+        let store = a_store_of_our_own();
         for (action, expected) in [
             (None, "history"),
-            (Some(HistoryAction::List), "history"),
-            (Some(HistoryAction::Show { id: None }), "history show"),
-            (Some(HistoryAction::Delete), "history delete"),
+            (
+                Some(HistoryAction::List {
+                    limit: crate::history::DEFAULT_LIMIT,
+                }),
+                "history",
+            ),
+            (
+                Some(HistoryAction::Show {
+                    id: "no-such-session".to_owned(),
+                }),
+                "history show",
+            ),
+            (
+                Some(HistoryAction::Delete {
+                    all: true,
+                    session: None,
+                    project: None,
+                }),
+                "history delete",
+            ),
             (Some(HistoryAction::Export), "history export"),
         ] {
-            assert_eq!(history_name(&action), expected);
+            let command = Command::History {
+                action: action.clone(),
+            };
+            let report = command.report(Some(&store));
+            assert_eq!(
+                report.command(),
+                expected,
+                "{action:?} answered under the wrong name"
+            );
+            assert_eq!(
+                report.command().split(' ').next(),
+                Some(command.name()),
+                "{action:?} answered under a different command than it was asked by"
+            );
         }
     }
 
     #[test]
-    fn the_refusal_for_a_destructive_subcommand_does_not_claim_a_deletion_happened() {
-        // The user's next question after `sure history delete` fails is whether
-        // it worked anyway, so the message has to answer it in those words.
-        let deleting = Command::History {
-            action: Some(HistoryAction::Delete),
+    fn a_history_the_user_has_none_of_is_an_answer_and_not_a_refusal() {
+        // The two ways this command could give a false impression, checked
+        // against each other. A refusal would say this build cannot show a
+        // history, which is false — it can, and it did. A blank success would
+        // leave the user unsure whether SURE looked. What it does instead is
+        // answer in words, with status 0 and nothing on the way out that a script
+        // would read as a failure.
+        let store = a_store_of_our_own();
+        let report = Command::History { action: None }.report(Some(&store));
+        assert!(
+            matches!(&report, Report::History(_)),
+            "a history that is empty was answered with {report:?}"
+        );
+        assert!(report.is_an_answer());
+        assert_eq!(report.exit_code(), crate::report::exit::OK);
+        assert_ne!(report.exit_code(), crate::report::exit::UNAVAILABLE);
+        assert_ne!(report.exit_code(), crate::report::exit::FAILED);
+
+        // And the same run left the store directory exactly as it was. A command
+        // that reports an empty history by creating the store it looked in has
+        // changed the thing it was reporting on, and the file it left is the
+        // evidence of a run that claimed to find nothing.
+        let left_behind: Vec<_> = std::fs::read_dir(&store)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", store.display()))
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<_, _>>()
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", store.display()));
+        assert!(
+            left_behind.is_empty(),
+            "`sure history` created {left_behind:?} in a store directory it was asked to \
+             report on"
+        );
+    }
+
+    #[test]
+    fn a_delete_that_matched_nothing_says_so_rather_than_claiming_a_deletion() {
+        // The user's next question after `sure history delete` is whether it
+        // worked, and "it did nothing" has to be distinguishable from "it worked"
+        // in the answer — in the machine frame as well as in the sentence, since
+        // a script cannot read a sentence.
+        let store = a_store_of_our_own();
+        let report = Command::History {
+            action: Some(HistoryAction::Delete {
+                all: true,
+                session: None,
+                project: None,
+            }),
+        }
+        .report(Some(&store));
+        let Report::History(history) = &report else {
+            panic!("a delete that matched nothing was answered with {report:?}");
         };
-        let refusal = match deleting.report(Some(&a_store_of_our_own())) {
-            Report::Unavailable(not_yet) => not_yet,
-            other => panic!("expected a refusal, got {other:?}"),
+        let crate::history::HistoryOutcome::Deleted { deleted, .. } = &history.outcome else {
+            panic!("a delete answered with {:?}", history.outcome);
         };
-        assert!(refusal.instead.contains("nothing was deleted"));
+        assert!(
+            deleted.is_empty(),
+            "a delete against a store that was never written removed something: {deleted:?}"
+        );
     }
 }

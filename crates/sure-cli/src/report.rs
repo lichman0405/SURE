@@ -377,6 +377,14 @@ pub enum Report {
     /// `sure check`, `sure recheck` or `sure repair`, carrying what the twelve
     /// stages of `docs/architecture/CHECK_PIPELINE.md` did.
     Check(Box<CheckReport>),
+    /// `sure history`, carrying what it found or what it removed.
+    ///
+    /// One variant for the three subcommands this build carries out, for
+    /// [`Self::Check`]'s reason: they are three readings of one store, they
+    /// differ only in what they did to it, and a variant each would be three
+    /// renderings free to drift. Which command the user typed is on the report,
+    /// so the frame names the command that was run rather than the group.
+    History(Box<crate::history::HistoryReport>),
     /// A command whose work lands in a later phase.
     Unavailable(NotYet),
     /// A command that tried and did not finish.
@@ -448,6 +456,12 @@ impl Report {
                     "not_green"
                 }
             }
+            // A history report is an answer about this machine's own store —
+            // what is in it, or what was taken out of it. It is never
+            // `not_green`: that is a statement about a project, and this command
+            // never looks at one. A history command that could not finish is a
+            // [`Self::Failed`], which is the arm below.
+            Self::History(_) => "ok",
             Self::Unavailable(_) => "unavailable",
             // A command that did not finish has not answered, and saying
             // `not_green` would read as "the project has problems" — which is a
@@ -527,6 +541,14 @@ impl Report {
                     exit::NOT_GREEN
                 }
             }
+            // 0, including for a history that turned out to be empty and for a
+            // delete whose scope matched nothing. Both are the whole of what the
+            // user asked: a listing of nothing is a listing, and "remove every
+            // session about this project" is satisfied when there are none. What
+            // must never be 0 is a delete that *could not* happen — the store
+            // unreadable, a row that would not go — and that is a
+            // [`Self::Failed`], below.
+            Self::History(_) => exit::OK,
             Self::Unavailable(_) => exit::UNAVAILABLE,
             Self::Failed(_) => exit::FAILED,
             // 0 for allow/warn so the launcher does not block the operation.
@@ -581,6 +603,12 @@ impl Report {
             // to file, and a person who piped the output meant to read why it
             // stopped.
             Self::Check(report) => report.finished(),
+            // A history report is the answer to a question about this machine's
+            // own store, and `sure history > history.txt` has to put it in the
+            // file. `sure history delete` is the same: the sentences saying what
+            // went are the point of the command, and a person who piped them
+            // meant to keep them.
+            Self::History(_) => true,
             Self::Unavailable(_) | Self::Failed(_) => false,
             // A hook decision is an answer: the command ran and produced a result.
             Self::HookDecision(_) => true,
@@ -634,6 +662,7 @@ impl Report {
             // the command that produced it rather than in the type that carries
             // it.
             Self::Check(report) => crate::check::human(report, out),
+            Self::History(report) => crate::history::human(report, out),
             Self::Failed(failure) => {
                 writeln!(
                     out,
@@ -840,6 +869,11 @@ impl Report {
             // own module so that the shape a script reads is decided beside the
             // prose a person reads.
             Self::Check(report) => frame["details"] = crate::check::machine(report),
+            // What the history command found, or removed, under the one key.
+            // Built by the command's own module for the reason the arm above
+            // gives, and built from the same values the human form renders, so
+            // that a script and a person are reading one result.
+            Self::History(report) => frame["details"] = crate::history::machine(report),
             // The failure's own words. `what` is a sentence SURE wrote about
             // itself and `detail` is whatever went wrong, kept apart here for
             // the same reason they are apart in the struct: a reader deciding
@@ -898,6 +932,12 @@ impl Report {
             // this variant, and a frame that said `check` for all three would
             // name a command the user did not run.
             Self::Check(report) => report.command,
+            // The command the user typed, taken from the report rather than
+            // fixed here, for the same reason as the arm above: `list`, `show`
+            // and `delete` share this variant, and a frame that said `history`
+            // for all three would not name the one that was run — which matters
+            // most for the one that deletes.
+            Self::History(report) => report.command,
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
             Self::HookDecision(_) => "hook",

@@ -310,11 +310,10 @@ fn run_in(store: &Path, args: &[&str]) -> Run {
 }
 
 /// The frame the command line prints for one command, as a value.
-fn frame_of(args: &[&str]) -> Value {
-    frame_of_in(&a_store_of_our_own(), args)
-}
-
-/// The same, in a store the caller named.
+///
+/// The store is always named, and by the caller: a tool result is compared with
+/// the command line's answer for the same command, and a frame that names the
+/// store it read can only be compared with one that read the same store.
 fn frame_of_in(store: &Path, args: &[&str]) -> Value {
     let mut with_format = vec!["--format", "json"];
     with_format.extend_from_slice(args);
@@ -355,8 +354,11 @@ fn frame_without_the_reading_id(frame: &Value) -> Value {
         .and_then(|details| details.get_mut("report"))
         .and_then(|report| report.get_mut("project_fingerprint"))
     else {
-        // A frame with no verdict in it — `sure history list` refuses, and a
-        // refusal is about the command and not about a project state.
+        // A frame with no verdict in it: not a refusal — no tool in this file
+        // refuses any more — but a report that is not about a project state,
+        // which `sure history` and `sure doctor` both are. There is nothing to
+        // normalize, and the comparison above still holds the two frames to each
+        // other.
         return frame;
     };
     let id = field
@@ -449,7 +451,14 @@ fn routes() -> [Route; 4] {
             routes_to: "sure history list",
             arguments: json!({}),
             command: &["history", "list"],
-            answers_on_stdout: false,
+            // It answers on standard output now, and the flag is the whole of
+            // what changed: `sure history list` used to be a command this build
+            // could not carry out, so its words went to the complaint stream and
+            // `isError` was true. The frame and the words are compared with the
+            // command line either way; what this decides is which stream the
+            // command line's half is read from, and whether the tool's result is
+            // marked as an error.
+            answers_on_stdout: true,
         },
     ]
 }
@@ -591,12 +600,17 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
     // refusals — and the one field the two readings cannot share, the
     // fingerprint id of the reading itself, is named and set aside in
     // `frame_without_the_reading_id` rather than waved at.
-    let mut session = Session::serve();
+    // One store for the session and for the command lines it is compared with,
+    // which `sure_status`'s test already had to do and every route needs now:
+    // a history frame carries the path of the store it read, so two runs in two
+    // stores could not be compared at all.
+    let store = a_store_of_our_own();
+    let mut session = Session::open_in(&store, &["mcp", "serve"]);
     session.start();
     for (index, route) in routes().iter().enumerate() {
         let answer = session.ask(call(10 + index as u32, route.tool, route.arguments.clone()));
         let result = result_of(&answer).clone();
-        let expected = frame_of(route.command);
+        let expected = frame_of_in(&store, route.command);
         assert_eq!(
             &frame_without_the_reading_id(&result["structuredContent"]["sure"]),
             &frame_without_the_reading_id(&expected),
@@ -604,7 +618,7 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
             route.tool,
             route.command.join(" ")
         );
-        let human = run(route.command);
+        let human = run_in(&store, route.command);
         let words: &str = if route.answers_on_stdout {
             &human.stdout
         } else {
@@ -686,9 +700,28 @@ fn sure_status_answers_about_this_build_and_never_about_a_project() {
 fn no_tool_reports_success_for_a_project_that_was_never_checked() {
     // The false green, in its MCP shape: an agent reads `isError: false` and
     // tells the user the project is fine.
+    //
+    // `sure_get_report` is skipped, and it is the only one that is. It does not
+    // answer about a project at all — `sure history` says what this *machine*
+    // has recorded, and "nothing has been recorded" is a true answer that exits
+    // 0. Demanding a non-`ok` outcome here would force it to lie about what it
+    // did, which is the failure this test exists to prevent wearing the other
+    // face. What it must never do is let that answer be read as a statement
+    // about the project, and that is
+    // `sure_get_report_answers_about_the_machine_and_never_about_a_project`
+    // below. The skip is read from the bridge's own tool schemas rather than
+    // from a name written here, so a tool that starts taking a project is back
+    // in this loop on the day it does.
     let mut session = Session::serve();
     session.start();
+    let answers_about_a_project = tools_that_take_a_project(&mut session);
     for (index, route) in routes().iter().enumerate() {
+        if !answers_about_a_project
+            .iter()
+            .any(|name| name == route.tool)
+        {
+            continue;
+        }
         let result =
             result_of(&session.ask(call(30 + index as u32, route.tool, route.arguments.clone())))
                 .clone();
@@ -722,6 +755,71 @@ fn no_tool_reports_success_for_a_project_that_was_never_checked() {
             assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
         }
     }
+    assert_eq!(session.finish().status, 0);
+}
+
+/// The tools that accept a `project` argument, read from the bridge's own
+/// `tools/list`.
+///
+/// From the schema rather than from a list written here, so that a tool which
+/// starts or stops taking a project moves the tests that care about the
+/// difference with it. The schema is what a caller reads to decide what to send,
+/// so it is also the thing that would be wrong if the two disagreed.
+fn tools_that_take_a_project(session: &mut Session) -> Vec<String> {
+    let listed = result_of(&session.ask(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/list"
+    })))
+    .clone();
+    listed["tools"]
+        .as_array()
+        .expect("the bridge lists tools")
+        .iter()
+        .filter(|tool| {
+            tool["inputSchema"]["properties"]
+                .as_object()
+                .is_some_and(|properties| properties.contains_key("project"))
+        })
+        .map(|tool| tool["name"].as_str().expect("a tool has a name").to_owned())
+        .collect()
+}
+
+#[test]
+fn sure_get_report_answers_about_the_machine_and_never_about_a_project() {
+    // The other half of the skip above, so that skipping it hides nothing. The
+    // tool is asked with no argument, in a store nothing has written, and what
+    // comes back has to be an answer about this machine: `ok`, exit 0, and a
+    // body that carries a history rather than a verdict — no `green`, no stage
+    // log, nothing an agent could quote as "the project is fine".
+    let mut session = Session::serve();
+    session.start();
+    let result = result_of(&session.ask(call(31, "sure_get_report", json!({})))).clone();
+    assert_eq!(result["isError"], false, "{result}");
+    let sure = &result["structuredContent"]["sure"];
+    assert_eq!(sure["command"], "history");
+    assert_eq!(sure["outcome"], "ok");
+    assert_eq!(sure["exit_code"], 0);
+    assert!(
+        sure["details"]["green"].is_null(),
+        "the history answered with a verdict about a project: {result}"
+    );
+    assert!(
+        sure["details"]["stages"].is_null(),
+        "the history answered with a stage log, which is a check's shape: {result}"
+    );
+    let text = text_of(&result);
+    assert!(
+        text.contains("this machine"),
+        "the answer does not say what it is about, so an agent could quote it as a verdict:\n{text}"
+    );
+    // And the bridge agrees that this tool takes no project, which is what the
+    // skip above rests on. Asked of the schemas, in a session of its own,
+    // because the loop above has already consumed the one it built.
+    let takes_one = tools_that_take_a_project(&mut session);
+    assert!(
+        !takes_one.iter().any(|name| name == "sure_get_report"),
+        "this test says the history never answers about a project, and the bridge's own schema \
+         says the tool takes one: {takes_one:?}"
+    );
     assert_eq!(session.finish().status, 0);
 }
 

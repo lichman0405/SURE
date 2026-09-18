@@ -66,8 +66,20 @@ In another terminal, run:
 
 ```powershell
 Set-Location $testRoot
-sure history --latest
+sure history
 ```
+
+`sure history` lists the sessions SURE has recorded on this machine — not only
+this project's — most recently recorded first, with each session's `session` id.
+Take the id from the top row and run:
+
+```powershell
+sure history show <SURE_SESSION_ID>
+```
+
+(The steps below write `sure history show <SURE_SESSION_ID>` for short: it reads
+the events of the session that list named. `sure history --latest` was written
+into this document before the command existed and is not a flag this build has.)
 
 Expected result: a `session-start` event appears with the current session id.
 If no event appears, the hook did not run or `sure.exe` could not be resolved.
@@ -86,7 +98,7 @@ Expected result: the `Read` succeeds. The `PreToolUse` hook should return
 Verify with:
 
 ```powershell
-sure history --latest
+sure history show <SURE_SESSION_ID>
 ```
 
 Expected result: a `pre-tool-use` event for `Read` and a `post-tool-use` event
@@ -107,7 +119,7 @@ not allowed.
 Verify with:
 
 ```powershell
-sure history --latest
+sure history show <SURE_SESSION_ID>
 ```
 
 Expected result: a `pre-tool-use` event for `Write` is recorded with decision
@@ -128,7 +140,7 @@ explicit consent, and the hook cannot obtain consent, so it fails closed.
 Verify with:
 
 ```powershell
-sure history --latest
+sure history show <SURE_SESSION_ID>
 ```
 
 Expected result: a `pre-tool-use` event for `Bash` with decision `block`.
@@ -152,7 +164,7 @@ Exit Claude Code. The `Stop` hook should run.
 Verify with:
 
 ```powershell
-sure history --latest
+sure history show <SURE_SESSION_ID>
 ```
 
 Expected result: a `stop` event appears with the same session id as the
@@ -160,7 +172,9 @@ Expected result: a `stop` event appears with the same session id as the
 
 ## Recording results
 
-1. Copy the relevant output from `sure history --latest` for each step.
+1. Copy the relevant output from `sure history show <SURE_SESSION_ID>` for each
+   step, or the listing from `sure history` — a session that recorded nothing is
+   a result too, and the command says which of the two it is.
 2. Redact any absolute paths, user names, or repository-specific values.
 3. Save the redacted transcript as task evidence or attach it to the
    `P10-T009` progress note.

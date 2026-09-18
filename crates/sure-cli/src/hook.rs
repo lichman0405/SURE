@@ -18,10 +18,13 @@
 use std::io::{self, Read};
 use std::path::Path;
 
+use sure_core::config::Authority;
 use sure_core::config::Config;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
-use sure_core::full_recording::{self, FullRecordingConsent};
+use sure_core::full_recording::{
+    self, DEFAULT_FULL_RECORDING_RETENTION_DAYS, FullRecordingConsent,
+};
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::{decide_claude_code_tool, decide_cursor_tool};
 use sure_core::ids::EventId;
@@ -220,6 +223,24 @@ fn persist_event_with_paths(
         Ok(loaded) if loaded.config.privacy.full_recording => FullRecordingConsent::Full,
         _ => FullRecordingConsent::ProjectionOnly,
     };
+    // How long the recording is kept, arbitrated the way every other setting in
+    // `sure_core::config` is: the user may name any duration, and a project may
+    // only shorten it. A project asking to keep the data for longer is not
+    // obeyed and does not raise the number — `Authority` records it as a refused
+    // `ProjectRequest::ExtendedRetention`, and what is written is the shorter
+    // period. "Recording more is not running more", and keeping it longer is not
+    // either.
+    //
+    // The fallback is the *default*, and it is the only thing here that resolves
+    // on failure. A configuration file that will not parse is a run whose
+    // settings SURE does not know, and the safe direction is the shorter one:
+    // falling back to nothing at all would be the same as the default, but
+    // falling back to whatever the project asked for would let an unreadable
+    // user file become a longer retention than SURE's own.
+    let retention_days = Authority::load(project_path, &paths.user_config_file())
+        .map_or(DEFAULT_FULL_RECORDING_RETENTION_DAYS, |authority| {
+            authority.full_recording_retention_days().value
+        });
     let _ = full_recording::persist_full_recording(
         &store,
         ingested,
@@ -227,6 +248,7 @@ fn persist_event_with_paths(
         project_root,
         &fingerprint.id,
         consent,
+        retention_days,
     );
 
     Ok(fingerprint.id)

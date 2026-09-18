@@ -56,3 +56,41 @@ a run that cannot support even that says so instead.
 ## Deletion
 
 Users must be able to inspect and delete local SURE history/recordings.
+
+Both are commands as of P13-T003, and neither answers about a project:
+
+- `sure history` lists the sessions this machine has recorded — which project
+  and harness each came from, and how long it is kept —
+  and `sure history show <SURE_SESSION_ID>` prints one session with the events
+  in it and the record each event wrote.
+- `sure history delete --session <SURE_SESSION_ID>`, `--project <ROOT>` or
+  `--all` removes what the scope names: the `sessions` row, its
+  `session_events`, the `records` those events own, and any full recording
+  written for one of them. It reports each count separately, because "the raw
+  transcript is gone too" is a different claim from "the session row is gone".
+  All of it goes in one transaction: a delete that stops partway removes
+  nothing.
+
+Three properties are part of the promise, not of the implementation:
+
+- **Nothing is deleted on a schedule.** Every row carries a date it is kept
+  until, and nothing in this release acts on one. The listing says so next to
+  the date, because a date printed alone reads as a retention policy that is
+  being enforced. Deleting is something the user does.
+- **Nothing is deleted without a scope on the command line.** Exactly one of
+  `--all`, `--session` and `--project` is required; a command line naming none
+  or two is a usage error (status 2) rather than a default. There is no prompt
+  and no confirmation, so this is what keeps a delete from happening by
+  omission — and it is why the command is usable from a script at all.
+  A delete whose scope matched nothing says it removed nothing and exits 0.
+- **A project cannot extend how long its own records are kept.** The duration is
+  a setting, and it resolves like every other restriction: a project file may
+  shorten it and may not lengthen it. A project asking for longer leaves a
+  refused request on the record and the shorter period is what is written. The
+  setting is `privacy.full_recording_retention_days` in
+  [CONFIG_REFERENCE.md](../architecture/CONFIG_REFERENCE.md#privacy); the rule
+  is [CONFIG_AUTHORITY.md](../architecture/CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins).
+
+What a delete does **not** do: it does not touch the project's files, its
+configuration, or any record of another project. A user asking SURE to forget
+something must not find out later that it forgot more than it said.

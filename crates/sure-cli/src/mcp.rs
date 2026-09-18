@@ -917,7 +917,9 @@ fn tool_set() -> [Tool; 5] {
             // accepting one to ignore it would be a promise SURE does not keep.
             takes_project: false,
             command: |_| Command::History {
-                action: Some(HistoryAction::List),
+                action: Some(HistoryAction::List {
+                    limit: crate::history::DEFAULT_LIMIT,
+                }),
             },
             extra: None,
         },
@@ -1446,26 +1448,39 @@ mod tests {
 
     #[test]
     fn a_command_this_build_cannot_run_answers_as_a_tool_error_in_its_own_words() {
-        // The heart of the honesty rule. `sure_get_report` runs `sure history`,
-        // which this build does not implement, and the tool says so with the
-        // same sentence the command line says, marked as an error — never a
-        // result, never an empty object.
+        // The heart of the honesty rule: a tool whose command this build cannot
+        // carry out answers with a tool result marked `isError`, in the
+        // command's own sentence — never a result, never an empty object.
         //
-        // It is the only tool left in that shape: the other four run commands
-        // that this build carries out, and what they answer is checked by
-        // `a_tool_that_ran_carries_its_verdict_and_not_an_error` below. The rule
-        // that links the two is one rule — a tool repeats its command, whichever
-        // shape that command's answer has.
-        let mut session = started();
-        let message = call(&mut session, "sure_get_report", json!({}));
-        let result = &message["result"];
-        assert_eq!(result["isError"], true, "{message}");
+        // This used to be driven through `sure_get_report`, which ran `sure
+        // history` and was the one tool left in that shape. `sure history` is
+        // carried out now, so **no tool is**, and the rule is driven where it
+        // actually lives: `tool_result`, the one function every tool's answer
+        // goes through. Driving it with a refusal written here rather than
+        // through a tool is honest about what is being checked — the rule, not
+        // one tool's luck — and the test below ties every tool's command to
+        // `commands::IMPLEMENTED`, so the day one of them goes back to refusing,
+        // the two meet again.
+        let tool = tool_set()
+            .into_iter()
+            .find(|tool| tool.name == "sure_get_report")
+            .expect("the bridge lists the tool that reports on the history");
+        let result = tool_result(
+            &tool,
+            &Report::Unavailable(crate::report::NotYet {
+                command: "history export",
+                does: "write the history out as JSON",
+                instead: "Use `sure --format json history`.",
+            }),
+        );
+
+        assert_eq!(result["isError"], true, "{result}");
         let text = result["content"][0]["text"]
             .as_str()
             .expect("a tool result carries text");
         assert!(text.contains("is not implemented in this build."), "{text}");
         assert!(
-            text.contains("history"),
+            text.contains("history export"),
             "the tool does not name the command it could not run: {text}"
         );
         assert_eq!(
@@ -1473,6 +1488,14 @@ mod tests {
             "unavailable"
         );
         assert_eq!(result["structuredContent"]["sure"]["exit_code"], 3);
+        // The tool that was asked is still named, even though the command it ran
+        // is not: a caller reading this has to be able to tell which of its calls
+        // came back this way.
+        assert_eq!(result["structuredContent"]["tool"], "sure_get_report");
+        assert_eq!(
+            result["structuredContent"]["routes_to"],
+            "sure history list"
+        );
     }
 
     #[test]
@@ -1528,13 +1551,17 @@ mod tests {
         // exempt: it answers about this *build*, not about a project (`doctor`
         // may legitimately be `ok`), and it has a test of its own —
         // `sure_status_answers_about_this_build_and_never_about_a_project`.
+        //
+        // `sure_get_report` is not in it either now, and for `sure_status`'s
+        // reason rather than by exemption: `sure history` is carried out in this
+        // build, it answers about this *machine* rather than about a project, and
+        // "there is nothing recorded" is a true answer that exits 0. Requiring it
+        // to be non-`ok` would force it to lie about what it did. What it must
+        // never do is read as a statement about a project, and that is what
+        // `sure_get_report_never_answers_a_question_about_a_project` asks
+        // instead.
         let mut session = started();
-        for name in [
-            "sure_check",
-            "sure_recheck",
-            "sure_get_repair",
-            "sure_get_report",
-        ] {
+        for name in ["sure_check", "sure_recheck", "sure_get_repair"] {
             let message = call(&mut session, name, json!({}));
             let sure = &message["result"]["structuredContent"]["sure"];
             assert_ne!(
@@ -1546,6 +1573,46 @@ mod tests {
                 "{name} exited zero for work that did not happen: {message}"
             );
         }
+    }
+
+    #[test]
+    fn sure_get_report_never_answers_a_question_about_a_project() {
+        // The tool that reads the history is the one tool whose `ok` is honest —
+        // it says what this machine has recorded, and it can be right. What
+        // would not be honest is an agent reading that `ok` as a verdict about
+        // the project it is working on. So the answer must carry a history and
+        // no green: no `green` field, no stage, nothing a caller could mistake
+        // for a check. Compared against the list of tools that do answer about a
+        // project, which is derived from `takes_project` rather than retyped.
+        let answering_about_projects: Vec<&str> = tool_set()
+            .iter()
+            .filter(|tool| tool.takes_project)
+            .map(|tool| tool.name)
+            .collect();
+
+        let mut session = started();
+        let message = call(&mut session, "sure_get_report", json!({}));
+        let result = &message["result"];
+        assert_eq!(result["isError"], false, "{message}");
+        let sure = &result["structuredContent"]["sure"];
+        assert_eq!(sure["command"], "history");
+        assert_eq!(sure["outcome"], "ok");
+        assert_eq!(sure["exit_code"], 0);
+        assert!(
+            sure["details"]["green"].is_null(),
+            "the history answered with a verdict about a project: {message}"
+        );
+        assert!(
+            !answering_about_projects.contains(&"sure_get_report"),
+            "this test says the history never answers about a project, and the tool set \
+             says it takes one: {answering_about_projects:?}"
+        );
+        // And the text a model reads says which machine it is about, so that a
+        // model quoting it cannot drop the subject.
+        let text = result["content"][0]["text"]
+            .as_str()
+            .expect("a tool result carries text");
+        assert!(text.contains("this machine"), "{text}");
     }
 
     #[test]

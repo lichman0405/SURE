@@ -53,6 +53,7 @@ both are what Windows editors write by default.
 | --- | --- | --- | --- |
 | `mode` | enum | `local_first` | `local_first`, `fully_local` (see below) |
 | `full_recording` | boolean | `false` | `true`, `false` |
+| `full_recording_retention_days` | integer, in days | SURE's own default when no file names it | `0` or more |
 | `telemetry` | boolean | `false` | `true`, `false` |
 
 `local_first` keeps evidence on this machine and allows external analysis only
@@ -74,6 +75,30 @@ alternative of `local_first` or `fully_local`.
 
 `full_recording` and `telemetry` are opt-in. Both are reported as requests, and
 neither takes effect without higher-authority approval.
+
+`full_recording_retention_days` is how long the raw content a full recording
+kept is kept for. It is an integer number of days, `0` means "until the moment
+it is written", and a negative number is refused as a bad value.
+
+- **When no file names it**, nothing changes: the duration is the one SURE uses
+  anyway. Absent is not "zero" and not "forever", and a report that named a file
+  for it would be telling the user they had chosen something.
+- **The user's own file may name any duration**, including one longer than the
+  default. A person deciding how long their own machine keeps their own
+  records is making a decision about their own data.
+- **A project file may only shorten it.** A project naming a longer period than
+  the user allowed is a **refused** escalation rather than a clamped one: the
+  refusal is on the record and what is written is the shorter period — see
+  [CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins).
+  "Recording more is not running more", and a repository the user merely opened
+  may not decide how long their activity is kept.
+
+This is not the same setting as `full_recording`, and the difference is the
+whole reason both exist: `full_recording` decides *whether* raw content is kept
+and `full_recording_retention_days` decides *how long*. They are also about
+different rows — this one governs the recording, and a session and its events
+carry their own retention, which no configuration file can change in this
+release.
 
 ### `protection`
 
@@ -178,8 +203,18 @@ each request becomes is in `docs/architecture/CONFIG_AUTHORITY.md`:
 | `execution.allow_dependency_install: true` | install dependencies |
 | `execution.allow_network: true` | network access |
 | `privacy.full_recording: true` | full recording |
+| `privacy.full_recording_retention_days` longer than the user allowed | keep recorded content for longer than you allowed |
 | `privacy.telemetry: true` | telemetry |
 | `analysis.provider` that is external | connect to a service |
+
+One row is decided by more than this file. Whether
+`privacy.full_recording_retention_days` is a request is a fact about the project
+file **and the user's file together**: the same number is a request when the
+user allows less and is nothing at all when the user allows the same. So it is
+not in `Config::requested_privileges`, which reads one file, and is produced by
+`Authority::privileges()` instead — see
+[CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins).
+A build that reported it from the project file alone would have to guess.
 
 **Scope reductions** — reported by `Config::scope_reductions`, so that a check
 that did not happen is never mistaken for a check that passed:

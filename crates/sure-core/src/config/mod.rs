@@ -89,6 +89,28 @@ pub struct PrivacyConfig {
     ///
     /// Off by default, and opt-in, per `docs/security/PRIVACY.md`.
     pub telemetry: bool,
+    /// How many days a full recording is kept, when `full_recording` is on.
+    ///
+    /// `None` — the value a file that does not name this setting has — means
+    /// "whatever this layer above me allows, or
+    /// [`crate::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS`] if
+    /// nobody named one". It is `Option` rather than a plain number with a
+    /// default for exactly that reason: a file that says nothing and a file
+    /// that says `3` are different statements, and only the second one is a
+    /// choice the user made. Folding them together would let a project that
+    /// mentioned nothing override a user who asked for 30 days.
+    ///
+    /// This is a *restriction*, not a privilege, and it resolves the way
+    /// protection and privacy mode do — towards less retention — with one
+    /// asymmetry those two do not have: the user may name **any** number of
+    /// days, including one larger than the default, because a person may
+    /// decide to keep their own machine's records for longer. A project file
+    /// may only ever shorten what the user set; naming a longer period is a
+    /// refused escalation ([`ProjectRequest::ExtendedRetention`]), because
+    /// "recording more is not running more" and a repository the user merely
+    /// opened may not extend how long their own activity is kept. See
+    /// [`crate::config::authority::Authority::full_recording_retention_days`].
+    pub full_recording_retention_days: Option<i64>,
 }
 
 /// Protection settings.
@@ -529,13 +551,24 @@ impl Config {
         Ok(())
     }
 
-    /// A privacy mode that promises less exposure than the provider delivers.
+    /// A privacy mode that promises less exposure than the provider delivers,
+    /// and a retention period that is not a period.
     fn validate_privacy_and_analysis(&self) -> Result<(), ConfigError> {
         if !self.privacy.mode.allows_external_analysis() && self.analysis.provider.is_external() {
             return Err(ConfigError::new(ErrorKind::Contradiction {
                 first: "privacy.mode".to_owned(),
                 second: "analysis.provider".to_owned(),
                 explanation: FULLY_LOCAL_EXPLANATION,
+            }));
+        }
+        if let Some(days) = self.privacy.full_recording_retention_days
+            && days < 0
+        {
+            return Err(ConfigError::new(ErrorKind::BadValue {
+                name: Some("privacy.full_recording_retention_days".to_owned()),
+                value: days.to_string(),
+                expected: vec![String::from("0 or more days")],
+                suggestion: Some(String::from("0")),
             }));
         }
         Ok(())

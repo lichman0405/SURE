@@ -187,18 +187,60 @@ pub enum Command {
 }
 
 /// What `sure history` can be asked to do.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum HistoryAction {
-    /// List what is recorded.
-    List,
-    /// Show one record.
-    Show {
-        /// The record to show.
-        id: Option<String>,
+    /// List the sessions SURE has recorded on this machine, newest first.
+    ///
+    /// A session is what a harness's work was recorded as: one per conversation
+    /// with an agent, one per project. The list says what is there and what is
+    /// not — that there are none is an answer, not an empty table.
+    List {
+        /// How many sessions to show. The listing always says how many the
+        /// store holds, so a page is never mistaken for the whole history.
+        #[arg(
+            long,
+            value_name = "N",
+            default_value_t = crate::history::DEFAULT_LIMIT,
+            value_parser = clap::value_parser!(u64).range(1..)
+        )]
+        limit: u64,
     },
-    /// Delete records. Long-term history only; the store refuses to delete
-    /// anything else.
-    Delete,
+    /// Show one session, and the events recorded in it.
+    Show {
+        /// SURE's own session id, as `sure history` prints it.
+        ///
+        /// Required. `sure history show` with nothing to show would be a
+        /// listing under a name that promises one session, and the id is the
+        /// one thing a user can copy out of the listing.
+        id: String,
+    },
+    /// Delete sessions, and everything recorded in them.
+    ///
+    /// **Exactly one scope is required, and nothing prompts.** The scope is on
+    /// the command line, so a script can run this and a person can read what it
+    /// will do before it does it, and neither can delete by accident by
+    /// answering a question SURE asked. `docs/architecture/CLI.md` records the
+    /// decision.
+    #[command(group(
+        clap::ArgGroup::new("scope")
+            .required(true)
+            .multiple(false)
+            .args(["all", "session", "project"])
+    ))]
+    Delete {
+        /// Every session in this store.
+        #[arg(long)]
+        all: bool,
+
+        /// One session, by SURE's session id.
+        #[arg(long, value_name = "SURE_SESSION_ID")]
+        session: Option<String>,
+
+        /// Every session recorded against one project root, exactly as
+        /// `sure history` prints it.
+        #[arg(long, value_name = "PROJECT_ROOT")]
+        project: Option<String>,
+    },
     /// Write the history out as JSON.
     Export,
 }

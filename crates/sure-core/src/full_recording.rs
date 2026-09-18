@@ -6,7 +6,12 @@
 //! which never stores raw content.
 //!
 //! Full recordings are stored as [`RecordKind::Recording`] with an explicit
-//! `full_recording` marker and a short retention period (3 days by default).
+//! `full_recording` marker and a short retention period.
+//! [`DEFAULT_FULL_RECORDING_RETENTION_DAYS`] is what that period is when nobody
+//! has named one; `privacy.full_recording_retention_days` in `sure.yaml` is how
+//! a user names one, and the caller passes the resolved number in. This module
+//! does not read configuration itself — the authority layer decides which of two
+//! files wins, and `sure_core::config::authority` is where that rule lives.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +24,12 @@ use crate::redact;
 use crate::store::{HistoryFilter, RecordKind, Store, StoreError, StoredRecord};
 
 /// Default retention for full recordings: 3 days.
+///
+/// Used when neither the user's settings file nor the project's names
+/// `privacy.full_recording_retention_days`. See
+/// [`crate::config::authority::Authority::full_recording_retention_days`] for
+/// the rule that decides which file wins when they disagree, and why a project
+/// file can only ever shorten it.
 pub const DEFAULT_FULL_RECORDING_RETENTION_DAYS: i64 = 3;
 
 /// Whether the user has consented to full recording retention.
@@ -114,6 +125,19 @@ pub struct StoredFullRecording {
 
 /// Persist a full recording for a project.
 ///
+/// `retention_days` is how long the recording is kept, and it is a parameter
+/// rather than a constant read here because the answer comes from two
+/// configuration files and a rule about which of them is allowed to decide —
+/// `sure_core::config::authority`. The caller resolves it and passes the number
+/// in; this function does not read settings. It is stored in the document and
+/// in the deadline, so what a record says about its own retention is what was
+/// decided when it was written rather than what today's settings happen to say.
+///
+/// A negative value is not clamped: it produces a deadline in the past, which
+/// means "already due" rather than a longer life. `Config::validate` refuses one
+/// before it can reach a caller, so the only way to get here with one is to call
+/// this function directly.
+///
 /// # Errors
 ///
 /// Returns [`FullRecordingError::NotOptedIn`] if `consent` is
@@ -128,13 +152,14 @@ pub fn persist_full_recording(
     project_root: &str,
     fingerprint: &FingerprintId,
     consent: FullRecordingConsent,
+    retention_days: i64,
 ) -> Result<i64, FullRecordingError> {
     if consent == FullRecordingConsent::ProjectionOnly {
         return Err(FullRecordingError::NotOptedIn);
     }
 
     let now_ms = now_ms();
-    let retained_until_ms = retention_deadline_ms(now_ms, DEFAULT_FULL_RECORDING_RETENTION_DAYS);
+    let retained_until_ms = retention_deadline_ms(now_ms, retention_days);
 
     // Redact the payload before storage, even under full opt-in.
     let redacted_payload = crate::store::redact_document(&event.envelope.payload);
@@ -318,6 +343,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .expect("persist succeeds");
         assert!(id > 0);
@@ -348,6 +374,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::ProjectionOnly,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap_err();
 
@@ -381,6 +408,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap();
 
@@ -430,6 +458,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap();
 
@@ -464,6 +493,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap();
 
@@ -484,6 +514,48 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_retention_is_the_one_that_is_written_down() {
+        // Criterion: "Full recording retention configurable." The duration is
+        // decided by `sure_core::config::authority` and handed in; what this
+        // checks is that the number handed in is the number a reader finds on
+        // the record. A function that took the argument and stored the constant
+        // would pass every other test in this file.
+        let store = store_in("full_recording_configured_retention");
+        let event = make_event("tool.completed", json!({"tool": "Bash"}));
+        let fingerprint = FingerprintId::generate();
+        let event_id = EventId::generate();
+
+        persist_full_recording(
+            &store,
+            &event,
+            &event_id,
+            "C:\\work\\my project",
+            &fingerprint,
+            FullRecordingConsent::Full,
+            11,
+        )
+        .unwrap();
+
+        let back = full_recordings_for_project(&store, &fingerprint, 10).unwrap();
+        assert_eq!(back.len(), 1);
+
+        let eleven_days_ms = 11 * 86_400_000;
+        let default_ms = DEFAULT_FULL_RECORDING_RETENTION_DAYS * 86_400_000;
+        let expected_min = now_ms() + eleven_days_ms - 60_000;
+        let expected_max = now_ms() + eleven_days_ms + 60_000;
+        assert!(
+            back[0].retained_until_ms >= expected_min && back[0].retained_until_ms <= expected_max,
+            "the record was kept for {} ms from now, not the 11 days it was asked for",
+            back[0].retained_until_ms - now_ms()
+        );
+        assert!(
+            back[0].retained_until_ms - now_ms() > default_ms,
+            "11 days and the 3-day default produced the same deadline, so the argument is not \
+             what decides it"
+        );
+    }
+
+    #[test]
     fn full_recordings_are_excluded_from_default_history() {
         let store = store_in("full_recording_hidden");
         let event = make_event("tool.completed", json!({"tool": "Bash"}));
@@ -497,6 +569,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap();
 
@@ -562,6 +635,7 @@ mod tests {
             "C:\\work\\my project",
             &fingerprint,
             FullRecordingConsent::Full,
+            DEFAULT_FULL_RECORDING_RETENTION_DAYS,
         )
         .unwrap();
 

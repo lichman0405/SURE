@@ -16,6 +16,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
+use rusqlite::types::Value as SqlValue;
 use serde_json::Value;
 use sure_domain::capability::CapabilityTier;
 use sure_domain::ids::{EventId, FingerprintId, SessionId};
@@ -168,6 +169,87 @@ pub struct StoredEvent {
     pub record_row_id: Option<i64>,
 }
 
+/// Which sessions a read or a delete is about.
+///
+/// One filter for both, so that a scope cannot mean one thing when a user reads
+/// their history and another when they delete it — the mistake that lets
+/// `sure history delete` remove rows `sure history` never showed. See
+/// [`SessionScope::sql`].
+///
+/// Every variant is a *named* scope. There is deliberately no `Default` and no
+/// "whatever matches": the caller that reaches the delete path has already had
+/// to say which of these it meant, and `docs/architecture/CLI.md` records why
+/// that argument is required rather than prompted for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionScope<'a> {
+    /// Every session in the store.
+    All,
+    /// One session, by SURE's own identifier for it.
+    One(&'a str),
+    /// Every session recorded against one project root, **exactly as recorded**.
+    ///
+    /// Exact rather than normalised, and the narrow direction is deliberate: a
+    /// match that folded case or separators would make a path the user typed
+    /// delete rows a different path named. `sure history` prints the root
+    /// verbatim, which is what a caller copies.
+    Project(&'a str),
+}
+
+impl SessionScope<'_> {
+    /// The `WHERE` clause and its parameters.
+    ///
+    /// Built here rather than written out at each call site, and returned as a
+    /// value the caller binds rather than as a finished statement: the values
+    /// are bound, never interpolated, because one of them is a path the user
+    /// typed and the other is a string out of the store.
+    fn sql(&self) -> (String, Vec<SqlValue>) {
+        match self {
+            Self::All => (String::new(), Vec::new()),
+            Self::One(sure_session_id) => (
+                String::from(" WHERE sure_session_id = ?"),
+                vec![SqlValue::Text((*sure_session_id).to_owned())],
+            ),
+            Self::Project(project_root) => (
+                String::from(" WHERE project_root = ?"),
+                vec![SqlValue::Text((*project_root).to_owned())],
+            ),
+        }
+    }
+}
+
+/// What one delete removed, counted by table.
+///
+/// Three numbers rather than one, because they are three different claims: the
+/// sessions are what the user asked to be rid of, the events are what was
+/// recorded inside them, and the records are the envelopes those events wrote.
+/// A single total would let a delete that removed nothing but rows already
+/// orphaned read as the delete the user asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DeletedSessions {
+    /// Rows removed from `sessions`.
+    pub sessions: u64,
+    /// Rows removed from `session_events`.
+    pub events: u64,
+    /// Rows removed from `records`, which those events owned.
+    pub records: u64,
+    /// Rows removed from `records` of kind `recording`.
+    ///
+    /// Counted apart from [`DeletedSessions::records`] because they are a
+    /// different claim: those rows hold the raw content a full recording opted
+    /// in to keeping, and a user asking *is it gone* is asking about these. A
+    /// delete that removed the session row and left the transcript behind would
+    /// be a deletion that reads as complete in a single total.
+    pub recordings: u64,
+}
+
+impl DeletedSessions {
+    /// Whether nothing at all was removed.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.sessions == 0 && self.events == 0 && self.records == 0 && self.recordings == 0
+    }
+}
+
 /// Wraps a [`Store`] to provide session and event persistence.
 #[derive(Debug)]
 pub struct SessionEventStore<'a> {
@@ -206,12 +288,7 @@ impl<'a> SessionEventStore<'a> {
         let envelope = &ingested.envelope;
         let capability_tier = envelope.capability_tier;
 
-        let connection = self.store.connection();
-        connection
-            .execute_batch("BEGIN IMMEDIATE")
-            .map_err(|error| self.write_error(error))?;
-
-        let outcome: Result<PersistResult, SessionEventStoreError> = (|| {
+        self.in_transaction(|connection| {
             // Re-check idempotency inside the transaction.
             if self.event_exists_in_connection(connection, event_id)? {
                 return Ok(PersistResult::AlreadyExists);
@@ -289,14 +366,35 @@ impl<'a> SessionEventStore<'a> {
                 .map_err(|error| self.write_error(error))?;
 
             Ok(PersistResult::Stored)
-        })();
+        })
+    }
 
-        match outcome {
-            Ok(result) => {
+    /// Run one write as a single transaction.
+    ///
+    /// `BEGIN IMMEDIATE` rather than `BEGIN`, for `sure_core::store`'s reason:
+    /// the write lock is taken now, so contention is met where the busy timeout
+    /// applies and where it can be reported as contention, instead of at the
+    /// first write, where a partial transaction would have to be unwound.
+    ///
+    /// One helper rather than the block written out at each of the two writes
+    /// this module makes. The two have to agree, and a transaction boundary is
+    /// not a thing to keep in step by hand — the second copy is where a
+    /// `ROLLBACK` goes missing from the path that needed it.
+    fn in_transaction<T>(
+        &self,
+        body: impl FnOnce(&Connection) -> Result<T, SessionEventStoreError>,
+    ) -> Result<T, SessionEventStoreError> {
+        let connection = self.store.connection();
+        connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|error| self.write_error(error))?;
+
+        match body(connection) {
+            Ok(value) => {
                 connection
                     .execute_batch("COMMIT")
                     .map_err(|error| self.write_error(error))?;
-                Ok(result)
+                Ok(value)
             }
             Err(error) => {
                 let _ = connection.execute_batch("ROLLBACK");
@@ -355,6 +453,259 @@ impl<'a> SessionEventStore<'a> {
         Ok(events)
     }
 
+    /// Read the recorded sessions, newest first.
+    ///
+    /// Newest first by the order SURE wrote them — the row id — rather than by
+    /// the `started_at` string, which is whatever the harness said and is not
+    /// SURE's to compare: two harnesses that spell the same instant differently
+    /// would order differently here, and a listing that reordered itself between
+    /// two runs over an unchanged store would be a listing a user could not
+    /// check against anything.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionEventStoreError`] if the query fails.
+    pub fn sessions(&self, limit: usize) -> Result<Vec<StoredSession>, SessionEventStoreError> {
+        let connection = self.store.connection();
+        let mut statement = connection
+            .prepare(
+                "SELECT id, harness_session_id, sure_session_id, project_root, \
+                 project_fingerprint, harness_source, capability_tier, started_at, \
+                 retention_days, retained_until_ms \
+                 FROM sessions \
+                 ORDER BY id DESC \
+                 LIMIT ?1",
+            )
+            .map_err(|error| self.write_error(error))?;
+        let rows = statement
+            .query_map([limit as i64], read_session_row)
+            .map_err(|error| self.write_error(error))?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row.map_err(|error| self.write_error(error))?);
+        }
+        Ok(sessions)
+    }
+
+    /// How many sessions the store holds, whatever the caller's page size.
+    ///
+    /// Read separately from [`SessionEventStore::sessions`] rather than returned
+    /// beside it, so that a listing which showed fewer rows than there are can
+    /// say so — "12 of 340" is a different sentence from "12", and a report that
+    /// could only say the second would be telling the user their history is
+    /// smaller than it is.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionEventStoreError`] if the query fails.
+    pub fn session_count(&self) -> Result<u64, SessionEventStoreError> {
+        let count: i64 = self
+            .store
+            .connection()
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .map_err(|error| self.write_error(error))?;
+        Ok(u64::try_from(count).unwrap_or(0))
+    }
+
+    /// One session, by SURE's own identifier for it.
+    ///
+    /// `None` when there is no such session. SURE's identifier rather than the
+    /// harness's, because the harness's is only unique per project and per
+    /// source: deleting by one would be deleting by something that names
+    /// several rows, and a delete is the wrong place to discover that.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionEventStoreError`] if the query fails.
+    pub fn session_by_sure_id(
+        &self,
+        sure_session_id: &str,
+    ) -> Result<Option<StoredSession>, SessionEventStoreError> {
+        let connection = self.store.connection();
+        let mut statement = connection
+            .prepare(
+                "SELECT id, harness_session_id, sure_session_id, project_root, \
+                 project_fingerprint, harness_source, capability_tier, started_at, \
+                 retention_days, retained_until_ms \
+                 FROM sessions \
+                 WHERE sure_session_id = ?1",
+            )
+            .map_err(|error| self.write_error(error))?;
+
+        let mut rows = statement
+            .query_map([sure_session_id], read_session_row)
+            .map_err(|error| self.write_error(error))?;
+        match rows.next() {
+            None => Ok(None),
+            Some(row) => Ok(Some(row.map_err(|error| self.write_error(error))?)),
+        }
+    }
+
+    /// Delete the sessions a scope names, their events, the records those events
+    /// own, and the full recordings of those events.
+    ///
+    /// # What goes, and in what order
+    ///
+    /// The order is the whole of the safety argument. A `session_events` row
+    /// carries `session_row_id REFERENCES sessions(id)` and
+    /// `record_row_id REFERENCES records(id)`, so the events are the child of
+    /// both and go first; then the `records` rows those events own, so that
+    /// nothing points at a row that is about to disappear; then the `sessions`
+    /// rows themselves.
+    ///
+    /// **`PRAGMA foreign_keys` is not set anywhere in this store, and the
+    /// default is off.** So `REFERENCES` here is documentation rather than
+    /// enforcement, there is no cascade, and a delete that removed `sessions`
+    /// first would leave the events behind as rows nothing points at and nothing
+    /// will ever clean up. Deleting children first is what makes this correct
+    /// whether or not the pragma is ever turned on, which is why the order is
+    /// stated rather than inherited from a constraint that is not in force.
+    ///
+    /// # Why the full recordings are in here
+    ///
+    /// A full recording is a second `records` row — kind `recording`, written by
+    /// [`crate::full_recording::persist_full_recording`] — and **nothing links
+    /// it to the `session_events` row it came from**: no column, no foreign key.
+    /// The two are written from one event with one [`EventId`] in
+    /// `crates/sure-cli/src/hook.rs`, and the event id is copied into the
+    /// recording's document (`"event_id"`), so that is the join. It is read with
+    /// `json_extract` rather than by rewriting the document to carry a row id,
+    /// because the recording's own document is a promise about what was kept and
+    /// a schema change to `records` is not what this is.
+    ///
+    /// Leaving them behind would be the worst shape of answer this module could
+    /// give: the session rows gone, the raw transcript still on the disk, and
+    /// the report saying the delete succeeded. `docs/security/PRIVACY.md` allows
+    /// raw content only on an explicit opt-in, and the delete the user asked for
+    /// has to reach it.
+    ///
+    /// # What does not go
+    ///
+    /// Records that no event of a deleted session points at — a recorded goal,
+    /// an approval, a standard projection, a recording whose event was written
+    /// by some other path — are not session records and are left alone; they
+    /// have their own retention and their own delete path.
+    ///
+    /// The counts are returned rather than assumed. A caller that reports them
+    /// tells the user how many rows went; a caller that reported nothing on a
+    /// delete whose scope matched nothing would be reporting a deletion that did
+    /// not happen.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionEventStoreError::Store`] if the delete fails. Everything is one
+    /// transaction, so a failure removes nothing at all — there is no state in
+    /// which half a session is gone.
+    pub fn delete_sessions(
+        &self,
+        scope: SessionScope<'_>,
+    ) -> Result<DeletedSessions, SessionEventStoreError> {
+        let (where_clause, parameters) = scope.sql();
+
+        self.in_transaction(|connection| {
+            let selected = format!("SELECT id FROM sessions{where_clause}");
+            let mut statement = connection
+                .prepare(&selected)
+                .map_err(|error| self.write_error(error))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(parameters.clone()), |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(|error| self.write_error(error))?;
+
+            let mut session_ids = Vec::new();
+            for row in rows {
+                session_ids.push(row.map_err(|error| self.write_error(error))?);
+            }
+            // The statement borrows the connection, and every statement below
+            // needs it too.
+            drop(statement);
+
+            let Some(in_sessions) = id_list(&session_ids) else {
+                return Ok(DeletedSessions::default());
+            };
+
+            // What the events being deleted own and what they were written as.
+            // Read before the events go, because after that there is nothing
+            // left to read them from.
+            let (record_ids, event_ids) = {
+                let sql = format!(
+                    "SELECT record_row_id, event_id FROM session_events \
+                     WHERE session_row_id IN ({in_sessions})"
+                );
+                let mut statement = connection
+                    .prepare(&sql)
+                    .map_err(|error| self.write_error(error))?;
+                let rows = statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|error| self.write_error(error))?;
+                let mut record_ids = Vec::new();
+                let mut event_ids = Vec::new();
+                for row in rows {
+                    let (record_id, event_id) = row.map_err(|error| self.write_error(error))?;
+                    record_ids.extend(record_id);
+                    event_ids.push(event_id);
+                }
+                (record_ids, event_ids)
+            };
+
+            let events = connection
+                .execute(
+                    &format!("DELETE FROM session_events WHERE session_row_id IN ({in_sessions})"),
+                    [],
+                )
+                .map_err(|error| self.write_error(error))?;
+
+            let records = match id_list(&record_ids) {
+                None => 0,
+                Some(in_records) => connection
+                    .execute(
+                        &format!("DELETE FROM records WHERE id IN ({in_records})"),
+                        [],
+                    )
+                    .map_err(|error| self.write_error(error))?,
+            };
+
+            // The full recordings those same events wrote. `event_id` is the
+            // only thing the two rows share — see the module-level note above
+            // `delete_sessions` — so it is what the join is made of. The ids are
+            // bound rather than interpolated: they are text out of the store,
+            // and a text value is the one kind that can end a SQL literal.
+            let recordings = if event_ids.is_empty() {
+                0
+            } else {
+                let placeholders = vec!["?"; event_ids.len()].join(", ");
+                let sql = format!(
+                    "DELETE FROM records WHERE kind = ? \
+                     AND json_extract(document, '$.event_id') IN ({placeholders})"
+                );
+                let mut values: Vec<SqlValue> =
+                    vec![SqlValue::Text(RecordKind::Recording.as_str().to_owned())];
+                values.extend(event_ids.into_iter().map(SqlValue::Text));
+                connection
+                    .execute(&sql, rusqlite::params_from_iter(values))
+                    .map_err(|error| self.write_error(error))?
+            };
+
+            let sessions = connection
+                .execute(
+                    &format!("DELETE FROM sessions WHERE id IN ({in_sessions})"),
+                    [],
+                )
+                .map_err(|error| self.write_error(error))?;
+
+            Ok(DeletedSessions {
+                sessions: u64::try_from(sessions).unwrap_or(0),
+                events: u64::try_from(events).unwrap_or(0),
+                records: u64::try_from(records).unwrap_or(0),
+                recordings: u64::try_from(recordings).unwrap_or(0),
+            })
+        })
+    }
+
     /// List sessions whose retention has expired.
     ///
     /// # Errors
@@ -376,22 +727,7 @@ impl<'a> SessionEventStore<'a> {
             )
             .map_err(|error| self.write_error(error))?;
         let rows = statement
-            .query_map([before_ms], |row| {
-                Ok(StoredSession {
-                    row_id: row.get(0)?,
-                    harness_session_id: row.get(1)?,
-                    sure_session_id: parse_session_id(row.get::<_, String>(2)?)?,
-                    project_root: row.get(3)?,
-                    project_fingerprint: row.get(4)?,
-                    harness_source: row.get(5)?,
-                    capability_tier: row
-                        .get::<_, Option<i64>>(6)?
-                        .and_then(|n| CapabilityTier::from_number(n as u8)),
-                    started_at: row.get(7)?,
-                    retention_days: row.get(8)?,
-                    retained_until_ms: row.get(9)?,
-                })
-            })
+            .query_map([before_ms], read_session_row)
             .map_err(|error| self.write_error(error))?;
 
         let mut sessions = Vec::new();
@@ -550,22 +886,7 @@ impl<'a> SessionEventStore<'a> {
              FROM sessions \
              WHERE harness_session_id = ?1 AND project_root = ?2 AND harness_source = ?3",
             rusqlite::params![harness_session_id, project_root, harness_source],
-            |row| {
-                Ok(StoredSession {
-                    row_id: row.get(0)?,
-                    harness_session_id: row.get(1)?,
-                    sure_session_id: parse_session_id(row.get::<_, String>(2)?)?,
-                    project_root: row.get(3)?,
-                    project_fingerprint: row.get(4)?,
-                    harness_source: row.get(5)?,
-                    capability_tier: row
-                        .get::<_, Option<i64>>(6)?
-                        .and_then(|n| CapabilityTier::from_number(n as u8)),
-                    started_at: row.get(7)?,
-                    retention_days: row.get(8)?,
-                    retained_until_ms: row.get(9)?,
-                })
-            },
+            read_session_row,
         )
     }
 
@@ -637,6 +958,49 @@ impl<'a> SessionEventStore<'a> {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64)
     }
+}
+
+/// Read one `sessions` row, in the column order every query in this module
+/// selects.
+///
+/// One reader for the three places a session row is read — by identifier, by
+/// harness binding, and by age — so that a column added to the query is a column
+/// added here rather than to two of the three.
+fn read_session_row(row: &rusqlite::Row<'_>) -> Result<StoredSession, rusqlite::Error> {
+    Ok(StoredSession {
+        row_id: row.get(0)?,
+        harness_session_id: row.get(1)?,
+        sure_session_id: parse_session_id(row.get::<_, String>(2)?)?,
+        project_root: row.get(3)?,
+        project_fingerprint: row.get(4)?,
+        harness_source: row.get(5)?,
+        capability_tier: row
+            .get::<_, Option<i64>>(6)?
+            .and_then(|n| CapabilityTier::from_number(n as u8)),
+        started_at: row.get(7)?,
+        retention_days: row.get(8)?,
+        retained_until_ms: row.get(9)?,
+    })
+}
+
+/// A comma-separated list of row ids for an `IN (…)` clause, or `None` for an
+/// empty one.
+///
+/// `None` rather than `String::new()`, because `IN ()` is a syntax error in
+/// SQLite and a caller that spelled it would get a failed delete reported as a
+/// parse failure rather than as "nothing matched". The ids are `i64`s this
+/// process read out of the store, so nothing a project controls is interpolated
+/// here.
+fn id_list(ids: &[i64]) -> Option<String> {
+    if ids.is_empty() {
+        return None;
+    }
+    Some(
+        ids.iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 fn parse_session_id(value: String) -> Result<SessionId, rusqlite::Error> {

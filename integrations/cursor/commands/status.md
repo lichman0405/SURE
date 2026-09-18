@@ -9,4 +9,4 @@ Resolve the local SURE binary in this order:
 
 If SURE is not found, tell the user that SURE is not installed and stop. Do not fabricate status.
 
-Run `sure history` for the current project and report what SURE has actually recorded. Distinguish missing integration evidence from clean status.
+Run `sure history` and report what SURE has actually recorded. It lists every session SURE has recorded on this machine, not only this project's, most recently recorded first; `sure history show <SURE_SESSION_ID>` reads the events of one. Distinguish missing integration evidence from clean status.

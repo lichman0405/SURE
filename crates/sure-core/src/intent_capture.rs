@@ -154,7 +154,17 @@ impl From<FullRecordingError> for PersistObservedError {
 ///
 /// The [`ProjectIntent`] is always persisted via [`crate::project_intent::record`].
 /// The original [`IngestedEvent`] is persisted as a full recording **only** when
-/// `consent` is [`FullRecordingConsent::Full`].
+/// `recording_days` is `Some`.
+///
+/// # Why one argument rather than a consent and a duration
+///
+/// `recording_days` is `Some(days)` to write the raw event and keep it that many
+/// days, and `None` to write no recording at all — which is what
+/// [`FullRecordingConsent::ProjectionOnly`] means. The caller decides that first,
+/// from [`crate::config::authority::Authority::full_recording_retention_days`] and
+/// the consent it resolved; this function does not take both a consent and a
+/// duration it would have to keep consistent with each other. Two arguments that
+/// can contradict each other are two arguments that eventually will.
 ///
 /// # Errors
 ///
@@ -167,18 +177,25 @@ pub fn persist_observed_intent(
     fingerprint: &FingerprintId,
     event: &IngestedEvent,
     event_id: &EventId,
-    consent: FullRecordingConsent,
+    recording_days: Option<i64>,
 ) -> Result<PersistOutcome, PersistObservedError> {
     let intent_rows =
         record(store, project_root, fingerprint, intent).map_err(PersistObservedError::Intent)?;
 
-    let recording_row = if consent == FullRecordingConsent::Full {
-        Some(
-            persist_full_recording(store, event, event_id, project_root, fingerprint, consent)
-                .map_err(PersistObservedError::Recording)?,
-        )
-    } else {
-        None
+    let recording_row = match recording_days {
+        Some(days) => Some(
+            persist_full_recording(
+                store,
+                event,
+                event_id,
+                project_root,
+                fingerprint,
+                FullRecordingConsent::Full,
+                days,
+            )
+            .map_err(PersistObservedError::Recording)?,
+        ),
+        None => None,
     };
 
     Ok(PersistOutcome {
@@ -201,7 +218,9 @@ mod tests {
 
     use super::*;
     use crate::config::{Config, ConfigSource, LoadedConfig};
-    use crate::full_recording::full_recordings_for_project;
+    use crate::full_recording::{
+        DEFAULT_FULL_RECORDING_RETENTION_DAYS, full_recordings_for_project,
+    };
     use crate::store::{HistoryFilter, RecordKind, Store};
 
     fn file(text: &str) -> LoadedConfig {
@@ -351,7 +370,7 @@ mod tests {
             &fingerprint,
             &event,
             &event_id,
-            FullRecordingConsent::Full,
+            Some(DEFAULT_FULL_RECORDING_RETENTION_DAYS),
         )
         .unwrap();
 
@@ -398,7 +417,7 @@ mod tests {
             &fingerprint,
             &event,
             &event_id,
-            FullRecordingConsent::ProjectionOnly,
+            None,
         )
         .expect("persist succeeds");
 
@@ -433,7 +452,7 @@ mod tests {
             &fingerprint,
             &event,
             &event_id,
-            FullRecordingConsent::Full,
+            Some(DEFAULT_FULL_RECORDING_RETENTION_DAYS),
         )
         .expect("persist succeeds");
 

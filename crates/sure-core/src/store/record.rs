@@ -188,7 +188,7 @@ impl fmt::Display for RecordKind {
 /// The fields are public because a report has to render them and there is
 /// nothing here that a caller could corrupt: the value is a copy of what was
 /// stored, and changing the copy cannot reach the database.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredRecord {
     /// The row's identity. Stable for the life of the file — see the
     /// `AUTOINCREMENT` note in `sql/0001_records.sql`.

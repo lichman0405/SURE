@@ -56,6 +56,7 @@ use sure_domain::variants::variants;
 
 use super::values::{PrivacyMode, ProjectRequest, ProtectionMode};
 use super::{Config, ConfigError, LoadedConfig};
+use crate::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS;
 
 /// One layer of configuration.
 ///
@@ -114,11 +115,22 @@ impl Layer {
 pub struct Resolved<T> {
     /// The value in effect.
     pub value: T,
-    /// The most trusted layer that asked for something stricter than the
-    /// default, or `None` when no layer did.
+    /// The most trusted layer that chose the value in effect by naming
+    /// something other than the default, or `None` when no layer did.
     ///
-    /// `None` is not "unknown": the settings this is used for are the *strict*
-    /// ones, so a layer that did not choose one chose what SURE does anyway.
+    /// `None` is not "unknown": a layer that did not name a value chose what
+    /// SURE does anyway, which is what every one of these settings defaults to.
+    ///
+    /// For [`Authority::protection`] and [`Authority::privacy_mode`] — the two
+    /// restrictions both layers can only make firmer — "named something other
+    /// than the default" and "asked for something stricter" are the same
+    /// sentence, and this field has always meant the firmer of the two values.
+    /// [`Authority::full_recording_retention_days`] is the one user of this type
+    /// where they come apart, because the *user* may also name a duration
+    /// longer than the default while a project may not. There `by` names the
+    /// layer whose number is in effect, whoever that is; what a project may not
+    /// do is name the number in the first place, and a project's attempt to do
+    /// so is a [`Privilege`] rather than a value here.
     pub by: Option<Layer>,
 }
 
@@ -249,7 +261,7 @@ impl Authority {
         };
         let project = self.project.config.requested_privileges();
 
-        ProjectRequest::ALL
+        let mut privileges: Vec<Privilege> = ProjectRequest::ALL
             .iter()
             .copied()
             .filter_map(|request| {
@@ -273,7 +285,114 @@ impl Authority {
                     granted_by,
                 })
             })
-            .collect()
+            .collect();
+
+        // `ProjectRequest::ExtendedRetention` is the one request neither file
+        // can be asked about on its own: a project naming 30 days has asked for
+        // nothing when the user already allows 30, and has asked for more than
+        // they allowed when the user allows 7 or said nothing at all. It is
+        // therefore decided here, from both files, and appended — which is also
+        // where `ProjectRequest::ALL` puts it, so the list stays in the order
+        // this method documents.
+        if let Some(escalation) = self.retention_escalation() {
+            privileges.push(escalation);
+        }
+        privileges
+    }
+
+    /// The project's request to keep data for longer than the user allows.
+    ///
+    /// `None` when the project named no duration, or named one no longer than
+    /// the ceiling. The ceiling is the user's own number of days, or the default
+    /// when the user named none — a repository the user merely opened is not a
+    /// reason to keep their activity for longer than SURE would have kept it
+    /// unasked.
+    ///
+    /// Recorded whether or not `privacy.full_recording` is on, and that is not
+    /// an oversight: the two settings are separate, a project may set them in
+    /// either order, and a build that recorded this only when recording happened
+    /// to be enabled would make "asked and refused" and "never asked" the same
+    /// list for as long as the boolean stayed off.
+    fn retention_escalation(&self) -> Option<Privilege> {
+        let project = self.project.config.privacy.full_recording_retention_days?;
+        (project > self.retention_ceiling_days()).then_some(Privilege {
+            request: ProjectRequest::ExtendedRetention,
+            asked_by: vec![Layer::Project],
+            granted_by: None,
+        })
+    }
+
+    /// The most days of full recording the user has allowed.
+    ///
+    /// The user's own setting when there is one, and
+    /// [`DEFAULT_FULL_RECORDING_RETENTION_DAYS`] when there is not. Only
+    /// [`Authority::full_recording_retention_days`] and
+    /// [`Authority::retention_escalation`] read it, so that the ceiling the
+    /// project is measured against cannot drift from the value in effect.
+    fn retention_ceiling_days(&self) -> i64 {
+        self.user
+            .as_ref()
+            .and_then(|loaded| loaded.config.privacy.full_recording_retention_days)
+            .unwrap_or(DEFAULT_FULL_RECORDING_RETENTION_DAYS)
+    }
+
+    /// How long a full recording is kept, in days.
+    ///
+    /// # Why this is not [`Authority::protection`] with a different rank
+    ///
+    /// Protection and privacy mode are symmetric: "stricter" means the same
+    /// thing to both layers, so the stricter of the two wins and `resolve` is
+    /// the whole of the rule. Retention is not symmetric, and this method is the
+    /// difference:
+    ///
+    /// - the **user** may name any number of days, including one larger than the
+    ///   default, because deciding to keep one's own machine's records for
+    ///   longer is a person's decision about their own data;
+    /// - the **project** may only ever shorten what the user allowed. Naming a
+    ///   longer period raises the value in effect by nothing at all, and leaves
+    ///   a refused [`ProjectRequest::ExtendedRetention`] behind in
+    ///   [`Authority::privileges`] — a refusal, not a clamp that silently keeps
+    ///   the shorter period while reporting the longer one.
+    ///
+    /// `docs/architecture/CONFIG_AUTHORITY.md` states the general rule this is
+    /// an instance of: a lower-authority source cannot weaken a higher-authority
+    /// restriction. The comment beside the `full_recording` test in this module
+    /// says the same thing about recording at all — recording more is not
+    /// running more — and keeping it longer is recording more.
+    ///
+    /// # What a user sees
+    ///
+    /// The default when no file names a duration: `3`, for
+    /// [`DEFAULT_FULL_RECORDING_RETENTION_DAYS`]'s reason, with `by: None`,
+    /// which is `Resolved`'s way of saying "nothing beyond what SURE does
+    /// anyway". When the two layers disagree the answer is the shorter period
+    /// and `by` names the layer that decided it.
+    #[must_use]
+    pub fn full_recording_retention_days(&self) -> Resolved<i64> {
+        let user = self
+            .user
+            .as_ref()
+            .and_then(|loaded| loaded.config.privacy.full_recording_retention_days);
+
+        if let Some(days) = self.project.config.privacy.full_recording_retention_days
+            && days < self.retention_ceiling_days()
+        {
+            return Resolved {
+                value: days,
+                by: Some(Layer::Project),
+            };
+        }
+
+        match user {
+            Some(days) if days != DEFAULT_FULL_RECORDING_RETENTION_DAYS => Resolved {
+                value: days,
+                by: Some(Layer::User),
+            },
+            _ => Resolved {
+                value: DEFAULT_FULL_RECORDING_RETENTION_DAYS,
+                by: None,
+            },
+        }
     }
 
     /// The request with this name, as it was resolved.
@@ -451,6 +570,14 @@ mod tests {
     }
 
     /// Everything a project file can ask for, asked for at once.
+    ///
+    /// The retention number is here and is longer than
+    /// [`DEFAULT_FULL_RECORDING_RETENTION_DAYS`], which is what makes it a
+    /// request at all: the user in this fixture has no file, so the ceiling is
+    /// SURE's own default and a project naming thirty days has asked to keep the
+    /// user's activity for longer than they allowed. A project naming *fewer*
+    /// days has asked for nothing, and belongs in the tests below rather than
+    /// here.
     const ASKS_FOR_EVERYTHING: &str = "\
 execution:
   mode: host_confirmed
@@ -459,6 +586,7 @@ execution:
 privacy:
   full_recording: true
   telemetry: true
+  full_recording_retention_days: 30
 analysis:
   provider: claude_cli
 ";
@@ -679,6 +807,175 @@ analysis:
         assert_eq!(authority.privileges().len(), 1);
         assert!(authority.privilege(ProjectRequest::Telemetry).is_none());
         assert!(authority.privilege(ProjectRequest::Network).is_none());
+        assert!(
+            authority
+                .privilege(ProjectRequest::ExtendedRetention)
+                .is_none(),
+            "a file that named no duration asked for nothing about retention"
+        );
+    }
+
+    #[test]
+    fn a_project_may_shorten_the_retention_and_is_named_as_the_reason() {
+        // How long a recording is kept is a restriction, like protection and
+        // privacy mode, and it resolves the way those do: towards less. A
+        // project that asks for less is obeyed, and the answer says which file
+        // decided it.
+        let authority = both(
+            "privacy:\n  full_recording_retention_days: 30\n",
+            "privacy:\n  full_recording_retention_days: 7\n",
+        );
+
+        let resolved = authority.full_recording_retention_days();
+        assert_eq!(resolved.value, 7);
+        assert_eq!(resolved.by, Some(Layer::Project));
+        assert!(
+            authority
+                .privilege(ProjectRequest::ExtendedRetention)
+                .is_none(),
+            "a project that shortened the period was recorded as asking for more"
+        );
+    }
+
+    #[test]
+    fn a_project_cannot_extend_the_retention_and_is_refused_rather_than_clamped() {
+        // The criterion this setting was added for. A repository the user merely
+        // opened may not decide how long their own activity is kept: "recording
+        // more is not running more", and keeping it longer is the same kind of
+        // request.
+        //
+        // The user has no file in this fixture, so the ceiling is SURE's own
+        // default. What the project asked for is on the record as a **refusal**,
+        // and the number in effect is the shorter one. A clamp that silently
+        // kept the shorter period while reporting the longer one would be worse
+        // than either answer: the user would be told their records were kept for
+        // thirty days and they would not be.
+        let authority = project_only("privacy:\n  full_recording_retention_days: 30\n");
+
+        let resolved = authority.full_recording_retention_days();
+        assert_eq!(resolved.value, DEFAULT_FULL_RECORDING_RETENTION_DAYS);
+        assert_eq!(resolved.by, None);
+        let escalation = authority
+            .privilege(ProjectRequest::ExtendedRetention)
+            .expect(
+                "a project asked to keep the user's activity for longer, and nothing recorded it",
+            );
+        assert_eq!(escalation.asked_by, vec![Layer::Project]);
+        assert_eq!(escalation.granted_by, None);
+        assert!(escalation.is_refused_escalation());
+        assert!(!escalation.is_granted());
+    }
+
+    #[test]
+    fn the_user_may_keep_their_own_records_for_longer_than_the_default() {
+        // The asymmetry, and the reason this is not `Authority::protection` with
+        // a different rank. Deciding to keep one's own machine's records for
+        // longer is a person's decision about their own data; a file in somebody
+        // else's repository is not a person deciding anything about theirs.
+        let authority = both("privacy:\n  full_recording_retention_days: 365\n", "");
+
+        let resolved = authority.full_recording_retention_days();
+        assert_eq!(resolved.value, 365);
+        assert_eq!(resolved.by, Some(Layer::User));
+        assert!(authority.privileges().is_empty());
+    }
+
+    #[test]
+    fn a_project_naming_the_users_own_number_has_asked_for_nothing() {
+        // The boundary of `ExtendedRetention`, and the reason it is the one
+        // request `Config::requested_privileges` cannot produce: whether a file
+        // has made it is a fact about that file *and the one above it*. A
+        // project naming exactly what the user allowed is not an escalation, and
+        // the layer that decided the number is the user's.
+        let authority = both(
+            "privacy:\n  full_recording_retention_days: 30\n",
+            "privacy:\n  full_recording_retention_days: 30\n",
+        );
+
+        assert_eq!(authority.full_recording_retention_days().value, 30);
+        assert_eq!(
+            authority.full_recording_retention_days().by,
+            Some(Layer::User)
+        );
+        assert!(
+            authority
+                .privilege(ProjectRequest::ExtendedRetention)
+                .is_none(),
+            "a project that named the user's own number was refused as an escalation"
+        );
+
+        // One more day, and it is an escalation again — so the line is exactly
+        // where the ceiling is, and not a day to either side of it.
+        let one_more = both(
+            "privacy:\n  full_recording_retention_days: 30\n",
+            "privacy:\n  full_recording_retention_days: 31\n",
+        );
+        assert_eq!(one_more.full_recording_retention_days().value, 30);
+        assert_eq!(
+            one_more.full_recording_retention_days().by,
+            Some(Layer::User)
+        );
+        assert!(
+            one_more
+                .privilege(ProjectRequest::ExtendedRetention)
+                .is_some_and(|privilege| privilege.is_refused_escalation()),
+            "31 days against a user ceiling of 30 was not refused"
+        );
+    }
+
+    #[test]
+    fn nothing_naming_a_duration_means_the_default_and_says_so() {
+        // What a user sees when the value is absent, which is the ordinary case
+        // and the one every other test in this file would otherwise be a special
+        // case of. `by: None` is `Resolved`'s way of saying "nothing beyond what
+        // SURE does anyway": no file decided this, and a report that named a
+        // layer would be telling the user they had chosen something.
+        for authority in [project_only(""), both("", "")] {
+            let resolved = authority.full_recording_retention_days();
+            assert_eq!(resolved.value, DEFAULT_FULL_RECORDING_RETENTION_DAYS);
+            assert!(resolved.is_default());
+            assert_eq!(resolved.by, None);
+            assert!(authority.privileges().is_empty());
+        }
+
+        // And the distinction the whole setting turns on, in one fixture: a
+        // project that asks to *record* more asks for nothing about how long it
+        // is kept, so it leaves `FullRecording` on the record and no
+        // `ExtendedRetention` beside it. Deciding whether content is kept and
+        // deciding how long it is kept are two questions with two answers, which
+        // is why `privacy.full_recording` was not the answer to this criterion.
+        let recording_more = project_only("privacy:\n  full_recording: true\n");
+        let resolved = recording_more.full_recording_retention_days();
+        assert_eq!(resolved.value, DEFAULT_FULL_RECORDING_RETENTION_DAYS);
+        assert_eq!(resolved.by, None);
+        assert!(
+            recording_more
+                .privilege(ProjectRequest::FullRecording)
+                .is_some_and(|privilege| privilege.is_refused_escalation()),
+            "a project asking to record content was not refused"
+        );
+        assert!(
+            recording_more
+                .privilege(ProjectRequest::ExtendedRetention)
+                .is_none(),
+            "asking to record was read as asking to keep it for longer"
+        );
+    }
+
+    #[test]
+    fn a_project_can_shorten_to_zero_and_that_is_not_a_request_for_less_than_nothing() {
+        // Zero is a value a file may name — `Config::validate` allows it, and it
+        // means "keep this until the moment it is written" — and it shortens, so
+        // it is obeyed rather than refused. The case is worth its own test
+        // because it is the one where "the project asked for less" and "the
+        // project asked for nothing" are easiest to confuse.
+        let authority = both("", "privacy:\n  full_recording_retention_days: 0\n");
+        assert_eq!(authority.full_recording_retention_days().value, 0);
+        assert_eq!(
+            authority.full_recording_retention_days().by,
+            Some(Layer::Project)
+        );
+        assert!(authority.privileges().is_empty());
     }
 
     #[test]

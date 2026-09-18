@@ -27,6 +27,7 @@ A lower-authority source cannot weaken a higher-authority safety/privacy restric
 - enable dependency installation/network access;
 - disable user protection rules;
 - enable full transcript recording;
+- keep recorded content for longer than the user allowed;
 - provide/override secret credentials as an authority bypass;
 - delete authoritative history.
 
@@ -42,10 +43,15 @@ neither `Layer` nor `ConsentGrantor` offers a way to name it — a source a call
 can name but never obtain is how a documented feature becomes a believed one.
 
 Read plainly: this layer decides what the two files, together, are allowed to
-mean. **Nothing routes through it yet.** No command builds an `Authority` today;
-wiring it in front of the check pipeline is P13-T009. Until then the resolution
-is built and tested on its own, and a report that claims a project's request was
-refused would be describing behaviour that has not run.
+mean. **Two things route through it.** Since P7-T010 `sure check` reads its
+settings through `Authority::load`, which is where the arbitrated privacy mode
+and the statement about models come from; since P13-T003 `sure hook ingest` reads
+`Authority::full_recording_retention_days` for the same reason — how long a full
+recording is kept is a restriction, and a restriction resolved anywhere else
+would be a second rule. Wiring it in front of the rest of the check pipeline is
+P13-T009. Until that lands, everything else is built and tested on its own, and a
+report that claimed a project's request had been refused when nothing consulted
+the layer would be describing behaviour that has not run.
 
 ## The two answers
 
@@ -75,6 +81,14 @@ was asked for. Dropping it would make "the project asked and was refused" and
 "the project asked for nothing" the same list, which is the shape of report this
 product exists to replace.
 
+One request in that list cannot be read off a single file, and it is worth
+naming here because it is the only one: `ExtendedRetention`. A project naming 30
+days has asked for nothing if the user already allows 30, and has asked for more
+than they allowed if the user allows 7 or named nothing at all. So it is not in
+`Config::requested_privileges` — that reads one file — and is decided by
+`Authority::privileges()` from both, which is also where `ProjectRequest::ALL`
+puts it.
+
 `Authority::permissions()` is the permission set those grants add up to. It is
 not the answer to whether an action may run: that is
 `sure_domain::execution::decide`, which also needs a mode and treats a command it
@@ -91,6 +105,24 @@ out is never the escalation.
 A layer that asked for nothing is `by: None`, which means "nothing beyond the
 default" and not "SURE did not work it out". A report that could not tell those
 apart would be unable to say whether it had looked.
+
+**`privacy.full_recording_retention_days` is a restriction that is not
+symmetric**, and it is the one place where "the stricter value" needs saying out
+loud: shorter is stricter, whoever asked for it. The user's own file may name any
+number of days, including one longer than SURE's default, because how long a
+person keeps their own machine's records is their decision. A project file may
+only shorten it. Naming a longer period does not raise the number that is used
+and does not silently keep the shorter one either: it leaves a refused
+`ProjectRequest::ExtendedRetention` in `Authority::privileges()`, so a report can
+say what was asked for. The comparison is against the user's number, or SURE's
+default when the user named none — a repository the user merely opened is not a
+reason to keep their activity longer than SURE would have kept it unasked.
+
+This is the same rule as `full_recording` one step along: recording more is not
+running more, and keeping what was recorded for longer is recording more.
+`crates/sure-core/src/config/authority.rs` states it as "Protection and privacy
+mode are symmetric... Retention is not", and it is why this cannot be resolved by
+the same function that resolves protection with the rank turned round.
 
 `Authority::privacy_mode()` is not only a rule the code enforces; it is what a
 run **reports**. `sure check` reads its settings through `Authority::load`, and

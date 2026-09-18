@@ -367,13 +367,45 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     events through this real decision path. Capability tier remains Observed
     (Tier 1) because the hook manifest does not confirm Claude Code enforces the
     response.
+54. A worker agent completed `P10-T007` — *Implement Claude full-recording
+    opt-in* — as commit `a01155f`. The supervisor re-ran the full gate set and
+    accepted the task. `sure hook ingest` now reads the project's
+    `privacy.full_recording` setting and, when opted in, persists a redacted full
+    recording alongside the standard session event. The full-recording write is
+    best-effort and never affects the protection decision returned to the harness.
 
 **Phase P11 is open at 7 of 9; Phase P10 is open at 6 of 8.** The READY list is now
-`P10-T007`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+`P10-T008`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
 `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T007`, *"Claude Code capability reporting and tier honesty"*, which is the next
+`P10-T008`, *"Claude synthetic E2E check-repair-recheck"*, which is the next
 concrete action.
+
+## What `P10-T007` added
+
+- `crates/sure-cli/src/hook.rs` — wired full-recording opt-in into hook ingestion:
+  - `run_ingest` generates one `EventId` and passes it to `persist_event` so the
+    session event and the full recording share the same identifier.
+  - `persist_event` opens the discovered store and persists the session event via
+    `SessionEventStore::persist` as before.
+  - New `persist_event_with_paths` helper loads the project's full `Config` and,
+    when `privacy.full_recording` is `true`, calls
+    `sure_core::full_recording::persist_full_recording` with
+    `FullRecordingConsent::Full`; otherwise it uses `ProjectionOnly`. Any failure
+    is ignored — the hook decision is never blocked by a recording write.
+  - Added integration tests that create a temporary project with a `sure.yaml`
+    opt-in flag, persist a `claude-code` event, and assert that a full recording
+    is stored when opted in and absent when opted out.
+
+## Validation of `P10-T007`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T006` added
 

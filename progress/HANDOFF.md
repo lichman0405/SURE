@@ -514,8 +514,14 @@ task graph is the plan, `taskctl validate` is the check, and a supervisor who
 adds a task to close a gap in it is changing the plan rather than following it.
 Until the owner decides, `P12-T009` is instructed to route every tool through
 the existing `Command::report` path so that there is exactly one engine path for
-the orchestrator to land on, and `P12-T007` is held back because an evidence
-bridge that feeds a check nobody can run would be built on sand.
+the orchestrator to land on.
+
+`P12-T007` was briefly held back on the argument that an evidence bridge feeding
+a check nobody can run would be built on sand. That argument does not survive
+reading the task: `sure hook ingest` runs today, so a Codex evidence bridge is
+independently testable, and §14 of `MASTER_PROMPT.md` prefers the lowest-numbered
+READY task. It is queued next behind `P12-T009`, once the `sure-cli` working tree
+is free — the two would otherwise write the same crate at the same time.
 
 ### Open plan-level risk: the detectors cannot reach the severities the corpus requires
 
@@ -589,6 +595,16 @@ Two test files, both new:
   **exact** proposal set, including that `/api/health` produces nothing. This is
   the file that makes "SURE detects this" a measurement instead of a claim; it
   was not in the brief and the worker disclosed it as a deliberate addition.
+
+**For whoever runs `P16-T007` (dogfood):** SURE's discovery excludes tool output
+and version-control directories by fixed name tables and deliberately does *not*
+read `.gitignore` (`docs/architecture/PROJECT_DISCOVERY.md`), so pointing SURE at
+this repository will scan `fixtures/adversarial/**` and report the deliberately
+fake payment, auth, email, button, analytics and route code as exactly what it
+is. That is a true finding about a true file, not a defect to repair: the
+fixtures exist to be fake, each README says so, and `P14-T012` depends on them
+staying that way. The dogfood report should name them as an expected class with
+the fixture READMEs as evidence rather than "fixing" them.
 
 Two deviations, both disclosed by the worker and both kept: `route-mismatch`
 ships a small Express-shaped shim rather than real Express (SURE's route reader

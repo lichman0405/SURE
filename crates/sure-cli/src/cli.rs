@@ -124,6 +124,19 @@ pub enum Command {
         id: Option<String>,
     },
 
+    /// Speak the Model Context Protocol to a coding harness on standard input
+    /// and standard output.
+    ///
+    /// Listed by `docs/architecture/MCP_BRIDGE.md` and named by the harness
+    /// integrations as `sure mcp serve`. See `crate::mcp` for what this build
+    /// answers a caller and why it is written through the same dispatch as
+    /// every other command.
+    Mcp {
+        /// What SURE should do with the MCP bridge.
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
     /// Print the version of the harness protocol this build speaks.
     Protocol {
         /// Check whether this build can talk to a caller that speaks this
@@ -169,6 +182,21 @@ pub enum ConfigAction {
     Validate,
 }
 
+/// What a harness can ask `sure mcp` to do.
+///
+/// `serve` is not optional, for `sure hook`'s reason: a `sure mcp` that ran
+/// nothing would be a harness reading "SURE is listening" out of a process that
+/// had already exited. `sure mcp` on its own is a wrong command line, status 2.
+#[derive(Debug, Subcommand)]
+pub enum McpAction {
+    /// Speak MCP over standard input and output until the caller closes it.
+    ///
+    /// The caller launches this process; SURE never listens on anything. See
+    /// `crate::mcp::serve` for the transport and the handshake, and
+    /// `docs/architecture/MCP_BRIDGE.md` for what each tool answers today.
+    Serve,
+}
+
 /// What a harness can ask `sure hook` to do.
 #[derive(Debug, Subcommand)]
 pub enum HookAction {
@@ -203,6 +231,7 @@ impl Command {
             Self::Config { .. } => "config",
             Self::Hook { .. } => "hook",
             Self::Explain { .. } => "explain",
+            Self::Mcp { .. } => "mcp",
             Self::Protocol { .. } => "protocol",
             Self::Version => "version",
         }

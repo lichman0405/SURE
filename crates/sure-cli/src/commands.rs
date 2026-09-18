@@ -30,9 +30,50 @@
 //! `docs/architecture/CLI.md` records what each command is for, and this file is
 //! where the ones that cannot run say so to the user rather than to a reader of
 //! the docs.
+//!
+//! # Where `sure mcp serve` sits
+//!
+//! It is the one command that is carried out *and* whose work is mostly other
+//! commands'. It speaks the Model Context Protocol, and each of the tools it
+//! exposes is one [`Command`] value put through [`Command::report`] — the same
+//! dispatch every other command goes through, so the MCP surface cannot check,
+//! repair or report anything by a path of its own, and cannot answer a caller
+//! with words the command line would not use. When a tool's command is not
+//! implemented in this build, the tool call is a *tool error carrying that
+//! command's refusal*, not a refusal of `sure mcp`: the caller asked for a
+//! check, and telling it that the bridge is missing would name the wrong thing.
+//!
+//! The arm below therefore has two jobs at once, and they are worth separating:
+//! it decides that MCP is implemented (rather than a [`NotYet`]), and it hands
+//! the session to [`crate::mcp`], which decides what every message in it
+//! answers. What it must never do is answer a tool call itself.
 
 use crate::cli::{Command, HistoryAction};
 use crate::report::{NotYet, Report};
+
+/// The commands this build carries out.
+///
+/// Every other command answers [`Report::Unavailable`]. Written as a list
+/// rather than derived at run time, because deriving it would mean *running*
+/// each command to find out what it does — `sure doctor` examines this machine
+/// and `sure check` will one day read a project, and a status question must not
+/// cause either. A test,
+/// `the_commands_this_build_implements_are_exactly_these_three`, asks the
+/// dispatch what it answers for every command in the grammar and fails when
+/// this list and the dispatch disagree, so the two cannot drift apart quietly.
+/// `mcp` is the one name that test cannot ask about, because asking would start
+/// a session that reads standard input; it is removed by name there, and what
+/// it answers is checked over a pipe instead.
+///
+/// `sure mcp serve` answers a caller's `sure_status` from this list rather than
+/// from one of its own: a tool that said "checking works" while `sure check`
+/// refused would be SURE's own false green, told to an agent.
+///
+/// `mcp` is in the list because it is true, not because a caller needs telling:
+/// the caller is already speaking to it through this process. It is listed
+/// under the name a user types, which is what a caller comparing this list
+/// against `sure --help` will find there.
+pub const IMPLEMENTED: &[&str] = &["doctor", "hook", "mcp", "protocol", "version"];
 
 impl Command {
     /// What SURE does about this command, in this build.
@@ -88,6 +129,26 @@ impl Command {
                 "No configuration was read.",
             ),
             Self::Hook { action } => crate::hook::run(action),
+
+            // A command this build carries out, and the first one that runs for
+            // as long as its caller wants it to rather than until it has an
+            // answer. The decision this arm records is *why it is an arm and not
+            // a [`NotYet`]*: `sure mcp serve` really does serve — it speaks the
+            // Model Context Protocol, negotiates a version, and answers
+            // `tools/list` and `tools/call` — and the tools it exposes route to
+            // the commands above and below through this same dispatch. So a
+            // tool whose command is not implemented answers with *that*
+            // command's refusal, in that command's words, as a tool error; a
+            // refusal of `sure mcp` would be a second, weaker sentence about the
+            // same missing work, and the caller would be told about the bridge
+            // instead of about the check. `crate::mcp` is where that is written
+            // down.
+            //
+            // The session itself is run here rather than in [`Report`] for
+            // [`Self::Doctor`]'s reason: the match holds a report, and the work
+            // belongs one level in. What comes back is a summary of the session,
+            // not a claim about any project.
+            Self::Mcp { action } => crate::mcp::run(action),
             Self::Explain { .. } => not_yet(
                 self,
                 "explain one recorded result in plain language",
@@ -125,7 +186,7 @@ fn history_name(action: &Option<HistoryAction>) -> &'static str {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::cli::{ConfigAction, HookAction};
+    use crate::cli::{ConfigAction, HookAction, McpAction};
 
     /// Every invocation the grammar accepts, built by hand.
     ///
@@ -143,6 +204,15 @@ mod tests {
     /// point it somewhere else: on Windows the data directory comes from
     /// `SHGetKnownFolderPath`, which ignores `LOCALAPPDATA`. `crate::check`'s
     /// tests drive the same code against locations they name.
+    ///
+    /// `Mcp`. Every command in this list is asked once and answers, but
+    /// `sure mcp serve` reads standard input until its caller closes it — in a
+    /// test binary whose stdin is not a pipe, adding it here would block the
+    /// suite rather than check anything, and a run of it would write a protocol
+    /// into whatever stdout the harness had. Its behaviour is driven instead by
+    /// `tests/mcp_protocol.rs`, which gives it a stdin and a stdout of its own.
+    /// What this list still owes MCP is the check below: `Mcp` is **not** in
+    /// [`IMPLEMENTED`] because it is not in this list, and the two must agree.
     fn every_command() -> Vec<Command> {
         vec![
             Command::Check {
@@ -240,7 +310,18 @@ mod tests {
                 // means somebody added one — and a test that quietly skipped it
                 // would be the only thing standing between an invented
                 // requirement and the history of the machine running the suite.
-                Report::GoalRecorded(_) | Report::Failed(_) => panic!(
+                //
+                // `Mcp` and `McpSession` join them for a different reason: they
+                // are unreachable from here because `every_command` holds no
+                // session (see its comment), not because a session would have a
+                // side effect. A session is not a claim about a project — it is
+                // the transport — and it is checked over a pipe rather than in
+                // this list. Reaching this arm would mean a command that is not
+                // `mcp` had answered with the bridge's own report.
+                Report::GoalRecorded(_)
+                | Report::Failed(_)
+                | Report::Mcp(_)
+                | Report::McpSession(_) => panic!(
                     "{command:?} produced {report:?}, and nothing in this list may have a \
                      side effect or a failure. See `every_command`."
                 ),
@@ -296,6 +377,12 @@ mod tests {
         // By name, once each: a command can be asked more than one way —
         // `sure protocol` with and without `--speaks` — and a name appearing
         // twice says nothing more than it appearing once.
+        //
+        // The name still says "three" from the task that wrote it, when `doctor`,
+        // `protocol` and `version` were the whole list; `hook` and then `mcp`
+        // joined it. It is left alone because `progress/DECISIONS.md` names it
+        // and `progress/` is not this task's to edit — but a reader should take
+        // the list below, not the number in the name, as the claim.
         let mut implemented: Vec<&str> = every_command()
             .iter()
             .filter(|command| !matches!(command.report(), Report::Unavailable(_)))
@@ -303,7 +390,41 @@ mod tests {
             .collect();
         implemented.sort_unstable();
         implemented.dedup();
-        assert_eq!(implemented, ["doctor", "hook", "protocol", "version"]);
+
+        // `mcp` is the one name in [`IMPLEMENTED`] that [`every_command`] cannot
+        // ask about, because a session reads stdin (see its comment) — and the
+        // reason is not incidental to this test: **calling `report()` on it here
+        // would start that session**, so the exception has to be made by name
+        // rather than by asking. What is checked here is that the exception is
+        // real and is exactly one name: the subtraction below proves `mcp` is in
+        // [`IMPLEMENTED`] exactly once, the equality against `expected` proves no
+        // *other* name in the list is one the loop cannot see, and the grammar is
+        // asked for the name so the literal is not a string that nothing ties to
+        // the command. That `sure mcp serve` deserves its place — the session
+        // answers, rather than refusing — is checked over a pipe, in
+        // `tests/mcp_protocol.rs`, which is the only place with a stdin to give
+        // it.
+        let expected: Vec<&str> = IMPLEMENTED
+            .iter()
+            .copied()
+            .filter(|name| *name != "mcp")
+            .collect();
+        assert_eq!(
+            expected.len() + 1,
+            IMPLEMENTED.len(),
+            "the exception above stopped being an exception: `mcp` appears in \
+             IMPLEMENTED a number of times other than once, so the list below is no \
+             longer what it says it is"
+        );
+        assert_eq!(
+            Command::Mcp {
+                action: McpAction::Serve
+            }
+            .name(),
+            "mcp",
+            "the name this test excepts is not the name the command answers under"
+        );
+        assert_eq!(implemented, expected);
     }
 
     #[test]

@@ -8,7 +8,8 @@ reimplementing them.
 P1-T008 built the framework: what SURE accepts, and how a result reaches a
 person and a script. P1-T009 added the first command whose answer depends on
 what it found; P1-T010 made `sure protocol` answer a caller that asks whether
-the two can talk. Three commands do their work. The rest are recognised, and say
+the two can talk; the harness work added `sure hook ingest`; P12-T009 added
+`sure mcp serve`. Five commands do their work. The rest are recognised, and say
 so.
 
 P2-T010 gave `sure check` its first flag with an effect: `--goal TEXT` records
@@ -26,8 +27,9 @@ contain, so it has its own section below.
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | recognised, not implemented |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
-| `sure hook ingest` | record one event from a coding harness | recognised, not implemented |
+| `sure hook ingest` | record one event from a coding harness | works |
 | `sure explain [ID]` | explain one recorded result in plain language | recognised, not implemented |
+| `sure mcp serve` | answer a coding harness that speaks the Model Context Protocol | works; each tool it exposes runs one command in this table and returns that command's own answer |
 | `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
 | `sure version` | print the version of this build | works |
 
@@ -134,6 +136,44 @@ a script that read prose would break the first time the prose was improved.
 ```json
 {"command":"protocol","details":{"agreed":false,"caller_speaks":2,"sure_speaks":1,"update":"sure"},"exit_code":3,"outcome":"unavailable","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
 ```
+
+## `sure mcp serve`
+
+The one command that runs for as long as its caller wants it to rather than until
+it has an answer, and a surface on the other commands rather than a command of
+its own. A coding harness launches the process, speaks the Model Context Protocol
+on its standard input and output, and closes the stream when it is done. SURE
+never listens on anything: there is no socket and no port, and the caller is the
+process that started this one.
+
+It answers a handshake, `ping`, `tools/list` and `tools/call`, and it exposes five
+tools: `sure_check`, `sure_get_report`, `sure_get_repair`, `sure_recheck` and
+`sure_status`. Each tool builds the command line in the table above and asks
+`Command::report` — the same dispatch every other command goes through — so a
+tool cannot check, repair or report anything by a path of its own, and cannot
+answer in words the command line would not use. A tool whose command this build
+cannot carry out is a *tool error carrying that command's own refusal*, not a
+refusal of `sure mcp`: the caller asked for a check, and telling it the bridge is
+missing would name the wrong thing.
+
+A tool call may name a project and nothing else. Execution mode, privacy settings
+and protection policy come from the user's own SURE configuration on the user's
+own machine, and **no argument can select or override them**; a call that tries
+is refused with a protocol error that says so. A project path is passed to the
+command unchanged, so a relative or unreadable path is refused exactly as the
+command line refuses it.
+
+`stdout` carries protocol messages and nothing else, which is why a caller must
+not ask for `--format json`: that flag means "everything SURE says goes to
+`stdout` as one frame", and the session summary would be written there after the
+last message. The default format puts the summary on `stderr`, where a diagnostic
+belongs.
+
+The process returns 0 when the session ends normally and 5 when the stream it was
+talking on could not be read or written. The statuses of the commands behind the
+tools do not travel in the process's status: each tool result carries its
+command's own frame, `exit_code` included. `docs/architecture/MCP_BRIDGE.md` is
+the contract for the protocol side.
 
 ## `sure check --goal TEXT`
 
@@ -279,6 +319,14 @@ becomes a guess — which is the reasoning ADR 0012 used to turn down a logging
 framework. When P12-T009's MCP server needs the same envelope, it moves, with a
 real second consumer in hand.
 
+P12-T009 arrived and the move did not happen, which is a decision rather than an
+omission. The bridge did not need a second envelope: it lives in this crate, it
+builds `Report::Mcp` values, and a protocol message *is* that report's machine
+form — the same `Report::frame` writes both. The tool results embed the
+command's frame verbatim under `structuredContent.sure`, which is that same call
+rather than a second renderer agreeing with the first. The trigger for the move is
+a consumer outside this crate needing the shape; a bridge inside it is not one.
+
 ## Exit statuses
 
 | Status | Meaning | Who returns it |
@@ -338,6 +386,10 @@ anything about output or status: both are SURE's, and both have one home.
 | No module outside `output.rs` writes to a stream | same file, `only_the_output_module_writes_to_a_stream` |
 | `sure hook ingest` does not read standard input | same file, `hook_ingest_does_not_read_standard_input` |
 | The grammar is the list in this document | `crates/sure-cli/src/main.rs`, `the_grammar_is_the_one_docs_architecture_cli_md_lists` |
+| Every MCP tool answers with what the command line behind it answers | `crates/sure-cli/tests/mcp_protocol.rs`, `every_tool_answers_what_the_command_line_behind_it_answers` |
+| No MCP tool reports success for a project that was never checked | same file, `no_tool_reports_success_for_a_project_that_was_never_checked` |
+| No MCP argument can reach the execution, privacy or protection policy | same file, `no_argument_can_reach_the_execution_privacy_or_protection_policy` |
+| The bridge writes protocol messages to stdout and its summary to stderr | same file, `stdout_carries_protocol_messages_and_the_session_summary_goes_to_stderr` |
 | The doctor's labels and values line up | `crates/sure-cli/src/doctor.rs`, `every_label_the_report_prints_is_separated_from_its_value` |
 | `sure doctor` never reads the settings file | `crates/sure-core/tests/doctor.rs`, `the_diagnostic_never_reaches_for_the_settings_module` |
 | `sure doctor` never creates the store | same file, `the_report_never_creates_what_it_reports_on` |

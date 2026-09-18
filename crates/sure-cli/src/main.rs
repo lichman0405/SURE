@@ -105,8 +105,13 @@ mod tests {
         // The doc and the grammar are two views of one list, and this is the
         // check that they are the same list: a command documented and not
         // accepted is a user typing something SURE does not recognise.
+        //
+        // A transcription of §The commands in that doc, in the doc's order,
+        // because the doc is what a user reads and this is what a build can be
+        // asked. `mcp` is in both: the table lists `sure mcp serve`, so the
+        // grammar accepting it is not a command nobody documented.
         const DOCUMENTED: &[&str] = &[
-            "check", "recheck", "repair", "history", "doctor", "config", "hook", "explain",
+            "check", "recheck", "repair", "history", "doctor", "config", "hook", "explain", "mcp",
             "protocol", "version",
         ];
         let command = Cli::command();

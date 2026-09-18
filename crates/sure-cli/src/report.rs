@@ -42,6 +42,18 @@
 //! event, each with a schema in `schemas/`; this is the envelope a command
 //! answers in. `docs/architecture/PROTOCOL.md` records the distinction, because
 //! a sentence there says "everything SURE writes" and a CLI response is written.
+//!
+//! # The one frame that is not this envelope
+//!
+//! [`Report::Mcp`] — one Model Context Protocol message on its way to a
+//! harness — carries the message itself, because a JSON-RPC message is not a
+//! CLI response and the caller reading it is reading `id` and `result`, not
+//! `sure_version` and `command`. Wrapping one in the other would put SURE's
+//! envelope between an MCP client and the protocol it speaks, and the whole
+//! point of the bridge is that it speaks the protocol rather than a dialect of
+//! it. It is the only variant with a frame of its own. What this envelope
+//! exists for is still in the answer, where it belongs: every tool result
+//! carries the command's own frame, unmodified, under `structuredContent.sure`.
 
 use std::io::{self, Write};
 
@@ -188,6 +200,100 @@ pub struct Failed {
     pub detail: String,
 }
 
+/// One Model Context Protocol message, on its way to the caller.
+///
+/// # Why a protocol message is a [`Report`]
+///
+/// `sure mcp serve` speaks JSON-RPC over standard input and output, and
+/// `crates/sure-cli/tests/cli_contract.rs` admits exactly one module in this
+/// crate that names a process stream. Routing each message through the same
+/// `Report` → [`Format`](crate::output::Format) path every other command takes
+/// is what keeps both rules true at once: the bridge never writes to a stream,
+/// and there is still no second way out of this program. A bridge that opened
+/// its own path to stdout would be the first exception to the rule that makes
+/// "human and machine output are separated" checkable.
+///
+/// The cost is that this is the one variant whose machine form is not the CLI
+/// envelope — see the module comment. It is a message, and the caller reads it
+/// as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpMessage {
+    /// The message, exactly as it goes on the wire.
+    pub message: serde_json::Value,
+}
+
+impl McpMessage {
+    /// Whether this message tells the caller SURE could not answer.
+    ///
+    /// Two shapes say so, and both are decided here rather than at the two
+    /// places that build them, so that the outcome, the exit status and
+    /// `isError` cannot drift apart:
+    ///
+    /// 1. a JSON-RPC **error object**, which is what the protocol has for a
+    ///    request that was malformed, a method that is not here, or arguments
+    ///    SURE will not accept;
+    /// 2. a **tool result with `isError`**, which is how every tool whose
+    ///    command this build cannot carry out answers.
+    ///
+    /// The second is the one that matters most in this build, and the one a
+    /// predicate that only looked for `error` would get wrong: it would call
+    /// `sure check is not implemented in this build` an `ok` message. That is
+    /// SURE's own false green, told to an agent, which is the one thing this
+    /// program exists to prevent.
+    #[must_use]
+    pub fn is_error(&self) -> bool {
+        if self
+            .message
+            .get("error")
+            .is_some_and(|error| !error.is_null())
+        {
+            return true;
+        }
+        self.message
+            .get("result")
+            .and_then(|result| result.get("isError"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }
+}
+
+/// What one run of `sure mcp serve` did, up to the moment its caller closed it.
+///
+/// # Why the bridge reports a session rather than a result
+///
+/// Every other command answers a question and stops. This one runs for as long
+/// as its caller wants it to, so what it has to say at the end is what
+/// happened on the way: whether a handshake completed, and how much of the
+/// protocol went past. None of those numbers is a claim about a project — the
+/// claims are in the tool results, each in the words of the command it ran.
+///
+/// The counts are bounded by the session and mean nothing else: a request
+/// answered is a response written, whether the answer was a result or an error
+/// object, and `errors` counts the ones that were errors. That is the pair a
+/// person reads to tell "the harness asked for five things and SURE answered"
+/// from "the harness asked for five things and SURE refused four".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpSession {
+    /// Whether a caller completed the handshake.
+    pub initialized: bool,
+    /// The protocol revision the caller asked for, if it named one.
+    ///
+    /// Kept even when SURE answers with its own revision, because "which
+    /// version did it ask for" is the first question a person has when two
+    /// sides disagree, and the answer is not recoverable afterwards.
+    pub requested_protocol_version: Option<String>,
+    /// The revision SURE answered with.
+    pub agreed_protocol_version: Option<String>,
+    /// Requests answered, with a result or with an error object.
+    pub answered: u64,
+    /// Notifications received, which are answered with nothing at all.
+    pub notifications: u64,
+    /// `tools/call` requests received.
+    pub tool_calls: u64,
+    /// Messages answered with an error.
+    pub errors: u64,
+}
+
 /// The result of one command.
 ///
 /// Boxed where the payload is large, so that a variant carrying a page of
@@ -214,6 +320,13 @@ pub enum Report {
     ///
     /// The machine form is the decision JSON that the harness reads from stdout.
     HookDecision(sure_core::hook_protection::ProtectionDecision),
+    /// `sure mcp serve`, carrying one Model Context Protocol message for the
+    /// caller.
+    ///
+    /// The machine form is the message itself; see [`McpMessage`].
+    Mcp(Box<McpMessage>),
+    /// `sure mcp serve`, carrying what the session did before it ended.
+    McpSession(Box<McpSession>),
 }
 
 impl Report {
@@ -223,8 +336,14 @@ impl Report {
     /// `docs/architecture/CLI.md` documents. A reader switches on this;
     /// adding a variant here is adding a case every reader must handle, which
     /// is why it is a short list.
+    ///
+    /// Not `const`, and the one reason is [`Self::Mcp`]: whether a protocol
+    /// message is an error is read out of the message, and
+    /// `serde_json::Value`'s accessors are not `const`. The other arms were
+    /// `const` while that was free; keeping it would have meant a second copy
+    /// of the predicate here for the compiler's benefit.
     #[must_use]
-    pub const fn outcome(&self) -> &'static str {
+    pub fn outcome(&self) -> &'static str {
         match self {
             Self::Version | Self::Protocol => "ok",
             // A refusal to speak a caller's protocol is not this build failing;
@@ -267,12 +386,34 @@ impl Report {
                 | sure_core::hook_protection::ProtectionDecisionKind::Warn => "ok",
                 sure_core::hook_protection::ProtectionDecisionKind::Block => "not_green",
             },
+            // A protocol message is answered for the caller rather than
+            // reported to a user, and its outcome is the message's own: an
+            // error — a JSON-RPC error object, or a tool result carrying
+            // `isError` — says SURE could not answer, which is `unavailable`
+            // everywhere else on this surface. Never `failed`: nothing about
+            // this process went wrong, and never `not_green`: that is a
+            // statement about a project, and this is a statement about a
+            // request.
+            Self::Mcp(message) => {
+                if message.is_error() {
+                    "unavailable"
+                } else {
+                    "ok"
+                }
+            }
+            // A session that ran and ended because its caller stopped asking
+            // did what it says it does. A session that ended any other way is a
+            // [`Self::Failed`], because the only other ending is a stream that
+            // could not be read or written.
+            Self::McpSession(_) => "ok",
         }
     }
 
     /// The status this program exits with.
+    ///
+    /// Not `const`, for [`Self::outcome`]'s reason.
     #[must_use]
-    pub const fn exit_code(&self) -> u8 {
+    pub fn exit_code(&self) -> u8 {
         match self {
             Self::Version | Self::Protocol => exit::OK,
             // 3, not 4. `docs/architecture/CLI.md` reserves 4 for a refusal that
@@ -310,6 +451,20 @@ impl Report {
                 | sure_core::hook_protection::ProtectionDecisionKind::Warn => exit::OK,
                 sure_core::hook_protection::ProtectionDecisionKind::Block => exit::NOT_GREEN,
             },
+            // 3 rather than 0 for a message that says SURE could not answer, so
+            // that the status and the outcome keep telling one story: `ok` is
+            // the only outcome that may exit 0. It is not 1, because 1 says a
+            // project has problems and a protocol error says nothing about any
+            // project — and not 5, because nothing about this run went wrong; a
+            // caller asked for something SURE does not do.
+            Self::Mcp(message) => {
+                if message.is_error() {
+                    exit::UNAVAILABLE
+                } else {
+                    exit::OK
+                }
+            }
+            Self::McpSession(_) => exit::OK,
         }
     }
 
@@ -341,6 +496,23 @@ impl Report {
             Self::GoalRecorded(_) | Self::Unavailable(_) | Self::Failed(_) => false,
             // A hook decision is an answer: the command ran and produced a result.
             Self::HookDecision(_) => true,
+            // A protocol message is the session's answer to its caller, and it
+            // goes to stdout whether or not it carries an error: an MCP client
+            // reads refusals there too, and a refusal sent anywhere else is a
+            // client waiting for an answer that never comes. Which is also why
+            // the bridge writes this variant on the machine path only — see
+            // `crate::mcp`.
+            Self::Mcp(_) => true,
+            // The other way round, and for a reason from the protocol rather
+            // than from this crate: the specification says the server MUST NOT
+            // write anything to its standard output that is not a valid MCP
+            // message. The summary of a session is not one, so it is a
+            // diagnostic — stderr, which is where `is_an_answer` sends the
+            // human form of anything that is not an answer. A caller that ran
+            // `sure --format json mcp serve` gets the envelope on stdout
+            // instead; `docs/architecture/MCP_BRIDGE.md` says so, and the
+            // harness integrations do not do it.
+            Self::McpSession(_) => false,
         }
     }
 
@@ -471,7 +643,74 @@ impl Report {
                     )
                 }
             },
+            // A protocol message has no human form: it is JSON-RPC and its
+            // reader is a program. The arm is here because every variant has
+            // both, and it writes the message itself rather than a rendering of
+            // it, so that even a call site that took the human path by mistake
+            // would put a line on the stream its caller can still parse.
+            Self::Mcp(message) => writeln!(out, "{}", message.message),
+            Self::McpSession(session) => {
+                writeln!(
+                    out,
+                    "SURE spoke the Model Context Protocol on this process's standard input and \
+                     output, and the caller closed them."
+                )?;
+                writeln!(out)?;
+                match &session.agreed_protocol_version {
+                    Some(agreed) => writeln!(out, "  handshake         agreed to speak {agreed}")?,
+                    // The plainest true sentence available. A caller that never
+                    // completed a handshake was answered, and answered with a
+                    // refusal, but nothing agreed on a version.
+                    None => writeln!(out, "  handshake         the caller never completed one")?,
+                }
+                // Kept beside the version SURE answered with, because a person
+                // asking "why did it refuse my version" is asking for both.
+                if let Some(requested) = &session.requested_protocol_version {
+                    writeln!(out, "  caller asked for  {requested}")?;
+                }
+                writeln!(out, "  requests answered {}", session.answered)?;
+                writeln!(out, "  notifications     {}", session.notifications)?;
+                writeln!(out, "  tool calls        {}", session.tool_calls)?;
+                writeln!(out, "  errors            {}", session.errors)?;
+                writeln!(out)?;
+                writeln!(
+                    out,
+                    "None of this is a claim about a project: it says how much of the protocol \
+                     went past, and what went past inside each tool result was that command's own \
+                     report, in that command's own words."
+                )?;
+                writeln!(out)?;
+                writeln!(
+                    out,
+                    "SURE exited with status {}, which is what it returns when a session ends \
+                     because its caller stopped asking. That is not a claim that a project is \
+                     clean: the bridge itself checked nothing.",
+                    exit::OK
+                )
+            }
         }
+    }
+
+    /// The human form, as a string.
+    ///
+    /// For the one caller that needs the words rather than a stream:
+    /// `sure mcp serve` puts a command's own answer inside a tool result, and it
+    /// has to be the same sentence the command line would have printed. A second
+    /// rendering written in the bridge would be a second explanation of one
+    /// refusal, free to drift from the first — and the refusal is the whole of
+    /// what several of the tools answer today.
+    ///
+    /// Infallible, and says so by returning a `String` rather than a `Result`:
+    /// [`Report::human`]'s only error is the writer's, and the writer here is a
+    /// `Vec<u8>`, whose `write` returns `Ok` unconditionally. The lossy
+    /// conversion is a total function over bytes this function has just written
+    /// from `&str`s and integers — which is UTF-8 by construction — rather than
+    /// a way of hiding a failure.
+    #[must_use]
+    pub fn human_text(&self) -> String {
+        let mut buffer = Vec::new();
+        let _ = self.human(&mut buffer);
+        String::from_utf8_lossy(&buffer).into_owned()
     }
 
     /// Write the machine-readable form: one object, one line, no newline.
@@ -489,6 +728,12 @@ impl Report {
 
     /// The frame [`Report::machine`] writes.
     ///
+    /// Public for the one caller that needs the value rather than the bytes:
+    /// `sure mcp serve` puts a command's own frame, unmodified, inside a tool
+    /// result, so that a caller reading a tool result is reading exactly what
+    /// `sure … --format json` would have printed. Rendering it to a stream and
+    /// parsing it back would be the same value with a way to be different.
+    ///
     /// # Why `exit_code` is always here
     ///
     /// It was first written only for a refusal, on the idea that a field should
@@ -496,7 +741,16 @@ impl Report {
     /// one of the two things a caller switches on, and a frame where it is
     /// sometimes `null` is a frame a script has to special-case. The status the
     /// process returned is a fact about every run, so it is in every frame.
-    fn frame(&self) -> serde_json::Value {
+    #[must_use]
+    pub fn frame(&self) -> serde_json::Value {
+        // The one variant whose machine form is not this envelope: a protocol
+        // message *is* the message, `id` and `result` and all, and it is
+        // returned here before the envelope is built rather than assembled and
+        // then replaced. See the module comment; the fields the envelope exists
+        // for are inside the tool results, under `structuredContent.sure`.
+        if let Self::Mcp(message) = self {
+            return message.message.clone();
+        }
         let mut frame = json!({
             "sure_version": env!("CARGO_PKG_VERSION"),
             "protocol_version": sure_core::PROTOCOL_VERSION,
@@ -563,11 +817,33 @@ impl Report {
                 });
             }
             Self::Version | Self::Protocol => {}
+            // Returned before the envelope was built, above. The arm is here
+            // because the match is exhaustive, and it deliberately does
+            // nothing: an envelope built for a message and then thrown away
+            // would be work whose only purpose was to be discarded.
+            Self::Mcp(_) => {}
             Self::HookDecision(decision) => {
                 frame["decision"] = json!(decision.decision.as_str());
                 if let Some(ref reason) = decision.reason {
                     frame["reason"] = json!(reason);
                 }
+            }
+            // The session summary is a report like any other and keeps the
+            // envelope, so that `sure --format json mcp serve` writes something
+            // a reader can line up with every other frame. See
+            // `Report::is_an_answer` for why the bridge itself writes this one
+            // on the human path, and `docs/architecture/MCP_BRIDGE.md` for the
+            // rule a caller has to keep.
+            Self::McpSession(session) => {
+                frame["details"] = json!({
+                    "initialized": session.initialized,
+                    "requested_protocol_version": session.requested_protocol_version,
+                    "agreed_protocol_version": session.agreed_protocol_version,
+                    "answered": session.answered,
+                    "notifications": session.notifications,
+                    "tool_calls": session.tool_calls,
+                    "errors": session.errors,
+                });
             }
         }
         frame
@@ -590,6 +866,12 @@ impl Report {
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
             Self::HookDecision(_) => "hook",
+            // The command a user types, for both of the bridge's reports: the
+            // session and the messages in it are `sure mcp serve`, and a frame
+            // that named anything else would name a command that does not exist
+            // on this surface. The tool a message answers for is inside the
+            // message, under `structuredContent.tool`.
+            Self::Mcp(_) | Self::McpSession(_) => "mcp",
         }
     }
 }
@@ -674,6 +956,68 @@ mod tests {
         }))
     }
 
+    /// A JSON-RPC error object: a request SURE would not carry out.
+    fn a_protocol_error() -> Report {
+        Report::Mcp(Box::new(McpMessage {
+            message: json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "error": {
+                    "code": -32602,
+                    "message": "Unknown tool: sure_wibble",
+                },
+            }),
+        }))
+    }
+
+    /// A response carrying a tool result, either way round.
+    ///
+    /// Built here rather than by running the bridge, because what this module
+    /// decides is the outcome and the stream of a message; what the bridge puts
+    /// in one is `crate::mcp`'s subject and `tests/mcp_protocol.rs`'s.
+    fn a_tool_result(is_error: bool) -> Report {
+        Report::Mcp(Box::new(McpMessage {
+            message: json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {
+                    "content": [{"type": "text", "text": "Nothing was checked."}],
+                    "structuredContent": {
+                        "tool": "sure_check",
+                        "sure": {"command": "check", "outcome": "unavailable", "exit_code": 3},
+                    },
+                    "isError": is_error,
+                },
+            }),
+        }))
+    }
+
+    /// A session that ended because its caller closed standard input.
+    fn a_session() -> Report {
+        Report::McpSession(Box::new(McpSession {
+            initialized: true,
+            requested_protocol_version: Some("2025-11-25".to_owned()),
+            agreed_protocol_version: Some("2025-11-25".to_owned()),
+            answered: 3,
+            notifications: 1,
+            tool_calls: 2,
+            errors: 2,
+        }))
+    }
+
+    /// A session whose caller never sent `initialize`.
+    fn a_session_that_never_handshook() -> Report {
+        Report::McpSession(Box::new(McpSession {
+            initialized: false,
+            requested_protocol_version: None,
+            agreed_protocol_version: None,
+            answered: 1,
+            notifications: 0,
+            tool_calls: 0,
+            errors: 1,
+        }))
+    }
+
     /// Every report this build can produce.
     ///
     /// Every *shape* of report, which is what the frame, the outcome and the
@@ -699,7 +1043,29 @@ mod tests {
             Report::HookDecision(sure_core::hook_protection::ProtectionDecision::block(
                 "The current execution mode does not permit this action.",
             )),
+            a_protocol_error(),
+            a_tool_result(false),
+            a_tool_result(true),
+            a_session(),
+            a_session_that_never_handshook(),
         ]
+    }
+
+    /// Every report whose machine form is the CLI envelope.
+    ///
+    /// [`Report::Mcp`] is not one of them: its machine form is the JSON-RPC
+    /// message itself, which is the exception the module comment records and the
+    /// reason the bridge needs no second path out of the program. The fields
+    /// the envelope exists for are still in the answer — every tool result
+    /// carries the command's own frame under `structuredContent.sure` — but
+    /// they are not in *this* frame. So the two tests that assert the envelope
+    /// holds for every report hold it for every report that has one, by name
+    /// rather than by quietly skipping a variant.
+    fn reports_in_the_cli_envelope() -> Vec<Report> {
+        every_report()
+            .into_iter()
+            .filter(|report| !matches!(report, Report::Mcp(_)))
+            .collect()
     }
 
     #[test]
@@ -719,7 +1085,7 @@ mod tests {
     fn the_machine_form_names_the_build_and_the_protocol() {
         // The two facts that decide whether a captured response can still be
         // read. A frame without them is one a reader has to guess about.
-        for report in every_report() {
+        for report in reports_in_the_cli_envelope() {
             let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
             assert_eq!(
                 frame["protocol_version"],
@@ -741,7 +1107,7 @@ mod tests {
         // Including the ones that are fine. A field that is present only when
         // something went wrong is a field every reader has to guard, and the
         // status is a fact about every run.
-        for report in every_report() {
+        for report in reports_in_the_cli_envelope() {
             let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
             assert!(
                 frame["exit_code"].is_u64(),
@@ -1048,5 +1414,112 @@ mod tests {
                 report.exit_code()
             );
         }
+    }
+
+    #[test]
+    fn a_message_that_says_sure_could_not_answer_is_not_ok() {
+        // The bridge's version of the rule this whole program exists for, and
+        // the reason `McpMessage::is_error` reads a tool result's `isError` and
+        // not only a JSON-RPC error object: every tool whose command this build
+        // cannot carry out answers with a result carrying `isError`, and a
+        // predicate that looked only for an error object would call
+        // "sure check is not implemented in this build" an `ok` message that
+        // exits 0. That is SURE's own false green, told to an agent.
+        for refused in [a_protocol_error(), a_tool_result(true)] {
+            assert_eq!(refused.outcome(), "unavailable");
+            assert_eq!(refused.exit_code(), exit::UNAVAILABLE);
+            assert_ne!(refused.exit_code(), exit::OK);
+            assert_ne!(
+                refused.exit_code(),
+                exit::NOT_GREEN,
+                "a protocol refusal is not a statement about a project"
+            );
+            assert_ne!(
+                refused.exit_code(),
+                exit::FAILED,
+                "nothing about a refusal is a run that went wrong"
+            );
+        }
+        let answered = a_tool_result(false);
+        assert_eq!(answered.outcome(), "ok");
+        assert_eq!(answered.exit_code(), exit::OK);
+    }
+
+    #[test]
+    fn the_machine_form_of_a_message_is_the_message_itself() {
+        // The documented exception to the envelope, asserted so that it stays a
+        // decision. A frame that grew a `sure_version` and tucked the message
+        // under `details` would be unreadable to every MCP client, and no other
+        // test in this file would notice.
+        let report = a_tool_result(true);
+        let Report::Mcp(message) = &report else {
+            panic!("this builder makes a message");
+        };
+        let frame: serde_json::Value = serde_json::from_str(&text(&report, true)).unwrap();
+        assert_eq!(&frame, &message.message);
+        assert_eq!(frame["jsonrpc"], json!("2.0"));
+        assert!(
+            frame.get("sure_version").is_none() && frame.get("exit_code").is_none(),
+            "the CLI envelope was wrapped around a protocol message: {frame}"
+        );
+    }
+
+    #[test]
+    fn a_message_has_no_human_form_and_is_not_rendered_as_one() {
+        // A protocol message is JSON-RPC and its reader is a program, so the
+        // human rendering is the message. It is written that way rather than
+        // left as an empty arm so that a call site which took the human path by
+        // mistake would still put a parseable line on the stream.
+        let report = a_tool_result(false);
+        assert_eq!(text(&report, false).trim_end(), text(&report, true));
+        assert_eq!(report.command(), "mcp");
+    }
+
+    #[test]
+    fn the_session_summary_is_a_diagnostic_and_a_message_is_not() {
+        // Which stream, decided once by `is_an_answer` and for a reason that
+        // comes from the protocol rather than from this crate: the
+        // specification says an MCP server MUST NOT write anything to its
+        // standard output that is not a valid MCP message. A summary of the
+        // session is not one, so it is a diagnostic. A message — including one
+        // that refuses the caller — is exactly what the caller is reading
+        // stdout for.
+        assert!(!a_session().is_an_answer());
+        assert!(!a_session_that_never_handshook().is_an_answer());
+        assert!(a_tool_result(false).is_an_answer());
+        assert!(a_protocol_error().is_an_answer());
+    }
+
+    #[test]
+    fn a_session_summary_does_not_claim_anything_about_a_project() {
+        // The one thing a status-looking report must not do. It names the
+        // version that was agreed and what went past, and it says in the
+        // user's own words that none of it is a verdict.
+        let written = text(&a_session(), false);
+        for needed in [
+            "agreed to speak 2025-11-25",
+            "requests answered 3",
+            "not a claim that a project is clean",
+            "status 0",
+        ] {
+            assert!(
+                written.contains(needed),
+                "the session summary does not say {needed:?}:\n{written}"
+            );
+        }
+        assert_eq!(a_session().exit_code(), exit::OK);
+        assert_eq!(a_session().command(), "mcp");
+
+        // A caller that never handshook gets the true sentence rather than the
+        // one that would claim a version was agreed.
+        let never = text(&a_session_that_never_handshook(), false);
+        assert!(
+            never.contains("the caller never completed one"),
+            "a session with no handshake claims one:\n{never}"
+        );
+        assert!(
+            !never.contains("agreed to speak"),
+            "a session with no handshake claims a version:\n{never}"
+        );
     }
 }

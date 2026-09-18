@@ -3,17 +3,20 @@
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P12-T010` (wire the MCP bridge into the Claude Code, Cursor and
-Agent plugin packages) is dispatched as of `0af2874` and is `in_progress`. The
-lowest-numbered READY task before that dispatch was `P1-T012` (give the store a
-location a caller can choose), and it, `P7-T011` (severity calibration) and
-`P12-T007` (Codex evidence bridge) are all accepted — "What `P1-T012` added",
-"Validation of `P1-T012`", "What `P7-T011` added", "Validation of `P7-T011`",
-"What `P12-T007` added" and "Validation of `P12-T007`" below carry the numbers.
-`P1-T012` closed the privacy defect this file carried since item 74: `cargo test
---workspace` no longer writes the developer's real store, measured before and
-after a full run rather than asserted.
-Progress: 128 / 172 tasks accepted (counted from `progress/state.json` against
+**Nothing is in flight.** `P12-T010` (wire the MCP bridge into the Claude Code,
+Cursor and Agent plugin packages) is accepted as commit `752489c` — "What
+`P12-T010` added" and "Validation of `P12-T010`" below carry the numbers. Before
+it, `P1-T012` (give the store a location a caller can choose), `P7-T011`
+(severity calibration) and `P12-T007` (Codex evidence bridge) are accepted, with
+"What `P1-T012` added", "Validation of `P1-T012`", "What `P7-T011` added",
+"Validation of `P7-T011`", "What `P12-T007` added" and "Validation of
+`P12-T007`" below. `P1-T012` closed the privacy defect this file carried since
+item 74: `cargo test --workspace` no longer writes the developer's real store,
+measured before and after a full run rather than asserted — and `P12-T010`
+re-measured it, because that task added tests that spawn the real binary and a
+manifest that launches `sure mcp serve` with no store flag, which is exactly the
+shape that could have put the write back.
+Progress: 129 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -24,8 +27,9 @@ recorded events never reach the verdict's capability tier (item 77)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
-(9/9), phase P11 complete (9/9). Phase P12 is open at 9 of 10; Phase P13 is open
-at 1 of 9; Phase P14 is open at 3 of 13.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
+at 1 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
+is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -678,15 +682,51 @@ tree is or is not intact would be reading a claim the file does not make.
     every manual run, and says why it does not apply to the manifests themselves:
     those launch `sure mcp serve` exactly as a user would. Both corrections were
     made before dispatch and the worker has not yet reported.
+82. A worker agent completed `P12-T010` — *Wire MCP bridge into Claude/Cursor/Agent
+    plugin packages* — as commit `752489c`. The supervisor re-ran all five gates
+    from PowerShell (73 targets, 2415 passed, 0 failed, 12 ignored), drove the
+    packaged launcher through the manifest's own command line and compared its
+    stdout to a direct server run byte for byte, drove all three failure shapes,
+    measured `--format json mcp serve` back from the process, and proved the
+    stdout-purity guard can fail by disabling the exception and watching four
+    tests go red. Accepted; "Validation of `P12-T010`" below carries the numbers.
+    The deviation this task owned is gone: no line that is not an MCP message
+    reaches stdout in any mode, and the session summary is a diagnostic on stderr
+    in both formats. Two things the verification found beyond the report: the
+    agent-plugin package's manifest is rejected by the very schema it declares —
+    confirmed by fetching the schema, not left as the worker's hedge — recorded
+    against `P15-T008`; and three empty directories at the repository root, named
+    from a path that lost its drive colon, created about eleven hours before this
+    worker was dispatched and therefore by an ad-hoc command in the `P10-T001` /
+    `P11-T001` sessions. Each was confirmed empty and removed.
+83. `P12-T010` closes the MCP half of the integrations and leaves the honest half
+    stated. No harness loaded any of these manifests: there is no installed
+    Claude Code plugin, Cursor or Codex here, so nothing in that acceptance is
+    evidence that a harness substitutes `${CLAUDE_PLUGIN_ROOT}`, spawns the
+    launcher or reports the refusal. For Cursor, agent-plugin and Codex the
+    decision was to keep `command: "sure"` and document the `PATH` requirement,
+    which each README now states and each installer prints — but there
+    "invokes the local binary" means "invokes whatever `sure` resolves to", and
+    a per-user install that left `sure` off `PATH` gets the harness's own
+    "server failed to start" with no SURE-authored sentence. That is inherent to
+    `command: "sure"` rather than an oversight, and it is the weaker half of the
+    task's second acceptance criterion.
+84. The next dispatch is the next READY task, `P13-T002` (implement privacy
+    modes), whose brief was written while `P12-T010` ran and sits at
+    `target/tmp/brief-p13t002.md`. Reading the tree for it turned up that
+    `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`, which ADR 0006 names as
+    where the privacy-mode semantics are frozen, does not exist, and that
+    `PrivacyMode` is read nowhere outside `crates/sure-core/src/config/` — the
+    predicates are sound and well-named, and no user-facing surface says which
+    mode is in effect. Both are in the brief.
 
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-18 after `P1-T012` was accepted, is
-`P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`,
-`P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`,
-`P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them. `P12-T010`
-(wire the MCP bridge into the plugin packages) is the first of those and is the
-one now in flight; its brief carries the `--format json mcp serve` deviation
-recorded below. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P12-T010` was accepted, is
+`P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`,
+`P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`,
+`P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T002` (implement
+privacy modes) is the first of those and is the next dispatch; its brief was
+written while `P12-T010` ran and sits at `target/tmp/brief-p13t002.md`. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
@@ -828,6 +868,93 @@ this project edits away. The rule for the next session: inside `@'…'@`, write 
 apostrophe. There is no escape to reach for, and the only way to see the damage
 before pushing is `git log -1 --format=%B` — which is worth doing for any message
 longer than a line.
+
+## What `P12-T010` added
+
+The MCP bridge itself was `P12-T009`'s and it worked; no package could start it.
+This task is the wiring, the failure behaviour, and one deviation removed.
+
+**The wiring is per package, because the answer differs with what each harness
+offers.** `integrations/claude-code/.mcp.json` now names
+`powershell -NoProfile -File ${CLAUDE_PLUGIN_ROOT}/scripts/sure-mcp.ps1` instead
+of `sure`, because a plugin installed per user cannot assume `sure.exe` is on
+`PATH` — it is not on the machine this is developed on, which is the machine the
+product ships from. The new `sure-mcp.ps1` resolves the binary the way the hook
+launchers already do (`SURE_BIN` → `Get-Command sure` →
+`%LOCALAPPDATA%\SURE\bin\sure.exe`), probes `sure mcp serve --help` so a build
+that predates the bridge is refused rather than handed a session, and then hands
+stdin, stdout and stderr over unchanged. Cursor, agent-plugin and Codex keep
+`command: "sure"`, and each README now states the `PATH` requirement; the Cursor
+and agent-plugin installers print the resolved binary at install time when
+`PATH` would not find it.
+
+**The failure half is the half that matters, and it fails closed — the opposite
+of the hooks.** A hook exits 0 with `{"acknowledged":false,…}` when SURE is
+missing so a session is never blocked. A *server* that started without a binary
+would answer `tools/list` with an empty list, and a caller reads an empty tool
+list as SURE having looked and found nothing. So the launcher exits 3 with one
+paragraph on stderr and **zero bytes on stdout**. Three shapes are covered and
+each says something different: no binary anywhere (names `SURE_BIN`, `PATH`,
+`%LOCALAPPDATA%\SURE\bin\sure.exe`, and ends "SURE has checked nothing, and this
+session has no `sure` tools."); a build that predates the bridge (quotes the
+status it answered with, names revision `2025-11-25`); and a path the operating
+system will not start, which leaves no status to quote and says "could not be run
+at all" rather than printing a blank one.
+
+**The deviation is gone.** `sure --format json mcp serve` used to write a CLI
+envelope to stdout after the last protocol message. MCP revision `2025-11-25`,
+`basic/transports`, says the server MUST NOT write anything to stdout that is not
+a valid MCP message, so the session summary is a diagnostic in **both** formats
+now: `Report::McpSession` is the one report `Format::emit` sends to stderr under
+`--format json`. The brief for this task said explicitly that "a caller must not
+ask for `--format json`" was not a resolution, and the worker did not use it.
+
+## Validation of `P12-T010`
+
+Supervisor, 2026-09-19, from PowerShell. Commit `752489c`; the five gates at that
+commit, all exit 0: fmt, clippy, `cargo test --workspace --all-features
+--no-fail-fast` (73 test targets, 2415 passes, 0 failures, 12 ignored), bootstrap
+(`17 phases, 172 tasks`), taskctl (`state OK: 172 tasks`). Log at
+`target/tmp/sup-p12t010-gates.txt`. Per-target from that log:
+`tests\integration_thinness.rs` 40 passed, `tests\mcp_protocol.rs` 24 passed,
+`tests\fixture_apps.rs` 22 passed. `git show --name-only` lists sixteen files,
+none under `evaluation/`, `progress/`, `tasks/`, `SHA256SUMS.txt`, `fixtures/` or
+`crates/sure-core/`.
+
+| Claim | How it was measured |
+| --- | --- |
+| The packaged manifest reaches the real binary | ran the `.mcp.json` command line itself with two messages from a file: exit 0, **3459 bytes** on stdout, `Get-FileHash` **equal** to a direct `sure mcp serve` run — not eyeballed |
+| `--format json mcp serve` keeps stdout a protocol stream | two stdout lines, each parsed and each carrying a `result`; the envelope `{"command":"mcp",…}` on stderr; stdout byte count identical to the unflagged run |
+| A missing binary does not fabricate | exit **3**, **0 bytes** on stdout, message naming `SURE_BIN`, `PATH`, `%LOCALAPPDATA%\SURE\bin\sure.exe` |
+| An incompatible binary is refused | a stand-in answering status 2 → exit **3**, 0 bytes on stdout, status and revision both quoted |
+| A path the OS will not start | `README.md` as `SURE_BIN` → exit **3**, "could not be run at all", no blanked status |
+| SURE never agrees to a revision it does not speak | `initialize` asking `1999-01-01` is answered `2025-11-25` |
+| The purity guard can fail | with `output.rs` reverted to its old behaviour, `mcp_protocol` reports **20 passed; 4 failed**; restored byte-for-byte, tree clean |
+| Starting the server does not write the store | `sure.db` is `D171755690549D3A…`, 348160 bytes, before and after everything above |
+
+Two things found here that the worker's report did not contain, or contained
+hedged. **The agent-plugin manifest is rejected by the schema it declares**:
+`integrations/agent-plugin/plugin.json` names
+`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` and carries
+`mcpServers` and `skills`, and that schema defines neither at its root — it is
+`"additionalProperties": false` with a single `extensions` object for
+client-specific data. The worker recorded this as unconfirmed; the supervisor
+fetched the schema and confirmed it, and it is recorded against `P15-T008`,
+whose acceptance is that the packages are installable. And **three empty
+directories at the repository root**, named from a path that lost its drive
+colon, created about eleven hours before this worker was dispatched and so not
+its doing; each was confirmed empty and removed. NTFS forbids `:` in a filename,
+which is why a search for `C:*` finds nothing — the worker's description of them
+was more accurate than the supervisor's first doubt about it.
+
+What was **not** verified, and this is the honest edge of the acceptance: no
+harness loaded any of these manifests. There is no installed Claude Code plugin,
+Cursor or Codex on this machine, so nothing here is evidence that a harness
+substitutes `${CLAUDE_PLUGIN_ROOT}`, spawns the launcher or reports the refusal.
+For the three packages that kept `command: "sure"`, "invokes the local binary"
+means "invokes whatever `sure` resolves to"; if a per-user install left `sure`
+off `PATH`, the only signal is the harness's own "server failed to start", with
+no SURE-authored sentence. That is inherent to `command: "sure"`.
 
 ## What `P1-T012` added
 

@@ -344,13 +344,49 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     has per-user `install.ps1`/`uninstall.ps1` scripts that resolve SURE, detect
     (or force) copy vs symlink, require no admin rights, and are guarded by
     contract and Windows integration tests.
+51. A worker agent completed `P10-T003` — *Implement Claude session evidence
+    ingestion* — as commit `7810b95`. The supervisor re-verified all quality
+    gates and accepted the task. The new
+    `crates/sure-core/src/normalizer/claude_code.rs` module maps all Claude Code
+    raw event fixtures to the SURE event protocol, reports capability tier as
+    Observed (Tier 1), and `sure hook ingest --source claude-code` is wired
+    alongside the Cursor path.
 
-**Phase P11 is open at 7 of 9; Phase P10 is open at 3 of 8.** The READY list is now
-`P10-T003`, `P10-T005`, `P10-T006`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`,
-`P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
-`P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T003`, *"Implement Claude session evidence ingestion"*, which is the next
-concrete action.
+**Phase P11 is open at 7 of 9; Phase P10 is open at 4 of 8.** The READY list is now
+`P10-T005`, `P10-T006`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+`P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
+`P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P10-T005`, *"Implement Claude repair handoff"*, which is the next concrete action.
+
+## What `P10-T003` added
+
+- `crates/sure-core/src/normalizer/claude_code.rs` — new Claude Code normalizer:
+  - `ClaudeCodeRawEvent` deserializes the raw JSON shape from
+    `integrations/claude-code/fixtures/`.
+  - `normalize` maps `SessionStart` → `session.started`, `PreToolUse` →
+    `tool.requested`, `PostToolUse` → `tool.completed`, `Stop` → `session.stopped`.
+  - Honest capability tier: Observed (Tier 1); does not claim Protected (Tier 2)
+    because the core protection response path for Claude Code is P10-T006.
+  - Includes error handling for unknown event type, wrong source, and invalid JSON.
+  - Unit/integration tests cover all fixtures plus error cases and end-to-end
+    ingestion through `harness_event::ingest_event_str`.
+- `crates/sure-core/src/normalizer/mod.rs` — exports `claude_code` module.
+- `crates/sure-cli/src/hook.rs` — wires `sure hook ingest --source claude-code`
+  alongside cursor source; reuses ingest/persist flow and returns
+  `ProtectionDecision::allow()` for Claude Code events (protection deferred to
+  P10-T006). Added CLI-level tests for session-start, pre-tool-use, and invalid JSON.
+- `integrations/claude-code/fixtures/post-tool-failure.json` — new synthetic
+  fixture for a failed tool use.
+
+## Validation of `P10-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T007` added
 

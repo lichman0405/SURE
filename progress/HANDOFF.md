@@ -302,13 +302,52 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `check`/`status`/`fix`/`recheck` command definitions that explicitly tell
     Cursor how to resolve the local SURE binary and fail safely when it is
     missing, plus a thinness test guarding against duplicated core wording.
+45. A worker agent completed `P10-T002` — *Implement Claude hook event
+    launcher/normalizer* — as commit `81024ef`. The supervisor re-verified all
+    quality gates and accepted the task. The Claude Code PowerShell launcher now
+    documents its binary-resolution order, emits a structured safe-failure
+    message to stderr when SURE is missing, and launcher stdin/stdout/exit-code
+    contract fixtures were recorded under
+    `integrations/claude-code/fixtures/launcher/`. The bash launcher received
+    equivalent safe-failure behavior for macOS/Linux CI parity.
 
-**Phase P11 is open at 3 of 9.** The READY list is now
-`P10-T002`, `P10-T004`, `P11-T004`, `P11-T006`, `P12-T001`, `P12-T008`, `P12-T009`,
-`P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
-`P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T002`, *"Implement Claude hook event launcher/normalizer"*, which is the next
-concrete action.
+**Phase P11 is open at 3 of 9; Phase P10 is open at 2 of 8.** The READY list is now
+`P10-T004`, `P11-T004`, `P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`,
+`P12-T009`, `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`,
+`P14-T005`, `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P10-T004`, *"Implement Claude check command"*, which is the next concrete action.
+
+## What `P10-T002` added
+
+- `integrations/claude-code/scripts/sure-hook.ps1` — hardened with comments
+  documenting binary-resolution order (`SURE_BIN` → PATH →
+  `%LOCALAPPDATA%\SURE\bin\sure.exe`), structured JSON safe-failure message to
+  stderr when SURE is missing, exit 0 fail-open, and unchanged stdin forwarding
+  to `sure.exe hook ingest --source claude-code`.
+- `integrations/claude-code/scripts/sure-hook.sh` — updated with equivalent
+  safe-failure JSON to stderr and comments documenting the resolution order for
+  macOS/Linux parity.
+- `integrations/claude-code/fixtures/launcher/stdin-session-start.json` — example
+  JSON payload the launcher receives.
+- `integrations/claude-code/fixtures/launcher/stdout-missing-bin.json` — exact
+  stderr JSON emitted when SURE is missing.
+- `integrations/claude-code/fixtures/launcher/exit-codes.json` — documents
+  launcher exit-code semantics.
+- `crates/sure-testkit/tests/integration_thinness.rs` — new
+  `claude_code_launcher_contract_fixtures_are_valid_json` test asserting the
+  launcher fixtures directory exists with valid JSON and that the PowerShell
+  script honours `SURE_BIN`, PATH, `%LOCALAPPDATA%`, emits "SURE binary not
+  found", and forwards to `hook ingest --source claude-code`.
+
+## Validation of `P10-T002`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T003` added
 

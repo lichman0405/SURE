@@ -4,5 +4,8 @@
   "description": "Check what AI-built software actually does, record supported evidence, and hand repair contracts back to Claude Code.",
   "author": { "name": "SURE contributors" },
   "repository": "https://github.com/lichman0405/SURE",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "commands": "commands/",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": ".mcp.json"
 }

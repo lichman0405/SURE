@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P11",
-  "last_updated": "2026-09-18T10:47:13.781Z",
+  "current_phase": "P13",
+  "last_updated": "2026-09-18T11:08:06.108Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1333,13 +1333,13 @@
       "notes": ""
     },
     "P12-T002": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T10:48:38.874Z",
+      "finished_at": "2026-09-18T11:08:05.938Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Disabled path records NotCheckedReason::AnalysisProviderDisabled; human, JSON and portable reports include reduced-coverage caveat; wire contract updated."
     },
     "P12-T003": {
       "status": "queued",
@@ -1414,13 +1414,13 @@
       "notes": ""
     },
     "P13-T001": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T10:49:16.184Z",
+      "finished_at": "2026-09-18T11:08:06.107Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Built-in and user-configurable secret redaction with literal/pattern rules, validation, and store/diagnostic wiring."
     },
     "P13-T002": {
       "status": "queued",

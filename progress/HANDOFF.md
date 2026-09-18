@@ -14923,3 +14923,64 @@ absent text.
 | `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P12-T002` added
+
+- `crates/sure-domain/src/status.rs` — added `NotCheckedReason::
+  AnalysisProviderDisabled` with plain explanation that no analysis provider is
+  configured.
+- `crates/sure-domain/tests/wire_contract.rs` — froze the wire name
+  `analysis_provider_disabled` for the new reason.
+- `crates/sure-core/src/analysis_provider/mod.rs` — added `disabled_result`
+  helper that builds an honest skipped result for a model-backed check when the
+  provider is disabled, preserving criticality so the check blocks green when
+  it should.
+- `crates/sure-core/src/project_verdict.rs` — added
+  `REDUCED_COVERAGE_ANALYSIS_DISABLED` caveat text.
+- `crates/sure-cli/src/human_report.rs`, `json_report.rs`, `portable_report.rs`
+  — emit the reduced-coverage caveat when any not-checked check carries
+  `AnalysisProviderDisabled`.
+- `schemas/report.schema.json` — added optional `coverage_caveat` field (report
+  schema version bumped to 3).
+
+## Validation of `P12-T002`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --all-features --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P13-T001` added
+
+- `crates/sure-core/src/redact.rs` — rewrote around a `Redactor` type with
+  built-in detectors for URL authorities, credential-name assignments,
+  PEM-encoded private-key blocks, and known token shapes, plus user-configured
+  literal secrets and regex patterns. Added `redact_value` to preserve JSON
+  shape while redacting string values.
+- `crates/sure-core/src/config/values.rs` — added `RedactionConfig` with
+  `literals` and `patterns` fields.
+- `crates/sure-core/src/config/error.rs` — added `ErrorKind::InvalidPattern`
+  for regex patterns that fail to compile.
+- `crates/sure-core/src/config/mod.rs` — wired `redaction` into `Config`,
+  validated patterns at load time, and added `Config::redactor()` builder.
+- `crates/sure-core/src/plain_language_finding.rs` — redact finding titles,
+  explanations, impact, next actions and anchor locations/locators.
+- `crates/sure-core/src/store/mod.rs` — apply redaction before writing
+  documents to the local store.
+- `Cargo.toml`, `crates/sure-core/Cargo.toml`, `Cargo.lock` — added `regex`
+  crate dependency.
+- `sure.example.yaml` — documented `redaction.literals` and
+  `redaction.patterns`.
+
+## Validation of `P13-T001`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --all-features --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |

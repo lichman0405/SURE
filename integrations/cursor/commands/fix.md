@@ -2,4 +2,11 @@
 name: sure-fix
 description: Apply a SURE repair contract and re-check.
 ---
-Apply the selected SURE repair contract, preserve the listed behavior, run its acceptance checks, then ask SURE to re-check the affected project state.
+Resolve the local SURE binary in this order:
+1. `$env:SURE_BIN` environment override.
+2. `sure` on PATH (via `Get-Command sure` or `which sure`).
+3. `%LOCALAPPDATA%\SURE\bin\sure.exe` for per-user installs.
+
+If SURE is not found, tell the user that SURE is not installed and stop. Do not fabricate a repair result.
+
+Load the repair contract supplied by SURE. Implement only the required repair while preserving listed behavior. Run the acceptance checks. Then invoke `sure recheck`. Do not mark the SURE finding resolved solely from your own statement.

@@ -1,6 +1,6 @@
 ---
-name: sure-check
-description: Check the current project with SURE.
+name: sure-recheck
+description: Re-check the current project with SURE after a repair.
 ---
 Resolve the local SURE binary in this order:
 1. `$env:SURE_BIN` environment override.
@@ -9,4 +9,4 @@ Resolve the local SURE binary in this order:
 
 If SURE is not found, tell the user that SURE is not installed and stop. Do not fabricate a check result.
 
-Run `sure check` for the current project and present its result faithfully. Treat unknown, skipped, error, and cannot-confirm as non-pass states. Do not invent checks that did not run.
+Run `sure recheck` for the current project and present its result faithfully. Treat unknown, skipped, error, and cannot-confirm as non-pass states. Do not invent checks that did not run.

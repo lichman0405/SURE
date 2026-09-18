@@ -330,3 +330,40 @@ fn cursor_launcher_contract_fixtures_are_valid_json() {
         "cursor launcher must forward to the SURE core"
     );
 }
+
+#[test]
+fn cursor_command_files_exist_and_are_thin() {
+    let commands_dir = sure_testkit::repository_root()
+        .join("integrations")
+        .join("cursor")
+        .join("commands");
+
+    let expected = ["check.md", "status.md", "fix.md", "recheck.md"];
+    for name in &expected {
+        let path = commands_dir.join(name);
+        assert!(path.is_file(), "cursor command file {name} must exist");
+
+        let text = std::fs::read_to_string(&path).expect("command file readable");
+
+        // Each command must reference the local SURE invocation path or concept.
+        let reaches_core = text.contains("SURE_BIN")
+            || text.contains("sure.exe")
+            || text.contains("sure check")
+            || text.contains("sure history")
+            || text.contains("sure recheck")
+            || text.contains("sure repair");
+        assert!(
+            reaches_core,
+            "{name} must reference local SURE invocation (SURE_BIN, sure.exe, or sure <subcommand>)"
+        );
+
+        // No command file may copy the frozen no-trusted-intent limitation sentence.
+        let normalised = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let frozen = sure_domain::status::NO_TRUSTED_INTENT_LIMITATION;
+        let frozen_normalised = frozen.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            !normalised.contains(&frozen_normalised),
+            "{name} must not copy the frozen no-trusted-intent limitation sentence; the core owns that wording"
+        );
+    }
+}

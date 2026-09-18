@@ -328,13 +328,55 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     workflow to run `sure repair` to obtain the repair contract, then load it,
     implement the required fix while preserving listed behavior, run acceptance
     checks, and invoke `sure recheck`; a thinness test guards the handoff wording.
+49. A worker agent completed `P11-T006` — *Implement Cursor protection where
+    supported* — as commit `7959b89`. The supervisor re-verified all quality
+    gates and accepted the task. `sure hook ingest --source cursor` now reads
+    stdin, normalizes events, persists them, and evaluates `preToolUse` requests
+    through the existing execution-safety machinery, returning structured
+    `allow`/`warn`/`block` decisions. The capability tier is kept honest as
+    Observed (Tier 1) because Cursor's hook schema does not confirm it will
+    honour a block response.
 
-**Phase P11 is open at 5 of 9; Phase P10 is open at 3 of 8.** The READY list is now
-`P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`, `P13-T004`,
-`P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`
-and `P14-T010`. The lowest-numbered READY task is
-`P11-T006`, *"Implement Cursor protection where supported"*, which is the next
+**Phase P11 is open at 6 of 9; Phase P10 is open at 3 of 8.** The READY list is now
+`P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`, `P13-T004`, `P14-T001`,
+`P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007` and `P14-T010`.
+The lowest-numbered READY task is
+`P11-T007`, *"Cursor local-plugin installation/symlink flow"*, which is the next
 concrete action.
+
+## What `P11-T006` added
+
+- `crates/sure-cli/src/cli.rs` — extended `HookAction::Ingest` with `--source`
+  and optional event-kind arguments so the hook launcher can pass them through.
+- `crates/sure-cli/src/commands.rs` — wired `Self::Hook` to `crate::hook::run`
+  instead of `not_yet`.
+- `crates/sure-cli/src/hook.rs` — new module implementing `sure hook ingest`:
+  reads stdin, normalizes Cursor events, validates via `ingest_event_str`,
+  best-effort persists via `SessionEventStore`, and returns a
+  `ProtectionDecision` for `pre-tool-use` events.
+- `crates/sure-cli/src/report.rs` — added `Report::HookDecision` rendering path.
+- `crates/sure-cli/src/lib.rs` — added `pub mod hook;`.
+- `crates/sure-cli/tests/cli_contract.rs` — updated command contract to
+  recognise `hook` as implemented.
+- `crates/sure-core/src/hook_protection.rs` — new protection decision adapter:
+  maps Cursor tool names (`Shell`, `Read`, `Write`, `Delete`) to
+  `ActionKind`, then uses the existing domain `decide` function with the
+  current `ExecutionMode` and `ExecutionPermissions` to produce `Allow`/`Warn`/`Block`.
+- `crates/sure-core/src/lib.rs` — added `pub mod hook_protection;`.
+- `crates/sure-core/src/normalizer/cursor.rs` — minor adjustments to expose
+  fields needed by the hook ingest path.
+- `integrations/cursor/scripts/sure-hook.ps1` — passes `--format json` before
+  `hook ingest` so the protection decision is emitted as JSON.
+
+## Validation of `P11-T006`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P11-T005` added
 

@@ -315,13 +315,49 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     the task. The Claude Code `check` command definition now explicitly tells
     Claude how to resolve the local SURE binary and fail safely when it is
     missing, plus a thinness test guarding against duplicated core wording.
+47. A worker agent completed `P11-T004` — *Implement Cursor session evidence
+    ingestion* — as commit `f878581`. The supervisor re-verified all quality
+    gates and accepted the task. The new `sure-core/src/normalizer/cursor.rs`
+    module maps all six Cursor raw event fixtures to the SURE event protocol,
+    honestly reports capability tier as Observed (Tier 1) because pre-action
+    decision/response is not yet implemented, and includes error-case and
+    end-to-end ingestion tests.
 
-**Phase P11 is open at 3 of 9; Phase P10 is open at 3 of 8.** The READY list is now
-`P11-T004`, `P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`,
-`P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
-`P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P11-T004`, *"Implement Cursor session evidence ingestion"*, which is the next
-concrete action.
+**Phase P11 is open at 4 of 9; Phase P10 is open at 3 of 8.** The READY list is now
+`P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+`P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
+`P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P11-T005`, *"Implement Cursor repair handoff"*, which is the next concrete action.
+
+## What `P11-T004` added
+
+- `crates/sure-core/src/lib.rs` — added `pub mod normalizer;`.
+- `crates/sure-core/src/normalizer/mod.rs` — new source-specific normalizer
+  module declaration.
+- `crates/sure-core/src/normalizer/cursor.rs` — new Cursor normalizer:
+  - `CursorRawEvent` deserializes the raw JSON shape from
+    `integrations/cursor/fixtures/`.
+  - `normalize` maps `sessionStart` → `session.started`, `preToolUse` →
+    `tool.requested`, `postToolUse` → `tool.completed`,
+    `postToolUseFailure` → `tool.failed`, `afterFileEdit` → `file.edited`,
+    `stop` → `session.stopped`.
+  - Honest capability tier: Observed (Tier 1); does not claim Protected (Tier 2)
+    because pre-action decision/response is P11-T006.
+  - Preserves raw payload fields (`tool`, `args`, `result`, `error`, `path`,
+    `cursor_event`) for audit; leaves redaction to the store layer.
+  - Unit/integration tests cover all six fixtures, unknown event type, wrong
+    source, invalid JSON, and end-to-end ingestion through
+    `harness_event::ingest_event_str`.
+
+## Validation of `P11-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T004` added
 

@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P8",
-  "last_updated": "2026-09-18T02:44:39.122Z",
+  "current_phase": "P9",
+  "last_updated": "2026-09-18T04:07:32.337Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1144,13 +1144,13 @@
       "notes": "accepted as commit df84d7f"
     },
     "P9-T005": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T03:57:52.352Z",
+      "finished_at": "2026-09-18T04:07:32.337Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Resuming after session crash; switching from P10-T001 to lowest-numbered READY task per engineering loop"
     },
     "P9-T006": {
       "status": "queued",
@@ -1162,8 +1162,8 @@
       "notes": ""
     },
     "P10-T001": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-18T02:47:38.335Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

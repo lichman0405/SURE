@@ -310,12 +310,40 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     contract fixtures were recorded under
     `integrations/claude-code/fixtures/launcher/`. The bash launcher received
     equivalent safe-failure behavior for macOS/Linux CI parity.
+46. A worker agent completed `P10-T004` — *Implement Claude check command* — as
+    commit `d57c215`. The supervisor re-verified all quality gates and accepted
+    the task. The Claude Code `check` command definition now explicitly tells
+    Claude how to resolve the local SURE binary and fail safely when it is
+    missing, plus a thinness test guarding against duplicated core wording.
 
-**Phase P11 is open at 3 of 9; Phase P10 is open at 2 of 8.** The READY list is now
-`P10-T004`, `P11-T004`, `P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`,
-`P12-T009`, `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`,
-`P14-T005`, `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T004`, *"Implement Claude check command"*, which is the next concrete action.
+**Phase P11 is open at 3 of 9; Phase P10 is open at 3 of 8.** The READY list is now
+`P11-T004`, `P11-T005`, `P11-T006`, `P11-T007`, `P12-T001`, `P12-T008`, `P12-T009`,
+`P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
+`P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
+`P11-T004`, *"Implement Cursor session evidence ingestion"*, which is the next
+concrete action.
+
+## What `P10-T004` added
+
+- `integrations/claude-code/commands/check.md` — updated with explicit
+  binary-resolution order (`$env:SURE_BIN` → `sure` on PATH →
+  `%LOCALAPPDATA%\SURE\bin\sure.exe`), safe-failure wording when SURE is missing
+  (tell the user to run `sure doctor`/installation instructions; do not
+  fabricate a result), and the existing faithful-summary instruction.
+- `crates/sure-testkit/tests/integration_thinness.rs` — new
+  `claude_code_check_command_exists_and_is_thin` test asserting the command file
+  exists, references a local SURE invocation, and does not copy the core-owned
+  frozen `NO_TRUSTED_INTENT_LIMITATION` sentence.
+
+## Validation of `P10-T004`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T002` added
 

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P13",
-  "last_updated": "2026-09-18T19:35:44.539Z",
+  "last_updated": "2026-09-18T19:47:11.078Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2064,6 +2064,15 @@
       "started_at": "2026-09-18T19:35:44.539Z",
       "finished_at": null,
       "base_sha": "7e021ae",
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P15-T017": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
       "head_sha": null,
       "evidence": [],
       "notes": ""

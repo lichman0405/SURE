@@ -10,7 +10,7 @@ loop has deliberately reordered its own work**: the two previous insertions
 so that §14 would still hand the next dispatch to the lowest-numbered READY task,
 and `P15-T016` is instead placed immediately before `P13-T006` so that it *is*
 the next dispatch. The reason is a stop-the-line condition and not a preference,
-and it is recorded as item 99 below: the `ci` workflow has failed on 78
+and it is recorded as item 99 below: the `ci` workflow has failed on 75
 consecutive runs, the run table in this file stops *before* the last green run,
 and on Linux and macOS the test step does not execute at all because clippy
 aborts the job first — so every acceptance since `717fc0ad` has recorded five
@@ -62,7 +62,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 133 / 175 tasks accepted (counted from `progress/state.json` against
+Progress: 133 / 176 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -76,12 +76,14 @@ unreproducible (item 93), and from 173 to 174 on 2026-09-19 when `P13-T005`'s
 verification found that `sure hook allow-once` reports success for an allowance
 the project's own settings make unspendable (item 97), and from 174 to 175 on the
 same day when a check of the branch's own CI runs found that two of the three
-platforms had been failing unread for 78 runs (item 99)). **Phase
+platforms had been failing unread for 75 runs (item 99), and from 175 to 176 when
+the investigation of that streak showed the class is structurally invisible from
+Windows and got an owner (item 99 again, and P15-T017)). **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 16; Phase P16
+at 5 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 17; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -949,38 +951,78 @@ tree is or is not intact would be reading a claim the file does not make.
     that cries wolf on five good commits is worth as little as one that passes a
     bad one.
 
-99. **The branch's own CI has been failing unread for 78 consecutive runs, and
+99. **The branch's own CI has been failing unread for 75 consecutive runs, and
     this file's run table is why nobody noticed.** Checked on 2026-09-19 while
-    confirming a push: the last green `ci` run is `35193436468` (`6d69c51b`,
-    2026-09-17T07:13Z) and every run since `35196110213` (`717fc0ad`,
-    2026-09-17T07:45Z) has failed — 78 of them. The run table under
+    confirming a push, then counted properly against the GitHub API: the branch
+    has 187 `ci` runs, 94 `success` and 93 `failure`, the last success is
+    `35193436468` (`6d69c51b`, 2026-09-17T07:13:02Z), and **all 75 runs created
+    after that instant are failures** — `35196110213` (2026-09-17T07:45:11Z)
+    through `35386874579` (2026-09-18T19:36:21Z). The run table under
     "Continuous integration, and why this section exists" stops at
     `35174114907`, which is *before* the last green run, so the streak appears
     nowhere in this file and the loop has been reporting five green Windows
-    gates as though they were the whole story. Three distinct causes were read
-    out of the logs: three `browser_driver.rs` tests failing on
-    `rust (windows-latest)` because a browser was found and could not be driven
-    — the product's own false-green discipline reporting correctly, and green
-    today, so environmental or intermittent; `candidate_context::tests::windows_separators_work`
+    gates as though they were the whole story. 75 rather than 78, and the first
+    figure this file carried was 78 because the supervisor counted failures in
+    the last hundred runs, sweeping in failures from *before* the last green
+    run; the commit message `ef297f4` still says 78 and cannot be rewritten, so
+    it is corrected here. The same correction was sent to `P15-T016`'s worker,
+    whose brief carried the wrong number.
+
+    Four failure shapes, in sequence: `cargo test` failing on ubuntu and macos
+    only (54 runs); that plus Windows also failing (7 runs, scattered, not
+    contiguous); `cargo fmt` failing on all three platforms (2 runs at
+    2026-09-17T18:09Z — a rustfmt break from `b7068a4` that vanished when a
+    later commit happened to touch the same file, so it was never fixed, only
+    overwritten); and the current shape, clippy on ubuntu and macos (12 runs).
+
+    Seven distinct defects sit under that. **The three that matter** are all the
+    same class — a Windows-primary machine cannot see them, which is the class
+    `CLAUDE.md` requires CI to catch. (i) `candidate_context::tests::windows_separators_work`
     and `recording_projection::tests::file_write_event_is_projected` failing on
-    `rust (ubuntu-latest)`, which are one root cause and not merely a test
-    problem, because `classify_path` walks `path.components()` and so classifies
-    a Windows-style path differently on Unix than on Windows while
+    Unix, one root cause and not merely a test problem: `classify_path` walks
+    `path.components()`, so a Windows-style path is two components on Windows
+    and one on Unix and classifies `Test` there and `Product` here, while
     `hook_protection.rs:1015`'s `folded` deliberately normalises backslashes on
-    every platform — two incompatible answers in one codebase; and the current
-    shape, `cargo clippy` failing on ubuntu and macos from `752489c`
-    (`P12-T010`) onward, where three helpers in
-    `crates/sure-testkit/tests/integration_thinness.rs` are live only on
-    Windows. Because clippy runs before the tests, **the test step has not run
-    on Unix since `752489c`**, so the current status of the second cause is
-    unknown. All three are the class of defect a Windows-primary machine cannot
-    see, which is the class `CLAUDE.md` requires CI to catch. Given an owner,
-    `P15-T016`, and placed **first** in the array so §14 dispatches it next —
-    the first deliberate reordering this loop has made, and the reasoning is
-    that an acceptance recorded while two of three platforms are unverified is
-    itself the kind of claim this project exists to refuse. The record-keeping
-    half is the supervisor's: the run table below is to be brought up to date
-    rather than left as it stands.
+    every platform — two incompatible answers in one codebase. (ii)
+    `recheck_lifecycle::tests::keys_match_case_insensitively_on_windows`, which
+    is platform-branched and whose **Unix** branch fails
+    (`assertion failed: update.kept_open.is_empty()` at
+    `recheck_lifecycle.rs:558`), so on a case-sensitive platform the reconciler
+    matched two differently-cased paths it should have kept apart — possibly a
+    product defect rather than a test one. (iii) the current break:
+    `cargo clippy` on ubuntu and macos from `752489c` (`P12-T010`) onward, three
+    helpers in `crates/sure-testkit/tests/integration_thinness.rs` live only on
+    Windows. Because clippy runs before the tests, **the test step has not
+    executed on Unix since `752489c`**, so defects (i) and (ii) are masked
+    rather than fixed and their current status is unknown — which is why
+    `P15-T016`'s first job is to get the Unix jobs past clippy so the tests can
+    speak.
+
+    The other four are characterised and left alone: the browser driver failing
+    on **both** Windows and ubuntu — Chrome or `/usr/bin/chromium` found and
+    unable to open a debugging port, on Linux with `Failed to connect to the
+    bus` and `Fontconfig error: No writable cache directories`, so the
+    workflow's apparmor step is not sufficient — which is the product's own
+    false-green discipline reporting correctly rather than a defect in it; and
+    three process-supervision flakes (`service_supervisor.rs:475` and `:793`,
+    `runtime_start.rs:1176`) plus `analysis_provider::tests::claude_cli_analyzer_runs_program_and_returns_stdout`,
+    each seen once or twice and gone the next run.
+
+    The **structural** finding is the one to keep: nothing available to this
+    loop can catch this class. The defect *is* caught, on ubuntu and macos by
+    design, but `cargo clippy --all-targets` on Windows compiles the Windows
+    `cfg` set, where those helpers are used, so the error is unreproducible
+    here. Nothing in the repository passes `--target x86_64-unknown-linux-gnu`
+    or `x86_64-apple-darwin` and there is no pre-push hook, so the blind spot is
+    structural rather than a missed step. Given an owner, `P15-T017`, placed
+    immediately after `P15-T016`.
+
+    Given the streak itself an owner, `P15-T016`, and placed **first** in the
+    array so §14 dispatches it next — the first deliberate reordering this loop
+    has made, and the reasoning is that an acceptance recorded while two of
+    three platforms are unverified is itself the kind of claim this project
+    exists to refuse. The record-keeping half is the supervisor's, and it is
+    done below rather than promised.
 
 The READY list, read from
 `node scripts/taskctl.mjs ready` on 2026-09-19 after `P15-T016` was inserted
@@ -998,6 +1040,99 @@ the same rule as every other task. `P7-T010`'s acceptance unblocked `P7-T011` an
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
+
+## The 75-run red streak, read from the API on 2026-09-19
+
+Item 99 records the finding and gives the streak two owners. This is the
+record-keeping half it promises, and it is written here rather than into either
+of the two run tables further down, because both of them stop before the streak
+starts: the older one under "Continuous integration, and why this section
+exists" ends at `35087849335` and the newer one under "Run table" ends at
+`35174114907` (`90a7bc6`), which is *before* the last green run. A red streak
+that no table records is how 75 runs went by unread.
+
+The reading is `target/tmp/ci-streak.mjs`: `gh run list --branch
+claude/v0.1-autonomous --limit 250` filtered to the `ci` workflow — **187
+runs**, the same 187 that item 99 counted — then `gh api
+repos/{owner}/{repo}/actions/runs/<id>/jobs` for each run created after the last
+green one, keeping every job whose conclusion is `failure` and the first step
+in it that failed. The raw output is `target/tmp/ci-streak.json` and this
+section is rendered from it by `target/tmp/streak-section.mjs`, so the run ids
+below are copied by the machine that read them. **Nothing here is inferred from
+a red mark on a run list**: each row is a set of runs whose step names were read
+out of the API.
+
+The last green run, which no table recorded because the newer one stopped six
+runs short of it:
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| 35193436468 | `6d69c51b` — **the last green `ci` run on this branch** | **all five jobs green.** Every run created after 2026-09-17T07:13:02Z has failed, which is what makes the 75 a streak rather than a rate |
+
+Then the 75 failures, grouped by the step that failed: **75 runs in
+4 shapes.**
+
+| Runs | Step that failed | Jobs | First | Last |
+| --- | --- | --- | --- | --- |
+| 7 | `cargo test --workspace --no-fail-fast` | macos-latest + ubuntu-latest + windows-latest | `35196110213` (`717fc0a`) | `35351409364` (`cf4d516`) |
+| | | | 2026-09-17T07:45Z … 2026-09-18T13:38Z | |
+| 54 | `cargo test --workspace --no-fail-fast` | macos-latest + ubuntu-latest | `35198861247` (`14c1101`) | `35365324422` (`e77fef7`) |
+| | | | 2026-09-17T08:17Z … 2026-09-18T15:55Z | |
+| 2 | `cargo fmt --all -- --check` | macos-latest + ubuntu-latest + windows-latest | `35257067401` (`b7068a4`) | `35257132396` (`b609cea`) |
+| | | | 2026-09-17T18:09Z … 2026-09-17T18:09Z | |
+| 12 | `cargo clippy --workspace --all-targets -- -D warnings` | macos-latest + ubuntu-latest | `35370477126` (`56e869a`) | `35386874579` (`68b4867`) |
+| | | | 2026-09-18T16:46Z … 2026-09-18T19:36Z | |
+
+**A row is a failure shape and not a run.** The runs inside a row failed in the
+same step of the same jobs, and seventy-five rows saying the same sentence would
+be a table nobody reads — which is the failure this section exists to correct.
+Every id is listed below, so any of the 75 can be opened and read; what is *not*
+in this table is which test failed inside a run, because a step name does not say
+that and reading 75 logs to fill in a column nobody consults is not the work.
+That detail exists for the runs whose logs were read, and they are named in item
+99 and in `P15-T016`'s notes:
+
+- **7** — `cargo test --workspace --no-fail-fast` on macos-latest + ubuntu-latest + windows-latest, first `35196110213`: `35196110213`, `35203339130`, `35219667520`, `35244103311`, `35245645076`, `35253900351`, `35351409364`
+- **54** — `cargo test --workspace --no-fail-fast` on macos-latest + ubuntu-latest, first `35198861247`: `35198861247`, `35200822733`, `35204290499`, `35207295042`, `35209239285`, `35211378495`, `35212998608`, `35215003685`, `35216535748`, `35217677945`, `35221651127`, `35223946975`, `35224561950`, `35224654523`, `35229902121`, `35231894468`, `35234800751`, `35236995457`, `35237206802`, `35241027816`, `35241128602`, `35243963910`, `35245780409`, `35248025695`, `35250115393`, `35252424260`, `35254817459`, `35255001588`, `35255542023`, `35295632095`, `35296338681`, `35296976855`, `35298614389`, `35300710884`, `35344060825`, `35346547334`, `35347628528`, `35347895746`, `35348052531`, `35348157685`, `35348260466`, `35349075435`, `35349989431`, `35351293152`, `35352560694`, `35357140129`, `35357365360`, `35361372876`, `35361648312`, `35361751445`, `35364658820`, `35364783467`, `35365279540`, `35365324422`
+- **2** — `cargo fmt --all -- --check` on macos-latest + ubuntu-latest + windows-latest, first `35257067401`: `35257067401`, `35257132396`
+- **12** — `cargo clippy --workspace --all-targets -- -D warnings` on macos-latest + ubuntu-latest, first `35370477126`: `35370477126`, `35370518169`, `35372909166`, `35372952577`, `35378324232`, `35378415391`, `35382311061`, `35382643299`, `35386306847`, `35386428716`, `35386832674`, `35386874579`
+
+Three things this reading can say and cannot say, recorded because a census is
+easy to over-read.
+
+**The grouping is by step name, so a shape is not a cause.** The 54-run shape
+contains at least two different failing tests — `candidate_context::tests::windows_separators_work`
+with `recording_projection::tests::file_write_event_is_projected`, and later
+`recheck_lifecycle::tests::keys_match_case_insensitively_on_windows` — and this
+table cannot tell them apart, because `cargo test` names the step either way.
+What the table is good for is the question that was unanswerable before it: which
+step failed, on which platforms, from when to when. The per-test question is
+answered by the log of a named run, which is why item 99 names its runs.
+
+**The job counts inside a shape are not stable, and that is an instrument fact.**
+`gh` returns a run's jobs in an order that varies between runs, so the twelve
+clippy runs arrived as seven with one ordering and five with another. They are
+one shape here because merging them is a deliberate joining of two groups whose
+step and platform sets are identical, and the merge is done in
+`streak-section.mjs` rather than by hand. A reader who re-runs the survey and
+sees different group sizes is seeing that ordering and not a different finding.
+
+**The streak is 75 commits and not 75 re-runs of one.** All 75 runs in it carry
+distinct head shas, which is the difference between a branch that has been red
+for two days and a single bad commit that kept being retried — and it is
+measured rather than assumed, because the second would be a much smaller
+problem. The streak spans **35 hours 51 minutes**, from `717fc0a` at
+2026-09-17T07:45:11Z to `68b4867` at 2026-09-18T19:36:21Z, with the shortest
+gap between two consecutive runs **25 seconds** (two commits pushed back to
+back) and the longest **9 hours 32 minutes** (overnight). So every commit pushed
+in that window produced a red run, and this table is the census of them. The
+instrument error that produced the first version of this paragraph is worth the
+line it costs: the check for runs arriving back to back compared a difference in
+*milliseconds* against a 120-*second* threshold and reported that no two runs
+were within two minutes of each other, which is how a measurement comes back
+agreeing with a guess. The figure above is the same check with the units right.
+The count that matters for the record is still the one item 99 states: the last
+green run is `35193436468` and every run after it failed.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 

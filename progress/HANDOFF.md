@@ -373,13 +373,48 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `privacy.full_recording` setting and, when opted in, persists a redacted full
     recording alongside the standard session event. The full-recording write is
     best-effort and never affects the protection decision returned to the harness.
+55. A worker agent completed `P10-T008` — *Claude synthetic E2E
+    check-repair-recheck* — as commit `bfc51fc`. The supervisor re-ran the full
+    gate set and accepted the task. `crates/sure-cli/src/hook.rs` now has an
+    injected-paths test helper, and a synthetic round-trip test feeds eight
+    Claude Code events (session-start, check pre/post, repair pre/post, recheck
+    pre/post, stop) through the real ingest path without network, asserts the
+    expected protection decisions, and verifies that all events are persisted.
 
-**Phase P11 is open at 7 of 9; Phase P10 is open at 6 of 8.** The READY list is now
-`P10-T008`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
+**Phase P11 is open at 7 of 9; Phase P10 is open at 7 of 8.** The READY list is now
+`P10-T009`, `P11-T008`, `P12-T001`, `P12-T008`, `P12-T009`, `P13-T001`,
 `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`,
 `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P10-T008`, *"Claude synthetic E2E check-repair-recheck"*, which is the next
-concrete action.
+`P10-T009`, *"Claude live smoke-test procedure"*, which is the next concrete action.
+
+## What `P10-T008` added
+
+- `crates/sure-cli/src/hook.rs` — made the ingest path testable with injected
+  paths and added a synthetic Claude Code E2E round-trip:
+  - New `run_ingest_with_paths(source, event_kind, stdin, paths)` contains the
+    ingest/normalize/validate/persist/decide logic and uses the supplied `Paths`
+    for storage.
+  - Existing `run_ingest` is now a thin wrapper that discovers paths and delegates
+    to `run_ingest_with_paths`.
+  - Removed the now-unused `persist_event` helper.
+  - Added `claude_code_check_repair_recheck_round_trip` test that creates a temp
+    project + SURE data/config under `target/tmp`, feeds eight synthetic
+    `claude-code` events (session-start → check → repair → recheck → stop) through
+    `run_ingest_with_paths`, asserts every `pre-tool-use` is `Block` under the
+    default `InspectOnly` config, asserts non-pre-tool-use events are `Allow`,
+    opens the temp store, and verifies all eight events were persisted with the
+    correct event types and a consistent session id. Also asserts no full
+    recording is stored when `privacy.full_recording` is off by default.
+
+## Validation of `P10-T008`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green (all crates) |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
 
 ## What `P10-T007` added
 

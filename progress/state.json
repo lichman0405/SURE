@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P10",
-  "last_updated": "2026-09-18T09:25:21.078Z",
+  "last_updated": "2026-09-18T09:47:47.135Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1225,13 +1225,13 @@
       "notes": "Supervisor review: worker implemented Claude full-recording opt-in in commit a01155f; re-ran full gate set (fmt, clippy, cargo test --workspace --no-fail-fast, validate-bootstrap, taskctl validate), all green."
     },
     "P10-T008": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
+      "finished_at": "2026-09-18T09:47:47.135Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Supervisor review: worker implemented Claude synthetic E2E check-repair-recheck in commit bfc51fc; re-ran full gate set, all green."
     },
     "P10-T009": {
       "status": "queued",

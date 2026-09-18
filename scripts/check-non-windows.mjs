@@ -10,13 +10,17 @@
 // no `--target` compiles the Windows `cfg` set, in which `#[cfg(windows)]` items
 // are used and `#[cfg(not(windows))]` items are not, so a break in the
 // non-Windows arms is invisible here and appears only on a CI runner. That is
-// not hypothetical: it is the class that left `ci` red on every platform for 76
-// consecutive runs, because on Linux and macOS `cargo clippy --all-targets -- -D
-// warnings` failed before the test step ran, so every Unix test behind it was
-// unrun rather than failing. The census is item 99 of `progress/HANDOFF.md`.
+// not hypothetical: it is the class that left `ci` red for 75 consecutive runs
+// — the census is item 99 of `progress/HANDOFF.md`, which counts them by the
+// step each one died in — because on Linux and macOS `cargo clippy --all-targets
+// -- -D warnings` failed before the test step ran, so every Unix test behind it
+// was unrun rather than failing.
 //
 // What it runs. For each Unix target, the same lints and the same `-D warnings`
-// as the native gate in `CLAUDE.md`, asked for the other platform:
+// as the native clippy gate this loop runs from PowerShell before every
+// acceptance — the commands are recorded in `progress/HANDOFF.md`, because
+// `CLAUDE.md` states the portability requirement and lists no commands — asked
+// for the other platform:
 //
 //   cargo clippy --workspace --all-targets --all-features --target <triple> -- -D warnings
 //

@@ -3,24 +3,17 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P15-T017` (make the non-Windows configuration checkable from
-Windows), dispatched from base commit `9294c4a` — the `P13-T006` acceptance —
-with its brief at `target/tmp/brief-p15t017.md`. It is the first READY task by
-the rule this file applies everywhere else — the order `tasks/tasks.json` lists
-them, filtered by `scripts/taskctl.mjs`'s predicate — and it is first because
-`P15-T016`, its only dependency, landed. The brief carries the funnel this task
-was narrowed to by measurement rather than by argument: both unix targets are
-already installed, cross-target clippy already reaches `sure-domain`,
-`sure-protocol` and `sure-testkit` on both, and it fails on `sure-core` and
-`sure-cli` inside `cc-rs` with `failed to find tool "x86_64-linux-gnu-gcc"`
-because a bundled SQLite is C that has to be compiled for the target. **That
-boundary is the whole difficulty and the brief states it as one**: of the four
-files the three recorded defects name, three are in `sure-core`, the crate the
-command cannot reach — so a check scoped to the three crates that work is worth
-having and must not be described as covering the class. The cost is measured
-too, because criterion 3 asks for it: **1.7 s warm and 7.3 s cold** for the
-three-crate command, taken with `CARGO_TARGET_DIR=target/cold-probe` so the warm
-cache was not disturbed.
+**In flight:** nothing. `P15-T017` (make the non-Windows configuration
+checkable from Windows) was dispatched from base commit `9294c4a` — the
+`P13-T006` acceptance — with its brief at `target/tmp/brief-p15t017.md`, handed
+back as `74a16e1`, verified independently and **accepted**; "What `P15-T017`
+added" and "Validation of `P15-T017`" below carry the numbers. It delivered one
+file, `scripts/check-non-windows.mjs`, which compiles both Unix `cfg` sets from
+this machine, names the two crates it cannot reach and why, refuses rather than
+passing when a target or a tool is missing, and is adopted here as the **sixth
+local gate** at **1.3 s warm / 19 s cold**. **The next dispatch is `P13-T007`
+(implement hook failure semantics tests)** — first in the READY list this
+acceptance leaves behind — and its brief is not written yet.
 `P13-T006` (implement protection audit history) was dispatched from
 base commit `a752fdc` — the `P15-T016` acceptance — with its brief at
 `target/tmp/brief-p13t006.md`, handed back as `72365b9`, verified independently
@@ -93,7 +86,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 135 / 179 tasks accepted (counted from `progress/state.json` against
+Progress: 136 / 179 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-19, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -117,12 +110,15 @@ of the `Text file busy` race in this repository's own fixtures showed that it ha
 been recorded three times and owned by nobody (item 101), and from 178 to 179 on
 2026-09-19 when `P13-T006`'s verification measured that the checksum manifest is
 read by nothing while both bootstrap gates pass over a stale copy of it
-(item 102)). **Phase
+(item 102)), and **`P15-T017`'s acceptance added no task at all**, which is why
+the graph is still 179: item 103 records an error in this file's own arithmetic,
+and what corrects it is a rule the next validations follow rather than a
+capability anybody has to build. **Phase
 P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 6 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 1 of 20; Phase P16
+at 6 of 10; Phase P14 is open at 3 of 13; Phase P15 is open at 2 of 20; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -160,17 +156,28 @@ commit `60cb152`, with `6ccab01` correcting a stale row in
 `7f85b03`.
 
 **How to read `progress/state.json`.** The per-task `evidence` array is empty for
-88 of the 127 accepted tasks (counted 2026-09-18). That is not a gap in the
+88 of the 135 accepted tasks (counted 2026-09-19; the numerator has not moved
+since 2026-09-18 and the denominator has, because every acceptance since has
+filled it). That is not a gap in the
 verification, it is where the verification was written down: `MASTER_PROMPT.md`
 step 11 says "mark task accepted with evidence/note", and in this repository the
 note is what carries it — every acceptance since `P7-T010` has its gate output,
 digests, file lists and stated limits in that task's `notes` string and in the
 matching "Validation of `…`" section of this file. An empty `evidence` array next
 to a non-empty `notes` means *read the note*, not *nothing was checked*. The
-`base_sha` and `head_sha` fields are likewise null throughout and always have
-been; the commit a task landed in is named in its note. Reading `evidence: []`
-as "accepted without evidence" would be wrong, and the fields being vestigial is
-itself worth knowing before anyone builds a report on them.
+`base_sha` and `head_sha` fields are set on some entries and null on most —
+`head_sha` on 40 of the 179 and `base_sha` on 40, counted 2026-09-19 at
+`P15-T017`'s acceptance — and the commit a task landed in is named in its note
+either way. Every entry that has one has the other, and the 40 are the recent
+ones plus a set filled in later: at `P15-T017`'s acceptance three accepted tasks
+that had `base_sha` and no `head_sha` were completed from evidence already in
+hand — `P13-T006` (`72365b9`, the hand-back its own note names), `P8-T005`
+(`3bcc53d`, the implementation commit, read out of `git log --grep` and
+confirmed by its parent being that task's dispatch commit) and `P15-T017` itself
+(`74a16e1`). Nothing else about those entries changed, and no other entry was
+touched. Reading `evidence: []` as "accepted without evidence" would be wrong,
+and the fields being mostly absent is itself worth knowing before anyone builds
+a report on them.
 
 **How to read `SHA256SUMS.txt`.** It is not a manifest of the repository. It lists
 184 paths, and `git ls-files` counts 497, so 313 tracked files are not in it — all
@@ -1153,14 +1160,47 @@ tree is or is not intact would be reading a claim the file does not make.
     in a task with an acceptance rather than in a verification note, because
     either answer changes what the repository promises about itself.
 
-The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T006` was accepted and
-`P15-T020` was added, is `P15-T017`, `P13-T007`, `P13-T009`,
-`P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T008`,
-`P14-T009`, `P14-T010`, `P15-T008`, `P15-T015`, `P15-T018`, `P15-T019`,
-`P15-T020`, `P7-T012`, `P14-T013`, `P7-T013`, in the order `tasks/tasks.json`
-lists them. **`P15-T017` (make the non-Windows configuration checkable from
-Windows) is the first of those and is the next dispatch.**
+103. **The test-count figure this file has been reporting is inflated by ten, and
+    the rule that would have caught it was already written here.** Found on
+    2026-09-19 while accepting `P15-T017`, by attributing the gate run's own log
+    rather than reading its total: a workspace `cargo test --workspace
+    --all-features --no-fail-fast` prints **73 `test result:` lines against 63
+    cargo headers** (58 `Running` + 5 `Doc-tests`), and the ten lines with no
+    binary of their own are printed by children `store_concurrency.rs` spawns —
+    each one `1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out`, a
+    parent test re-run in a second process to exercise the lock — which the
+    parent's own result line counts as well. **Measured**: summing all 73 lines
+    gives Windows **2518** / macOS **2509** / Ubuntu **2510**; counting one line
+    per header gives **2508 / 2499 / 2500**, with `0 failed` and `12 ignored`
+    under both. The validations of `P15-T016` and `P13-T006` report the raw sum
+    — 2504 and 2518 on Windows — and re-measuring their runs from the job logs
+    at acceptance gives 2494 and 2508 for the same two trees. The section *Count
+    the parent lines, not the `test result:` lines* is already in this file and
+    already says the total is "inflated by the child lines"; what failed is
+    narrower than a lost rule — the attribution was applied to the *number of
+    lines* and not to the *sum*, so a sentence could name the ten children and
+    still report a total that contained them. **No verdict changes**: `0 failed`
+    is the same fact under either rule, and every comparison of two runs in this
+    file compares two raw sums, which move by the same ten on both sides. It is
+    recorded rather than given a script because the number is produced by hand
+    at acceptance time and a checker nothing runs is item 102's defect — with the
+    falsifier stated: **the next validation that quotes a passed count without
+    saying which of the two it is has to build the script instead of writing the
+    rule down a third time.** From `P15-T017` on, this file's validations give
+    the parent count and name the raw sum when the raw sum is what a log shows.
+
+The READY list, recomputed on 2026-09-19 from `tasks/tasks.json` against the
+`progress/state.json` that `P15-T017`'s acceptance stages — the predicate
+`scripts/taskctl.mjs` implements, applied to the two committed files rather than
+carried forward in prose — is `P13-T007`, `P13-T009`, `P13-T010`, `P14-T004`,
+`P14-T005`, `P14-T006`, `P14-T007`, `P14-T008`, `P14-T009`, `P14-T010`,
+`P15-T008`, `P15-T015`, `P15-T018`, `P15-T019`, `P15-T020`, `P7-T012`,
+`P14-T013`, `P7-T013`, in the order `tasks/tasks.json` lists them.
+**`P13-T007` (implement hook failure semantics tests) is the first of those and
+is the next dispatch**; it is first because `P15-T017` has left the list and
+`P13-T006` left it one acceptance earlier, and the list `P15-T017` was itself
+dispatched from is the one printed above this paragraph, which had `P15-T017` at
+its front.
 
 **This paragraph printed a false list, and the error is worth more than the
 correction.** As it stood until now it named `P13-T006` as the front of the READY
@@ -1506,6 +1546,246 @@ A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
+## What `P15-T017` added
+
+**The Unix `cfg` sets are now compiled on the machine this project is developed
+on, and the command names the parts of them it did not compile.** The acceptance
+is *make the non-Windows configuration checkable from Windows*, and the gap was
+structural: `cargo clippy` with no `--target` compiles the Windows arm, in which
+`#[cfg(not(windows))]` items are not compiled at all, so a break inside them is
+invisible here and appears only when a runner compiles it. That is the class the
+75-run red streak belonged to, and on Linux and macOS the job died at clippy,
+which is why the Unix tests behind it were unrun rather than failing.
+
+The deliverable is one file, `scripts/check-non-windows.mjs`, run from the
+repository root as `node scripts/check-non-windows.mjs`. For each of
+`x86_64-unknown-linux-gnu` and `x86_64-apple-darwin` it runs the local clippy
+gate asked for that target — `cargo clippy --workspace --all-targets
+--all-features --target <triple> -- -D warnings`. `--all-targets` is
+load-bearing rather than decoration: the defect that caused the streak was three
+helper functions used only from Windows-gated tests, and integration tests are a
+target a plain `cargo clippy` does not reach.
+
+**What it reaches and what it does not, measured.** A census of `cfg(windows)`,
+`cfg(not(windows))`, `cfg(unix)`, `target_os` and `target_family` finds **116
+platform-conditional sites** in the workspace — `sure-domain` 0,
+`sure-protocol` 0, `sure-testkit` 12, `sure-core` 100, `sure-cli` 4 — and **22
+`target_os`-qualified sites, every one of them in `sure-core`**. The check
+compiles the first three crates for both Unix targets, so it reaches **12 of the
+116**; **104 are outside it**, every `target_os` arm among them, because
+`sure-core` and `sure-cli` cannot be compiled for either target on this machine.
+
+The blocker is C, and there is more of it than the brief said. `sure-core` takes
+`rusqlite` with `bundled`, so `libsqlite3-sys` compiles `sqlite3.c` for the
+target, **and** it takes `ureq`, which reaches `ring 0.17.14` and its own C
+through `rustls`; `sure-cli` depends on `sure-core` and inherits both. The worker
+corrected the brief's "one C library" and the correction is right — it is
+checkable in `Cargo.lock`. The failure is `cc-rs: failed to find tool
+"x86_64-linux-gnu-gcc"`, raised inside a **build script**, which is why `cargo
+check --target` fails where `cargo clippy --target` does, why `--no-deps` does
+not avoid it, and why the two commands that look like escapes are not escapes:
+`CC_FORCE_DISABLE=1` errors rather than skipping, and
+`LIBSQLITE3_SYS_USE_PKG_CONFIG=1` gets past SQLite and dies on `ring`.
+
+**Which of the three recorded defects this would have caught, named one by
+one** — the measure the brief asked for, and the one a green exit code cannot
+give:
+
+- the three Unix-dead helpers in
+  `crates/sure-testkit/tests/integration_thinness.rs` — **caught**. This is the
+  defect that made the streak.
+- the Windows-path assertions in `sure-core`'s `candidate_context.rs` and
+  `recording_projection.rs` — **not caught**, because both live in the crate the
+  check cannot compile, and because both are assertions that fail when Unix code
+  *runs*; no compiler and no lint on any platform finds them.
+- `recheck_lifecycle.rs`'s Unix branch asserting the wrong `kept_open` — **not
+  caught**, for both of those reasons.
+
+So the honest description is that this covers the form the streak took and none
+of the assertion defects, and the file's own header says so rather than leaving
+it for a reader to work out.
+
+**What it does when it cannot check something.** It refuses rather than passing
+quietly: `rustup` missing, or a target not installed, is exit 1 with "Nothing
+was checked" and the `rustup target add …` line that closes it; a
+whole-workspace failure that is not the missing C compiler is exit 1 with the
+compiler's output printed whole. When the failure *is* the C compiler it asks
+again with `--exclude sure-core --exclude sure-cli`, prints what passed, and
+then a `--- NOT CHECKED ---` section naming the two crates, the two C libraries,
+and the `CC_x86_64_unknown_linux_gnu` / `CC_x86_64_apple_darwin` variables that
+would close the gap — naming `zig cc` as a compiler that installs without
+administrator rights, and recording that this repository has not installed or
+verified it. **The whole-workspace attempt is made first**, so nothing in the
+file is a standing claim that those crates cannot be checked: the day a cross C
+compiler is present the excluded command is never composed and that section
+never prints.
+
+**That path exits 0, and the choice is stated rather than left to be inferred.**
+Exit 0 means *every crate this could check is clean for both Unix targets*; the
+section naming what was not checked prints unconditionally on that path, and the
+last line says the run "says nothing about their Unix configuration". Exit 1
+would leave the gate permanently red on a machine with no cross C compiler while
+detecting nothing more than the section already reports — and a check nobody can
+afford to run is a check nobody runs, which is criterion 3's own argument.
+
+**The demonstration was performed by the supervisor, not taken from the
+hand-back.** Three `#[cfg(windows)]` lines were deleted from
+`integration_thinness.rs` (448, 464, 486), and the command exited 1 naming
+`powershell`, `launcher_scratch` and `stub_binary` — at the shifted lines 448,
+463 and 484 of the mutated file — ending
+`error: could not compile "sure-testkit" (test "integration_thinness") due to 3
+previous errors`. The file was then restored byte-identically (`sha256
+b70eb1b0…`), `git diff` was empty, and the command exited 0. The restore was
+followed by a touch, because `Copy-Item` preserves `LastWriteTime` and item 100
+records what believing a stale artifact costs. The missing-target path was
+exercised on a copy of the script with `x86_64-unknown-freebsd` in place of
+darwin: exit 1, "Nothing was checked", and the install command printed.
+
+**Two claims in the delivered file's header were wrong and were corrected at
+acceptance**, both of them things a reader would otherwise repeat:
+
+- The comment said the check runs "the same lints … as the native gate in
+  `CLAUDE.md`". **`CLAUDE.md` lists no gates**:
+  `Select-String -Path CLAUDE.md -Pattern 'gate|clippy|cargo test|cargo fmt|quality'`
+  matches nothing at all. The commands live in `MASTER_PROMPT.md` §15, "Required
+  quality gates", which is the operator's file and is not edited from this loop —
+  it lists fmt, `cargo check --workspace --all-targets`, clippy, the workspace
+  suite and `validate-bootstrap`, while the set this loop runs adds
+  `taskctl validate` and drops `cargo check` as clippy's own subset. The set as
+  it is run here is recorded in this file, and the comment now says that. The
+  error came from the brief, which told the worker a gate "belongs in
+  `CLAUDE.md`'s list" — a list that does not exist.
+- The comment said the streak was "76 consecutive runs" and "on every platform".
+  The census below counts **75** — 7 + 54 + 2 + 12 — and two of its four shapes
+  include `windows-latest`, 9 runs in all; the other 66 failed on `macos-latest`
+  and `ubuntu-latest` alone. The comment now says 75 and names the census.
+
+Behaviour is untouched by both; the script was re-run after each edit and exits
+0. Both corrections ride in this acceptance commit rather than in the hand-back,
+so the file committed here is not the file `74a16e1` gated — stated because that
+is the same substitution the chain rule refuses to make silently elsewhere.
+`git diff -U0` over the script shows every added and removed line beginning with
+`//`, and no Rust file is in either commit, so the three cargo gates cannot be
+affected by it; the sixth gate was re-run over the exact bytes being committed
+and exits 0.
+
+**Adopted as the sixth local gate.** The gate set from here is `cargo fmt --all
+-- --check`; `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`; `cargo test --workspace --all-features --no-fail-fast`; `node
+scripts/validate-bootstrap.mjs`; `node scripts/taskctl.mjs validate`; and `node
+scripts/check-non-windows.mjs`. Criterion 3 asked for its cost to decide that,
+and it is **1.3 s warm** and **19 s cold** — the cold figure taken with
+`CARGO_TARGET_DIR=target/cold-probe-6th`, both Unix targets built from an empty
+directory. Validation sections earlier in this file that say "the five gates"
+are records of the set as it stood at the time, not claims about today's.
+
+**It is deliberately not in `.github/workflows/ci.yml`.** There it would add
+nothing and say something at every run: each runner already compiles its own
+`cfg` set natively in the existing clippy step, so on ubuntu and on macos the
+check duplicates that step for the native target, and on the Windows runner it
+would print the `NOT CHECKED` section for both targets and exit 0 — a green step
+that checks nothing, which is the shape this file has spent several thousand
+lines learning to distrust. What was missing was never coverage on the runners;
+it was a way to compile the other platform's arms from the machine the code is
+written on.
+
+## Validation of `P15-T017`
+
+**The gates, run by the supervisor from native PowerShell on `74a16e1`, the
+hand-back, not taken from the report**: `cargo fmt --all -- --check` exit 0;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0;
+`cargo test --workspace --all-features --no-fail-fast` exit 0 with **63 test
+binaries — 58 `Running` and 5 `Doc-tests` headers — 2508 passed, 0 failed, 12
+ignored**; `node scripts/validate-bootstrap.mjs` exit 0; `node
+scripts/taskctl.mjs validate` exit 0; and the new sixth gate exit 0 in 1.3 s.
+The passed figure is the parent count; the correction that makes that phrase
+mean something is item 103.
+
+**The commit is one file and nothing else.** `git show --stat 74a16e1` reads
+`scripts/check-non-windows.mjs | 275 +++++…`, one file changed, 275 insertions.
+`crates/sure-testkit/tests/integration_thinness.rs` — the file the demonstration
+mutates and restores — is untouched by the commit and by the working tree:
+`git status --porcelain` for it is empty and its digest is
+`b70eb1b08de55ead38f01ae5aa1195b5380c3e5b4a6e6f2558080ba2fb212aaa`. No path in
+`SHA256SUMS.txt` was touched.
+
+**The claims that could be borrowed rather than checked were checked.** The
+116-site census and its per-crate split were re-measured by the supervisor
+rather than read from the script's header, and give the same numbers. The `ureq
+→ rustls → ring 0.17.14` path was traced in `Cargo.lock`. The three dead ends
+were re-run: `cargo check -p sure-core --all-targets --target
+x86_64-unknown-linux-gnu` fails inside `cc-rs` exactly as clippy does,
+`CC_FORCE_DISABLE=1` errors instead of skipping, and
+`LIBSQLITE3_SYS_USE_PKG_CONFIG=1` gets past SQLite and dies at `ring v0.17.14`.
+The demonstration and the missing-target path are the supervisor's own runs,
+kept at `target/tmp/p15t017-defect-present.txt`,
+`target/tmp/p15t017-defect-removed.txt` and
+`target/tmp/p15t017-missing-target.txt`.
+
+**The test count every recent validation has been reporting is inflated, and
+this is the first one to say so.** A workspace run prints **73 `test result:`
+lines against 63 cargo headers** (58 `Running` + 5 `Doc-tests`). The ten extra
+lines are printed by children `store_concurrency.rs` spawns — each one
+`1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out`, a re-run of one
+parent test in a second process to exercise the lock — and they are counted by
+the parent's own result line as well. Summing all 73 lines gives **2518** on
+Windows; counting one result line per header gives **2508**. Both the `P15-T016`
+and the `P13-T006` validations report the raw sum — 2504 and 2518 — and the
+`P15-T016` sentence names the ten children in the same sentence as the number,
+which is exactly how a reader takes it to be excluded. Measured against the logs
+of both runs: `35389096745` is 2504 raw / **2494** parents on Windows, 2495 /
+**2485** on macOS, 2496 / **2486** on Ubuntu; `35392425989` is 2518 / **2508**,
+2509 / **2499**, 2510 / **2500**. The rule was already written down — *Count the
+parent lines, not the `test result:` lines*, in this file — and what failed is
+that it was applied to the number of lines and not to the sum, which is the half
+that carries the arithmetic. Nothing about a verdict changes: `0 failed` is `0
+failed` under either rule, and every figure in this file that compares two runs
+moves by the same ten on both sides. Item 103 carries it.
+
+**The backfill.** Two runs were read in the session that took `P13-T006`'s
+acceptance and could not be written into a commit at the time, because a commit
+cannot contain the run of itself:
+
+| Run | Commit | What it is | Result |
+| --- | --- | --- | --- |
+| 35393536379 | `9294c4a` | **the `P13-T006` acceptance commit** | all five jobs green, **attempt 1** |
+| 35393756541 | `ef33da3` | the `P15-T017` dispatch commit | all five jobs green, **attempt 1** |
+
+Both read with `gh run watch <id> --exit-status` and then
+`gh api repos/{owner}/{repo}/actions/runs/<id>/jobs`, with `run_attempt: 1`
+confirmed per job. Per-platform counts from the first one's three job logs: 73
+result lines and 63 headers on each, **2508 / 2499 / 2500 parent tests** (2518 /
+2509 / 2510 raw) with **0 failed**, **12 ignored**, and **zero occurrences of
+`Text file busy`**. That is eight ubuntu test-step executions in a row with no
+`ETXTBSY`, which is a sample and not an explanation: `P15-T019` has not been
+dispatched and nothing about the fixtures has changed.
+
+**Three `head_sha` fields were filled by this acceptance.** `P15-T017`'s own is
+`74a16e1`, and it is set by hand rather than by the helper:
+`target/tmp/accept-task.mjs` sets status, `finished_at`, `evidence` and `notes`
+and does not touch `head_sha`. Two accepted entries carried `base_sha` and no
+`head_sha` — `P13-T006` and `P8-T005` — and both were completed from evidence
+already in hand rather than left as the standing example the "How to read
+`progress/state.json`" paragraph used to give: `72365b9`, the hand-back
+`P13-T006`'s own note names, and `3bcc53d`, which `git log --grep=P8-T005`
+returns and whose parent `bb1a4ec` is that task's dispatch commit. No other
+field of either entry changed and no other entry was touched: `head_sha` and
+`base_sha` now stand at **40 of the 179** each, against 37 and 40 before.
+
+**What this acceptance owes and cannot pay here**: the run for the commit that
+carries it, and the sixth gate's verdict on that commit's bytes. It is read in
+this session and reported in the next entry.
+
+**The READY list after this acceptance**, recomputed from `tasks/tasks.json`
+against the `progress/state.json` this commit stages rather than carried
+forward: **`P13-T007`, `P13-T009`, `P13-T010`, `P14-T004`, `P14-T005`,
+`P14-T006`, `P14-T007`, `P14-T008`, `P14-T009`, `P14-T010`, `P15-T008`,
+`P15-T015`, `P15-T018`, `P15-T019`, `P15-T020`, `P7-T012`, `P14-T013`,
+`P7-T013`** — 18, in the order the file lists them. The next dispatch is
+**`P13-T007`**, which is first because `P15-T017` has left the list and
+`P13-T006` left it before that. Progress is **136 / 179**, with P13 open at 6 of
+10 and P15 at 2 of 20.
+
 ## What `P13-T006` added
 
 **A protection decision now exists after the process that made it exits.** The
@@ -1593,8 +1873,10 @@ for a decision. No sentence claims a capability the CLI does not have.
 **The five gates, run by the supervisor from native PowerShell on `72365b9`, not
 taken from the hand-back**: `cargo fmt --all -- --check` exit 0; `cargo clippy
 --workspace --all-targets --all-features -- -D warnings` exit 0; `cargo test
---workspace --all-features --no-fail-fast` exit 0 with **73 `test result:` lines —
-58 `Running` and 5 `Doc-tests` headers — 2518 passed, 0 failed, 12 ignored**;
+--workspace --all-features --no-fail-fast` exit 0 with **73 `test result:` lines
+against 63 headers — 58 `Running` and 5 `Doc-tests` — 2518 as the raw sum, which
+is 2508 parent tests, 0 failed, 12 ignored**; the ten-line difference is item
+103, and the parent count is the one that counts tests;
 `node scripts/validate-bootstrap.mjs` exit 0; `node scripts/taskctl.mjs validate`
 exit 0. The result lines were counted with their headers attributed rather than by
 a bare number, for the reason the `P15-T016` validation gives.
@@ -1631,7 +1913,10 @@ that said three, which is the point: the assertion a new kind has to confront is
 still there rather than deleted to make room for `Decision`.
 
 **The run: `35392425989`, all five jobs green, and all five on the first
-attempt.** Windows **2518** / macOS **2509** / Ubuntu **2510** passed, **0
+attempt.** Windows **2518** / macOS **2509** / Ubuntu **2510** as raw sums, which
+are **2508 / 2499 / 2500 parent tests** (item 103 — the numbers in this row were
+measured from the job logs again at `P15-T017`'s acceptance and the parent
+figures are the ones that count tests); **0
 failed**, **12 ignored**, **73 result lines** on each, **58 `Running` plus 5
 `Doc-tests` headers**, and **zero occurrences of `Text file busy`** on any of the
 three. **The local Windows figure and the CI Windows figure agree exactly at
@@ -1758,8 +2043,10 @@ on a supported platform.
 taken from the hand-back**: `cargo fmt --all -- --check` exit 0;
 `cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0;
 `cargo test --workspace --all-features --no-fail-fast` exit 0 with **73 `test
-result:` lines — 58 `Running` and 5 `Doc-tests` headers, ten of the lines printed
-by children of `store_concurrency` — 2504 passed, 0 failed, 12 ignored**;
+result:` lines against 63 headers — 58 `Running` and 5 `Doc-tests`, ten of the
+lines printed by children of `store_concurrency` — 2504 as the raw sum, which is
+2494 parent tests, 0 failed, 12 ignored** (item 103: the ten children are counted
+here in the same sentence as the number, and the sum contains them);
 `node scripts/validate-bootstrap.mjs` exit 0; `node scripts/taskctl.mjs validate`
 exit 0. The result lines were counted with their headers attributed rather than
 by a bare number, because `cargo test <filter>` matching nothing prints
@@ -1787,7 +2074,9 @@ they are asking and why, and `basename_of`'s folding is traced to the call sites
 that reach it from a harness payload rather than asserted from the diff's shape.
 
 **The run: `35389096745`, all five jobs green, and all five on the second
-attempt.** Windows **2504** / macOS **2495** / Ubuntu **2496** passed, **0
+attempt.** Windows **2504** / macOS **2495** / Ubuntu **2496** as raw sums, which
+are **2494 / 2485 / 2486 parent tests** by item 103's recount of the same three
+logs; **0
 failed**, **12 ignored**, **73 result lines** on each, **58 `Running` plus 5
 `Doc-tests` headers**, so criterion 2 holds on the platform it was written for:
 the ubuntu and macos logs contain result lines and passed counts rather than

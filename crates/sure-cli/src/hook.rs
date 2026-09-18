@@ -22,7 +22,7 @@ use sure_core::config::Config;
 use sure_core::execution::{ExecutionMode, ExecutionPermissions};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::harness_event::ingest_event_str;
-use sure_core::hook_protection::decide_cursor_tool;
+use sure_core::hook_protection::{decide_claude_code_tool, decide_cursor_tool};
 use sure_core::ids::EventId;
 use sure_core::normalizer::{claude_code, cursor};
 use sure_core::paths::Paths;
@@ -111,14 +111,6 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
         event_kind == Some("pre-tool-use") || envelope.event_type == "tool.requested";
 
     if is_pre_tool_use {
-        // Claude Code protection decisions are not yet wired (P10-T006). A hook
-        // that cannot ask the user for consent must fail closed.
-        if source == Some("claude-code") {
-            return Report::HookDecision(sure_core::hook_protection::ProtectionDecision::block(
-                "Protection decisions are not yet supported for Claude Code; refusing to authorize.",
-            ));
-        }
-
         let tool = envelope
             .payload
             .get("tool")
@@ -127,7 +119,10 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
 
         let (mode, permissions) = load_execution_config(&project_root);
 
-        let decision = decide_cursor_tool(tool, mode, &permissions);
+        let decision = match source {
+            Some("claude-code") => decide_claude_code_tool(tool, mode, &permissions),
+            _ => decide_cursor_tool(tool, mode, &permissions),
+        };
         return Report::HookDecision(decision);
     }
 
@@ -292,13 +287,15 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_pre_tool_use_blocks_until_protection_is_implemented() {
+    fn claude_code_pre_tool_use_uses_protection_decision() {
         let text = claude_fixture("pre-tool-use.json");
         let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), &text);
         let decision = match &report {
             Report::HookDecision(d) => d,
             other => panic!("expected HookDecision, got {other:?}"),
         };
+        // Default config is InspectOnly; Bash maps to ArbitraryCommand, which is
+        // denied in InspectOnly.
         assert_eq!(
             decision.decision,
             sure_core::hook_protection::ProtectionDecisionKind::Block
@@ -308,7 +305,7 @@ mod tests {
                 .reason
                 .as_deref()
                 .expect("blocked decision should have a reason")
-                .contains("not yet supported for Claude Code")
+                .contains("execution mode")
         );
     }
 

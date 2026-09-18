@@ -113,6 +113,48 @@ pub fn decide_cursor_tool(
     }
 }
 
+/// Map a Claude Code tool name to the [`ActionKind`] the domain understands.
+fn claude_code_tool_to_action_kind(tool: &str) -> ActionKind {
+    match tool {
+        "Bash" => ActionKind::ArbitraryCommand,
+        "Read" => ActionKind::ReadFile,
+        "Write" | "Edit" => ActionKind::WriteProjectFile,
+        "Delete" => ActionKind::DeleteProjectFile,
+        _ => ActionKind::ArbitraryCommand,
+    }
+}
+
+/// Decide whether a Claude Code `PreToolUse` request should be allowed.
+///
+/// Uses the existing domain [`decide`] function with the current execution mode
+/// and permissions. No new rule engine is invented.
+///
+/// # Capability tier honesty
+///
+/// Claude Code remains **Observed** (Tier 1). The hook manifest wires
+/// `PreToolUse`, but it does not confirm that Claude Code interprets or enforces
+/// the response, so the integration cannot honestly claim Protected (Tier 2).
+/// The decision still uses the real mode and permissions so that the answer is
+/// truthful about what SURE would do.
+#[must_use]
+pub fn decide_claude_code_tool(
+    tool: &str,
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+) -> ProtectionDecision {
+    let action_kind = claude_code_tool_to_action_kind(tool);
+
+    match decide(action_kind, mode, permissions) {
+        ExecutionDecision::Allowed => ProtectionDecision::allow(),
+        ExecutionDecision::NeedsConsent => ProtectionDecision::block(
+            "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+        ),
+        ExecutionDecision::Denied => {
+            ProtectionDecision::block("The current execution mode does not permit this action.")
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -192,6 +234,97 @@ mod tests {
     #[test]
     fn unknown_tool_is_treated_as_arbitrary_command() {
         let decision = decide_cursor_tool(
+            "UnknownTool",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+    }
+
+    #[test]
+    fn claude_code_bash_is_blocked_in_inspect_only() {
+        let decision = decide_claude_code_tool(
+            "Bash",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn claude_code_read_is_allowed_in_inspect_only() {
+        let decision = decide_claude_code_tool(
+            "Read",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn claude_code_write_is_blocked_in_inspect_only() {
+        let decision = decide_claude_code_tool(
+            "Write",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn claude_code_edit_is_blocked_in_inspect_only() {
+        let decision = decide_claude_code_tool(
+            "Edit",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn claude_code_delete_is_blocked_in_inspect_only() {
+        let decision = decide_claude_code_tool(
+            "Delete",
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+        );
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn claude_code_write_is_allowed_with_write_permission() {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.write_project = true;
+        let decision = decide_claude_code_tool("Write", ExecutionMode::HostConfirmed, &permissions);
+        assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn claude_code_edit_is_allowed_with_write_permission() {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.write_project = true;
+        let decision = decide_claude_code_tool("Edit", ExecutionMode::HostConfirmed, &permissions);
+        assert_eq!(decision.decision, ProtectionDecisionKind::Allow);
+    }
+
+    #[test]
+    fn claude_code_bash_needs_consent_even_with_run_project_code() {
+        let mut permissions = ExecutionPermissions::inspect_only();
+        permissions.run_project_code = true;
+        let decision = decide_claude_code_tool("Bash", ExecutionMode::HostConfirmed, &permissions);
+        // ArbitraryCommand always returns NeedsConsent. A hook that cannot ask
+        // for consent must fail closed, so it maps to Block rather than Warn.
+        assert_eq!(decision.decision, ProtectionDecisionKind::Block);
+        assert!(decision.reason.is_some());
+    }
+
+    #[test]
+    fn claude_code_unknown_tool_is_treated_as_arbitrary_command() {
+        let decision = decide_claude_code_tool(
             "UnknownTool",
             ExecutionMode::InspectOnly,
             &ExecutionPermissions::inspect_only(),

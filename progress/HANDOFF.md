@@ -2,14 +2,14 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 122 / 168 tasks accepted (counted from `progress/state.json` against
+Progress: 123 / 168 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why). **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 9 of 11, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
-(9/9), phase P11 complete (9/9). Phase P12 is open at 7 of 10; Phase P13 is open
+(9/9), phase P11 complete (9/9). Phase P12 is open at 8 of 10; Phase P13 is open
 at 1 of 9; Phase P14 is open at 2 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -39,7 +39,9 @@ security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
 `3f9d002`. `P8-T009` received a follow-up security fix. `P12-T001` … `P12-T006`
 and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commit
-`20649d3` with its acceptance recorded in `a5eabb9`.
+`20649d3` with its acceptance recorded in `a5eabb9`. `P12-T009` is accepted as
+commit `60cb152`, with `6ccab01` correcting a stale row in
+`docs/architecture/CLI.md`.
 
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -492,15 +494,25 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
     `mcp` command added to the grammar without updating
     `docs/architecture/CLI.md` — and reported it without touching it, which is
     the behaviour this process needs when two workers share a workspace.
+71. A worker agent completed `P12-T009` — *Implement stdio SURE MCP server* — as
+    commit `60cb152`, with `6ccab01` correcting a stale row in
+    `docs/architecture/CLI.md` that cited a test name which does not exist. The
+    supervisor re-ran every gate from PowerShell, drove the server over real
+    pipes with `target/tmp/mcp-probe.mjs`, read the dispatch path in source, and
+    accepted the task; "Validation of `P12-T009`" below carries the numbers and
+    the two deviations the worker disclosed. `sure-cli` is now free, which is
+    what `P7-T010` was waiting for.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 7 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
-`P7-T010`, `P12-T007`, `P13-T002`, `P13-T003`, `P13-T004`,
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 8 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
+`P7-T010`, `P12-T007`, `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`,
 `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
-`P14-T010` and `P15-T008`. `P12-T009` is `in_progress`. The
-lowest-numbered READY task is `P7-T010`, and it is dispatched the moment
-`P12-T009` lands: it writes `sure-cli` and `sure-core/src`, which that task's
-worker is holding. `P7-T010` is also what five later tasks are waiting on, so it
-is not queued behind anything else.
+`P14-T010` and `P15-T008`. The
+lowest-numbered READY task is `P7-T010`, and both crates it writes are free
+(`sure-cli` was released by `P12-T009`'s acceptance), so it is dispatched now.
+`P7-T010` is also what five later tasks are waiting on, so it is
+not queued behind anything else. `P12-T010` became READY on this acceptance too:
+it wires the MCP bridge into the plugin packages, and its brief carries the
+`--format json` deviation recorded below.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
@@ -548,9 +560,16 @@ accepted dependencies it actually calls. Nothing else in the graph was edited:
 `P14-T011` does need a working check pipeline in practice, but rewiring an
 existing task's dependencies is a further plan change and was not made.
 
-Until `P7-T010` lands, `P12-T009` is instructed to route every tool through the
+Until `P7-T010` lands, `P12-T009` was instructed to route every tool through the
 existing `Command::report` path, so that there is exactly one engine path for
-the orchestrator to land on.
+the orchestrator to land on. It did, and the supervisor read it in source rather
+than taking the report's word: every tool builds a `Command` variant and runs it
+through `Command::report` (`crates/sure-cli/src/mcp.rs:855-907`), and the exposed
+tool list is derived from `crates/sure-cli/src/commands.rs::IMPLEMENTED`, so a
+tool cannot exist for a command this build refuses to carry out. When `P7-T010`
+gives `Command::report` a real `check`, the MCP tools follow with no change to
+`mcp.rs` — four of the five tools answer `sure check`'s refusal today, and that
+refusal becomes a verdict on its own.
 
 `P12-T007` was briefly held back on the argument that an evidence bridge feeding
 a check nobody can run would be built on sand. That argument does not survive
@@ -614,6 +633,101 @@ platform does start and name it by full path, which also gives
 workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P12-T009` added
+
+- `crates/sure-cli/src/mcp.rs` (new, ~1489 lines with 24 unit tests) — the
+  session loop and the five tools. Newline-delimited JSON-RPC 2.0 over the
+  process's own standard input and output: `initialize`, `ping`, `tools/list`,
+  `tools/call`. No listener, no socket, no port, no child process, so the
+  instructions the server sends a caller ("SURE never listens on a network; this
+  process speaks to its caller and to nothing else") are true of the code.
+  A notification is never answered and never run, and a request that arrives
+  before the handshake is refused with `-32002`.
+- `crates/sure-cli/tests/mcp_protocol.rs` (new, 833 lines, 22 tests) — drives the
+  built binary over real pipes, including that every tool's answer equals what
+  the command line prints for the same command, and that no tool reports success
+  for a project that was never checked.
+- `crates/sure-cli/src/report.rs` — `Report::Mcp` and `Report::McpSession`, plus
+  `Report::frame()` made public and `Report::human_text()`. A protocol message is
+  *not* wrapped in the CLI envelope: `Report::frame` writes both, so there is one
+  renderer rather than two that agree.
+- `crates/sure-cli/src/{cli,commands,lib,main}.rs` — the `mcp` subcommand, its
+  place in the single exhaustive dispatch, and `"mcp"` added to `DOCUMENTED` in
+  `main.rs` beside the command in the `IMPLEMENTED` list.
+- `docs/architecture/CLI.md` and `docs/architecture/MCP_BRIDGE.md` — the
+  `sure mcp serve` row and section CLI.md was missing, what this build implements
+  and what each tool answers today, and the record of why the response frame did
+  *not* move to `sure-protocol` (the bridge lives in this crate, so there was no
+  second consumer).
+
+The five tools are `sure_check`, `sure_get_report`, `sure_get_repair`,
+`sure_recheck` and `sure_status`, each named for the command line it runs. Four
+of them run commands this build cannot carry out yet (`sure check`, `sure
+history`, `sure repair`, `sure recheck`), and each answers with **that command's
+own refusal**, `isError: true`, never a verdict and never an empty success.
+`sure_status` runs the implemented `sure doctor` and answers `isError: false`
+with its words. A tool call may name a project and nothing else: execution mode,
+privacy settings and protection policy come from the user's own configuration,
+and a call that tries to select one is refused with `-32602` and a sentence
+saying where the policy comes from.
+
+## Validation of `P12-T009`
+
+Verified by the supervisor on 2026-09-18 from the worker's commits `60cb152` and
+`6ccab01`, none of it read from the worker's report:
+
+| Claim | How it was checked |
+| --- | --- |
+| no reserved path touched | `git show --name-only` over both commits: 9 + 1 files, all `crates/sure-cli/**` and `docs/architecture/**`; working tree clean |
+| the workspace is green | `cargo test --workspace --all-features --no-fail-fast` from PowerShell: exit 0, 71 test binaries, **2327 tests passed**, 0 failures |
+| formatting and lints | `cargo fmt --all -- --check` exit 0; `cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0 |
+| the bootstrap and the plan | `node scripts/validate-bootstrap.mjs` OK (17 phases, 168 tasks); `node scripts/taskctl.mjs validate` OK (168 tasks) |
+| the handshake is real | `node target/tmp/mcp-probe.mjs target/debug/sure.exe sure_status NONE`: `initialize` answered `protocolVersion 2025-11-25` with `capabilities.tools.listChanged=false`, `tools/list` answered exactly five tools each with an `inputSchema`, `tools/call sure_status` answered `isError: false` with `sure doctor`'s own words and a `structuredContent` frame, an unknown tool answered `-32602`, `shutdown` answered `-32601` (that method left the revision in 2025-06-18), **5 of 5 stdout lines were protocol messages and 0 were not**, the session summary went to stderr, exit 0 |
+| tools cannot reach the engine by another path | `mcp.rs` grep'd for sockets, listeners and child processes: none; every tool builds a `Command` and runs it through `Command::report` (lines 855-907); `isError` derives from `Report::is_an_answer`; the tool list derives from `commands::IMPLEMENTED` |
+
+**One gate result is recorded rather than explained away.** A first invocation of
+`cargo test --workspace --all-features --no-fail-fast` returned exit 101 with two
+failing targets. It was not reproduced in the eight runs that followed — one
+further full workspace run (2327 passed) plus four `store_concurrency` and three
+`mcp_protocol` runs of the binaries that spawn processes and assert on timing —
+the output of the failing run was not captured, and no file under `fixtures/` or
+`crates/` had been written for half an hour before it. What failed is therefore
+unknown, and this file does not claim it was noise. The consequence for a
+reviewer is small (the same command is green on the committed tree, repeatedly),
+but a workspace gate that can fail once in nine runs is itself worth knowing
+about before the P16 runs are treated as a release check.
+
+Two deviations are recorded, both disclosed by the worker rather than found by
+the supervisor, and both owned by other tasks:
+
+- **`sure --format json mcp serve` writes a sixth line to stdout** after the last
+  protocol message: the CLI response frame, which the MCP transport forbids
+  ("MUST NOT write anything to its stdout that is not a valid MCP message").
+  Confirmed by probe: 6 stdout lines, 5 protocol, 1 not. It needs an explicit
+  non-default flag, so a harness that launches `sure mcp serve` — which is what
+  the integrations do — is not affected. It is disclosed in CLI.md's own
+  `sure mcp serve` section ("a caller must not ask for `--format json`") and
+  pinned by `the_machine_format_puts_one_envelope_on_stdout_after_the_last_message`,
+  so it cannot be lost or drift. **Owner: `P12-T010`**, which is the task that
+  decides what the plugin launchers pass and is READY now.
+- **`sure hook ingest` answers a non-pre-tool-use event with
+  `ProtectionDecision::allow()`** (`crates/sure-cli/src/hook.rs:149-150`), which
+  `report.rs:621-632` renders as "SURE allows this tool request." and, in JSON,
+  as `decision: "allow"` — a statement about a tool request that was never made,
+  in SURE's own voice, on a path a harness reads. Neither commit touches
+  `hook.rs`, so it predates this task and is not `P12-T009`'s to answer for.
+  **Owner: `P13-T007`**, whose acceptance is that fail-open/fail-closed behaviour
+  is explicit for each harness and event.
+
+The worker also corrected a description of the supervisor's, and the correction
+is right: the grammar test compares the grammar against a hand transcription,
+`const DOCUMENTED` at `crates/sure-cli/src/main.rs:113`, **not** against CLI.md at
+run time. No test reads CLI.md's text. The document and the transcription are two
+places that can drift and only the transcription is checked, which is why the
+stale `sure hook ingest` row in `6ccab01` (it cited
+`hook_ingest_does_not_read_standard_input`, a test that does not exist) survived
+until a worker read that table while adding rows to it.
 
 ## What `P14-T002` added
 

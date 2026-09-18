@@ -65,8 +65,11 @@ pub enum AnalysisError {
         /// What went wrong, in plain words.
         message: String,
     },
-    /// The Claude CLI provider is not implemented in this release.
-    ClaudeCliNotImplemented,
+    /// The Claude CLI provider could not run or did not finish cleanly.
+    ClaudeCliFailed {
+        /// What went wrong, in plain words.
+        message: String,
+    },
     /// The OpenAI-compatible provider is not implemented in this release.
     OpenAiCompatibleNotImplemented,
 }
@@ -82,10 +85,9 @@ impl fmt::Display for AnalysisError {
             Self::LocalCommandFailed { message } => {
                 write!(f, "The local command failed: {message}")
             }
-            Self::ClaudeCliNotImplemented => write!(
-                f,
-                "The Claude CLI provider is not implemented in this release."
-            ),
+            Self::ClaudeCliFailed { message } => {
+                write!(f, "The Claude CLI provider failed: {message}")
+            }
             Self::OpenAiCompatibleNotImplemented => write!(
                 f,
                 "The OpenAI-compatible provider is not implemented in this release."
@@ -211,13 +213,86 @@ fn prepare_prompt(prompt: &str) -> String {
     crate::redact::redact(prompt)
 }
 
-/// Placeholder for the Claude CLI provider.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ClaudeCliAnalyzer;
+/// Provider that invokes the user-installed Anthropic Claude CLI.
+///
+/// The provider runs `claude -p <prompt>` in the project root. The prompt is
+/// redacted before it leaves SURE, and both stdout and stderr are bounded so
+/// a runaway CLI cannot fill memory. The returned text is a model assessment,
+/// not deterministic evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeCliAnalyzer {
+    program: OsString,
+    working_directory: PathBuf,
+}
+
+impl ClaudeCliAnalyzer {
+    /// Build a provider that runs `claude` in `working_directory`.
+    #[must_use]
+    pub fn new(working_directory: impl Into<PathBuf>) -> Self {
+        Self {
+            program: "claude".into(),
+            working_directory: working_directory.into(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_program(
+        program: impl Into<OsString>,
+        working_directory: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            program: program.into(),
+            working_directory: working_directory.into(),
+        }
+    }
+}
 
 impl Analyzer for ClaudeCliAnalyzer {
-    fn analyze(&self, _request: AnalysisRequest<'_>) -> Result<AnalysisResponse, AnalysisError> {
-        Err(AnalysisError::ClaudeCliNotImplemented)
+    fn analyze(&self, request: AnalysisRequest<'_>) -> Result<AnalysisResponse, AnalysisError> {
+        let cancellation = Cancellation::new();
+        let limits = Limits::new(DEFAULT_TIMEOUT, DEFAULT_OUTPUT_BYTES, DEFAULT_OUTPUT_BYTES);
+
+        let prompt = prepare_prompt(request.prompt);
+        let arguments: Vec<OsString> = vec!["-p".into(), prompt.into()];
+
+        let process_request =
+            ProcessRequest::new(&self.program, &self.working_directory, limits, cancellation)
+                .with_arguments(arguments);
+
+        let outcome = crate::process::run(&process_request).map_err(|error| {
+            AnalysisError::ClaudeCliFailed {
+                message: error.to_string(),
+            }
+        })?;
+
+        claude_cli_response(outcome)
+    }
+}
+
+/// Turn a finished Claude CLI run into an analysis response or error.
+fn claude_cli_response(outcome: Outcome) -> Result<AnalysisResponse, AnalysisError> {
+    match outcome.termination() {
+        Termination::Exited { code: Some(0) } => {
+            Ok(AnalysisResponse::new(outcome.stdout().text_lossy()))
+        }
+        Termination::Exited { code: Some(code) } => {
+            let stderr = outcome.stderr().text_lossy();
+            Err(AnalysisError::ClaudeCliFailed {
+                message: format!("exited with code {code}: {stderr}"),
+            })
+        }
+        Termination::Exited { code: None } => Err(AnalysisError::ClaudeCliFailed {
+            message: "exited without a code".to_owned(),
+        }),
+        Termination::TimedOut { .. } => Err(AnalysisError::ClaudeCliFailed {
+            message: "timed out".to_owned(),
+        }),
+        Termination::Cancelled { .. } => Err(AnalysisError::ClaudeCliFailed {
+            message: "was cancelled".to_owned(),
+        }),
+        Termination::CancelledBeforeStart => Err(AnalysisError::ClaudeCliFailed {
+            message: "was cancelled before it started".to_owned(),
+        }),
     }
 }
 
@@ -269,7 +344,7 @@ pub fn build(
                 project_root,
             )))
         }
-        AnalysisProvider::ClaudeCli => Ok(Box::new(ClaudeCliAnalyzer)),
+        AnalysisProvider::ClaudeCli => Ok(Box::new(ClaudeCliAnalyzer::new(project_root))),
         AnalysisProvider::OpenAiCompatible => Ok(Box::new(OpenAiCompatibleAnalyzer::new(
             config.endpoint.clone().unwrap_or_default(),
             config.model.clone(),
@@ -424,15 +499,44 @@ mod tests {
     }
 
     #[test]
-    fn build_dispatches_to_claude_cli_placeholder() {
+    fn build_dispatches_to_claude_cli() {
         let config = AnalysisConfig {
             provider: AnalysisProvider::ClaudeCli,
             ..AnalysisConfig::default()
         };
         let root = temp_root();
         let analyzer = require_analyzer(build(&config, &root));
+        // The default program is `claude`, which is not expected to be installed
+        // in test environments. The analyzer must report a provider failure, not
+        // a placeholder.
         let error = analyzer.analyze(request("x")).unwrap_err();
-        assert_eq!(error, AnalysisError::ClaudeCliNotImplemented);
+        assert!(matches!(error, AnalysisError::ClaudeCliFailed { .. }));
+        let message = error.to_string();
+        assert!(
+            message.contains("failed") || message.contains("claude"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn claude_cli_analyzer_runs_program_and_returns_stdout() {
+        let temp = std::env::temp_dir();
+        let analyzer = ClaudeCliAnalyzer::with_program("echo", &temp);
+
+        let response = analyzer.analyze(request("hello from claude")).unwrap();
+
+        assert!(response.text.contains("hello from claude"));
+    }
+
+    #[test]
+    fn claude_cli_analyzer_redacts_prompt_before_passing_it() {
+        let temp = std::env::temp_dir();
+        let analyzer = ClaudeCliAnalyzer::with_program("echo", &temp);
+
+        let response = analyzer.analyze(request("token sk-abcdefghijklmnopqrstuvwxyz01")).unwrap();
+
+        assert!(!response.text.contains("sk-abcdefghijklmnopqrstuvwxyz01"));
+        assert!(response.text.contains("***"));
     }
 
     #[test]

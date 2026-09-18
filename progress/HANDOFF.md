@@ -3,15 +3,16 @@
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
 
-**In flight: `P1-T012`** (give the store a location a caller can choose),
-dispatched 2026-09-18 with its brief at `target/tmp/brief-p1t012.md`. It owns the
-privacy defect this file has been carrying since item 74: every `cargo test
---workspace` on this branch writes an `event` row into the developer's real
-`%LOCALAPPDATA%\SURE\sure.db`, and the tests that read it are flaky for the same
-reason. `P7-T011` (severity calibration) and `P12-T007` (Codex evidence bridge)
-are both accepted — "What `P7-T011` added", "Validation of `P7-T011`", "What
-`P12-T007` added" and "Validation of `P12-T007`" below carry the numbers.
-Progress: 127 / 172 tasks accepted (counted from `progress/state.json` against
+**Nothing is in flight:** `P1-T012` (give the store a location a caller can
+choose), `P7-T011` (severity calibration) and `P12-T007` (Codex evidence bridge)
+are all accepted — "What `P1-T012` added", "Validation of `P1-T012`", "What
+`P7-T011` added", "Validation of `P7-T011`", "What `P12-T007` added" and
+"Validation of `P12-T007`" below carry the numbers. The tree is clean and the
+next dispatch is the next READY task, `P12-T010`. `P1-T012` closed the privacy
+defect this file carried since item 74: `cargo test --workspace` no longer
+writes the developer's real store, measured before and after a full run rather
+than asserted.
+Progress: 128 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -19,8 +20,7 @@ below record why — from 168 to 170 on the same day, when two gaps found by
 `P7-T011`'s verification gave the corpus's own record of what the detectors do an
 owner (item 75), and from 171 to 172 when `P12-T007`'s verification found that
 recorded events never reach the verdict's capability tier (item 77)). **Phase
-P0 complete (9/9), phase P1 is open at
-11 of 12, phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
+P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 9 of 10; Phase P13 is open
@@ -57,7 +57,8 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
 commit `60cb152`, with `6ccab01` correcting a stale row in
 `docs/architecture/CLI.md`. `P7-T010` is accepted as commit `5af79c7`.
 `P7-T011` is accepted as commit `80e98b2`. `P12-T007` is accepted as commit
-`d41d085`.
+`d41d085`. `P1-T012` is accepted as commit `7c0f355`, with the dispatch in
+`7f85b03`.
 
 **How to read `progress/state.json`.** The per-task `evidence` array is empty for
 88 of the 127 accepted tasks (counted 2026-09-18). That is not a gap in the
@@ -71,6 +72,18 @@ to a non-empty `notes` means *read the note*, not *nothing was checked*. The
 been; the commit a task landed in is named in its note. Reading `evidence: []`
 as "accepted without evidence" would be wrong, and the fields being vestigial is
 itself worth knowing before anyone builds a report on them.
+
+**How to read `SHA256SUMS.txt`.** It is not a manifest of the repository. It lists
+184 paths, and `git ls-files` counts 497, so 313 tracked files are not in it — all
+but eleven of the Rust sources among them. The set is also frozen: the supervisor's
+`target/tmp/regen-sums.mjs` recomputes the digest of each listed path and never
+adds, removes or reorders an entry, so a file created after the manifest was
+written can never appear in it. Nothing in the repository claims otherwise, and no
+script, test or CI job reads the file — its actual role is the one it plays in
+every acceptance note above, a fixed list of paths a worker's commit must not
+touch, plus a change-detection record for the files it does list. Diffing it is a
+sound way to see whether one of those 184 moved; concluding from that diff that the
+tree is or is not intact would be reading a claim the file does not make.
 
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -619,20 +632,45 @@ itself worth knowing before anyone builds a report on them.
     acceptance ("repair can close only with new passing evidence; regression
     variant blocked") is the real end-to-end claim and the only thing that can
     honestly carry it. No task was added: the graph stays at 172.
+79. A worker agent completed `P1-T012` — *Give the store a location a caller can
+    choose* — as commit `7c0f355`. The supervisor re-ran all five gates from
+    PowerShell, hashed the real store before and after its own full workspace
+    run, drove every acceptance criterion through the shipped binary, and proved
+    both source-scan guards can fail by planting a violation of each shape and
+    running the guard alone. Accepted; "Validation of `P1-T012`" below carries
+    the numbers. The store is now `--store-dir DIR`, taken from the process's
+    argument vector and from nowhere else — no project file, and deliberately no
+    environment variable, because a checked project's harness configuration can
+    set the environment of the processes it starts. `cargo test --workspace` no
+    longer writes the developer's store: before and after the run the file is
+    `D171755690549D3A…`, 348160 bytes, with no `-wal`, `-shm` or `-journal`
+    beside it.
+80. `P1-T012`'s verification found that the hook path takes its project root from
+    the event payload (`crates/sure-cli/src/hook.rs`:
+    `envelope.project_root.clone().unwrap_or_else(current_dir)`). The store's
+    *location* is no longer project-settable, but the refusal to keep it inside
+    the project, and the config the protection decision is read from, are only as
+    good as a claim the payload makes. Recorded against `P13-T009` — "enforce
+    user authority over project-controlled config/evidence", whose second
+    acceptance line is that authoritative evidence is stored outside the checked
+    working tree — rather than added as a task. The same verification saw
+    `crates/sure-core/tests/browser_driver.rs:694` fail once under a full
+    workspace run ("something is listening on 127.0.0.1:60014 after the listener
+    was released") and could not reproduce it in one full-suite run and six
+    isolated runs; recorded against `P16-T001`, which has to trust this gate, and
+    noted at `P5-T004`, whose file it is.
 
 The READY list, read from
 `node scripts/taskctl.mjs ready` on 2026-09-18 after `P7-T011` and `P12-T007`
 were accepted, is `P12-T010`, `P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`,
 `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`,
-`P1-T012`, `P7-T012`, `P14-T013`, `P7-T013`; `P1-T012` is `in_progress` under a
-dispatched worker. The
-lowest-numbered READY task was `P1-T012` (give the store a location a caller
-can choose) — `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012`, `P7-T011`
-is accepted, `P14-T013` joined the list when that acceptance gave the
-corpus's own record an owner, and `P7-T013` joined it when `P12-T007`'s
+`P1-T012`, `P7-T012`, `P14-T013`, `P7-T013`; nothing is `in_progress`. The
+next dispatch is the first READY task, `P12-T010` (wire the MCP bridge into the
+plugin packages), whose brief carries the `--format json mcp serve` deviation
+recorded below. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and both
+`P7-T011` and `P1-T012` are accepted; `P14-T013` joined the list when `P7-T011`
+gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
-`P12-T010` wires the MCP bridge into the plugin
-packages, and its brief carries the `--format json` deviation recorded below.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
 
@@ -758,6 +796,101 @@ platform does start and name it by full path, which also gives
 workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P1-T012` added
+
+`sure --store-dir DIR`, global, and the interesting part is that it is a flag.
+The value comes from the process's own argument vector and from nowhere else: no
+file in the project is read for it — not `.sure/config`, not a manifest field —
+and there is deliberately **no environment variable**, because a checked
+project's harness configuration can set the environment of the processes it
+starts, which would be acceptance 1's defect wearing a different hat. Claude
+Code's documentation bears this out and slightly more strongly than the worker
+put it: a project's `.claude/settings.json` `env` block is "Set environment
+variables for every session and its subprocesses", it applies to "Everyone
+working in the project, checked into source control", hook processes inherit the
+parent environment, and in `claude -p`/SDK a folder that was never trusted still
+gets the block applied — `--bare` does not stop it either. Claude Code keeps an
+ignore-list for exactly the variables that choose where *it* stores its files,
+and that list is keyed to Claude Code's own names, so it would not have covered
+`SURE_STORE_DIR`.
+
+`Paths::discover_at(named)` is the mechanism and `Paths::discover()` is now
+`discover_at(None)`, so the default is the same code path rather than a second
+one that could drift. The user-level *settings* directory is not movable: naming
+a store moves the store and nothing else. `Origin::{Platform, Caller}` travels
+with the `Paths` value and is what `sure doctor` prints — "the platform's own
+location for this user" or "named for this run, not the platform's own", with
+`details.places.store_location` as `"platform"` or `"caller"` in the machine
+form — because a redirect that was ignored and one that worked look identical in
+a path, and the reader would debug the wrong thing. A relative or empty
+directory is refused at the parser (status 2, `store_directory` shared between
+the parser and the run-time resolution so the rule cannot drift), a location that
+cannot be written is status 5 with "Nothing was written", and a directory that
+does not exist yet is not an error — `doctor` reports it as not created yet and
+does not create it.
+
+**Two source scans hold it rather than stating it**, which is the part worth
+keeping: `nothing_a_project_can_write_decides_where_the_store_goes` reads the
+four modules that decide the location and fails if one reads the environment;
+`every_command_is_reached_by_the_location_the_caller_named` reads every crate's
+`src` and fails if any file but `paths/mod.rs` calls the no-argument
+`Paths::discover()` — the shape a command that ignored its caller would take, and
+the difference between a mechanism and a mechanism one command honours.
+
+**What it deliberately did not do.** `integrations/*/scripts/sure-hook.ps1` were
+not given the flag: a hook whose events landed in a scratch store would be a hook
+whose events the verdict never reads. The flag exists for callers who want it,
+not for the product's own path.
+
+## Validation of `P1-T012`
+
+Supervisor, 2026-09-18, from PowerShell. Commit `7c0f355`; the five gates at that
+commit, all exit 0: fmt, clippy, `cargo test --workspace --all-features
+--no-fail-fast` (73 test targets, 2406 passes, 0 failures, 12 ignored — 8 of them
+in one target), bootstrap (`17 phases, 172 tasks`), taskctl (`state OK: 172
+tasks`). Log at `target/tmp/sup-p1t012-gates.txt`. `git show --name-only` lists
+fifteen files, none under `evaluation/`, `fixtures/`, `progress/`, `tasks/` or
+`SHA256SUMS.txt`.
+
+The measurement the task exists for, taken by the supervisor around its own gate
+run: `%LOCALAPPDATA%\SURE\sure.db` is `D171755690549D3A…`, 348160 bytes, before
+and after, and the directory holds `sure.db` and nothing else. Before this task
+that file gained a row on every `cargo test --workspace`; now it does not move.
+The same digest holds after every command below and after the mutation tests.
+
+Driven through the shipped binary: `--store-dir <dir> check --goal … <proj>`
+exits 1 and writes `<dir>\sure.db`; `--store-dir <dir> doctor` says "named for
+this run" and the machine form says `"caller"` while `config_dir` and
+`settings_file` stay where they were; bare `sure doctor` still reports
+`%LOCALAPPDATA%\SURE\sure.db`, "the platform's own location for this user", and
+the 324 records that were always there. A store inside the checked project exits
+5 with nothing on stdout, the three sentences the rest of the build uses, and
+`Test-Path` on the directory False. Two cases the worker's tests do not cover and
+the supervisor drove anyway: a relative store directory is refused at the parser
+with status 2, and a location that cannot exist — parent is a file (os error
+183), or an unsyntactic path (os error 123) — is status 5 with "Nothing was
+written. SURE keeps evidence outside the project, so it has nowhere else it is
+willing to put it." rather than a silent fallback to the default.
+
+Both guards were shown able to fail rather than assumed to be live: a planted
+`Paths::discover()` in `sure-cli/src/mcp.rs` fails
+`every_command_is_reached_by_the_location_the_caller_named`, and a planted
+`std::env::var("SURE_STORE_DIR")` in `paths/mod.rs` fails
+`nothing_a_project_can_write_decides_where_the_store_goes`, each naming the file
+and saying why. Both files restored from copies taken beforehand;
+`git status --porcelain` empty afterwards.
+
+Not verified: `crates/sure-core/tests/browser_driver.rs:694` failed once under
+the worker's full workspace run ("something is listening on 127.0.0.1:60014
+after the listener was released") and did not reproduce for the supervisor in one
+full-suite run or six isolated runs of that target. One occurrence across two
+full-suite runs, cause unknown; recorded against `P16-T001` and `P5-T004`. The
+Claude Code `env` claim is scoped to the documented behaviour as of this date:
+the exact contents of Claude Code's ignore-list come from a summary of a page
+that truncates on fetch, and the hook inheritance is a two-statement inference
+from "for every session and its subprocesses" plus "a hook process inherits the
+parent environment", not one quoted guarantee.
 
 ## What `P12-T007` added
 

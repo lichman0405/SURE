@@ -1,0 +1,676 @@
+{
+  "schema_version": 1,
+  "corpus": "privacy",
+  "title": "The mandatory secret-redaction and protection corpus",
+  "note": "P13-T008's 'mandatory secret/protection fixtures'. Every entry is either a case this suite drives (kind: hook_ingest, check, full_recording_on_disk) or a pointer at the test that already drives it (kind: covered_by) -- and a pointer is checked to exist, so this list cannot decay into prose. Every entry's promised_by binds it to a sentence in docs/ (or in the code that asserts it); the suite fails if a sentence stops being there, so a withdrawn promise takes its fixture with it. What this corpus does NOT confirm is in not_confirmed, printed on every run. Run it with `cargo test -p sure-cli --test privacy_suite`.",
+  "license_note": "Every secret in this file is invented and matches a detector's shape, not a real credential.",
+  "cases": [
+    {
+      "id": "no-settings-file-at-all-records-no-full-recording",
+      "kind": "hook_ingest",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "A real `sure` run with no settings file of any kind stores the event and no recording",
+      "why": "This is acceptance line 1, named. The event must be observable afterwards -- a store that is empty because the hook failed would pass an assertion about an absence for the wrong reason -- so the case requires a stored event row beside the missing recording.",
+      "preconditions": ["no_user_settings_file"],
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Explicit opt-in may store:"
+        },
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Do not require durable storage of full prompt/response/terminal content."
+        }
+      ],
+      "project": { "files": {} },
+      "ingest": {
+        "argv": ["--source", "cursor"],
+        "harness": "cursor",
+        "harness_session_id": "p13t008-default-hook",
+        "event": {
+          "event": "afterFileEdit",
+          "path": "src/lib.rs",
+          "timestamp_utc": "2026-09-19T09:00:00Z"
+        }
+      },
+      "expect": {
+        "status": 0,
+        "decision": "allow",
+        "event_rows_at_least": 1,
+        "recordings": 0
+      }
+    },
+    {
+      "id": "a-run-that-takes-a-protection-decision-records-no-full-recording-either",
+      "kind": "hook_ingest",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "The decision path writes a decision row and still no recording",
+      "why": "The hook opens the store twice -- once for the event, once for the decision -- and the recording decision is taken once, before both. A default that only held on the event path would be a default with a hole in it, so the case requires both writes to have happened and no third row.",
+      "preconditions": ["no_user_settings_file"],
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Explicit opt-in may store:"
+        },
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "The mode in effect is the stricter of the two settings files"
+        }
+      ],
+      "project": {
+        "files": {
+          "sure.yaml": "protection:\n  mode: strict\n"
+        }
+      },
+      "ingest": {
+        "argv": ["--source", "cursor", "pre-tool-use"],
+        "harness": "cursor",
+        "harness_session_id": "p13t008-default-decision",
+        "event": {
+          "event": "preToolUse",
+          "tool": "Read",
+          "path": ".env",
+          "timestamp_utc": "2026-09-19T09:00:01Z"
+        }
+      },
+      "expect": {
+        "status": 1,
+        "decision": "block",
+        "reason_contains": ["credentials"],
+        "event_rows_at_least": 1,
+        "decision_rows": 1,
+        "recordings": 0
+      }
+    },
+    {
+      "id": "a-credential-in-a-project-file-is-refused-and-never-printed",
+      "kind": "check",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "A project's own sure.yaml cannot carry a credential, and the value is not echoed when it tries",
+      "why": "The structural half of secret redaction: the value never has to be redacted because the file is refused before it is read into anything. The case also requires the store to be untouched, because a refusal that had already recorded something would be a refusal that leaked.",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "Redaction must occur before user-visible reports and preferably before durable recording/model context."
+        },
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "avoid logging raw environment values;"
+        }
+      ],
+      "project": {
+        "files": {
+          "README.md": "# a project whose settings file carries a credential\n",
+          "sure.yaml": "privacy:\n  mode: fully_local\nanalysis:\n  provider: openai_compatible\n  endpoint: https://user:ghp_0123456789abcdefghij@api.example.com/v1\n"
+        }
+      },
+      "secrets": ["ghp_0123456789abcdefghij"],
+      "check": { "goal": null },
+      "expect": {
+        "status": 5,
+        "output_absent": ["ghp_0123456789abcdefghij"],
+        "stderr_contains": ["analysis.endpoint", "has not printed the value"],
+        "store_exists": false
+      }
+    },
+    {
+      "id": "a-protection-mode-this-release-does-not-implement-is-refused",
+      "kind": "check",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "`protection.mode: custom` is refused by a check rather than accepted",
+      "why": "PROTECTION_MODE.md promises the setting is refused rather than accepted, and that a project believing it had rules SURE does not implement is the failure being avoided. Status 5 and an empty store are the observable form of 'stopped rather than accepted'.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "Not implemented in this release."
+        },
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "a settings file naming it is **refused** rather than accepted"
+        }
+      ],
+      "project": {
+        "files": {
+          "README.md": "# a project asking for protection rules this release does not have\n",
+          "sure.yaml": "protection:\n  mode: custom\n"
+        }
+      },
+      "check": { "goal": null },
+      "expect": {
+        "status": 5,
+        "stderr_contains": ["does not implement", "standard", "strict"],
+        "store_exists": false
+      }
+    },
+    {
+      "id": "a-protection-mode-this-release-does-not-implement-fails-firm-in-a-hook",
+      "kind": "hook_ingest",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "The same unimplementable setting is answered under strict when a harness meets it",
+      "why": "The other half of the refusal, and the one that must not fail open: a hook cannot stop and cannot ask, so a settings file it cannot read has to leave the user with more protection rather than less. The held read of a credential is how 'strict' is observed from a launcher.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "answers under `strict`, the firmest mode this release implements, and never under the default"
+        },
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "a user who cannot be asked must not end up with less protection than they set."
+        }
+      ],
+      "project": {
+        "files": {
+          "sure.yaml": "protection:\n  mode: custom\n"
+        }
+      },
+      "ingest": {
+        "argv": ["--source", "cursor", "pre-tool-use"],
+        "harness": "cursor",
+        "harness_session_id": "p13t008-custom-fails-firm",
+        "event": {
+          "event": "preToolUse",
+          "tool": "Read",
+          "path": ".env",
+          "timestamp_utc": "2026-09-19T09:02:00Z"
+        }
+      },
+      "expect": {
+        "status": 1,
+        "decision": "block",
+        "reason_contains": ["credentials"],
+        "event_rows_at_least": 1,
+        "recordings": 0
+      }
+    },
+    {
+      "id": "an-unimplementable-protection-mode-does-not-hold-ordinary-work",
+      "kind": "hook_ingest",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "Failing firm is strict and not a blanket refusal",
+      "why": "Without this control, the case above would pass for a hook that refused everything, which is a different product -- and a hook that refused everything is a hook a user turns off, which leaves them with less protection than either case is about. The same project whose mode SURE cannot read lets an ordinary read through.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "`strict` differs from `standard` on the categories named above and on nothing else."
+        }
+      ],
+      "project": {
+        "files": {
+          "sure.yaml": "protection:\n  mode: custom\n"
+        }
+      },
+      "ingest": {
+        "argv": ["--source", "cursor", "pre-tool-use"],
+        "harness": "cursor",
+        "harness_session_id": "p13t008-custom-ordinary",
+        "event": {
+          "event": "preToolUse",
+          "tool": "Read",
+          "path": "src/lib.rs",
+          "timestamp_utc": "2026-09-19T09:02:01Z"
+        }
+      },
+      "expect": {
+        "status": 0,
+        "decision": "allow",
+        "event_rows_at_least": 1,
+        "recordings": 0
+      }
+    },
+    {
+      "id": "a-secret-typed-into-a-goal-reaches-the-store-only-redacted",
+      "kind": "check",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "A credential in `--goal` is in no byte of the store, and the redacted form is",
+      "why": "The report-and-storage seam for a value that arrives on the command line rather than from the project. Both halves are required: the absence proves nothing on its own, because a run that wrote no goal at all would satisfy it -- the redacted text being present is what shows SURE really did store the words it was given. The stdouts assertion requires the run to have said it recorded the goal, so the store half is about a goal that was recorded rather than about a setting that was never written. What the report prints is not asserted here; see not_confirmed[the-report-shows-a-goal-the-history-does-not-hold].",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "Redaction must occur before user-visible reports and preferably before durable recording/model context."
+        },
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Users must be able to inspect and delete local SURE history/recordings."
+        }
+      ],
+      "project": {
+        "files": {
+          "README.md": "# a project with no settings file\n",
+          "package.json": "{\"name\":\"p13t008-goal\",\"version\":\"1.0.0\"}\n"
+        }
+      },
+      "secrets": ["ghp_0123456789abcdefghij"],
+      "check": { "goal": "deploy using token ghp_0123456789abcdefghij please" },
+      "expect": {
+        "status_not": [2, 3, 5],
+        "store_exists": true,
+        "stdout_contains": ["Your goal was written to the history as record"],
+        "store_absent": ["ghp_0123456789abcdefghij"],
+        "store_present": ["deploy using token *** please"]
+      }
+    },
+    {
+      "id": "a-full-recording-written-under-consent-is-redacted-on-disk",
+      "kind": "full_recording_on_disk",
+      "layer": "store",
+      "release_blocking": true,
+      "title": "With recording turned on, the recording on disk still holds no secret",
+      "why": "The consent-times-redaction seam, at the only layer that can reach it: `persist_full_recording` redacts the payload before it is written, so opting in changes what is kept and not whether it is redacted. Every byte under the store directory is read, because the claim is about the file and not about the value a reader is handed back.",
+      "layer_note": "In-process, and it has to be: the consent comes from the user's own settings file, which on Windows is `%APPDATA%\\SURE\\sure.yaml` -- no flag, no environment variable and no test may redirect or write it (`Paths::discover_at` moves the store and not the settings). The writes are the same two calls `sure hook ingest` makes, through the same normalizer. See not_confirmed[no-recording-through-the-binary].",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "redact stdout/stderr before persistent full-recording write where feasible;"
+        },
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "full terminal output;"
+        }
+      ],
+      "payload": {
+        "command": "curl https://user:ghp_0123456789abcdefghij@example.com/upload",
+        "env": { "SURE_DEMO_KEY": "api_key=sk-live0123456789abcdefghijklmnop" },
+        "note": "the recording keeps the event and not the credential"
+      },
+      "expect": {
+        "recordings": 1,
+        "payload_absent": ["ghp_0123456789abcdefghij", "sk-live0123456789abcdefghijklmnop"],
+        "store_absent": ["ghp_0123456789abcdefghij", "sk-live0123456789abcdefghijklmnop"],
+        "store_present": ["full_recording"]
+      }
+    },
+    {
+      "id": "the-redaction-engine-replaces-each-shape-of-secret-and-keeps-the-prose",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "The engine's own corpus of secret shapes, and its false-positive half",
+      "why": "Not driven from here: these are the engine's unit tests, and the fixtures above are about what reaches a stored record. Re-running them through a process would prove the same assertions at a layer where the value has already been through them.",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "test false positives as well as known secret patterns;"
+        },
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "never claim perfect secret detection."
+        }
+      ],
+      "file": "crates/sure-core/src/redact.rs",
+      "tests": [
+        "a_password_in_a_url_does_not_survive",
+        "an_assigned_secret_is_replaced_but_the_name_is_kept",
+        "known_token_shapes_are_replaced",
+        "a_pem_private_key_block_is_fully_redacted",
+        "a_value_cannot_forge_extra_lines_in_a_message",
+        "structured_redaction_redacts_nested_secrets",
+        "ordinary_prose_is_not_mangled",
+        "harmless_strings_that_look_a_bit_like_secrets_are_left_alone"
+      ]
+    },
+    {
+      "id": "the-redaction-engine-reads-the-projects-own-configured-secrets",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": false,
+      "title": "A literal or a pattern in the project's settings file is redacted too",
+      "why": "The custom-rule half of the engine. It is not driven from here because a project file naming a secret is one more input the cases above already carry, and the engine's own tests are where the ordering of overlapping rules is decided.",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "explicitly configured secret names/values;"
+        }
+      ],
+      "file": "crates/sure-core/src/redact.rs",
+      "tests": [
+        "a_configured_literal_secret_is_redacted_everywhere",
+        "a_configured_regex_pattern_is_redacted",
+        "longer_literals_are_redacted_before_shorter_ones",
+        "configured_rules_stack_with_built_in_detectors"
+      ]
+    },
+    {
+      "id": "a-decision-row-holds-the-decision-and-not-the-credentials-it-carried",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "The request's own words, with a credential in them, do not reach the store",
+      "why": "Already proved at the binary layer, by a test that greps every file under a store directory it named. This corpus does not repeat it: it is the same instrument, and the corpus points at it instead. What this corpus adds is the case where the payload is kept (a recording) rather than summarised.",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "avoid logging raw environment values;"
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "a_decision_row_holds_the_decision_and_none_of_the_credentials_the_request_carried"
+      ]
+    },
+    {
+      "id": "a-captured-user-request-is-redacted-before-it-is-stored",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "The intent capture path redacts a credential the user typed",
+      "why": "The third writer of raw content, after the event and the recording. It is the same engine and the same rule; proving it again here would be proving the engine, and the engine has its own corpus above.",
+      "promised_by": [
+        {
+          "doc": "docs/security/SECRET_REDACTION.md",
+          "says": "Redaction must occur before user-visible reports and preferably before durable recording/model context."
+        }
+      ],
+      "file": "crates/sure-core/src/intent_capture.rs",
+      "tests": [
+        "credential_shaped_text_is_redacted_before_storage",
+        "user_request_event_is_captured_when_full_recording_is_granted",
+        "user_request_event_is_refused_when_full_recording_is_not_granted",
+        "raw_event_is_not_persisted_when_consent_is_projection_only",
+        "raw_event_is_persisted_when_consent_is_full"
+      ]
+    },
+    {
+      "id": "the-recording-path-refuses-to-write-when-consent-is-projection-only",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "`persist_full_recording` refuses without consent and writes the payload redacted with it",
+      "why": "The function this corpus's `full_recording_on_disk` case drives, checked here for the half a process cannot reach: that it refuses rather than writing something partial, and that the redaction happens before storage rather than on the way out. Both are asserted against an in-memory payload by these tests, and against every byte on disk by the case above.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Explicit opt-in may store:"
+        }
+      ],
+      "file": "crates/sure-core/src/full_recording.rs",
+      "tests": [
+        "full_recording_is_refused_when_opt_in_is_projection_only",
+        "raw_payload_secrets_are_redacted_before_storage",
+        "full_recordings_are_excluded_from_default_history",
+        "retention_metadata_is_recorded",
+        "stored_full_recording_is_distinguishable_from_standard_projection"
+      ]
+    },
+    {
+      "id": "the-consent-is-the-users-and-a-project-file-cannot-give-it",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "Only the user's own layer can turn recording on, and only the user's layer can lengthen its retention",
+      "why": "This is the rule the default depends on: a project file asking for full recording is a request the layer cannot grant, and the refusal is what keeps the default in force for every project that asks. The corpus's binary cases observe the default; these decide it.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "A project cannot extend how long its own records are kept."
+        }
+      ],
+      "file": "crates/sure-core/src/config/authority.rs",
+      "tests": [
+        "a_project_file_cannot_turn_on_full_recording",
+        "only_the_user_layer_can_grant",
+        "a_project_may_shorten_the_retention_and_is_named_as_the_reason",
+        "a_project_cannot_extend_the_retention_and_is_refused_rather_than_clamped",
+        "a_project_file_cannot_grant_itself_anything"
+      ]
+    },
+    {
+      "id": "the-hook-honours-the-grant-the-authority-layer-resolved",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "The one writer: what the hook stores is what the authority layer said",
+      "why": "The single decision site the whole default hangs from, tested from inside with a settings file a test may write. The binary cases drive the same site with no file at all, which is the case this corpus is about.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Explicit opt-in may store:"
+        }
+      ],
+      "file": "crates/sure-cli/src/hook.rs",
+      "tests": [
+        "full_recording_is_stored_when_the_user_opted_in",
+        "a_project_file_cannot_turn_on_full_recording",
+        "a_project_file_cannot_outlast_the_users_retention",
+        "full_recording_is_not_stored_when_not_opted_in"
+      ]
+    },
+    {
+      "id": "the-default-run-is-the-one-no-test-is-named-for-but-two-walks",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": false,
+      "title": "Two end-to-end walks that never write a settings file of any kind",
+      "why": "Both round-trips run with no user settings file and no project file, and both assert that no recording was stored. They are named for the round trip rather than for the default, which is why this corpus names the default as its own case -- a behaviour nothing is named after is a behaviour that disappears in a rename.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Explicit opt-in may store:"
+        }
+      ],
+      "file": "crates/sure-cli/src/hook.rs",
+      "tests": [
+        "claude_code_check_repair_recheck_round_trip",
+        "cursor_check_repair_recheck_round_trip"
+      ]
+    },
+    {
+      "id": "a-recording-that-was-written-is-deletable-with-its-session",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "What opting in stores, the user can still remove",
+      "why": "The half of the promise that makes the opt-in acceptable, and it is checked at the binary layer by a test that writes a recording through a real event and then deletes the session. Not repeated here.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Users must be able to inspect and delete local SURE history/recordings."
+        },
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Nothing is deleted on a schedule."
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "a_delete_reaches_a_full_recording_that_its_session_event_wrote",
+        "a_delete_removes_the_session_its_events_and_its_records_and_says_how_many",
+        "a_project_that_asks_for_full_recording_does_not_get_one"
+      ]
+    },
+    {
+      "id": "the-mode-a-run-decides-under-is-the-one-both-files-resolve-to",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "One request, two projects, differing only in the mode their own file names",
+      "why": "The protection half of acceptance line 2 at the process level, with the premise that no user settings file exists stated in the test itself. This corpus drives the same command with a mode the build cannot read; this one is about the mode it can.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "The mode is read from the user's settings file and the project's, and the **stricter of the two** runs"
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "the_protection_mode_a_project_names_is_the_one_sure_decides_under",
+        "hook_ingest_reads_standard_input_and_evaluates_protection"
+      ]
+    },
+    {
+      "id": "the-two-settings-layers-resolve-by-the-stricter-wins-rule",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "A project may raise protection and may not lower it, and the layer that decided is named",
+      "why": "The arbitration rule itself, in both directions, with the layer that set the value named so that a report can say who decided. The binary cases above observe what the rule produces; these are the rule.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "a project may ask for more protection than the user set and may not ask for less"
+        }
+      ],
+      "file": "crates/sure-core/src/config/authority.rs",
+      "tests": [
+        "a_project_cannot_lower_the_protection_the_user_set",
+        "a_project_may_strengthen_protection_and_is_named_as_the_reason",
+        "the_stricter_privacy_mode_wins_and_the_layer_that_set_it_is_named"
+      ]
+    },
+    {
+      "id": "the-three-acts-an-allowance-reaches-are-holds-and-only-those",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "A broad change, a force push and a read of credentials are held, and one grant lets one through",
+      "why": "The three dangerous acts the document names, each held and each releasable by exactly one allowance. P14-T008 owns the fixture directories for these acts at the project level; this is the rule underneath them, and the seam is stated in not_confirmed[the-dangerous-action-scenarios-are-p14-t008s].",
+      "promised_by": [
+        {
+          "doc": "docs/security/PROTECTION_MODE.md",
+          "says": "An allowance reaches the three acts this document calls dangerous and nothing else:"
+        }
+      ],
+      "file": "crates/sure-cli/src/hook.rs",
+      "tests": [
+        "a_broad_delete_is_held_and_an_allowance_for_it_lets_one_through",
+        "a_force_push_is_held_and_an_allowance_for_it_lets_one_through",
+        "a_read_of_credentials_is_held_under_strict_and_an_allowance_for_it_lets_one_through",
+        "an_allowance_covers_one_request_and_not_its_neighbours",
+        "an_allowance_is_not_spent_by_a_request_that_was_never_held",
+        "a_hold_sure_cannot_tie_to_an_allowance_is_never_letting_one_through"
+      ]
+    },
+    {
+      "id": "a-decision-is-recordable-auditable-and-deletable",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "What SURE decided about one request is a row the user can read and remove",
+      "why": "The audit trail end to end: a warn, a block and an allow that came from an allowance are written, readable through `sure history show`, and removed by the delete that removes their session. Not repeated here -- the corpus's hook cases read the rows back with the store API instead.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "`sure history show <SURE_SESSION_ID>` prints one session with the events in it, the record each event wrote, and the decision SURE reached about it where the event asked for one"
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delete_it",
+        "an_allowance_that_was_spent_is_what_tells_one_allow_from_another",
+        "a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_the_record_is_missing"
+      ]
+    },
+    {
+      "id": "a-decision-that-cannot-be-recorded-is-not-a-decision-that-changed",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "A store SURE cannot write leaves the answer the hooks reached intact and says the record is missing",
+      "why": "The failure direction of the audit trail: recording is best-effort and the verdict is not. It is a claim about a store that cannot be opened, which a process-level case would have to arrange by making a directory unreadable -- a per-platform trick this suite does not need, since the assertion is about what the hook returns rather than about what a launcher sees.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "Users must be able to inspect and delete local SURE history/recordings."
+        }
+      ],
+      "file": "crates/sure-cli/src/hook.rs",
+      "tests": [
+        "a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_so",
+        "a_store_sure_cannot_read_holds_the_request_and_says_so"
+      ]
+    },
+    {
+      "id": "the-report-says-the-mode-and-whether-a-model-was-consulted",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "Every run that reads settings says which mode was in effect and what it did about models",
+      "why": "The user-facing half of the privacy statement, asserted at the layer the user meets it. It is the promise in PRIVACY.md's last paragraph, and it is checked for a run that stopped as well as a run that finished.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "**The report states which mode was in effect and whether a model was consulted**, on every run that reads settings, including a run that stopped."
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "a_run_says_which_privacy_mode_it_was_under_and_what_it_did_about_models",
+        "a_projects_execution_settings_do_not_move_the_mode_a_check_reports"
+      ]
+    },
+    {
+      "id": "the-statement-is-arbitrated-and-never-the-projects-own-saying",
+      "kind": "covered_by",
+      "layer": "test",
+      "release_blocking": true,
+      "title": "The mode a run reports is the arbitrated one, and every state says what it means",
+      "why": "What the report's sentence is computed from. A statement built from the project's own file would be the report agreeing with the thing it is supposed to report about, and that is the failure these tests exist to make impossible.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "The mode in effect is the stricter of the two settings files"
+        }
+      ],
+      "file": "crates/sure-core/src/privacy.rs",
+      "tests": [
+        "the_mode_in_effect_is_the_arbitrated_one_and_never_the_projects",
+        "the_two_settings_can_only_differ_in_one_direction",
+        "the_provider_reported_is_the_one_the_run_consults",
+        "the_mode_reported_is_always_one_this_release_implements"
+      ]
+    },
+    {
+      "id": "nothing-a-project-can-write-decides-what-sure-may-do",
+      "kind": "covered_by",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "A project's own files cannot move the store, the mode a hook decides under, or a run's own answer",
+      "why": "P13-T009's rule, and the one the whole corpus rests on: a fixture project is a directory of files somebody else wrote, and a case is only about what SURE decides if none of those files can decide it. The corpus's own cases name their store on the command line for the same reason.",
+      "promised_by": [
+        {
+          "doc": "docs/security/PRIVACY.md",
+          "says": "The mode in effect is the stricter of the two settings files"
+        }
+      ],
+      "file": "crates/sure-cli/tests/cli_contract.rs",
+      "tests": [
+        "nothing_a_project_can_write_decides_where_the_store_goes",
+        "a_project_cannot_write_its_own_answer_into_the_cache_directory",
+        "a_projects_execution_settings_do_not_move_a_hook_decision",
+        "a_store_inside_the_project_is_refused_before_anything_is_recorded"
+      ]
+    }
+  ],
+  "not_confirmed": [
+    {
+      "id": "the-report-shows-a-goal-the-history-does-not-hold",
+      "kind": "gap",
+      "owner": "unassigned",
+      "what": "`sure check --goal \"...\"` prints the goal verbatim under 'Your goal was written to the history as record N', and the history holds the redacted form. The sentence is about the record, so it describes a record that is not the one that was written.",
+      "evidence": "The case `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` asserts the store half and passes: every byte under the store directory holds `deploy using token *** please` and no byte holds the credential. The report half is asserted by nothing, because the honest expectation is not settled. The two surfaces are `crates/sure-cli/src/check.rs` (`what_was_recorded`, the sentence and the verbatim text) and `crates/sure-core/src/store/mod.rs` (`redact_document`, applied to every document a write accepts).",
+      "would_settle_it": "A decision about which of the two rules wins for the goal: PROJECT_INTENT.md says the text is stored verbatim -- 'minus nothing' -- and the store redacts every document it accepts. Either the report prints what the store holds, or the goal is exempted from the store's redaction and the document says so. The corpus entry above should then become an assertion about the report as well as the store."
+    },
+    {
+      "id": "no-recording-through-the-binary",
+      "kind": "gap",
+      "owner": "unassigned",
+      "what": "No case here opens a full recording through the real `sure` process. The consent is read from the user's own settings file alone (`Authority::full_recording`), that file is not redirectable on Windows, and no test may write the machine's own settings.",
+      "evidence": "`a-full-recording-written-under-consent-is-redacted-on-disk` is `layer: store` for exactly this reason, and its expectations are about the file the store wrote rather than about what a process decided. `crates/sure-cli/tests/cli_contract.rs` says the same thing in `a_project_that_asks_for_full_recording_does_not_get_one`, whose retention number 'is not observable from here'.",
+      "would_settle_it": "A caller-named settings location -- a flag or a documented test hook that moves the user's settings the way `--store-dir` moves the store -- after which this case can be driven by a process and asserted at the binary layer like the others."
+    },
+    {
+      "id": "the-dangerous-action-scenarios-are-p14-t008s",
+      "kind": "seam",
+      "owner": "P14-T008",
+      "what": "`evaluation/acceptance-manifest.json` marks `dangerous-delete`, `force-push` and `sensitive-read` release-blocking, and `fixtures/adversarial/` has no directory for any of the three. This corpus covers the mode being the one in force and the decision about one request being recorded; it does not build those three scenarios, and their directory is P14-T008's acceptance ('Delete/force-push/sensitive-read expected protection behavior tested').",
+      "evidence": "`fixtures/adversarial/dangerous-delete/scenario.json` still carries `fixture_status: to_be_implemented_by_task_graph`. The rule the three acts are held by is covered here, in the entry `the-three-acts-an-allowance-reaches-are-holds-and-only-those`.",
+      "would_settle_it": "P14-T008's fixtures. The seam is stated rather than assumed: a case here whose expectation depended on one of those three acts would be a second owner for the same acceptance, and there is none."
+    }
+  ]
+}

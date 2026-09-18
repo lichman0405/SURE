@@ -24,3 +24,20 @@ Mandatory scenarios:
 - dynamic check not authorized => visible not-checked state.
 
 Every fixture has machine-readable expected outcomes. A mandatory false green blocks release.
+
+## Where the machine-readable outcomes are
+
+| corpus | data | what runs it |
+| --- | --- | --- |
+| the scenarios above | `fixtures/adversarial/<id>/scenario.json`, bound to `evaluation/acceptance-manifest.json` | `crates/sure-testkit/tests/fixture_apps.rs` |
+| secret redaction and protection mode (`DEFINITION_OF_DONE.md`: "secret-redaction fixtures pass;", `PRODUCT_EVALS.md`: "secret redaction mandatory fixtures") | `fixtures/privacy/manifest.json` | `crates/sure-cli/tests/privacy_suite.rs` |
+
+The privacy corpus is not a list of scenarios under `fixtures/adversarial/`: its
+entries are cases about a *run* — what a real `sure` process stored with no
+settings file of any kind, what a hook answered, what a refusal printed — rather
+than projects with an expected verdict. Each entry names the documents that
+promise it and the sentence in each, so an entry fails when the promise it was
+written for is withdrawn, and each one that points at a test somewhere else is
+checked to still name a test that exists. `fixtures/privacy/README.md` is the
+human half; `not_confirmed` in the manifest, printed on every run, is what the
+corpus could not confirm and what would settle it.

@@ -23,11 +23,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
-use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
+use crate::candidate_context::classify_path;
 use crate::checks::check_id;
 use crate::discover::Discovery;
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::redact::escape_control_characters;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
@@ -156,17 +157,46 @@ impl UiActionBridge {
                 (EvidenceClass::Inference, &[ActionKind::ReadFile])
             };
 
+            let reason = CheckReason::CandidateFound {
+                path: action.file.clone(),
+                line: action.line,
+                context: action.context.clone(),
+            };
+            // **A declared UI action SURE has no evidence about is rated
+            // `must_fix`, and that is the corpus's decision rather than a
+            // convenience.** `fixtures/adversarial/dead-button/scenario.json`
+            // requires `must_fix` for this very proposal and says why in its own
+            // words: *an inference about a primary action must stay visible
+            // rather than be assumed fine*. Until `P7-T011` this module said
+            // `Note` here, and the aggregator filed it as style noise, so the
+            // only evidence about the fixture's dead button was invisible.
+            //
+            // What is claimed is narrow: a user-facing action is declared, and
+            // SURE has not established what it does. That is not a statement that
+            // the handler is broken — no detector here reads a handler body — and
+            // it is the reason the severity does not travel with a raised
+            // evidence class: the class stays `Inference` unless the browser
+            // observed the element, exactly as `P6-T006`'s acceptance requires.
+            //
+            // The cost is stated rather than hidden: this fires on every declared
+            // `onClick`/`onSubmit` in a frontend source file, so a healthy
+            // single-page app now yields `must_fix` candidates. It does not move
+            // the verdict — `critical` stays false, so `CheckResult::blocks_green`
+            // is untouched — and it is the price of not letting an unchecked
+            // primary action disappear into a bucket named style noise.
+            // `classify_path` reads the path itself and ignores both the root and
+            // the component graph, so the empty root here is the honest argument
+            // rather than a placeholder that changes the answer.
+            let reach = Reach::from(classify_path(Path::new(&action.file), Path::new(""), None));
+            let gravity = gravity_of(&reason, evidence_class, reach, GapKind::SubstitutedAction);
+
             proposals.push(CheckProposal::new(
                 check_id(&action.file, &format!("ui_action_{}", action.line)),
                 title,
-                Severity::Note,
+                gravity.severity(),
                 false,
                 evidence_class,
-                CheckReason::CandidateFound {
-                    path: action.file.clone(),
-                    line: action.line,
-                    context: action.context.clone(),
-                },
+                reason,
                 actions,
             ));
         }
@@ -420,6 +450,7 @@ fn is_within_project(root: &Path, full: &Path) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_domain::severity::Severity;
 
     #[test]
     fn a_project_with_no_frontend_produces_nothing() {
@@ -471,7 +502,7 @@ mod tests {
         let proposal = &proposals[0];
         assert!(proposal.title().contains("click"));
         assert!(proposal.title().contains("button"));
-        assert_eq!(proposal.severity(), Severity::Note);
+        assert_eq!(proposal.severity(), Severity::MustFix);
         assert!(!proposal.critical());
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
         assert_eq!(proposal.requirements().actions(), &[ActionKind::ReadFile]);
@@ -512,6 +543,13 @@ mod tests {
         assert_eq!(
             proposal.requirements().actions(),
             &[ActionKind::BrowserObservation]
+        );
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "observing the element does not establish what the handler does, so the \
+             severity is the same one the unobserved case gets and the evidence \
+             class is what carries the difference"
         );
     }
 

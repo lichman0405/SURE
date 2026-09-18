@@ -28,9 +28,15 @@
 //! This module does not decide whether a candidate is a real defect. It only
 //! decides which of several proposals about the same place should be shown, and
 //! which candidates are too weak to bother a user with.
+//!
+//! **It also does not decide how serious a candidate is.** Ranking uses the
+//! severity a proposal arrives with, and the line between matter and noise is
+//! [`crate::finding_gravity`]'s rule; this module reads that rule's answer in
+//! [`is_style_noise`] instead of holding a second copy of it. A change to what
+//! counts as style noise belongs in that module, and the detectors and the
+//! aggregator move together because they ask one question of one place.
 
 use sure_domain::evidence::EvidenceClass;
-use sure_domain::severity::Severity;
 
 use crate::schedule::CheckProposal;
 
@@ -90,10 +96,12 @@ impl AggregatedCandidates {
 /// names nothing are dropped entirely and do not count toward
 /// [`AggregatedCandidates::duplicates_dropped`]. Within each anchor group the
 /// most serious proposal is kept; the rest are counted as duplicates. After
-/// deduplication, `Severity::Note` candidates that are not critical and carry
-/// `EvidenceClass::Inference` are moved to [`AggregatedCandidates::style_noise`];
-/// everything else becomes [`AggregatedCandidates::material`], ordered by
-/// severity worst-first, then critical-first, then identifier.
+/// deduplication, candidates the severity rule filed as informational — and that
+/// are not critical — are moved to [`AggregatedCandidates::style_noise`]; see
+/// [`is_style_noise`], which reads [`crate::finding_gravity`] rather than
+/// deciding for itself. Everything else becomes
+/// [`AggregatedCandidates::material`], ordered by severity worst-first, then
+/// critical-first, then identifier.
 pub fn aggregate(candidates: impl IntoIterator<Item = CheckProposal>) -> AggregatedCandidates {
     let mut anchored: Vec<(sure_domain::evidence::EvidenceAnchor, Vec<CheckProposal>)> = Vec::new();
     let mut unanchored: Vec<CheckProposal> = Vec::new();
@@ -153,10 +161,27 @@ pub fn aggregate(candidates: impl IntoIterator<Item = CheckProposal>) -> Aggrega
 }
 
 /// Whether a candidate is too weak to show as material.
+///
+/// **This reads [`crate::finding_gravity`]'s answer rather than deciding on its
+/// own.** The rule in that module returns `Severity::Note` exactly when a
+/// detector finding names nothing, points at a place a reader cannot open,
+/// rests on a result worth nothing, or describes something that cannot reach a
+/// user; [`crate::finding_gravity::is_informational`] is that answer, and this
+/// asks it. Before `P7-T011` the decision was written here instead, as the
+/// conjunction `severity == Note && !critical && evidence_class == Inference` —
+/// and every candidate from every detector happened to satisfy all three, so
+/// nothing any detector found was ever shown as material. That conjunction is
+/// gone: what counts as style noise is the rule's to say, and there is one rule.
+///
+/// **The `critical` half is not a second opinion about severity.** It answers a
+/// different question — whether failing this forbids hand-off — and the
+/// aggregator keeps it because a candidate that could block hand-off must not be
+/// hidden in a bucket named *style noise* whatever level the rule gave it. The
+/// rule does not set `critical` and never reads it. No detector sets it today,
+/// and `a_critical_candidate_is_material_whatever_its_severity` is the test that
+/// holds the guard open rather than leaving it to be rediscovered.
 fn is_style_noise(proposal: &CheckProposal) -> bool {
-    proposal.severity() == Severity::Note
-        && !proposal.critical()
-        && proposal.evidence_class() == EvidenceClass::Inference
+    crate::finding_gravity::is_informational(proposal.severity()) && !proposal.critical()
 }
 
 /// A comparable key where "more serious" sorts greater.
@@ -347,6 +372,65 @@ mod tests {
         assert_eq!(aggregated.material().len(), 0);
         assert_eq!(aggregated.style_noise().len(), 1);
         assert_eq!(aggregated.style_noise()[0].title(), "noise");
+    }
+
+    #[test]
+    fn the_severity_rule_decides_what_is_style_noise_not_the_evidence_class() {
+        // Two candidates in the same place differing only in evidence class and
+        // severity. The rule puts a `note` in the noise and anything above it in
+        // the material, and the class does not move either one: before
+        // `P7-T011` this module required `EvidenceClass::Inference` as well, so
+        // a note carrying an observed fact was shown while a note carrying an
+        // inference was not -- a distinction about how the finding was reached
+        // rather than about whether a user should act on it.
+        let raised = proposal(
+            "chk_a",
+            "observed and raised",
+            Severity::CanFixLater,
+            false,
+            EvidenceClass::ObservedFact,
+            candidate_reason("src/a.rs", 1, "TODO"),
+            &[ActionKind::ReadFile],
+        );
+        let quiet = proposal(
+            "chk_b",
+            "observed and quiet",
+            Severity::Note,
+            false,
+            EvidenceClass::ObservedFact,
+            candidate_reason("src/b.rs", 2, "TODO"),
+            &[ActionKind::ReadFile],
+        );
+
+        let aggregated = aggregate([raised, quiet]);
+        let material: Vec<&str> = aggregated.material().iter().map(|p| p.title()).collect();
+        let noise: Vec<&str> = aggregated.style_noise().iter().map(|p| p.title()).collect();
+        assert_eq!(material, ["observed and raised"]);
+        assert_eq!(noise, ["observed and quiet"]);
+    }
+
+    #[test]
+    fn a_critical_candidate_is_material_whatever_its_severity() {
+        // `critical` answers whether failing this forbids hand-off, which is a
+        // different question from how serious it is, and the aggregator keeps it
+        // as a guard: a candidate that could block hand-off must not be hidden in
+        // a bucket named style noise. No detector sets `critical` today, so
+        // without this test the guard would be a line nobody could see was
+        // load-bearing.
+        let proposals = [proposal(
+            "chk_a",
+            "quiet but blocking",
+            Severity::Note,
+            true,
+            EvidenceClass::Inference,
+            candidate_reason("src/lib.rs", 9, "TODO"),
+            &[ActionKind::ReadFile],
+        )];
+
+        let aggregated = aggregate(proposals);
+        assert_eq!(aggregated.material().len(), 1);
+        assert!(aggregated.style_noise().is_empty());
+        assert_eq!(aggregated.material()[0].title(), "quiet but blocking");
     }
 
     #[test]

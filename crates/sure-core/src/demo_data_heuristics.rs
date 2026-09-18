@@ -27,12 +27,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
-use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::{CandidateContext, classify_path};
 use crate::checks::check_id;
 use crate::discover::Discovery;
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -54,7 +54,9 @@ pub enum DemoDataCategory {
 /// The weights one category carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CategoryRow {
-    severity: Severity,
+    /// What kind of gap this category is: the input
+    /// [`crate::finding_gravity::gravity_of`] turns into a severity.
+    gap: GapKind,
     critical: bool,
     evidence_class: EvidenceClass,
 }
@@ -63,11 +65,19 @@ struct CategoryRow {
 ///
 /// **The order is the report's**: demo_analytics, demo_dataset,
 /// placeholder_user_id, hard_coded_demo_value.
+///
+/// **All four are [`GapKind::UnrealContent`]**, which the rule rates one level
+/// below a substituted action: the code here runs and produces the result it
+/// says it produces, and what is wrong is that the content is not real.
+/// `fixtures/adversarial/demo-analytics/scenario.json` requires
+/// `should_fix_first` for all four, and its `forbidden_outcomes` says why the
+/// level is not `must_fix` — the concern is a constant presented as a
+/// measurement, not a user being told something happened that did not.
 const CATEGORIES: &[(DemoDataCategory, CategoryRow)] = &[
     (
         DemoDataCategory::DemoAnalytics,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnrealContent,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -75,7 +85,7 @@ const CATEGORIES: &[(DemoDataCategory, CategoryRow)] = &[
     (
         DemoDataCategory::DemoDataset,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnrealContent,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -83,7 +93,7 @@ const CATEGORIES: &[(DemoDataCategory, CategoryRow)] = &[
     (
         DemoDataCategory::PlaceholderUserId,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnrealContent,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -91,7 +101,7 @@ const CATEGORIES: &[(DemoDataCategory, CategoryRow)] = &[
     (
         DemoDataCategory::HardCodedDemoValue,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnrealContent,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -281,17 +291,25 @@ impl DemoDataHeuristics {
             let Some(detection) = detection else {
                 continue;
             };
+            let reason = CheckReason::CandidateFound {
+                path: detection.file.clone(),
+                line: detection.line,
+                context: detection.context.clone(),
+            };
+            // The severity is the rule's answer, not this table's.
+            let gravity = gravity_of(
+                &reason,
+                row.evidence_class,
+                Reach::from(detection.path_context),
+                row.gap,
+            );
             proposals.push(CheckProposal::new(
                 check_id(&detection.file, &format!("demo{}", category.tag())),
                 category.contextual_description(detection.path_context),
-                row.severity,
+                gravity.severity(),
                 row.critical,
                 row.evidence_class,
-                CheckReason::CandidateFound {
-                    path: detection.file.clone(),
-                    line: detection.line,
-                    context: detection.context.clone(),
-                },
+                reason,
                 &[ActionKind::ReadFile],
             ));
         }
@@ -441,6 +459,7 @@ fn is_within_project(root: &Path, full: &Path) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_domain::severity::Severity;
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
     #[test]
@@ -576,7 +595,13 @@ mod tests {
             proposal.title(),
             "project contains hard-coded demo analytics values in production code"
         );
-        assert_eq!(proposal.severity(), Severity::Note);
+        assert_eq!(
+            proposal.severity(),
+            Severity::ShouldFixFirst,
+            "hard-coded demo values in production code are unreal content a user \
+             reads as real: a reliability risk, one level below a substituted \
+             action"
+        );
         assert!(!proposal.critical());
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
         assert_eq!(proposal.requirements().actions(), &[ActionKind::ReadFile]);

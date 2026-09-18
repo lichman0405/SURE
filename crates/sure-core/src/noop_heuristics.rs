@@ -25,12 +25,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
-use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::{CandidateContext, classify_path};
 use crate::checks::check_id;
 use crate::discover::Discovery;
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -52,7 +52,9 @@ pub enum NoOpCategory {
 /// The weights one category carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CategoryRow {
-    severity: Severity,
+    /// What kind of gap this category is: the input
+    /// [`crate::finding_gravity::gravity_of`] turns into a severity.
+    gap: GapKind,
     critical: bool,
     evidence_class: EvidenceClass,
 }
@@ -61,11 +63,22 @@ struct CategoryRow {
 ///
 /// **The order is the report's**: fake_email, fake_payment, no_op_function,
 /// hard_coded_success.
+///
+/// **All four are [`GapKind::SubstitutedAction`]**, because in each one
+/// something stands where the real thing belongs: a placeholder address where a
+/// deliverable one belongs, a sandbox key where a provider call belongs, a
+/// constant success return where work belongs, a fixed `200` where an outcome
+/// belongs. The fixtures say the same in their own words —
+/// `fixtures/adversarial/fake-payment/scenario.json` requires `must_fix` for
+/// `FakePayment`, `HardCodedSuccess` and `NoOpFunction`, each with the reason
+/// SURE should not treat the code as doing what it says. Whether that reaches a
+/// user is not this table's question: the rule reads it from where the pattern
+/// was found, so the same category in a test file is a note.
 const CATEGORIES: &[(NoOpCategory, CategoryRow)] = &[
     (
         NoOpCategory::FakeEmail,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::SubstitutedAction,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -73,7 +86,7 @@ const CATEGORIES: &[(NoOpCategory, CategoryRow)] = &[
     (
         NoOpCategory::FakePayment,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::SubstitutedAction,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -81,7 +94,7 @@ const CATEGORIES: &[(NoOpCategory, CategoryRow)] = &[
     (
         NoOpCategory::NoOpFunction,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::SubstitutedAction,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -89,7 +102,7 @@ const CATEGORIES: &[(NoOpCategory, CategoryRow)] = &[
     (
         NoOpCategory::HardCodedSuccess,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::SubstitutedAction,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -246,17 +259,27 @@ impl NoOpHeuristics {
             let Some(detection) = detection else {
                 continue;
             };
+            let reason = CheckReason::CandidateFound {
+                path: detection.file.clone(),
+                line: detection.line,
+                context: detection.context.clone(),
+            };
+            // The severity is the rule's answer, not this table's: what a
+            // fake-success pattern is worth depends on where it stands as well as
+            // on what it is.
+            let gravity = gravity_of(
+                &reason,
+                row.evidence_class,
+                Reach::from(detection.path_context),
+                row.gap,
+            );
             proposals.push(CheckProposal::new(
                 check_id(&detection.file, &format!("noop{}", category.tag())),
                 category.contextual_description(detection.path_context),
-                row.severity,
+                gravity.severity(),
                 row.critical,
                 row.evidence_class,
-                CheckReason::CandidateFound {
-                    path: detection.file.clone(),
-                    line: detection.line,
-                    context: detection.context.clone(),
-                },
+                reason,
                 &[ActionKind::ReadFile],
             ));
         }
@@ -406,6 +429,7 @@ fn is_within_project(root: &Path, full: &Path) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_domain::severity::Severity;
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
     #[test]
@@ -517,9 +541,23 @@ mod tests {
             proposal.title(),
             "project contains fake email addresses or domains in production code"
         );
-        assert_eq!(proposal.severity(), Severity::Note);
-        assert!(!proposal.critical());
-        assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "a placeholder address in production code is an action standing in for \
+             the real one, and the rule says do not hand that off"
+        );
+        assert!(
+            !proposal.critical(),
+            "the rule sets a severity and never a criticality: whether a verdict is \
+             forbidden is a separate question and this detector does not answer it"
+        );
+        assert_eq!(
+            proposal.evidence_class(),
+            EvidenceClass::Inference,
+            "the severity is earned by where the finding is anchored, not by \
+             relabelling a pattern guess as an observation"
+        );
         assert_eq!(proposal.requirements().actions(), &[ActionKind::ReadFile]);
         assert!(!proposal.requirements().runs_project_code());
     }

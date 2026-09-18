@@ -44,11 +44,11 @@
 //! scanners above; each one fires a different module, and the differences are
 //! the point:
 //!
-//! - `missing-migration` fires [`sure_core::db_migrations`], which is the only
-//!   check in this file that reaches `Severity::MustFix` and the only one whose
-//!   evidence is `EvidenceClass::ObservedFact` rather than `Inference`. This is
-//!   the one P14 fixture where what SURE detects already carries the weight the
-//!   release manifest asks for, and it is asserted rather than assumed.
+//! - `missing-migration` fires [`sure_core::db_migrations`], the only check in
+//!   this file whose evidence is `EvidenceClass::ObservedFact` rather than
+//!   `Inference`. It reaches `Severity::MustFix` on that observed fact, not
+//!   through [`sure_core::finding_gravity`], and it is asserted rather than
+//!   assumed.
 //! - `external-unverified` fires [`sure_core::external_service`], whose
 //!   proposal is `Severity::ShouldFixFirst` with `critical = true` — heavier
 //!   than the manifest's `note`, and *not* filed as style noise, because
@@ -63,14 +63,37 @@
 //!
 //! # What is not claimed
 //!
-//! **Severity, for the six TypeScript fixtures.** Every assertion about those is
-//! about what is *reported*, not at what weight. Their scanners emit
-//! `Severity::Note`, `critical = false`, `EvidenceClass::Inference`, which
-//! [`sure_core::false_completion_aggregator::aggregate`] classifies as style
-//! noise rather than material. `evaluation/acceptance-manifest.json` asks for
-//! `must_fix` on five of those six ids, so the gap between what is detected and
-//! what the manifest requires is real, is recorded in each `scenario.json`, and
-//! is not asserted away here.
+//! **A severity of its own, for the six TypeScript fixtures.** No scanner in
+//! this file holds one. What each emits is [`sure_core::finding_gravity`]'s
+//! answer for the gap it found and the reach it found it on: `must_fix` for a
+//! substituted action in production code, `should_fix_first` for unreal content,
+//! `note` for an unfinished marker and for anything that names nothing, points
+//! at a place a reader cannot open, rests on an `Unknown` result, or cannot
+//! reach a user. Until `P7-T011` every scanner here emitted `Severity::Note`,
+//! `critical = false`, `EvidenceClass::Inference` — the combination
+//! [`sure_core::false_completion_aggregator`] filed as style noise — while
+//! `evaluation/acceptance-manifest.json` asked for `must_fix` on five of those
+//! six ids. The test that recorded that gap was
+//! `what_is_detected_is_not_yet_what_the_manifest_requires`;
+//! [`what_is_detected_now_carries_the_weight_the_manifest_requires`] is that
+//! test inverted, and the sentence is kept in both places because it is the only
+//! statement in the tree that the two numbers were ever different.
+//!
+//! **A raised evidence class.** The severity moved and the class did not:
+//! `EvidenceClass::Inference` is what every one of these findings' own
+//! `scenario.json` requires, and it is what they still report. A scanner that
+//! reached `must_fix` by presenting its inference as a fact would be relabelling
+//! rather than grading, and [`sure_core::finding_gravity`]'s own tests refuse
+//! that move.
+//!
+//! **A verdict.** These are candidates. `CheckProposal::severity` is how bad it
+//! would be if the check is not satisfied, and no scanner here sets `critical`,
+//! so a `must_fix` candidate decides nothing about whether a project passes —
+//! what it decides is whether the candidate is shown rather than filed as noise.
+//! The weight was not free: `noop_heuristics`' hard-coded-success shape and
+//! `ui_action_bridge`'s declared-handler shape both occur in ordinary, working
+//! code, and they are now weighted as if a user's money or their primary action
+//! is behind them. That cost is deliberate and is recorded at the detectors.
 //!
 //! **A password check that is always true.** SURE has no detector that reads
 //! `verifyPassword` returning `true` as an authentication bypass.
@@ -510,7 +533,8 @@ fn missing_migration_is_detected_as_a_record_that_is_there_and_empty() {
     assert_eq!(claim.severity(), Severity::MustFix);
     assert!(
         claim.severity().blocks_hand_off(),
-        "this is the one P14 fixture whose detector reaches the manifest's own severity on its own"
+        "this fixture's detector reaches the manifest's `must_fix` on an observed fact \
+         rather than through the candidate rule"
     );
     assert!(
         report.is_complete(),
@@ -929,15 +953,32 @@ fn every_fixture_these_assertions_name_is_a_fixture_this_repository_ships() {
     }
 }
 
+/// What every scanner in this file emitted for these fixtures before `P7-T011`.
+///
+/// Held as a value rather than only as a sentence, because it is the number the
+/// inverted test below replaced and the number its failure message names. A
+/// scanner that falls back to it is not failing for an unknown reason: this is
+/// where it landed.
+const SEVERITY_BEFORE_P7T011: Severity = Severity::Note;
+
 #[test]
-fn what_is_detected_is_not_yet_what_the_manifest_requires() {
-    // The gap, pinned so it cannot be forgotten or mistaken for done. Five of
-    // these six ids are release-blocking `must_fix` cases in
-    // `evaluation/acceptance-manifest.json`, and everything the scanners above
-    // produce is `Note`, not critical, `Inference` — the combination
-    // `false_completion_aggregator` files as style noise. The day a detector
-    // earns a stronger weight this assertion fails and the recording in each
-    // `scenario.json` is updated with it.
+fn what_is_detected_now_carries_the_weight_the_manifest_requires() {
+    // This is `what_is_detected_is_not_yet_what_the_manifest_requires`, the
+    // test that recorded the gap between what SURE saw and what the corpus
+    // required, **inverted rather than deleted** by `P7-T011`. It asserted the
+    // opposite of everything below: every proposal was `Severity::Note`, not
+    // critical, `Inference` — the combination
+    // `false_completion_aggregator` files as style noise — while
+    // `evaluation/acceptance-manifest.json` asks for `must_fix` on fake-payment
+    // and four of its siblings. The old name and the old number are kept here
+    // because this is the only statement in the tree that the two were ever
+    // different.
+    //
+    // `noop_heuristics` is the probe. It reads the file that takes the money,
+    // its proposals name `src/payments.js` and the line they were read from, and
+    // `sure_core::finding_gravity` grades the gap it found — a substituted
+    // action, in production code — `must_fix`. The two things that must *not*
+    // have moved with it are asserted here beside it.
     let discovery = discovery("fake-payment");
     let proposals = NoOpHeuristics::of(&discovery).proposed().to_vec();
     assert!(
@@ -945,23 +986,39 @@ fn what_is_detected_is_not_yet_what_the_manifest_requires() {
         "the probe fixture produced nothing, so this test proves nothing"
     );
     for proposal in &proposals {
-        assert_eq!(proposal.severity(), Severity::Note);
-        assert!(!proposal.critical());
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "{}: the manifest requires `must_fix` on fake-payment and this is \
+             `{:?}`. `{SEVERITY_BEFORE_P7T011:?}` is what every scanner here \
+             emitted before P7-T011; if that is where this landed, the severity \
+             rule in `sure_core::finding_gravity` was bypassed.",
+            proposal.title(),
+            proposal.severity(),
+        );
+        // The weight is about impact, not about how the finding was reached:
+        // `Inference` is the class this fixture's `scenario.json` requires and
+        // the class the evidence is, and raising the severity by promoting it to
+        // a fact is the move this test would have to catch.
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
+        // And a heavier candidate is still not a blocker. Nothing in this file
+        // sets `critical`, so no candidate decides a verdict however it is
+        // weighted.
+        assert!(!proposal.critical());
     }
 
-    // And that combination is exactly what the aggregator sets aside: the
-    // finding reaches a reader as style noise, not as something to act on. That
-    // is the whole of the gap — detected, and not weighed as the manifest
-    // weighs it — so it is asserted rather than left to the sentence above.
+    // The weight reaches the reader. `material` non-empty is the half that says
+    // the finding is shown; `style_noise` empty is the half that says it is not
+    // filed under a name that tells a reader to skip it. Both used to be the
+    // other way round, and that is the whole of what `P7-T011` changed.
     let aggregated = aggregate(proposals);
     assert!(
-        aggregated.material().is_empty(),
-        "something here is now material: {:?}",
-        aggregated.material()
+        !aggregated.material().is_empty(),
+        "the probe fixture's findings reached neither list, so this test proves nothing"
     );
     assert!(
-        !aggregated.style_noise().is_empty(),
-        "the probe fixture's findings reached neither list, so this test proves nothing"
+        aggregated.style_noise().is_empty(),
+        "a payment path that never contacts a provider is filed as style noise: {:?}",
+        aggregated.style_noise()
     );
 }

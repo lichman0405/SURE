@@ -33,12 +33,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::intent::{IntentSource, ProjectIntent};
-use sure_domain::severity::Severity;
 use sure_domain::status::RequirementClaim;
 
 use crate::checks::check_id;
 use crate::components::ComponentGraph;
 use crate::discover::{Discovery, Findings};
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::http_routes::RouteReading;
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
@@ -419,36 +419,28 @@ fn build_findings(intent: &ProjectIntent, unmatched: &[RequirementMatch]) -> Vec
             "requirement `{}` has no implementation evidence",
             requirement_match.requirement_text
         );
-        findings.push(CheckProposal::new(
+        findings.push(declared_intent_proposal(
             check_id(&requirement_match.requirement_id, "intentunmatched"),
             title,
-            Severity::Note,
-            false,
-            EvidenceClass::Inference,
             CheckReason::CandidateFound {
                 path: requirement_match.requirement_id.clone(),
                 line: 1,
                 context: requirement_match.requirement_text.clone(),
             },
-            &[ActionKind::ReadFile],
         ));
     }
 
     for requirement in intent.requirements.iter() {
         if requirement.source == IntentSource::ProjectSpec {
             let text = escape_control_characters(&requirement.text);
-            findings.push(CheckProposal::new(
+            findings.push(declared_intent_proposal(
                 check_id(&requirement.id, "intentdoc"),
                 format!("documented instruction `{text}`"),
-                Severity::Note,
-                false,
-                EvidenceClass::Inference,
                 CheckReason::CandidateFound {
                     path: requirement.id.clone(),
                     line: 1,
                     context: text,
                 },
-                &[ActionKind::ReadFile],
             ));
         }
     }
@@ -456,18 +448,14 @@ fn build_findings(intent: &ProjectIntent, unmatched: &[RequirementMatch]) -> Vec
     for requirement in intent.requirements.iter() {
         if requirement.source == IntentSource::AgentClaim {
             let text = escape_control_characters(&requirement.text);
-            findings.push(CheckProposal::new(
+            findings.push(declared_intent_proposal(
                 check_id(&requirement.id, "intentclaim"),
                 format!("agent claim `{text}`"),
-                Severity::Note,
-                false,
-                EvidenceClass::Inference,
                 CheckReason::CandidateFound {
                     path: requirement.id.clone(),
                     line: 1,
                     context: text,
                 },
-                &[ActionKind::ReadFile],
             ));
         }
     }
@@ -477,6 +465,42 @@ fn build_findings(intent: &ProjectIntent, unmatched: &[RequirementMatch]) -> Vec
     findings
 }
 
+/// One finding about what the project was asked to do.
+///
+/// **Every proposal this module builds goes through here**, and the severity it
+/// carries is the rule's answer for [`GapKind::DeclaredIntent`] reached on
+/// [`Reach::NotProduction`] — never a literal.
+///
+/// Why that level is the honest one, and why it is the corpus's requirement
+/// rather than a preference: the reason's anchor is the requirement's own
+/// identifier, which is not a file a reader can open, and the claim it carries —
+/// *SURE could not match this to code* — is a statement about SURE's reading
+/// rather than about the project. `evaluation/acceptance-manifest.json` requires
+/// `note` for `missing-user-intent`, and this finding is that case.
+/// [`crate::finding_gravity`] rates it `note` on any reach, so a caller that
+/// later gives this module a production context cannot raise it by accident.
+fn declared_intent_proposal(
+    id: sure_domain::ids::CheckId,
+    title: impl Into<String>,
+    reason: CheckReason,
+) -> CheckProposal {
+    let gravity = gravity_of(
+        &reason,
+        EvidenceClass::Inference,
+        Reach::NotProduction,
+        GapKind::DeclaredIntent,
+    );
+    CheckProposal::new(
+        id,
+        title,
+        gravity.severity(),
+        false,
+        EvidenceClass::Inference,
+        reason,
+        &[ActionKind::ReadFile],
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -484,6 +508,7 @@ mod tests {
 
     use super::*;
     use sure_domain::intent::Requirement;
+    use sure_domain::severity::Severity;
 
     fn temp_dir(prefix: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

@@ -49,11 +49,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
-use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
+use crate::candidate_context::classify_path;
 use crate::checks::check_id;
 use crate::discover::Discovery;
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::http_routes::RouteReading;
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
@@ -134,20 +135,41 @@ impl RouteConsistency {
                 "frontend expects backend path `{}` which is not declared",
                 escape_control_characters(&expectation.path)
             );
+            let reason = CheckReason::CandidateFound {
+                path: expectation.file.clone(),
+                line: expectation.line,
+                context: expectation.context.clone(),
+            };
+            // A frontend path with no backend route behind it is code standing in
+            // for an action the product tells a caller it performs, which is the
+            // gap the rule rates `must_fix`. `fixtures/adversarial/route-mismatch`
+            // requires exactly that, and requires it while the finding stays an
+            // inference: SURE read the two sides and did not run either.
+            //
+            // Where the expectation was read from is asked rather than assumed,
+            // with the same classifier the other detectors use, so an expectation
+            // in a test fixture cannot become a `must_fix` about production.
+            let reach = Reach::from(classify_path(
+                Path::new(&expectation.file),
+                &discovery.root,
+                None,
+            ));
+            let gravity = gravity_of(
+                &reason,
+                EvidenceClass::Inference,
+                reach,
+                GapKind::SubstitutedAction,
+            );
             proposals.push(CheckProposal::new(
                 check_id(
                     &expectation.file,
                     &format!("route_consistency{}", expectation.path),
                 ),
                 title,
-                Severity::Note,
+                gravity.severity(),
                 false,
                 EvidenceClass::Inference,
-                CheckReason::CandidateFound {
-                    path: expectation.file.clone(),
-                    line: expectation.line,
-                    context: expectation.context.clone(),
-                },
+                reason,
                 &[ActionKind::ReadFile],
             ));
         }
@@ -400,6 +422,7 @@ fn is_within_project(root: &Path, full: &Path) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_domain::severity::Severity;
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
     #[test]
@@ -466,7 +489,12 @@ mod tests {
             "the proposal should name the unmatched path: {}",
             proposal.title()
         );
-        assert_eq!(proposal.severity(), Severity::Note);
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "the frontend calls a path no backend declares, and a caller of this \
+             project is told the action happens"
+        );
         assert!(!proposal.critical());
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
         assert_eq!(proposal.requirements().actions(), &[ActionKind::ReadFile]);

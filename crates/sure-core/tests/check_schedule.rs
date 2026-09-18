@@ -212,8 +212,11 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
         "`P6-T001`: it scans source files for TODO, FIXME, mock, stub and \
          placeholder patterns, and produces candidate checks that include the \
          file, line and context where each pattern was found. Candidates are \
-         not automatically product defects: they carry `Severity::Note`, \
-         `critical: false`, and `EvidenceClass::Inference`. The reason they \
+         not automatically product defects: they carry `critical: false` and \
+         `EvidenceClass::Inference`, and their severity is `finding_gravity`'s \
+         answer for the category and the place rather than this module's — a \
+         marker in production code is above `note`, the same marker in a test \
+         file is a `note`. The reason they \
          build is `CheckReason::CandidateFound`, the variant added to \
          `schedule.rs` with this module, because a candidate check has to name \
          *where SURE read the pattern* and a `FilePresent` naming a file would \
@@ -225,8 +228,10 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          fake email addresses or domains, fake payment or sandbox tokens, \
          no-op function bodies that return constant success values, and \
          hard-coded success responses for external integrations. It produces \
-         candidate checks with `Severity::Note`, `critical: false`, and \
-         `EvidenceClass::Inference`, using `CheckReason::CandidateFound` to \
+         candidate checks with `critical: false` and `EvidenceClass::Inference`, \
+         with the severity `finding_gravity` returns for the gap and the place \
+         — a substituted action in production code is `must_fix` — using \
+         `CheckReason::CandidateFound` to \
          anchor each proposal to the file, line and context where the pattern \
          was found. The `CandidateContext` classifier distinguishes test, \
          example, mock-fixture and production code",
@@ -236,8 +241,11 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
         "`P6-T004`: it scans source files for hard-coded demo-data patterns — \
          demo analytics values, hard-coded demo or sample datasets, placeholder \
          user or content IDs, and hard-coded chart or dashboard demo values. It \
-         produces candidate checks with `Severity::Note`, `critical: false`, and \
-         `EvidenceClass::Inference`, using `CheckReason::CandidateFound` to \
+         produces candidate checks with `critical: false` and \
+         `EvidenceClass::Inference`, at the severity `finding_gravity` returns \
+         for unreal content that reaches a user — `should_fix_first`, the \
+         weight `demo-analytics`'s `scenario.json` requires — using \
+         `CheckReason::CandidateFound` to \
          anchor each proposal to the file, line and context where the pattern \
          was found. The `CandidateContext` classifier distinguishes test, \
          example, mock-fixture and production code, preferring Product context \
@@ -249,8 +257,9 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          (`fetch`, `axios`, React Router `path=`, Vue Router `path:`) and \
          compares them against backend routes read by `http_routes.rs`. \
          Frontend paths with no corresponding backend route become candidate \
-         checks carrying `Severity::Note`, `critical: false`, and \
-         `EvidenceClass::Inference`, anchored with `CheckReason::CandidateFound` \
+         checks carrying `critical: false` and `EvidenceClass::Inference`, at \
+         the severity `finding_gravity` returns for a route a user walks into \
+         that is not there, anchored with `CheckReason::CandidateFound` \
          to the frontend file and line where the unmatched path was read. \
          Dynamic routes, template literals and slotted paths are skipped rather \
          than guessed",
@@ -262,8 +271,10 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          checks. When runtime browser evidence confirms an action, the proposal \
          carries `EvidenceClass::ObservedFact` and `ActionKind::BrowserObservation`; \
          otherwise it remains `EvidenceClass::Inference` with `ActionKind::ReadFile`. \
-         Checks use `Severity::Note`, `critical: false`, and \
-         `CheckReason::CandidateFound` anchored to the source file, line and context",
+         Checks use `critical: false` and `CheckReason::CandidateFound` anchored to \
+         the source file, line and context, and take the severity `finding_gravity` \
+         returns for the place the action was declared — the class carries the \
+         difference between a declared handler and an observed one, not the weight",
     ),
     (
         "src/intent_implementation.rs",
@@ -273,9 +284,12 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          `ObservedUserRequest`) are matched deterministically against component \
          paths, declared commands, HTTP routes and source-file identifiers; \
          unmatched requirements, documented instructions (`ProjectSpec`) and agent \
-         claims (`AgentClaim`) become candidate checks carrying `Severity::Note`, \
-         `critical: false`, `EvidenceClass::Inference` and \
-         `CheckReason::CandidateFound`. Inferred sources are ignored, and when no \
+         claims (`AgentClaim`) become candidate checks carrying `critical: false`, \
+         `EvidenceClass::Inference`, `CheckReason::CandidateFound` and the \
+         severity `finding_gravity` gives a statement about declared intent, which \
+         is `note`: what a requirement says and what the code does are two \
+         documents, and the comparison between them is an inference. Inferred \
+         sources are ignored, and when no \
          trusted user requirement exists the module returns the frozen \
          after-the-fact limitation instead of fabricating a passing result",
     ),
@@ -288,6 +302,20 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          each proposal's anchor and `names_something` predicate. The module does not \
          invent new checks; it only decides which of several proposals about the same \
          place should survive",
+    ),
+    (
+        "src/finding_gravity.rs",
+        "`P7-T011`, and it proposes nothing: it is the rule that says how serious a \
+         finding a detector has already made is, and what a reader should be told \
+         about it. It names `CheckReason` because the reason *is* the rule's input \
+         — whether it names anything, and whether the anchor it carries is one a \
+         reader can open — and it names no `CheckProposal` at all, because it \
+         returns a severity and a rationale rather than a check. **The distinction \
+         this entry exists to make checkable**: this file decides how heavily an \
+         existing finding is weighed, never which checks exist. Every proposal \
+         that reaches a builder still comes from the modules in the entries above, \
+         and a `CheckProposal` constructed here would be the second proposer this \
+         rule is written to prevent",
     ),
     (
         "src/pipeline.rs",

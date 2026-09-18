@@ -35,6 +35,7 @@ pub mod enforce;
 pub mod env_completeness;
 pub mod external_service;
 pub mod false_completion_aggregator;
+pub mod finding_gravity;
 pub mod fingerprint;
 pub mod full_recording;
 pub mod harness_event;

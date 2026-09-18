@@ -26,12 +26,12 @@ use std::path::Path;
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
-use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::{CandidateContext, classify_path};
 use crate::checks::check_id;
 use crate::discover::Discovery;
+use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -53,8 +53,15 @@ pub enum CandidateCategory {
 /// The weights one category carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CategoryRow {
-    /// How bad it is if the check does not pass.
-    severity: Severity,
+    /// What kind of gap this category is: the input
+    /// [`crate::finding_gravity::gravity_of`] turns into a severity.
+    ///
+    /// **A category carries a gap and not a severity**, because the severity
+    /// also depends on where the pattern was found: a `mock` in a test file and
+    /// a `mock` in a shipped source file are the same category and are not the
+    /// same finding. The rule reads both and this table cannot state one without
+    /// the other.
+    gap: GapKind,
     /// Whether the project cannot be trusted for hand-off when it does not pass.
     critical: bool,
     /// What the check's result would be worth.
@@ -64,11 +71,21 @@ struct CategoryRow {
 /// The categories SURE checks, and what each one's check is.
 ///
 /// **The order is the report's**: todo, mock, stub, placeholder.
+///
+/// **All four are [`GapKind::UnfinishedMarker`]**, and that is a measured
+/// decision rather than a shrug. `fixtures/adversarial/fake-auth/scenario.json`
+/// requires `must_fix` for the `Todo` category at `src/auth.js` while
+/// `fixtures/adversarial/demo-analytics/scenario.json` requires
+/// `should_fix_first` for the same category at `src/metrics.js` — two identical
+/// inputs, two different required answers. What separates them is what each TODO
+/// is *on*, which this scanner does not read: it records the word and the place.
+/// A `can_fix_later` is what the word and the place have earned. See
+/// [`crate::finding_gravity`].
 const CATEGORIES: &[(CandidateCategory, CategoryRow)] = &[
     (
         CandidateCategory::Todo,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnfinishedMarker,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -76,7 +93,7 @@ const CATEGORIES: &[(CandidateCategory, CategoryRow)] = &[
     (
         CandidateCategory::Mock,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnfinishedMarker,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -84,7 +101,7 @@ const CATEGORIES: &[(CandidateCategory, CategoryRow)] = &[
     (
         CandidateCategory::Stub,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnfinishedMarker,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -92,7 +109,7 @@ const CATEGORIES: &[(CandidateCategory, CategoryRow)] = &[
     (
         CandidateCategory::Placeholder,
         CategoryRow {
-            severity: Severity::Note,
+            gap: GapKind::UnfinishedMarker,
             critical: false,
             evidence_class: EvidenceClass::Inference,
         },
@@ -195,17 +212,27 @@ impl CandidateScanner {
             let Some(detection) = detection else {
                 continue;
             };
+            let reason = CheckReason::CandidateFound {
+                path: detection.file.clone(),
+                line: detection.line,
+                context: detection.context.clone(),
+            };
+            // The severity is not this module's to choose: it is
+            // `crate::finding_gravity`'s answer for what was found, where it was
+            // found and what kind of gap this category is.
+            let gravity = gravity_of(
+                &reason,
+                row.evidence_class,
+                Reach::from(detection.path_context),
+                row.gap,
+            );
             proposals.push(CheckProposal::new(
                 check_id(&detection.file, &format!("candidate{}", category.tag())),
                 category.contextual_description(detection.path_context),
-                row.severity,
+                gravity.severity(),
                 row.critical,
                 row.evidence_class,
-                CheckReason::CandidateFound {
-                    path: detection.file.clone(),
-                    line: detection.line,
-                    context: detection.context.clone(),
-                },
+                reason,
                 &[ActionKind::ReadFile],
             ));
         }
@@ -380,6 +407,7 @@ fn line_contains_pattern<'line>(line: &'line str, patterns: &[&str]) -> Option<&
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use sure_domain::severity::Severity;
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
     #[test]
@@ -508,7 +536,12 @@ mod tests {
             proposal.title(),
             "project contains TODO or FIXME comments in production code"
         );
-        assert_eq!(proposal.severity(), Severity::Note);
+        assert_eq!(
+            proposal.severity(),
+            Severity::CanFixLater,
+            "a TODO in product code is work the author marked as unfinished, which \
+             the rule rates as a non-blocking improvement and not as a note"
+        );
         assert!(!proposal.critical());
         assert_eq!(proposal.evidence_class(), EvidenceClass::Inference);
         assert_eq!(proposal.requirements().actions(), &[ActionKind::ReadFile]);

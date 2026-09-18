@@ -2,11 +2,14 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 119 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 120 / 166 tasks accepted (counted from `progress/state.json` against
+`tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
+this file). **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11). Phase P9 complete (5/5). Phase P10 complete
-(1/1). Phase P11 complete (9/9). Phase P12 is open at 5 of 10; Phase P13 is open at 1 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
+(9/9), phase P11 complete (9/9). Phase P12 is open at 7 of 10; Phase P13 is open
+at 1 of 9; Phase P14 is open at 0 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -33,7 +36,9 @@ accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T00
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
-`3f9d002`. `P8-T009` received a follow-up security fix.
+`3f9d002`. `P8-T009` received a follow-up security fix. `P12-T001` … `P12-T006`
+and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commit
+`20649d3` with its acceptance recorded in `a5eabb9`.
 
 **Since `P5-T006`'s acceptance (newest last):**
 1. A worker agent completed `P5-T007` — *Implement runtime evidence cleanup and
@@ -454,7 +459,7 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     `integrations/codex/README.md`, and accepted the task. `P14-T001` is being
     done by a second worker in the same tree and is not yet reported.
 
-**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 6 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
+**Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 7 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P12-T007`, `P12-T009`, `P13-T002`, `P13-T003`, `P13-T004`,
 `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009` and
 `P14-T010`. `P12-T009` is now `in_progress`; the lowest-numbered READY task is

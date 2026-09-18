@@ -16,7 +16,7 @@ use sure_core::vocabulary::ProjectVerdict;
 /// The schema version of the JSON report.
 ///
 /// Bumped when the shape changes in a way an older reader would get wrong.
-pub const REPORT_SCHEMA_VERSION: u32 = 2;
+pub const REPORT_SCHEMA_VERSION: u32 = 3;
 
 /// A stable JSON report for a project verdict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +34,9 @@ pub struct JsonReport {
     /// The caveat text, when it applies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caveat: Option<String>,
+    /// A reduced-coverage note when model-backed analysis is disabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage_caveat: Option<String>,
     /// What the harness integration could and could not see.
     pub capability: JsonCapability,
     /// Findings that still need attention, most serious first.
@@ -237,6 +240,14 @@ fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
         must_caveat_requirements: verdict.must_caveat_requirements(),
         caveat: if verdict.must_caveat_requirements() {
             Some(sure_core::status::NO_TRUSTED_INTENT_LIMITATION.to_owned())
+        } else {
+            None
+        },
+        coverage_caveat: if verdict.not_checked.iter().any(|r| {
+            r.not_checked_reason
+                == Some(sure_core::status::NotCheckedReason::AnalysisProviderDisabled)
+        }) {
+            Some(sure_core::project_verdict::REDUCED_COVERAGE_ANALYSIS_DISABLED.to_owned())
         } else {
             None
         },
@@ -614,6 +625,50 @@ mod tests {
             evidence: Vec::new(),
             session: None,
         }
+    }
+
+    #[test]
+    fn coverage_caveat_is_present_when_analysis_provider_is_disabled() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "semantic intent match",
+            Severity::ShouldFixFirst,
+            true,
+            NotCheckedReason::AnalysisProviderDisabled,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(green_aggregate(), Vec::new(), not_checked);
+        let json = render_json_report(&verdict);
+        let report = parse_report(&json);
+        assert!(
+            report.coverage_caveat.is_some(),
+            "coverage caveat should be present: {json}"
+        );
+        let caveat = report.coverage_caveat.unwrap();
+        assert!(
+            caveat.contains("Model-backed analysis is disabled"),
+            "{caveat}"
+        );
+        assert!(caveat.contains("deterministic checks only"), "{caveat}");
+    }
+
+    #[test]
+    fn coverage_caveat_is_absent_when_provider_is_not_disabled() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "run tests",
+            Severity::MustFix,
+            true,
+            NotCheckedReason::ExecutionNotAuthorized,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(green_aggregate(), Vec::new(), not_checked);
+        let json = render_json_report(&verdict);
+        let report = parse_report(&json);
+        assert!(
+            report.coverage_caveat.is_none(),
+            "coverage caveat should not appear: {json}"
+        );
     }
 
     #[test]

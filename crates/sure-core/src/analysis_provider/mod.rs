@@ -18,6 +18,9 @@ use std::time::Duration;
 
 use crate::config::{AnalysisConfig, AnalysisProvider};
 use crate::process::{Cancellation, Limits, Outcome, ProcessRequest, Termination};
+use sure_domain::ids::{CheckId, FingerprintId};
+use sure_domain::severity::Severity;
+use sure_domain::status::{CheckResult, NotCheckedReason};
 
 /// How long a local-command analysis may run before it is stopped.
 ///
@@ -157,7 +160,7 @@ impl Analyzer for LocalCommandAnalyzer {
         let limits = Limits::new(DEFAULT_TIMEOUT, DEFAULT_OUTPUT_BYTES, DEFAULT_OUTPUT_BYTES);
 
         let mut arguments = self.arguments.clone();
-        arguments.push(request.prompt.into());
+        arguments.push(prepare_prompt(request.prompt).into());
 
         let process_request =
             ProcessRequest::new(&self.program, &self.working_directory, limits, cancellation)
@@ -176,11 +179,11 @@ impl Analyzer for LocalCommandAnalyzer {
 /// Turn a finished local command into an analysis response or error.
 fn local_command_response(outcome: Outcome) -> Result<AnalysisResponse, AnalysisError> {
     match outcome.termination() {
-        Termination::Exited { code: Some(0) } => {
-            Ok(AnalysisResponse::new(outcome.stdout().text_lossy()))
-        }
+        Termination::Exited { code: Some(0) } => Ok(AnalysisResponse::new(crate::redact::redact(
+            &outcome.stdout().text_lossy(),
+        ))),
         Termination::Exited { code: Some(code) } => {
-            let stderr = outcome.stderr().text_lossy();
+            let stderr = crate::redact::redact(&outcome.stderr().text_lossy());
             Err(AnalysisError::LocalCommandFailed {
                 message: format!("exited with code {code}: {stderr}"),
             })
@@ -198,6 +201,14 @@ fn local_command_response(outcome: Outcome) -> Result<AnalysisResponse, Analysis
             message: "was cancelled before it started".to_owned(),
         }),
     }
+}
+
+/// Strip secrets from a prompt before it is handed to a provider.
+///
+/// External providers must not receive raw secrets, and a local command may log
+/// its arguments. Redacting here keeps the secret out of both places.
+fn prepare_prompt(prompt: &str) -> String {
+    crate::redact::redact(prompt)
 }
 
 /// Placeholder for the Claude CLI provider.
@@ -264,6 +275,32 @@ pub fn build(
             config.model.clone(),
         ))),
     }
+}
+
+/// Build a [`CheckResult`] for a check that could not run because analysis is disabled.
+///
+/// This is the honest way to record a model-backed check when the configured
+/// provider is [`AnalysisProvider::Disabled`]: the check is skipped, the reason
+/// says the provider is missing, and the result blocks green when the check was
+/// critical. The check engine stays independent of the provider — it only calls
+/// this helper after the provider itself returns [`AnalysisError::Disabled`].
+#[must_use]
+pub fn disabled_result(
+    id: CheckId,
+    title: impl Into<String>,
+    severity: Severity,
+    critical: bool,
+    fingerprint: FingerprintId,
+) -> CheckResult {
+    CheckResult::not_run(
+        id,
+        title,
+        severity,
+        critical,
+        NotCheckedReason::AnalysisProviderDisabled,
+        fingerprint,
+    )
+    .with_reason("No analysis provider is configured.".to_owned())
 }
 
 #[cfg(test)]
@@ -424,6 +461,36 @@ mod tests {
         assert_eq!(
             analyzer.analyze(request("x")).unwrap_err(),
             AnalysisError::Disabled
+        );
+    }
+
+    #[test]
+    fn disabled_result_records_analysis_provider_disabled_reason() {
+        let fp = FingerprintId::generate();
+        let id = CheckId::generate();
+        let result = disabled_result(
+            id.clone(),
+            "semantic intent match",
+            Severity::ShouldFixFirst,
+            true,
+            fp.clone(),
+        );
+
+        assert_eq!(result.id, id);
+        assert_eq!(result.title, "semantic intent match");
+        assert_eq!(result.status, sure_domain::status::CheckStatus::Skipped);
+        assert_eq!(
+            result.not_checked_reason,
+            Some(NotCheckedReason::AnalysisProviderDisabled)
+        );
+        assert!(
+            result.reason.contains("analysis provider"),
+            "reason should explain the provider is missing: {}",
+            result.reason
+        );
+        assert!(
+            result.blocks_green(),
+            "a critical model-backed check that could not run must block green"
         );
     }
 }

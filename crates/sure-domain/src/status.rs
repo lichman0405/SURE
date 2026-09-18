@@ -159,6 +159,8 @@ pub enum NotCheckedReason {
     DisabledByConfiguration,
     /// It needed a real external service that is not reachable.
     ExternalServiceUnavailable,
+    /// No analysis provider is configured, so model-backed checks could not run.
+    AnalysisProviderDisabled,
     /// SURE has no rule for deciding.
     UnknownReason,
 }
@@ -173,6 +175,7 @@ variants!(NotCheckedReason {
     NotApplicable,
     DisabledByConfiguration,
     ExternalServiceUnavailable,
+    AnalysisProviderDisabled,
     UnknownReason
 });
 
@@ -189,6 +192,12 @@ impl NotCheckedReason {
             self,
             Self::NotApplicable | Self::UnsupportedStack | Self::DisabledByConfiguration
         )
+    }
+
+    /// Whether this reason means model-backed analysis was disabled for this run.
+    #[must_use]
+    pub const fn is_analysis_provider_disabled(self) -> bool {
+        matches!(self, Self::AnalysisProviderDisabled)
     }
 
     /// Plain-language explanation written for someone who is not a programmer.
@@ -211,6 +220,9 @@ impl NotCheckedReason {
             Self::DisabledByConfiguration => "You switched this check off in the SURE settings.",
             Self::ExternalServiceUnavailable => {
                 "This can only be confirmed against the real outside service, which is not available here."
+            }
+            Self::AnalysisProviderDisabled => {
+                "No analysis provider is configured, so SURE cannot perform model-backed checks."
             }
             Self::UnknownReason => "SURE does not know why this was not checked.",
         }
@@ -913,6 +925,7 @@ mod tests {
             NotCheckedReason::NetworkNotPermitted,
             NotCheckedReason::ToolUnavailable,
             NotCheckedReason::ExternalServiceUnavailable,
+            NotCheckedReason::AnalysisProviderDisabled,
             NotCheckedReason::UnknownReason,
         ] {
             assert!(!reason.is_scope_limit());
@@ -921,6 +934,22 @@ mod tests {
             let summary = aggregate(&[skipped]);
             assert_ne!(summary.severity, AggregateSeverity::Green, "{reason:?}");
         }
+    }
+
+    #[test]
+    fn analysis_provider_disabled_is_recognized_and_reported() {
+        let reason = NotCheckedReason::AnalysisProviderDisabled;
+        assert!(!reason.is_scope_limit());
+        assert!(reason.is_analysis_provider_disabled());
+        let explanation = reason.plain_explanation();
+        assert!(
+            explanation.contains("analysis provider"),
+            "explanation should mention the analysis provider: {explanation}"
+        );
+        assert!(
+            explanation.contains("model-backed"),
+            "explanation should mention model-backed checks: {explanation}"
+        );
     }
 
     #[test]

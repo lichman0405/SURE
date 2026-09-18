@@ -12,7 +12,12 @@ use sure_domain::severity::Severity;
 use sure_domain::status::{Aggregate, CheckResult};
 use sure_domain::vocabulary::{Claim, ProjectVerdict};
 
-use crate::redact::escape_control_characters;
+use crate::redact::{escape_control_characters, redact};
+use sure_domain::status::NotCheckedReason;
+
+/// The sentence SURE uses when model-backed analysis was disabled and coverage is reduced.
+pub const REDUCED_COVERAGE_ANALYSIS_DISABLED: &str =
+    "Model-backed analysis is disabled, so coverage is reduced to deterministic checks only.";
 
 /// Build a [`ProjectVerdict`] from the pieces of a completed run.
 ///
@@ -82,6 +87,15 @@ pub fn render_summary(verdict: &ProjectVerdict) -> String {
         parts.push(sure_domain::status::NO_TRUSTED_INTENT_LIMITATION.to_owned());
     }
 
+    // Reduced-coverage caveat when model-backed analysis is disabled.
+    if verdict
+        .not_checked
+        .iter()
+        .any(|r| r.not_checked_reason == Some(NotCheckedReason::AnalysisProviderDisabled))
+    {
+        parts.push(REDUCED_COVERAGE_ANALYSIS_DISABLED.to_owned());
+    }
+
     // Capability / support level.
     parts.push(verdict.capability.summary());
 
@@ -118,7 +132,7 @@ pub fn render_summary(verdict: &ProjectVerdict) -> String {
             ));
             let titles: Vec<String> = critical_not_checked
                 .iter()
-                .map(|r| escape_control_characters(&r.title))
+                .map(|r| escape_control_characters(&redact(&r.title)))
                 .collect();
             if !titles.is_empty() {
                 sentence.push_str(&format!(" ({})", titles.join(", ")));
@@ -401,6 +415,62 @@ mod tests {
         assert!(
             !summary.contains("cannot confirm that it matches your original request"),
             "{summary}"
+        );
+    }
+
+    #[test]
+    fn summary_includes_reduced_coverage_caveat_when_analysis_provider_is_disabled() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "semantic intent match",
+            Severity::ShouldFixFirst,
+            true,
+            NotCheckedReason::AnalysisProviderDisabled,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(
+            fingerprint(),
+            green_aggregate(),
+            ProjectIntent::empty(),
+            CapabilityReport::cli(),
+            Vec::new(),
+            not_checked,
+            Vec::new(),
+        );
+        let summary = render_summary(&verdict);
+        assert!(
+            summary.contains("Model-backed analysis is disabled"),
+            "summary should note reduced coverage: {summary}"
+        );
+        assert!(
+            summary.contains("deterministic checks only"),
+            "summary should say coverage is limited to deterministic checks: {summary}"
+        );
+    }
+
+    #[test]
+    fn summary_does_not_include_reduced_coverage_caveat_when_provider_ran() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "run tests",
+            Severity::MustFix,
+            true,
+            NotCheckedReason::ExecutionNotAuthorized,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(
+            fingerprint(),
+            green_aggregate(),
+            ProjectIntent::empty(),
+            CapabilityReport::cli(),
+            Vec::new(),
+            not_checked,
+            Vec::new(),
+        );
+        let summary = render_summary(&verdict);
+        assert!(
+            !summary.contains("Model-backed analysis is disabled"),
+            "summary should not claim reduced coverage when provider is not disabled: {summary}"
         );
     }
 }

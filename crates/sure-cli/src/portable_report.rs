@@ -749,6 +749,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reduced_coverage_caveat_appears_when_analysis_provider_is_disabled() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "semantic intent match",
+            Severity::ShouldFixFirst,
+            true,
+            NotCheckedReason::AnalysisProviderDisabled,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(green_aggregate(), Vec::new(), not_checked);
+        let md = render_markdown(&verdict);
+        let html = render_html(&verdict);
+
+        assert!(
+            md.contains("Model-backed analysis is disabled"),
+            "markdown should note reduced coverage: {md}"
+        );
+        assert!(
+            md.contains("deterministic checks only"),
+            "markdown should say coverage is limited to deterministic checks: {md}"
+        );
+        assert!(
+            html.contains("Model-backed analysis is disabled"),
+            "html should note reduced coverage: {html}"
+        );
+        assert!(
+            html.contains("semantic intent match"),
+            "html should list the disabled check: {html}"
+        );
+    }
+
     fn a_claim(assessment: ClaimAssessment, text: &str) -> Claim {
         Claim {
             id: ClaimId::generate(),

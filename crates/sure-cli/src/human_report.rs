@@ -439,6 +439,32 @@ mod tests {
     }
 
     #[test]
+    fn reduced_coverage_caveat_appears_when_analysis_provider_is_disabled() {
+        let not_checked = vec![CheckResult::not_run(
+            CheckId::generate(),
+            "semantic intent match",
+            Severity::ShouldFixFirst,
+            true,
+            NotCheckedReason::AnalysisProviderDisabled,
+            fingerprint(),
+        )];
+        let verdict = build_verdict(green_aggregate(), Vec::new(), not_checked);
+        let text = render(&verdict);
+        assert!(
+            text.contains("Model-backed analysis is disabled"),
+            "human report should note reduced coverage: {text}"
+        );
+        assert!(
+            text.contains("deterministic checks only"),
+            "human report should say coverage is limited to deterministic checks: {text}"
+        );
+        assert!(
+            text.contains("semantic intent match"),
+            "human report should list the disabled check: {text}"
+        );
+    }
+
+    #[test]
     fn material_findings_are_shown_before_non_material() {
         let fp = fingerprint();
         let material = FindingBuilder::new(

@@ -274,6 +274,7 @@ frozen!(NotCheckedReason, test: not_checked_reason_wire_names_are_frozen, {
     NotApplicable => "not_applicable",
     DisabledByConfiguration => "disabled_by_configuration",
     ExternalServiceUnavailable => "external_service_unavailable",
+    AnalysisProviderDisabled => "analysis_provider_disabled",
     UnknownReason => "unknown_reason",
 });
 

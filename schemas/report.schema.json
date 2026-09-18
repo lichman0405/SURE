@@ -57,6 +57,10 @@
     "caveat": {
       "type": "string"
     },
+    "coverage_caveat": {
+      "description": "Reduced-coverage note when model-backed analysis is disabled.",
+      "type": "string"
+    },
     "capability": {
       "type": "object",
       "required": [

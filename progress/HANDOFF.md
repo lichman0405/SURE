@@ -1,10 +1,17 @@
 # Autonomous handoff
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T002` (implement privacy modes) is dispatched as of `56e869a`
-and is `in_progress`, with its brief at `target/tmp/brief-p13t002.md`. `P12-T010`
+**In flight:** nothing. `P13-T002` (implement privacy modes) is accepted as
+commit `2439c6f`, verified at that sha — "What `P13-T002` added" and "Validation
+of `P13-T002`" below carry the numbers. It found and recorded one defect in its
+own deliverable, a citation `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`
+attributes to `CLI.md` that `CLI.md` does not contain; the supervisor corrected
+it at acceptance rather than accepting a true claim propped up by an invented
+quotation. The next READY task is `P13-T003` (implement recording
+retention/deletion controls), whose brief is already written and sits at
+`target/tmp/brief-p13t003.md`. `P12-T010`
 (wire the MCP bridge into the Claude Code, Cursor and Agent plugin packages) is
 accepted as commit `752489c` — "What
 `P12-T010` added" and "Validation of `P12-T010`" below carry the numbers. Before
@@ -18,7 +25,7 @@ measured before and after a full run rather than asserted — and `P12-T010`
 re-measured it, because that task added tests that spawn the real binary and a
 manifest that launches `sure mcp serve` with no store flag, which is exactly the
 shape that could have put the write back.
-Progress: 129 / 172 tasks accepted (counted from `progress/state.json` against
+Progress: 130 / 172 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why — from 168 to 170 on the same day, when two gaps found by
@@ -30,7 +37,7 @@ P0 complete (9/9), phase P1 is complete (12/12), phase P2 complete (12/12), phas
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 11 of 13, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9), phase P12 complete (10/10). Phase P13 is open
-at 1 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
+at 2 of 9; Phase P14 is open at 3 of 13; Phase P15 is open at 0 of 14; Phase P16
 is open at 0 of 9.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
@@ -722,13 +729,44 @@ tree is or is not intact would be reading a claim the file does not make.
     predicates are sound and well-named, and no user-facing surface says which
     mode is in effect. Both are in the brief.
 
+85. A worker agent completed `P13-T002` — *Implement privacy modes* — as commit
+    `2439c6f`, accepted after independent verification. The mode in effect is now
+    the arbitrated one, in both renderings of the check report, and model use is
+    one of five states read from the run's own stage-8 record rather than a
+    constant. The ADR's named `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`
+    now exists. The acceptance found one defect in the deliverable and corrected
+    it: the new document quoted `CLI.md` as saying the doctor "deliberately holds
+    nothing from settings contents", and no file in this repository contains that
+    phrase — the claim was true, the quotation was invented, and `CLI.md:579`
+    states it properly. See "What `P13-T002` added" and "Validation of
+    `P13-T002`".
+86. `P13-T002`'s verification produced two instrument errors that are worth more
+    than the result they nearly corrupted, both written up in the family section
+    above: a piped `Select-Object -First 8` reporting a refusal's status as 1
+    when it is 5, and a `Copy-Item` restore preserving an old mtime so cargo
+    reused a mutated build and made a correct tree look broken. Neither was a
+    product defect and both would have been reported as one.
+87. The next dispatch is the next READY task, `P13-T003` (implement recording
+    retention/deletion controls), whose brief is already written at
+    `target/tmp/brief-p13t003.md`. Reading the tree for it established three
+    things: the only `DELETE` statement in the product is `DELETE FROM records`
+    (`store/mod.rs:606`), so nothing has ever deleted a session despite
+    `sessions` and `session_events` carrying `retained_until_ms` and dedicated
+    retention indexes; `sessions_past_retention` exists and works with no
+    production caller; and the entire `sure history` group refuses, so both halves
+    of the criterion — inspect and delete — are absent from the user's surface.
+    The brief's central trap: `privacy.full_recording` is already configurable
+    and decides *whether* raw content is kept, never *how long*, and the duration
+    is the hardcoded `DEFAULT_FULL_RECORDING_RETENTION_DAYS = 3`.
+
 The READY list, read from
-`node scripts/taskctl.mjs ready` on 2026-09-19 after `P12-T010` was accepted, is
-`P13-T002`, `P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`,
+`node scripts/taskctl.mjs ready` on 2026-09-19 after `P13-T002` was accepted, is
+`P13-T003`, `P13-T004`, `P14-T004`, `P14-T005`, `P14-T006`,
 `P14-T007`, `P14-T009`, `P14-T010`, `P15-T008`, `P7-T012`, `P14-T013`,
-`P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T002` (implement
-privacy modes) is the first of those and is the next dispatch; its brief was
-written while `P12-T010` ran and sits at `target/tmp/brief-p13t002.md`. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
+`P7-T013`, in the order `tasks/tasks.json` lists them. `P13-T003` (implement
+recording retention/deletion controls) is the first of those and is the next
+dispatch; its brief sits at `target/tmp/brief-p13t003.md`. Its base commit is to
+be pinned at dispatch, since `P13-T002` landed after the brief was written. `P7-T010`'s acceptance unblocked `P7-T011` and `P7-T012` and
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
@@ -870,6 +908,129 @@ this project edits away. The rule for the next session: inside `@'…'@`, write 
 apostrophe. There is no escape to reach for, and the only way to see the damage
 before pushing is `git log -1 --format=%B` — which is worth doing for any message
 longer than a line.
+
+Two more of the same family, both from `P13-T002`'s verification, and both times
+the instrument was wrong rather than the tree. First, `& $sure … | Select-Object
+-First 8` reported a refusal's status as 1 when it is 5: truncating the pipeline
+is not a neutral way to look at a process. Re-measured through `cmd /c` with the
+streams redirected to files, it is 5, with zero bytes on stdout. This is the
+second time in two tasks that a PowerShell capture produced a wrong number about
+a child process — the `P12-T010` launcher measurement was the first — so the rule
+is now: a claim about a process's status, bytes or streams comes from redirection
+to a file, never from a pipeline. Second, and worse because it looked like a
+product defect: after a mutation test the file was restored and its SHA256 matched
+with `git status --porcelain` empty, and the two tests were still failing.
+`Copy-Item` **preserves the source's `LastWriteTime`**, so the restored file
+carried an mtime *older* than the artifact cargo had built from the mutated
+source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
+A clean tree and a matching hash are not evidence that anything was rebuilt —
+after any restore, touch the file or `cargo clean -p <crate>` before believing a
+result.
+
+## What `P13-T002` added
+
+The mechanism existed and was unreachable, which is the shape that reads as done
+from the inside. `PrivacyMode` was read nowhere outside
+`crates/sure-core/src/config/`; no command, report or doctor output named the mode
+in effect; and no line any user could see said whether a model had been
+consulted. The predicates were well-named, sound, and had no caller a person
+could reach.
+
+**The mode a run is under is now stated, and it is the arbitrated one.** The
+check report carries `details.privacy` — `mode`, `mode_set_by`, `project_mode`,
+`external_analysis_allowed`, `analysis_provider` — and a "Privacy and model use"
+section in the human form. The value comes from `Authority::privacy_mode()`, not
+from the project's file, because reporting what a project asked for would be a
+false statement about the user's own policy: worse than saying nothing, because
+it reads as an answer. `check.rs` now reads settings through `Authority::load`
+rather than `Config::load` for that reason. `project_mode` is carried separately
+and used for exactly one sentence — when the two differ, that the stricter one is
+in effect and the project's could not have been otherwise.
+
+**Model use is one state of five, read from the run rather than written as a
+constant.** `no_provider` / `nothing_asked` / `provider_unusable` / `consulted` /
+`cannot_confirm`, derived by `ModelUse::of` from stage 8's own `StageOutcome`.
+Two decisions make it honest. First, no boolean: `a_model_was_consulted` is not
+in the frame, because `false` would have to mean both "not consulted" and "cannot
+say". Second, `run.stopped_at` is consulted before the match, because a run that
+stopped early leaves the same `NotPartOfWork` record a genuine "nothing asked"
+writes, and reading that as the reassuring half is the false negative the type
+exists to refuse. The tempting constant — "no check in this build asks for
+analysis, so no model was consulted" — is true today and is exactly what this
+product refuses, so a test asserts the reachable set and will fail the day a
+check asks.
+
+**The ADR's named document now exists.** `docs/architecture/PRIVACY_AND_MODEL_STRATEGY.md`
+is 218 lines: what each mode permits and forbids, which this release implements,
+what to write instead of the one it does not, where the mode is stated, the five
+model states, and a "What SURE will not say" section. ADR 0006 cited it and
+nothing else did. Its "Enforced by" table names the code, and the sentences are
+transcribed in `crates/sure-core/src/privacy.rs` where a test reads the markdown
+and fails if the mode names or the local-only alternative disappear.
+
+**What it did not do, and said so.** `Authority` is still not wired into
+`Pipeline`, so a project's `analysis.provider` and `execution.mode` reach the
+pipeline ungated — the commit message records that rather than leaving it to be
+found. `consulted` is unreachable and nothing is sent, stated in the shipped
+document rather than hedged. `allows_external_analysis()` is enforced at the
+settings-file boundary and nowhere on a send path, which is harmless only because
+there is no send path yet.
+
+## Validation of `P13-T002`
+
+Supervisor, 2026-09-19, from PowerShell. Commit `2439c6f`; the five gates at that
+commit, all exit 0: fmt, clippy, `cargo test --workspace --all-features
+--no-fail-fast` (73 test targets, 2435 passes, 0 failures, 12 ignored — `P12-T010`
+measured 2415, so +20), `validate-bootstrap.mjs` ("17 phases, 172 tasks") and
+`taskctl validate` ("state OK: 172 tasks"). Log at
+`target/tmp/sup-p13t002-gates.txt`. The 11 files touch nothing under
+`evaluation/`, `progress/`, `tasks/`, `SHA256SUMS.txt` or `fixtures/`.
+
+**Criterion 1, through the shipped binary.** No settings: the human form prints
+the section and the frame answers
+`{"mode":"local_first","mode_set_by":null,"project_mode":"local_first","external_analysis_allowed":true,"analysis_provider":"disabled"}`.
+A project file asking for `fully_local` with no user file: `{"mode":"fully_local","mode_set_by":"project","external_analysis_allowed":false}`
+and the line "A project may ask for more privacy than you configured; it cannot
+ask for less." `cloud_enhanced` is refused with both alternatives, status 5, zero
+bytes on stdout. Status 5 there is pre-existing and documented at `check.rs:57` at
+the base commit, so this task changed no status.
+
+**The guard was proven able to fail.** `PrivacyStatement::of` changed from
+`mode: mode.value` to `mode: authority.project().privacy.mode` — the exact
+mistake criterion 1 exists to prevent. Three guards across two crates failed
+naming it: `the_mode_in_effect_is_the_arbitrated_one_and_never_the_projects`
+("the project's own file decided the mode in effect", left `LocalFirst` right
+`FullyLocal`), `the_two_settings_can_only_differ_in_one_direction` (left 0, right
+2), and `the_mode_in_a_report_is_the_arbitrated_one_and_not_the_one_a_file_names`
+("the report names the mode the project asked for, not the mode in effect").
+Restored, touched, 11 passed 0 failed.
+
+**One defect in the deliverable, corrected here.** The new document quoted
+`CLI.md` as saying the doctor "deliberately holds nothing from settings
+contents". That phrase is in no file in this repository except the sentence
+quoting it. The claim is true — `CLI.md:579` states it properly as a table row,
+"`sure doctor` never reads the settings file" — so the correction keeps the
+meaning and removes the invention. Every other citation was checked the same way
+and all resolve, including `ProjectRequest::ExternalAnalysis` →
+`Permission::ConnectService` (`values.rs:355`) and `privacy_rank`
+(`authority.rs:384`), which is what makes "the stricter of the two settings
+files" true.
+
+**The hand-back's reviewer command proves nothing.** It offered
+`cargo test -p sure-cli --lib privacy::the_three_modes_say_what_the_document_says_they_say`,
+which prints "ok. 0 passed; 0 failed; 1293 filtered out" and exits 0. The test is
+in `sure-core`, and the filter needs the `tests::` segment. A reviewer following
+the hand-back would have seen green while nothing ran. The supervisor's own first
+attempt at the corrected command made the same mistake for the same reason; the
+only thing that caught it was reading the "0 passed" line.
+
+**The store is untouched.** `D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`,
+348160 bytes, before the gates and after every probe.
+
+`SHA256SUMS.txt` is regenerated with this acceptance: the commit changed four
+listed paths (`lib.rs`, `CONFIG_AUTHORITY.md`, `PROVIDER_MODEL.md`,
+`PRIVACY.md`). Exactly 4 of 184 lines changed, 184 before and after, dry re-run
+clean. The file is not a completeness claim and no gate reads it.
 
 ## What `P12-T010` added
 

@@ -136,8 +136,9 @@ that printed one layer's `privacy.mode` under the name "privacy mode" would be
 making exactly the false statement about the user's policy that the arbitration
 exists to prevent.
 
-`docs/architecture/CLI.md` records the same rule from the other side: the doctor
-"deliberately holds nothing from settings contents".
+`docs/architecture/CLI.md` records the same rule from the other side, as one row
+of its table of claims each witnessed by a test: "`sure doctor` never reads the
+settings file".
 
 `sure config show` is the natural third candidate and is **not implemented in
 this release** — it answers `not_yet`. When it is built it is the right place to

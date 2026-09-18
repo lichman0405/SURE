@@ -106,17 +106,19 @@ fn run_ingest(source: Option<&str>, event_kind: Option<&str>, stdin: &str) -> Re
     // pre-tool-use; a store failure should not block the operation.
     let _ = persist_event(&ingested, &project_root);
 
-    // For now, Claude Code events do not need a protection decision (P10-T006).
-    // Return allow so the operation proceeds while evidence is recorded.
-    if source == Some("claude-code") {
-        return Report::HookDecision(sure_core::hook_protection::ProtectionDecision::allow());
-    }
-
     // Evaluate protection for pre-tool-use events.
     let is_pre_tool_use =
         event_kind == Some("pre-tool-use") || envelope.event_type == "tool.requested";
 
     if is_pre_tool_use {
+        // Claude Code protection decisions are not yet wired (P10-T006). A hook
+        // that cannot ask the user for consent must fail closed.
+        if source == Some("claude-code") {
+            return Report::HookDecision(sure_core::hook_protection::ProtectionDecision::block(
+                "Protection decisions are not yet supported for Claude Code; refusing to authorize.",
+            ));
+        }
+
         let tool = envelope
             .payload
             .get("tool")
@@ -290,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_pre_tool_use_allows_without_decision() {
+    fn claude_code_pre_tool_use_blocks_until_protection_is_implemented() {
         let text = claude_fixture("pre-tool-use.json");
         let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), &text);
         let decision = match &report {
@@ -299,7 +301,14 @@ mod tests {
         };
         assert_eq!(
             decision.decision,
-            sure_core::hook_protection::ProtectionDecisionKind::Allow
+            sure_core::hook_protection::ProtectionDecisionKind::Block
+        );
+        assert!(
+            decision
+                .reason
+                .as_deref()
+                .expect("blocked decision should have a reason")
+                .contains("not yet supported for Claude Code")
         );
     }
 

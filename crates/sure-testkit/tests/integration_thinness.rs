@@ -425,6 +425,36 @@ fn claude_code_check_command_exists_and_is_thin() {
 }
 
 #[test]
+fn claude_code_repair_handoff_references_repair_and_recheck() {
+    let fix_md = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("commands")
+        .join("fix.md");
+
+    assert!(fix_md.is_file(), "claude-code fix.md must exist");
+
+    let text = std::fs::read_to_string(&fix_md).expect("fix.md readable");
+
+    assert!(
+        text.contains("sure repair"),
+        "claude-code fix.md must reference `sure repair` so the handoff can obtain the contract"
+    );
+    assert!(
+        text.contains("sure recheck"),
+        "claude-code fix.md must reference `sure recheck` so the handoff can close with evidence"
+    );
+
+    let normalised = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let frozen = sure_domain::status::NO_TRUSTED_INTENT_LIMITATION;
+    let frozen_normalised = frozen.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !normalised.contains(&frozen_normalised),
+        "claude-code fix.md must not copy the frozen no-trusted-intent limitation sentence"
+    );
+}
+
+#[test]
 fn cursor_repair_handoff_references_repair_and_recheck() {
     let fix_md = sure_testkit::repository_root()
         .join("integrations")

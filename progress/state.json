@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-18T13:05:31.894Z",
+  "last_updated": "2026-09-18T13:23:28.175Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -1522,13 +1522,13 @@
       "notes": "Worker commit 69c7bee: 39 fixture files plus 2 test files (41 changed). Supervisor verification, none of it taken from the worker report: (1) cargo test -p sure-testkit --test fixture_apps = 14 passed; cargo test -p sure-core --test adversarial_fixture_detection = 10 passed. (2) All six fixtures were run by the supervisor - node scripts/check.js in each of fake-payment, fake-auth, fake-email, dead-button, demo-analytics and route-mismatch - and all six exit 0 printing their own PASS (on purpose) trap summary, so \"runnable\" is measured rather than claimed. (3) src/auth.js was read: verifyPassword looks the account up, receives the password argument, never compares it and returns true, so the bypass is real. (4) The two cargo test --workspace failures the worker reported were reproduced and are NOT the worker: they are analysis_provider tests that name a bare echo, which only resolves when echo.exe is on PATH, so they pass under Git Bash and fail under PowerShell. Fixed by the supervisor in 0c7bf90; sure-core is now green from both shells. Recorded gap, verified independently by the supervisor: every false-completion detector emits Severity::Note with EvidenceClass::Inference, and false_completion_aggregator::is_style_noise sorts exactly that combination into style_noise, while evaluation/acceptance-manifest.json requires must_fix for these release-blocking cases. The fixtures are correct; the severity calibration is not, and it is recorded in progress/HANDOFF.md as the second plan-level gap. Also recorded: nothing detects an authentication bypass itself - the fake-auth fixture fires on the evidence around it."
     },
     "P14-T002": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-18T13:05:31.894Z",
-      "finished_at": null,
+      "finished_at": "2026-09-18T13:23:28.175Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Worker commit 2449bc3: 27 files, all under fixtures/adversarial/ plus the two test files. No reserved path touched - checked with git show --name-only against progress/, tasks/, integrations/, evaluation/, SHA256SUMS and every crates/*/src/ path. Supervisor verification, none of it taken from the worker report: (1) cargo test -p sure-core --test adversarial_fixture_detection = 17 passed; cargo test -p sure-testkit --test fixture_apps = 19 passed. (2) All three fixtures run by hand on python 3.13.9 - missing-migration, external-unverified, missing-config - each exits 0 printing its trap line and 'verdict of this project's own check: PASS (on purpose)', and running them leaves the tree clean of __pycache__. (3) cargo test --workspace --all-features --no-fail-fast --exclude sure-cli, run from PowerShell = exit 0, 65 test binaries green, 2148 tests passed, 0 failures; sure-cli is excluded because P12-T009's worker holds that crate mid-edit, and nothing this task changed reaches it. (4) The pinned gap test what_is_detected_is_not_yet_what_the_manifest_requires is intact and stronger than before: it still asserts Note + not-critical + Inference for the TypeScript probe fixture and now also asserts the aggregator files exactly that in style_noise, so the gap the Handoff records cannot be mistaken for done. (5) The manifest exemption the worker added is a guard rather than a hole: the_only_fixture_without_a_manifest_case_is_the_one_named_here asserts every entry has a non-empty reason, names a shipped directory, and is NOT graded by the manifest, so a graded case cannot be excused from the severity agreement. (6) Severity claims spot-checked in source rather than read from the report: external_service.rs emits ShouldFixFirst only (lines 66, 74, 82) and db_migrations reaches MustFix, so missing-migration already carries the weight the manifest asks for while external-unverified is heavier than its row asks rather than lighter - the calibration P7-T011 inherits is not uniform across detector families, which is what its notes say. Recorded caveat: at acceptance time sure-cli's the_grammar_is_the_one_docs_architecture_cli_md_lists fails and sure-cli is unformatted, both from P12-T009's uncommitted tree; the worker neither fixed nor staged them, which is the right behaviour and is P12-T009's acceptance to answer for."
     },
     "P14-T003": {
       "status": "queued",

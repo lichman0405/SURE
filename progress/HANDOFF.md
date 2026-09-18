@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 121 / 168 tasks accepted (counted from `progress/state.json` against
+Progress: 122 / 168 tasks accepted (counted from `progress/state.json` against
 `tasks/tasks.json` on 2026-09-18, not carried forward from the previous line of
 this file; the graph grew from 166 to 168 tasks on 2026-09-18 — items 68 and 69
 below record why). **Phase P0 complete (9/9), phase P1 complete
@@ -10,7 +10,7 @@ below record why). **Phase P0 complete (9/9), phase P1 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 is open at
 9 of 11, phase P8 complete (11/11), phase P9 complete (6/6), phase P10 complete
 (9/9), phase P11 complete (9/9). Phase P12 is open at 7 of 10; Phase P13 is open
-at 1 of 9; Phase P14 is open at 1 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+at 1 of 9; Phase P14 is open at 2 of 12.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -483,14 +483,23 @@ and `P12-T008` are accepted; `P12-T005` is commit `3a71ddc`, `P12-T006` is commi
     `node scripts/validate-bootstrap.mjs` reports 17 phases and 168 tasks, and
     `node scripts/taskctl.mjs validate` reports state OK. `tasks/README.md` said
     "Tasks: 159", which was already stale before this change; it now says 168.
+70. A worker agent completed `P14-T002` — *Implement Python adversarial fixture
+    apps* — as commit `2449bc3`. The supervisor re-ran both test binaries, ran
+    all three fixtures by hand on python 3.13.9, read the pinned gap test and the
+    new manifest exemption in full, and spot-checked the severity claims in the
+    detectors' own source; "Validation of `P14-T002`" below carries the numbers.
+    The worker also found a real defect inside `P12-T009`'s uncommitted tree — an
+    `mcp` command added to the grammar without updating
+    `docs/architecture/CLI.md` — and reported it without touching it, which is
+    the behaviour this process needs when two workers share a workspace.
 
 **Phase P11 is complete at 9 of 9; Phase P10 is complete at 9 of 9; Phase P12 is open at 7 of 10; Phase P13 is open at 1 of 9.** `P12-T005` was accepted as commit `3a71ddc` and pushed to `origin/claude/v0.1-autonomous` as a fast-forward checkpoint. The READY list is now
 `P7-T010`, `P12-T007`, `P13-T002`, `P13-T003`, `P13-T004`,
 `P14-T003`, `P14-T004`, `P14-T005`, `P14-T006`, `P14-T007`, `P14-T009`,
-`P14-T010` and `P15-T008`. `P12-T009` and `P14-T002` are `in_progress`. The
-lowest-numbered READY task is `P7-T010`, which is dispatched as soon as those two
-workers have landed: it writes `sure-cli` and `sure-core`, which they are holding
-between them. `P7-T010` is also the task five later tasks are waiting on, so it
+`P14-T010` and `P15-T008`. `P12-T009` is `in_progress`. The
+lowest-numbered READY task is `P7-T010`, and it is dispatched the moment
+`P12-T009` lands: it writes `sure-cli` and `sure-core/src`, which that task's
+worker is holding. `P7-T010` is also what five later tasks are waiting on, so it
 is not queued behind anything else.
 
 ### Plan-level gap, closed 2026-09-18: the check pipeline had no task
@@ -605,6 +614,77 @@ platform does start and name it by full path, which also gives
 workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
+
+## What `P14-T002` added
+
+Three runnable Python fixture apps under `fixtures/adversarial/`, each a project
+that passes its own check while the thing it advertises is not done:
+
+| Fixture | The trap | What fires today |
+| --- | --- | --- |
+| `missing-migration` | the application declares three columns and the database has a schema, but `alembic/versions/` is present and empty | `db_migrations`: `Record::Empty`, `Confirmed`, `Severity::MustFix`, two `ObservedFact` anchors (`alembic.ini`, `alembic/versions`) |
+| `external-unverified` | a payment is posted to `api.stripe.com` and the answer comes from a stand-in transport; nothing left the machine | `external_service`: `ShouldFixFirst`, `critical`, `Inference`, plus `not_checked` → `Skipped` / `ExternalServiceUnavailable` |
+| `missing-config` | the application reads three environment keys and no file or document declares any of them | `env_completeness` over `references`: three `ReadButNotDeclared` / `Confirmed` / `ShouldFixFirst` |
+
+Each is a Python project (`pyproject.toml`, `app/`, `scripts/check.py`,
+`scenario.json`, `README.md`), stdlib only, no network and no writes, run as
+`python scripts/check.py`. It is `python` and not `python3` on purpose:
+`python3` is a Microsoft Store alias on the machines this is developed on, so an
+entry point spelled that way reads as runnable and is not. The testkit refuses
+it, and `ALLOWED_PYTHON_MODULES` is a short list so that a new import in a later
+Python fixture is a written decision rather than an import that happened to work.
+
+Two decisions worth reading before trusting the numbers:
+
+- **`missing-config` has no row in `evaluation/acceptance-manifest.json`**, and
+  the manifest is the release contract, not this task's to edit. Rather than
+  invent a row, the fixture is named once in `FIXTURES_WITHOUT_A_MANIFEST_CASE`
+  with its reason, and the exemption is checked in both directions —
+  `the_only_fixture_without_a_manifest_case_is_the_one_named_here` fails if the
+  named id is graded by the manifest, if it is not a shipped directory, or if its
+  reason is empty. Only the severity agreement is waived for it; the schema, the
+  false-green rule and runnability are not.
+- **`must_fix` needs `Record::Empty`, not `Record::Absent`.** An Alembic project
+  with no `versions/` directory at all is `ShouldFixFirst`. The fixture holds the
+  stronger shape by shipping `versions/` present and empty, which needs
+  `alembic/versions/.gitkeep` — not a `.py` file, so it is not a revision.
+
+The negative half is built rather than copied: `adversarial_fixture_detection.rs`
+constructs four scratch projects under `target/tmp` — Alembic with one revision,
+a `.env.example` that does declare the keys, `import stripe` in a module, and a
+`requirements.txt` line — and asserts the checks stay silent on them. A fixture
+with no control could be satisfied by a check that fires on everything.
+
+## Validation of `P14-T002`
+
+Verified by the supervisor on 2026-09-18 from the worker's commit `2449bc3`, none
+of it read from the worker's report:
+
+| Claim | How it was checked |
+| --- | --- |
+| 27 files, none of them reserved | `git show --name-only 2449bc3` against `progress/`, `tasks/`, `integrations/`, `evaluation/`, `SHA256SUMS.txt` and every `crates/*/src/` path |
+| the fixtures run | all three executed by hand on python 3.13.9, each exit 0, each printing its trap line and `verdict of this project's own check: PASS (on purpose)`; no `__pycache__` left behind |
+| the tests pass | `cargo test -p sure-core --test adversarial_fixture_detection` 17 passed; `cargo test -p sure-testkit --test fixture_apps` 19 passed |
+| the workspace is green | `cargo test --workspace --all-features --no-fail-fast --exclude sure-cli` from PowerShell: exit 0, 65 test binaries, 2148 tests, 0 failures |
+| the gap was not asserted away | `what_is_detected_is_not_yet_what_the_manifest_requires` read in full: intact, and now also asserts the aggregator files the probe fixture's proposals as style noise |
+| the exemption is a guard | `the_only_fixture_without_a_manifest_case_is_the_one_named_here` read in full; it checks reason, directory and the absence of a manifest row |
+| the severity claims | `external_service.rs` grep'd: `ShouldFixFirst` at lines 66, 74, 82 and nothing else; `db_migrations` reaches `MustFix` |
+
+`sure-cli` is excluded from the workspace run because `P12-T009`'s worker holds
+that crate mid-edit; nothing `P14-T002` changed reaches it. The failure the
+worker reported inside `sure-cli` is real and is `P12-T009`'s to answer for — an
+`mcp` command was added to the grammar without updating
+`docs/architecture/CLI.md`, which is what
+`the_grammar_is_the_one_docs_architecture_cli_md_lists` checks. The worker neither
+fixed it nor staged it, which is the right behaviour.
+
+**The severity picture is not uniform, and `P7-T011` should start from that.**
+`missing-migration` already carries the `must_fix` the manifest asks for.
+`external-unverified` is *heavier* than its row asks — `ShouldFixFirst` and
+critical where the manifest says `note`, and not style noise, because
+`is_style_noise` moves only `Note` candidates. The corpus gap is specifically the
+false-completion scanners and their unconditional `Note`, not "everything is
+under-weighted".
 
 ## What `P14-T001` added
 

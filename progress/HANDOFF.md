@@ -3,7 +3,31 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T008` — "Privacy/security integration suite" — **accepted** as
+**In flight:** `P13-T010` — *"Tell a person when a recorded allowance cannot be
+spent"* — dispatched from base commit `4b190e6` (the `P13-T008` acceptance) with
+its brief at `target/tmp/brief-p13t010.md`. **The defect is that `sure hook
+allow-once` reads no configuration at all**, so it can record a grant that no
+future request can ever spend and tell the user, in one unconditional sentence
+built from the allowance's own fields, that the next matching request will be
+let through. The record path's only validation is the duration check; both
+`Authority::load` calls in `hook.rs` are in the *ingest* path and the
+`with_any_allowance` matcher returns before it opens the store whenever
+`assessment.danger` is `None`, which `hook_protection.rs:426-429` makes true for
+everything but `NeedsConsent`. **The unspendable case is the default one, and
+that is the measurement that makes this worth a task**: a destructive shell
+request under a mode that does not run project code is `Denied` rather than
+`NeedsConsent`, `ExecutionConfig::default()` is `inspect_only`, and `P15-T022`
+measured that nothing in this build writes the user's own `sure.yaml` — so the
+sentence being corrected is the sentence every user of this build currently
+reads. The anchors the brief leans on were re-measured on `4b190e6`
+(`hook.rs:174`, `:438`, `:448-450`, `:667`, `:2128`; `report.rs:517`;
+`hook_protection.rs:426-429`; `execution.rs:625`) rather than inherited, and **two
+figures in the brief were corrected at dispatch rather than carried**: its
+workspace baseline (now 65 headers, 75 result lines, **2534 parents**, 2544 raw)
+and its scratch-pool count, which is now stated as the shape of the failure
+because a size was stale the moment it was written.
+
+**In flight:** nothing, as of this paragraph. `P13-T008` — "Privacy/security integration suite" — was **accepted** as
 `79ce3f3`, the hand-back `734f582` plus one correction commit. It took two
 commits because the first was sent back over a single false sentence, and that
 sentence was **the supervisor's error before it was the worker's**: the brief at

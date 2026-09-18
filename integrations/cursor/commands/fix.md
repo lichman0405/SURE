@@ -9,4 +9,4 @@ Resolve the local SURE binary in this order:
 
 If SURE is not found, tell the user that SURE is not installed and stop. Do not fabricate a repair result.
 
-Load the repair contract supplied by SURE. Implement only the required repair while preserving listed behavior. Run the acceptance checks. Then invoke `sure recheck`. Do not mark the SURE finding resolved solely from your own statement.
+Run `sure repair` for the current project to obtain the repair contract. Load the contract and implement only the required repair while preserving listed behavior. Run the acceptance checks. Then invoke `sure recheck`. Do not mark the SURE finding resolved solely from your own statement.

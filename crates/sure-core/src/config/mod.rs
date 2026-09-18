@@ -137,6 +137,12 @@ pub struct AnalysisConfig {
     pub endpoint: Option<String>,
     /// The model name for a provider that needs one.
     pub model: Option<String>,
+    /// The command for the local-command provider.
+    ///
+    /// The first element is the program and the rest are arguments, one element
+    /// per argument. SURE does not split a string into a command line, so this
+    /// must be written as a YAML list.
+    pub command: Option<Vec<String>>,
 }
 
 /// What the project says it is for.
@@ -426,6 +432,12 @@ impl Config {
         Ok(())
     }
 
+    /// Why a command setting cannot be combined with a provider other than
+    /// local-command.
+    const NON_LOCAL_COMMAND_EXPLANATION: &str = "A command is only used by the \
+         local-command provider. With any other provider the setting could never \
+         take effect.";
+
     /// Provider settings that could never take effect, and endpoints that
     /// carry a credential.
     fn validate_analysis(&self) -> Result<(), ConfigError> {
@@ -433,6 +445,7 @@ impl Config {
             for (name, present) in [
                 ("analysis.endpoint", self.analysis.endpoint.is_some()),
                 ("analysis.model", self.analysis.model.is_some()),
+                ("analysis.command", self.analysis.command.is_some()),
             ] {
                 if present {
                     return Err(ConfigError::new(ErrorKind::Contradiction {
@@ -442,6 +455,16 @@ impl Config {
                     }));
                 }
             }
+        }
+
+        if self.analysis.provider != AnalysisProvider::LocalCommand
+            && self.analysis.command.is_some()
+        {
+            return Err(ConfigError::new(ErrorKind::Contradiction {
+                first: "analysis.provider".to_owned(),
+                second: "analysis.command".to_owned(),
+                explanation: Self::NON_LOCAL_COMMAND_EXPLANATION,
+            }));
         }
 
         if let Some(endpoint) = &self.analysis.endpoint {
@@ -882,6 +905,7 @@ mod tests {
         assert!(!config.execution.allow_network);
         assert_eq!(config.analysis.provider, AnalysisProvider::Disabled);
         assert!(config.analysis.endpoint.is_none());
+        assert!(config.analysis.command.is_none());
         assert!(config.project_intent.goal.is_none());
         assert!(config.checks.existing_tests);
         assert_eq!(config.report.format, ReportFormat::Human);
@@ -1053,6 +1077,20 @@ report:
                 .contains(&ProjectRequest::ExternalAnalysis)
         );
         assert_eq!(config.analysis.provider, AnalysisProvider::LocalCommand);
+    }
+
+    #[test]
+    fn a_local_command_provider_can_carry_a_command_list() {
+        // A command must be a list, one element per argument, so that SURE never
+        // has to split a command line.
+        let config =
+            Config::from_yaml("analysis:\n  provider: local_command\n  command: [echo, hello]\n")
+                .expect("parse");
+        assert_eq!(config.analysis.provider, AnalysisProvider::LocalCommand);
+        assert_eq!(
+            config.analysis.command,
+            Some(vec!["echo".to_owned(), "hello".to_owned()])
+        );
     }
 
     #[test]
@@ -1331,6 +1369,12 @@ report:
         assert!(matches!(
             error.kind(),
             ErrorKind::Contradiction { second, .. } if second == "analysis.model"
+        ));
+
+        let error = error_from("analysis:\n  command: [echo, hello]\n");
+        assert!(matches!(
+            error.kind(),
+            ErrorKind::Contradiction { second, .. } if second == "analysis.command"
         ));
     }
 

@@ -13,16 +13,20 @@ execution:
 
 analysis:
   provider: disabled
-  # Both are meaningless while the provider is `disabled`, and SURE refuses the
-  # combination rather than accept a setting that could not take effect. Set
-  # them together with a provider that uses a model.
+  # All three are meaningless while the provider is `disabled`, and SURE refuses
+  # the combination rather than accept a setting that could not take effect. Set
+  # them together with a provider that uses them.
   #
   # The endpoint must be an http(s) URL, and must NOT carry a password. A
   # project file is not a safe place for a credential — SURE refuses one here
-  # and never prints it. Keep credentials in your user-level configuration or an
-  # environment variable.
+  # and never prints it. Keep credentials in your user-level SURE configuration
+  # or an environment variable.
   endpoint: null
   model: null
+  # For `provider: local_command`, the command to run. The first element is the
+  # program and the rest are arguments, one element per argument. SURE appends
+  # the prompt as the final argument. It is not used by the other providers.
+  command: null
 
 project_intent:
   # An explicit goal, written by a person. SURE treats this as documentation:

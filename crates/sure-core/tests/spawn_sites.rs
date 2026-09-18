@@ -124,15 +124,19 @@ const THE_RUNNER: &str = "sure-core/src/process/";
 /// The files that may name a [`ProcessRequest`], which is the whole of what rule
 /// two exempts.
 ///
-/// Two entries, and the second is the one that has to be argued for. The runner
-/// builds requests; `service.rs` is the caller `P3-T009` added, and it is here
-/// because the rule is not "the runner is the only place a request is named" —
-/// that was never the point — but "**a file that names a request is a file that
-/// can run something, so every one of them is named here and a new one is a
-/// decision**". The entry is a path rather than a directory because it is one
-/// file, and a path rather than a predicate because a predicate is a rule that
-/// grows without anybody reading it.
-const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[THE_RUNNER, THE_SUPERVISOR];
+/// Three entries. The runner builds requests; `service.rs` is the caller
+/// `P3-T009` added; `analysis_provider/mod.rs` is the one `P12-T001` added for
+/// the local-command analysis backend. The rule is not "the runner is the only
+/// place a request is named" — that was never the point — but "**a file that
+/// names a request is a file that can run something, so every one of them is
+/// named here and a new one is a decision**". The local-command provider runs a
+/// command the user configured for analysis; it is not reached from a product
+/// path in this release, and it does not change `support::CEILING`.
+const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[
+    THE_RUNNER,
+    THE_SUPERVISOR,
+    "sure-core/src/analysis_provider/mod.rs",
+];
 
 /// The two files that may name a [`Supervisor`], which is the whole of what rule
 /// three exempts.
@@ -434,6 +438,7 @@ fn every_exemption_is_one_a_file_actually_needs() {
     for (path, token) in [
         (THE_RUNNER, "ProcessRequest"),
         (THE_SUPERVISOR, "ProcessRequest"),
+        ("sure-core/src/analysis_provider/mod.rs", "ProcessRequest"),
         (THE_SUPERVISOR, "Supervisor"),
         (THE_START_SMOKE, "Supervisor"),
         (THE_START_SMOKE, "StartSmoke"),

@@ -319,7 +319,7 @@
       "id": "the-redaction-engine-reads-the-projects-own-configured-secrets",
       "kind": "covered_by",
       "layer": "test",
-      "release_blocking": false,
+      "release_blocking": true,
       "title": "A literal or a pattern in the project's settings file is redacted too",
       "why": "The custom-rule half of the engine. It is not driven from here because a project file naming a secret is one more input the cases above already carry, and the engine's own tests are where the ordering of overlapping rules is decided.",
       "promised_by": [
@@ -445,7 +445,7 @@
       "id": "the-default-run-is-the-one-no-test-is-named-for-but-two-walks",
       "kind": "covered_by",
       "layer": "test",
-      "release_blocking": false,
+      "release_blocking": true,
       "title": "Two end-to-end walks that never write a settings file of any kind",
       "why": "Both round-trips run with no user settings file and no project file, and both assert that no recording was stored. They are named for the round trip rather than for the default, which is why this corpus names the default as its own case -- a behaviour nothing is named after is a behaviour that disappears in a rename.",
       "promised_by": [
@@ -668,8 +668,8 @@
       "id": "the-dangerous-action-scenarios-are-p14-t008s",
       "kind": "seam",
       "owner": "P14-T008",
-      "what": "`evaluation/acceptance-manifest.json` marks `dangerous-delete`, `force-push` and `sensitive-read` release-blocking, and `fixtures/adversarial/` has no directory for any of the three. This corpus covers the mode being the one in force and the decision about one request being recorded; it does not build those three scenarios, and their directory is P14-T008's acceptance ('Delete/force-push/sensitive-read expected protection behavior tested').",
-      "evidence": "`fixtures/adversarial/dangerous-delete/scenario.json` still carries `fixture_status: to_be_implemented_by_task_graph`. The rule the three acts are held by is covered here, in the entry `the-three-acts-an-allowance-reaches-are-holds-and-only-those`.",
+      "what": "`evaluation/acceptance-manifest.json` marks `dangerous-delete`, `force-push` and `sensitive-read` release-blocking, and the scenarios behind the three acts belong to P14-T008 rather than to this corpus. As this tree stands: `fixtures/adversarial/dangerous-delete/scenario.json` exists as a stub that carries `fixture_status: to_be_implemented_by_task_graph`, while `force-push` and `sensitive-read` have no directory. This corpus covers the mode being the one in force and the decision about one request being recorded; it does not build those three scenarios, and they are P14-T008's acceptance ('Delete/force-push/sensitive-read expected protection behavior tested').",
+      "evidence": "`fixtures/adversarial/dangerous-delete/scenario.json` (209 bytes, listed in `SHA256SUMS.txt`) carries `fixture_status: to_be_implemented_by_task_graph`; `fixtures/adversarial/force-push/` and `fixtures/adversarial/sensitive-read/` are absent, which is a measurement of this tree rather than an inference from a brief. The rule the three acts are held by is covered here, in the entry `the-three-acts-an-allowance-reaches-are-holds-and-only-those`.",
       "would_settle_it": "P14-T008's fixtures. The seam is stated rather than assumed: a case here whose expectation depended on one of those three acts would be a second owner for the same acceptance, and there is none."
     }
   ]

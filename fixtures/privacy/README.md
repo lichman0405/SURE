@@ -32,6 +32,15 @@ Every entry carries six things a reader can enumerate:
 | `why` | why this entry is here rather than somewhere else |
 | `promised_by` | the documents that promise it, and the sentence in each |
 
+`release_blocking` is `true` on every entry, and
+`every_case_carries_what_the_corpus_promises_a_reader_can_find` asserts it: an entry
+whose failure would not block a release does not belong in a corpus whose whole
+purpose is to give "mandatory" a referent. An entry blocks through three routes —
+the assertions of a driven case, the test a `covered_by` entry points at (which is
+part of `cargo test`), and the pointer itself, since
+`every_pointer_names_a_test_that_exists` fails when the named test is gone. A
+`false` here would understate what the entry already does.
+
 `promised_by` is how "mandatory" has a referent. The suite fails when a document
 stops making a sentence an entry is bound to, so a withdrawn promise takes its
 entry with it instead of leaving a fixture nobody promised and a promise nobody
@@ -56,9 +65,12 @@ Two of these deserve a note.
   own driven case here: a behaviour nothing is named after disappears in a rename.
 - `the-three-acts-an-allowance-reaches-are-holds-and-only-those` — the broad
   change, the force push and the read of credentials are held by a rule that is
-  tested, but the *scenario directories* for those three acts belong to `P14-T008`
-  ("Delete/force-push/sensitive-read expected protection behavior tested"). See
-  `not_confirmed[the-dangerous-action-scenarios-are-p14-t008s]`.
+  tested, but the *scenarios* for those three acts belong to `P14-T008`
+  ("Delete/force-push/sensitive-read expected protection behavior tested"). As this
+  tree stands, `fixtures/adversarial/dangerous-delete/` holds a stub carrying
+  `fixture_status: to_be_implemented_by_task_graph`, and the other two have no
+  directory at all. See `not_confirmed[the-dangerous-action-scenarios-are-p14-t008s]`,
+  whose `what` measures the same three.
 
 ## What "no false green" means in this file
 
@@ -75,8 +87,8 @@ Two of these deserve a note.
   `not_confirmed`, they are printed by
   `the_corpus_prints_what_it_could_not_confirm`, and the field a reader is looking
   for is `would_settle_it`.
-- Every case says whether it blocks a release, and a `covered_by` entry says which
-  layer the test it points at observes at.
+- Every case blocks a release and is asserted to say so, and a `covered_by` entry
+  says which layer the test it points at observes at.
 
 ## The premise the recording cases run under
 

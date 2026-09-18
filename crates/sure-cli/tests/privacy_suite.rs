@@ -922,6 +922,12 @@ fn every_case_carries_what_the_corpus_promises_a_reader_can_find() {
             "{id} does not say whether it blocks release"
         );
         assert!(
+            case["release_blocking"] == Value::Bool(true),
+            "{id} is in the mandatory corpus and does not block release: an entry whose failure \
+             would not block a release belongs somewhere other than here, and a false understates \
+             what a regressed test or a decayed pointer at this entry would do"
+        );
+        assert!(
             !promised_by(case).is_empty(),
             "{id} is bound to no document, so 'mandatory' has no referent for it"
         );

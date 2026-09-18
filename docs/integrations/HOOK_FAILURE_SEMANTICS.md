@@ -173,7 +173,7 @@ branch every Copilot event lands in, and §5 is what that means.
 
 ## 4. What `cannot confirm` means here, and what would settle each
 
-Five rows say `cannot confirm`. They are not one kind of uncertainty:
+Six rows say `cannot confirm`. They are not one kind of uncertainty:
 
 - **cursor / preToolUse** — the vendor page states both a general fail-open rule
   for non-2 non-zero exits and a permission-hook rule that blocks on a response

@@ -3,22 +3,30 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P13-T007` (implement hook failure semantics tests), dispatched
-from base commit `f14f715` — the `P15-T017` acceptance — with its brief at
-`target/tmp/brief-p13t007.md`. It is the first task dispatched under the sixth
-gate, and its subject is the one this repository's own security documentation
-names as a threat it has never resolved: `docs/security/PROTECTION_MODE.md:105`
-requires every integration to document whether its hook failure behaviour is
-fail-open or fail-closed for the relevant event,
-`docs/security/THREAT_MODEL.md:61-62` states the confusion as T18 and resolves it
-nowhere, and `docs/architecture/CONFIG_AUTHORITY.md:152` names `P13-T007` as the
-owner of the per-integration documentation that does not exist. The brief was
-measured before it was written: the seven launcher scripts and what each does
-when the binary is missing, the seventeen failure branches in
+**In flight:** nothing, as of this paragraph. `P13-T007` (implement hook
+failure semantics tests) was dispatched from base commit `f14f715` — the
+`P15-T017` acceptance — with its brief at `target/tmp/brief-p13t007.md`, handed
+back as `9eda950`, verified independently and **accepted** as that same commit;
+"What `P13-T007` added" and "Validation of `P13-T007`" below carry the numbers.
+It was sent back once, before acceptance, for a setup defect that would have
+failed on macOS and Ubuntu and passed on Windows. It was the first task
+dispatched under the sixth gate, and its subject is the one this repository's
+own security documentation names as a threat it has never resolved:
+`docs/security/PROTECTION_MODE.md:105` requires every integration to document
+whether its hook failure behaviour is fail-open or fail-closed for the relevant
+event, `docs/security/THREAT_MODEL.md:61-62` states the confusion as T18 and
+resolves it nowhere, and `docs/architecture/CONFIG_AUTHORITY.md:152` names
+`P13-T007` as the owner of the per-integration documentation that did not exist.
+Its brief was measured before it was written: the seven launcher scripts and what
+each does when the binary is missing, the seventeen failure branches in
 `crates/sure-cli/src/hook.rs` and which of them fail open, fail closed or leave
 the answer alone, the four event surfaces and the cells where they disagree, the
-tests that exist, and the two that do not — a launcher has never been executed by
-a test, and no binary-level test feeds `sure hook ingest` a failure.
+tests that exist, and the two that did not — no test executed a launcher against
+a SURE that answered, and no binary-level test fed `sure hook ingest` a failure.
+One sentence of that brief was wrong and the worker reported it rather than
+repeating it; the correction is in the validation section below. **The next
+dispatch is `P13-T009`**, whose brief is already written at
+`target/tmp/brief-p13t009.md`.
 
 `P15-T017` (make the non-Windows configuration
 checkable from Windows) was dispatched from base commit `9294c4a` — the
@@ -1239,6 +1247,31 @@ tree is or is not intact would be reading a claim the file does not make.
     Ubuntu. A same-named test in two different binaries is a collision, not a
     re-run: the children print no ok lines at all.
 
+    **The shape reappeared one commit later, in a hand-back's own gate report,
+    and the instrument that decides it is still not in the repository.** Read
+    strictly the falsifier above did not fire — it named *this file's*
+    validations and the next one written here gives the parent count — but read
+    by its reason it did, and the reason is the half worth keeping. `P13-T007`'s
+    hand-back commit message reads `2525 passed` beside `59 test binaries and 5
+    doc-test targets`; 2525 is the raw sum over that run's 74 `test result:`
+    lines and the number of tests that exist is **2515**, which is the same pair
+    this item was written about, published one commit after the rule was written
+    down for the second time. The same message puts *five* `cannot confirm` cells
+    in the new page's table and then enumerates six, and that numeral reached the
+    delivered page too (`docs/integrations/HOOK_FAILURE_SEMANTICS.md:176`, where
+    it was corrected to `Six rows` at acceptance). So the rule has now been
+    needed three times — `P15-T016`, `P13-T006`, `P13-T007`'s message — and each
+    time the correction was written by hand, which is the cost the falsifier
+    exists to stop paying. `target/tmp/measure-run.mjs` decides it mechanically
+    and has never had to refuse, and it is in no clone of this repository:
+    `git ls-files --error-unmatch target/tmp/measure-run.mjs` fails and
+    `grep -rn measure-run` outside `target/` returns this file, which is prose
+    about it. That is the same finding `P15-T020` was minted for on
+    `target/tmp/regen-sums.mjs`, one artifact over, so it is minted as
+    **`P15-T021`** — *put the test-count instrument where a contributor can run
+    it, or stop producing counts by hand* — rather than written down a fourth
+    time here.
+
 The READY list, recomputed on 2026-09-19 from `tasks/tasks.json` against the
 `progress/state.json` that `P15-T017`'s acceptance stages — the predicate
 `scripts/taskctl.mjs` implements, applied to the two committed files rather than
@@ -1595,6 +1628,205 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T007` added
+
+**The launchers are now executed rather than read, and the per-harness failure
+table exists and is machine-checked.** The acceptance is *fail-open/fail-closed
+behaviour is explicit for each harness/event and surfaced in docs*, and the half
+that was missing was the half nothing measured. `integration_thinness.rs`
+asserted what a launcher's *text* contains — that the script resolves the binary,
+names its source, relays a status — and every one of those assertions passes on a
+launcher that then drops the status it relayed. The four failing inputs to `sure
+hook ingest` (empty stdin, non-JSON, an unknown `--source`, an event type no
+manifest maps) existed only as in-process assertions about a `Report` value,
+which is a statement about a function and not about the process a harness talks
+to. A launcher that found `sure`, ran it, and exited 0 whatever SURE answered
+satisfied every check in this tree before this commit.
+
+**Three files carry it.** `crates/sure-testkit/tests/hook_failure_semantics.rs`
+(875 lines, 5 tests) spawns each *packaged* launcher — four `.ps1` on Windows,
+three `.sh` through `/bin/sh` on Unix, chosen per platform from the tree rather
+than from a hand-written list, so a launcher added without a row fails the table
+test instead of being omitted — against a stand-in that answers 0, 1 or 5 and
+writes a distinct marker to each stream, then asserts the launcher's own status
+and both streams; then the same launchers with SURE nowhere to be found, where
+each must exit 0 and write nothing to stdout.
+`crates/sure-cli/tests/cli_contract.rs` (+224: two tests and an `ingest_argv`
+helper) drives the real binary through the four failing inputs and asserts exit
+5, no `decision` key, no store file created, and history reporting nothing.
+`docs/integrations/HOOK_FAILURE_SEMANTICS.md` (286 lines) is the page
+`docs/security/PROTECTION_MODE.md:105` requires and
+`docs/architecture/CONFIG_AUTHORITY.md:152` names this task as owning: 20 rows,
+one per wired event across four harnesses, whose cells are **13 `fail-open`, 1
+`fail-closed`, 6 `cannot confirm`**.
+
+**The table is checked against the tree, which is what makes it a contract rather
+than a document.** A fifth test reads the page, derives the harnesses and events
+from `integrations/*/hooks/hooks.json` and from the launchers present in the
+tree, and fails on a wired event with no row, on a semantics cell that is not one
+of the three permitted values, on a `cannot confirm` that names no remedy, and on
+an evidence cell naming a test that does not exist in the workspace. The hand-back
+measured the last of those by renaming `PreToolUse` in the claude-code manifest
+and watching the test fail by name.
+
+**The two questions are kept apart in the same table,** which is the only way a
+reader can tell a measured answer from a quoted one. Nothing in this repository
+observes a harness: what SURE emits is measured here and carries a test name;
+what the harness does with it is quoted from a named vendor page read on
+2026-09-19, or says `cannot confirm` and names what would settle it. The six
+`cannot confirm` cells are not one kind of uncertainty — cursor `preToolUse`,
+where the vendor page's general fail-open rule for a non-2 non-zero exit and its
+permission-hook rule for a response that does not match the hook's schema point
+opposite ways on the shape this launcher actually sends; three Codex events the
+page read here does not define; and two Copilot event names it does not define
+either.
+
+**Two findings are recorded rather than fixed, because neither is this task's to
+settle.** Copilot: `grep -rn copilot crates/` returns nothing, so `--source
+copilot` exits 5 for every event, while `integrations/copilot/README.md:156` says
+the adapter must fail open, and the Copilot hooks reference makes `preToolUse`
+fail-closed on a non-zero exit — the two statements disagree in the direction
+that denies every tool call. No normaliser was added and the README was not
+softened; §5 of the page states what was measured and recommends treating the
+package as what its own manifest calls it, a placeholder. Claude Code: its hooks
+page makes exit 2 the only blocking status, so a SURE block (exit 1) and a SURE
+failure (exit 5) are both non-blocking there — recorded from upstream and marked
+as recorded rather than measured. **Two further gaps are named as open:** every
+launcher script is packaged `100644`, so a fresh Unix checkout cannot start one
+by path even though the Codex manifest names it directly, and nothing in this
+repository records what a harness does on a hook timeout, with the four vendor
+pages disagreeing about how much it matters.
+
+**The new page is pointed at from the four places that promised it.**
+`PROTECTION_MODE.md`, `THREAT_MODEL.md`'s T18,
+`CONFIG_AUTHORITY.md:152` and `HOOK_EVENT_MAPPING.md` each gained a pointer, and
+the three documents that promised the page no longer promise it alone.
+
+## Validation of `P13-T007`
+
+**The gates, run by the supervisor from native PowerShell on `9eda950`, the
+hand-back, not taken from the report**: `cargo fmt --all -- --check` exit 0;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` exit 0;
+`cargo test --workspace --all-features --no-fail-fast` exit 0 with **64 cargo
+headers (59 `Running` + 5 `Doc-tests`) against 74 `test result:` lines, 2515
+passed, 0 failed, 12 ignored**; `node scripts/validate-bootstrap.mjs` exit 0;
+`node scripts/taskctl.mjs validate` exit 0; and the sixth gate exit 0 over both
+Unix targets with its usual `--- NOT CHECKED ---` section naming `sure-core` and
+`sure-cli`. The passed figure is the parent count and the raw sum over the 74
+lines is 2525; item 103 carries the rule, and the two instruments agreed on this
+log, which is the condition `target/tmp/measure-run.mjs` refuses to print
+without. The sixth gate is load-bearing for this task rather than incidental:
+it lints both Unix `cfg` sets with `--all-targets`, so it compiles the new
+`#[cfg(unix)]` items, which is the only execution that code gets on this machine.
+
+**The commit is seven files, and nothing outside the deliverable is in it.**
+`git show --stat 9eda950` reads 7 files changed, 1408 insertions(+), 1 deletion;
+no path under `progress/`, `tasks/`, `SHA256SUMS.txt` or `.github/` is in it, and
+the single deletion is one line of `CONFIG_AUTHORITY.md` replaced by four. The
+new tests are 5 in `hook_failure_semantics.rs` and 2 in `cli_contract.rs`, and
+that arithmetic is the check on the count above rather than a restatement of it:
+`f14f715`'s tree is 2508 parents by the same instrument, this one is 2515, and
+the difference is exactly the seven tests the commit adds.
+
+**The defect this acceptance sent back would have turned CI red on two of three
+platforms, and it was in the test's setup rather than in its assertion.** The
+missing-binary test emptied `PATH` to make `sure` unfindable, and on Unix that
+also hides `cat`, which `integrations/cursor/scripts/sure-hook.sh:13` uses to
+drain stdin — so `/bin/sh` writes `cat: command not found` to stderr and the
+test, whose helper asserts stderr is empty for that case, fails on macOS and
+Ubuntu while passing on Windows. I reproduced it before sending it back
+(`cat=/usr/bin/cat`, `sure=not found`, and the cursor launcher's stderr carrying
+the shell's own diagnostic) and refused the two cheap fixes — weakening the
+assertion, and `2>/dev/null` on the drain, which silences a real diagnostic to
+satisfy a test. The fix is 2 files, +79/−5, and no changed line in it mentions
+`silent`, `stderr.is_empty`, `stderr_has` or `stderr_lacks`: the assertion is
+byte for byte what it was, `PATH` on Unix becomes `/usr/bin:/bin`, and a new
+`assert_sure_cannot_be_found` walks those entries and the two absolute fallbacks
+the launchers try (`/opt/homebrew/bin/sure`, `/usr/local/bin/sure`) and fails
+loudly, naming the path, if this machine has one. **A test that cannot run where
+it would prove nothing now refuses there** instead of passing there.
+
+**Two counts the hand-back published are wrong, and the one that is in the tree
+was corrected here.** The commit message reports `2525 passed` beside `59 test
+binaries and 5 doc-test targets`; 2525 is the raw sum and the number of tests
+that exist is 2515, which is the pair item 103 exists to keep apart, published
+one commit after the rule was written down for the second time. The same message
+says the new page has *five* `cannot confirm` cells and then enumerates six, and
+that numeral is also in the delivered page at
+`docs/integrations/HOOK_FAILURE_SEMANTICS.md:176` — so the page's half was
+corrected at acceptance rather than repeated (`Five rows` → `Six rows`, one word,
+no behaviour touched, the page's own check still green), and the message's half
+is recorded here, because a commit message is not a file a later commit can
+carry. That is the same disposition `d58532a`'s message got at `P3-T006`. Nothing
+about a verdict moves under either count, and no file the hand-back gated was
+changed except the one word named here.
+
+**One claim in the hand-back was not reproduced and is recorded as such.** The
+worker reported a `cargo test --workspace` run that exited 101 with no failing
+test in the output, and disclosed it rather than dropping it. I ran the workspace
+suite three more times and the focused launcher suite five more times on this
+tree: exit 0 every time, no recurrence. That is *not reproduced*, not
+*flake-free*, and the cause is unidentified — written down because a 101 nobody
+can reproduce is a fact about this tree until something explains it.
+
+**The Unix arm cannot run here, so it was probed and labelled.** CI's
+`macos-latest` and `ubuntu-latest` jobs are where `/bin/sh` launchers actually
+run; before the push I ran `target/tmp/probe-unix-launchers.sh` under Git Bash,
+which starts each `.sh` launcher with a stand-in answering 0, 1 and 5 and asserts
+the relayed status and both streams, then with `SURE_BIN` removed and `PATH` and
+`HOME` emptied, where each must exit 0 with empty stdout. Git Bash on Windows is
+not GNU/Linux, so a failure there is a strong signal and a pass there is not
+proof — the same label every Unix-adjacent measurement in this file carries. The
+probe's own first version is worth the line: its loop paths omitted the
+`integrations/` prefix, so every launcher printed `absent` and the probe exited 0
+having checked zero launchers, which is this task's failure shape aimed at the
+instrument rather than the tree.
+
+**The backfill, and what this acceptance owed.** Under the chain rule a commit
+cannot contain the run of itself: `35396267231` (`f14f715`, the `P15-T017`
+acceptance commit) was written into this file by `709acfe`, the dispatch commit
+that followed it, so the run this acceptance owed is that dispatch commit's —
+`35397108557`, all five jobs green, **`run_attempt 1` on every one**, read with
+`gh run watch 35397108557 --exit-status` and then
+`gh api repos/lichman0405/SURE/actions/runs/35397108557/jobs`. Per-platform,
+from the three job logs: 63 headers and 73 result lines on each, **2508 / 2499 /
+2500 parent tests** against 2518 / 2509 / 2510 raw, **0 failed**, **12
+ignored**, and **zero occurrences of `Text file busy`** — identical to
+`f14f715`'s run in every cell, which is what a commit touching `SHA256SUMS.txt`,
+`progress/HANDOFF.md`, `progress/state.json` and a brief should produce. That is
+the **ninth consecutive green `ci` run**, the eighth on the first attempt and the
+tenth ubuntu test-step execution without the race, three counts carried forward
+from the figures this file states rather than re-derived here.
+
+**One task was added, and it is item 103's stated falsifier rather than a third
+copy of the rule.** The falsifier was *the next validation that quotes a passed
+count without saying which of the two it is has to build the script instead of
+writing the rule down a third time*; the script was built the same day and a
+count of the forbidden shape appeared one commit later, in the hand-back's own
+gate report. What is missing is not the instrument but its presence —
+`git ls-files --error-unmatch target/tmp/measure-run.mjs` fails, and
+`grep -rn measure-run` outside `target/` returns one file,
+`progress/HANDOFF.md`, which is prose about it — so **`P15-T021`** is minted:
+*put the test-count instrument where a contributor can run it, or stop producing
+counts by hand*. It is the same finding `P15-T020` was minted for on
+`target/tmp/regen-sums.mjs`, one artifact over, and it is placed after
+`P15-T020` so the two are settled in the order the task file lists them. The
+graph goes from 179 tasks to 180.
+
+**The READY list after this acceptance**, recomputed from `tasks/tasks.json`
+against the `progress/state.json` this commit stages rather than carried
+forward: **`P13-T009`, `P13-T010`, `P14-T004`, `P14-T005`, `P14-T006`,
+`P14-T007`, `P14-T008`, `P14-T009`, `P14-T010`, `P15-T008`, `P15-T015`,
+`P15-T018`, `P15-T019`, `P15-T020`, `P15-T021`, `P7-T012`, `P14-T013`,
+`P7-T013`** — 18, in the order the file lists them. The next dispatch is
+**`P13-T009`**. Progress is **137 / 180**, with P13 open at 7 of 10 and P15 at 2
+of 21.
+
+**What remains owed**: the run of the commit that carries this acceptance — the
+first run on which the Unix arm of the launcher tests executes, since
+`macos-latest` and `ubuntu-latest` are where the three `.sh` launchers are
+spawned. It is read in this session and reported in the next entry.
 
 ## What `P15-T017` added
 
@@ -15546,6 +15778,34 @@ it needs a Mac.
   count** — the second run's survivor is the most serious thing this set found, a
   route the project declares and does not serve that stopped blocking green, which is
   a false green one field to the left of the status.
+
+- `9eda950` **`P13-T007`** (accepted by the progress-only commit that carries this
+  entry) — *"Implement hook failure semantics tests"*. **The task's own detail is
+  the section above**; this entry is the place in the accepted list that names it,
+  and what belongs here is the shape rather than a second telling: three files —
+  `crates/sure-testkit/tests/hook_failure_semantics.rs` (875 lines, 5 tests)
+  spawning each packaged launcher against a stand-in that answers 0, 1 or 5,
+  `crates/sure-cli/tests/cli_contract.rs` (+224: two tests) driving the real
+  binary through the four ways a hook event can fail, and
+  `docs/integrations/HOOK_FAILURE_SEMANTICS.md` (286 lines), the 20-row
+  per-harness-per-event table `PROTECTION_MODE.md:105` requires, machine-checked
+  against `integrations/*/hooks/hooks.json` by a fifth test. It was **sent back
+  once**, before acceptance, for a setup defect that would have failed on macOS
+  and Ubuntu while passing on Windows. **No run of its own commit is in this
+  entry**: `35397108557` belongs to the dispatch commit that preceded it, and the
+  acceptance commit's run is owed to the next acceptance under the chain rule.
+
+**The check was run at this acceptance, for the second time in this file's
+history, and it returns 48.** The accepted set in `progress/state.json` is 136
+ids and 48 of them appear nowhere below this heading — the deficit has grown by
+roughly one per acceptance since `P5-T003`, the last entry this list gained
+before the one above, which is the entry that stops this acceptance from adding
+to it. The number is recorded rather than left to be discovered, and the list is
+not rebuilt here: 48 pointer entries would each need the commit sha and the
+section above that carries its detail, and writing them from memory of work this
+session did not read is a worse artefact than a heading with a stated hole in
+it. **Whoever closes this should close it with the command, not with a
+paragraph** — the one the section below gives is what returned 48.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all

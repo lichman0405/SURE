@@ -816,6 +816,19 @@ workspace-test claim in this file should be read as "from the shell named at the
 time", and the P16 gates should run `cargo test --workspace` from PowerShell,
 because that is what `CLAUDE.md` says the primary environment is.
 
+The same family, one level down, and it will recur on every commit until it is
+written down. Commit messages on this branch are written through the PowerShell
+tool with a literal here-string, `@'…'@`, inside which nothing is expanded. On
+`88ed168` the supervisor used bash's `'"'"'` idiom to escape an apostrophe inside
+one of those messages anyway. It does not escape anything there — it appears
+verbatim, so that commit's text reads `P12-T007'"'"'s` and `note'"'"'s` where an
+apostrophe belongs. Nothing in the record is untrue and no command in it is wrong,
+so the commit was not rewritten; `git log` on a pushed branch is not something
+this project edits away. The rule for the next session: inside `@'…'@`, write the
+apostrophe. There is no escape to reach for, and the only way to see the damage
+before pushing is `git log -1 --format=%B` — which is worth doing for any message
+longer than a line.
+
 ## What `P1-T012` added
 
 `sure --store-dir DIR`, global, and the interesting part is that it is a flag.

@@ -38,7 +38,7 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 91 of 166 v0.1 tasks accepted (phase P9 in progress).
+- **Progress:** 92 of 166 v0.1 tasks accepted (phase P9 in progress).
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 
@@ -70,7 +70,7 @@ Implemented so far:
 - Repair contract domain/schema: `RepairContract` carries problem, impact, evidence, required fix, preserve, acceptance, recheck, and forbidden-shortcuts fields; the JSON schema now declares the full wire surface including `id` and `recheck`.
 - Repair contract generation: `RepairContract::from_finding` generates a bounded, actionable contract from a grounded finding, rejecting ungrounded findings and empty re-check lists so acceptance conditions stay observable and no unobserved facts are invented.
 - Harness-neutral repair envelope: `RepairEnvelope` wraps a `RepairContract` with a version and optional `target_harness`, so the same bounded contract can be delivered to Claude, Cursor, Codex, or any future adapter without changing the contract itself.
-
+- Impacted-check selection: `select_impacted_checks` chooses the checks to re-run after a repair by combining the contract's `recheck` list, checks whose reason overlaps the repair evidence, and serious deterministic regression checks that run project code.
 Start with `START_HERE.md` for the Windows bootstrap and development workflow.
 
 ## Development bootstrap

@@ -2,10 +2,10 @@
 
 Last updated: 2026-09-18
 Branch: `claude/v0.1-autonomous`
-Progress: 91 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
+Progress: 92 / 166 tasks accepted. **Phase P0 complete (9/9), phase P1 complete
 (11/11), phase P2 complete (12/12), phase P3 complete (11/11), phase P4 complete
 (9/9), phase P5 complete (7/7), phase P6 complete (9/9), phase P7 complete
-(9/9), phase P8 complete (11/11). Phase P9 is open at 3 of 5.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
+(9/9), phase P8 complete (11/11). Phase P9 is open at 4 of 5.** `P5-T007` is accepted as commit `a6dbf98`. `P6-T001` is accepted as
 commit `e2610c4`. `P6-T002` is accepted as commit `de684e9`. `P6-T003` is
 accepted as commit `09d5fb5`. `P6-T004` is accepted as commit `a0575de`.
 `P6-T005` is accepted as commit `cf35947`. `P6-T006` is accepted as commit
@@ -22,7 +22,7 @@ commit `79610cd`. `P8-T005` is accepted as commit `3bcc53d`. `P8-T006` is
 accepted as commit `0c6a43a`. `P8-T007` is accepted as commit `66470ed`. `P8-T008` is accepted as commit `bcae5c8`. `P8-T009` is accepted as commit `8062f3d`. `P8-T010` is accepted as commit
 `b7068a4`. `P8-T011` is accepted as commit `5bf6ee1`. `P9-T001` is accepted as commit
 `0982310`. `P9-T002` is accepted as commit `a398107`. `P9-T003` is accepted as commit
-`d1fd41b`. `P5-T005` received two follow-up security fixes in
+`d1fd41b`. `P9-T004` is accepted as commit `df84d7f`. `P5-T005` received two follow-up security fixes in
 commits `3d5f9a9` and `cc121ed`. `P7-T004` and `P7-T006` received a follow-up
 security fix in commit `f0e7032`. `P8-T002` received a follow-up security fix in
 commit `1069704`. `P8-T003` received a follow-up security fix in commit
@@ -251,11 +251,11 @@ commit `1069704`. `P8-T003` received a follow-up security fix in commit
     protocol document registry now include `RepairEnvelope`, and round-trip and
     conformance tests cover it.
 
-**Phase P9 is open at 3 of 5.** The READY list is now
-`P9-T004`, `P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
+**Phase P9 is open at 4 of 5.** The READY list is now
+`P10-T001`, `P11-T001`, `P12-T001`, `P12-T008`,
 `P13-T001`, `P13-T004`, `P14-T001`, `P14-T002`, `P14-T003`, `P14-T004`, `P14-T005`,
 `P14-T006`, `P14-T007` and `P14-T010`. The lowest-numbered READY task is
-`P9-T004`, *"Implement impacted-check selection"*, which is the next
+`P10-T001`, *"Implement re-check lifecycle/history"*, which is the next
 concrete action.
 
 ## What `P5-T007` added
@@ -14091,6 +14091,31 @@ absent text.
   harness, JSON round-trip, and omission of `target_harness` when neutral.
 
 ## Validation of `P9-T003`
+
+| Gate | Result |
+| --- | ------ |
+| `cargo fmt --all -- --check` | green |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | green |
+| `cargo test --workspace --no-fail-fast` | green |
+| `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
+| `node scripts/taskctl.mjs validate` | green (state OK) |
+
+## What `P9-T004` added
+
+- `crates/sure-core/src/repair_impact.rs` — `select_impacted_checks`.
+  - The contract's own `recheck` list is always returned first.
+  - A check whose reason anchor overlaps an evidence anchor from the contract is
+    treated as affected and selected.
+  - Deterministic checks that run project code and are serious enough
+    (`MustFix` or `ShouldFixFirst`) are treated as relevant regression checks
+    and selected even when their anchor does not overlap the repair location.
+  - The result is de-duplicated and kept in schedule order.
+- `crates/sure-core/tests/repair_impact.rs` (new) — integration tests for
+  recheck inclusion, affected-check selection, regression-check filtering,
+  deduplication, schedule-order stability, and line-range overlap.
+- `crates/sure-core/src/lib.rs` — registered the new `repair_impact` module.
+
+## Validation of `P9-T004`
 
 | Gate | Result |
 | --- | ------ |

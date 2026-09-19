@@ -5055,12 +5055,23 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
 
 /// The `P14-T008` fixtures, named rather than discovered for the reason every
 /// list in this file is: a test that discovered them would pass on an empty
-/// directory.
+/// directory. This is where the in-process grading below registers: each id is
+/// driven through `assess_claude_code_tool` / `assess_cursor_tool`, and the runs
+/// its `dangerous_action` block declares are held against the product's own
+/// answers.
 ///
 /// The same three ids are named in `crates/sure-testkit/tests/fixture_apps.rs`,
 /// which grades the artefacts — the schema, the false-green rule, the README,
-/// the manifest row and the shape of the control — and the guard below is what
-/// says the two files are talking about the same directories.
+/// the manifest row and the shape of the control — but they are two lists. This
+/// paragraph used to end "the guard below is what says the two files are talking
+/// about the same directories", which is more than that guard does: it reads
+/// this list against the disk, the other file's guard reads its own copy against
+/// the same disk, and the two lists are never compared with each other. Measured
+/// at `P14-T008`: removing `"sensitive-read"` from this list leaves this file's
+/// tests green at 32 passed and `fixture_apps.rs` green at 26, so an id dropped
+/// here stops being graded behaviourally — its runs are still declared, and
+/// still artefact-checked through the other file's copy of the list — with
+/// nothing in the tree to say so.
 const DANGEROUS_ACTION_FIXTURES: &[&str] = &["dangerous-delete", "force-push", "sensitive-read"];
 
 /// The keys of a declared run that are the request and the settings it is
@@ -5191,15 +5202,29 @@ fn assert_the_pointer_names_the_route(id: &str, what: &str, pointer: &Value) {
 /// claim is graded. Two of the checks are the ones the case exists for:
 ///
 /// - a `danger_reason` sentence is compared **against the function's own return
-///   value**, not against a copy of the text in this file, so a reworded sentence
-///   in the product reddens the fixture even if the fixture is reworded to match;
+///   value**, not against a copy of the text in this file, so what the check
+///   guarantees is that the two agree: a reworded sentence in the product reddens
+///   the fixture unless the declaration is reworded with it, and a reworded
+///   declaration reddens unless the product moves with it;
 /// - the strict route's sentence is required to begin with the danger's own
 ///   `consequence()` and to be **none** of the `danger_reason` sentences, because
 ///   the product writes it as the consequence plus a different tail. A build that
 ///   collapsed the two routes onto one sentence reddens here.
 ///
 /// Every route is also held against the fixture's own declared text first, which
-/// is the direction that makes a rewrite of *any* of these sentences red.
+/// is the direction that makes a rewrite of *any* of these sentences red unless
+/// the other copy is reworded with it.
+///
+/// The first bullet used to end "so a reworded sentence in the product reddens
+/// the fixture even if the fixture is reworded to match". That clause was false
+/// when it was written rather than something that stopped being true later: the
+/// declaration is held against the product's answer by equality before anything
+/// else here, and the `danger_reason` check is another equality, so neither can
+/// catch the two texts moving together. Measured at `P14-T008`: rewording
+/// `FORCE_PUSH_CONSEQUENCE` and the six copies of that sentence in
+/// `fixtures/adversarial/force-push/scenario.json` together leaves the grading
+/// test below green, while moving either side alone reddens it at that first
+/// equality.
 fn assert_the_reason_is_the_one_the_fixture_names(
     id: &str,
     kind: &str,

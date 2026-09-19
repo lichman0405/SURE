@@ -1,6 +1,86 @@
 {
   "id": "repair-regression",
   "expected_severity": "must_fix",
-  "description": "Repair closes finding A but breaks previously passing behavior.",
-  "fixture_status": "implemented"
+  "release_blocking": true,
+  "fixture_status": "implemented",
+  "description": "A two-member npm workspace whose members share one helper. The helper is wrong, and only one of the two members notices. The repair that corrects the helper is the repair that breaks the other member, which passed before it. The case is the re-check lifecycle: a finding may be closed only when every check selected to observe the fix reported `pass`, so the careless repair must leave the finding open and the complete repair must close it.",
+  "project": {
+    "manifest": "package.json",
+    "kind": "an npm workspace with two members and no dependencies, so a reviewer with nothing but Node can run it",
+    "shared_helper": "shared/pricing.js",
+    "defect": "`less(total, amount)` adds `amount` to `total` instead of taking it off. `packages/checkout` calls it as `less(subtotal, discount)` and gets the wrong answer; `packages/billing` calls it as `less(paid, -fee)`, so the same defect cancels out and its own check passes.",
+    "members": {
+      "packages/checkout": "`totalCents(subtotal, discount)` — fails as shipped",
+      "packages/billing": "`refundCents(paid, fee)` — passes as shipped, and is the previously passing behaviour the careless repair breaks"
+    },
+    "checks": [
+      {
+        "manifest": "packages/checkout/package.json",
+        "role": "test",
+        "declared": "node tests/total.js",
+        "sure_command": "npm test",
+        "title": "run the tests in packages/checkout"
+      },
+      {
+        "manifest": "packages/billing/package.json",
+        "role": "test",
+        "declared": "node tests/refund.js",
+        "sure_command": "npm test",
+        "title": "run the tests in packages/billing"
+      }
+    ],
+    "why_no_entry_point_block": "This case is release-blocking and it now ships a project, and it still declares no entry-point block on purpose. `crates/sure-core/tests/finding_severity_rule.rs` reads that key to decide which release-blocking cases have a fixture app, and it measures each of those with the five candidate detectors; none of them has anything to say about a repair lifecycle, so the case would join an exact set it does not belong to and the measurement would panic rather than answer. The precedent is `check-crash` (`P14-T007`) and the three dangerous-action fixtures (`P14-T008`): a release-blocking case whose subject is not a project the candidate detectors can read declares none either. What grades this fixture instead is `crates/sure-core/tests/repair_fixture_e2e.rs`, which drives discovery, the checks layer, the runner, selection and the lifecycle over it in process."
+  },
+  "required_outcomes": [
+    {
+      "kind": "lifecycle",
+      "family": "repair_regression",
+      "surface": "recheck_lifecycle",
+      "module": "crates/sure-core/src/recheck_lifecycle.rs",
+      "reading_module": "crates/sure-core/src/repair_impact.rs",
+      "detector": "`recheck_passed` — `checks.iter().all(|id| result_by_id.get(id) == Some(&CheckStatus::Pass))`",
+      "title": "a careless repair leaves the finding open, because a previously passing check that broke is in the re-check list",
+      "status": "reported",
+      "graded_by": "crates/sure-core/tests/repair_fixture_e2e.rs",
+      "repair": "shared/pricing.js corrected in one line: `total + amount` becomes `total - amount`. Nothing else is touched.",
+      "original_check": "run the tests in packages/checkout — fail before, pass after",
+      "previously_passing_check": "run the tests in packages/billing — pass before, fail after",
+      "selected_by": "the contract names only the checkout check; the billing check is added by `select_impacted_checks`'s regression rule, because it runs project code, is a `DeterministicCheck`, and is `must_fix`",
+      "required_outcome": "the finding stays `open`, `update.resolved` is empty, and the run's aggregate is not green",
+      "why": "The acceptance's second half, and it is only worth something because the first half is measured beside it: the same project, the same selection rule and the same decision function, with the one line a careless repair would stop at. `Cannot close` is free in this build — `crates/sure-core/src/pipeline.rs` passes an empty re-check list, so nothing closes through the binary — which is why this case ships a project whose two checks really run and really disagree."
+    },
+    {
+      "kind": "control",
+      "family": "repair_regression",
+      "surface": "recheck_lifecycle",
+      "module": "crates/sure-core/src/recheck_lifecycle.rs",
+      "reading_module": "crates/sure-core/src/repair_impact.rs",
+      "detector": "the same `reconcile` call with every selected check passing, over a project whose bytes changed",
+      "title": "the complete repair closes the finding on new passing evidence, and the run is green",
+      "status": "reported",
+      "graded_by": "crates/sure-core/tests/repair_fixture_e2e.rs",
+      "repair": "two lines: `shared/pricing.js` corrected, and `packages/billing/src/refund.js` updated to call `less(paidCents, feeCents)` — the call that the helper's meaning moved under.",
+      "required_outcome": "the finding resolves, every selected check reported `pass`, and the run's aggregate is green",
+      "why": "This is the half that makes the other one mean something. A build with the whole re-check machinery deleted refuses to close every finding and would satisfy the case above; it fails here. The evidence is new rather than merely passing — the copy's project fingerprint is taken before and after the repair and the two are asserted to differ, so `pass` here is a statement about a project that is not the one the finding was made against."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The finding is reported as resolved, fixed or closed while `packages/billing`'s check is failing, so the project reads as green after a repair that broke something that used to work."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project is reported as passing, as working or as ready to hand off while the basket total adds the discount instead of taking it off. The shipped fixture is the defective project, and the two checks it declares are the evidence about it."
+    },
+    {
+      "kind": "false_green",
+      "description": "The repair is accepted on the strength of the original check alone. A re-check list that names only the check that was failing turns `the fix worked` into `the thing I looked at looks better`, which is the reading this case exists to refuse."
+    },
+    {
+      "kind": "silent",
+      "description": "The billing check is not selected at all, so the regression is invisible rather than reported: the run then has nothing to be red about and the first forbidden outcome above arrives by subtraction."
+    }
+  ],
+  "notes": "`repair-regression` is a case in `evaluation/acceptance-manifest.json` with `release_blocking: true`, `expected_severity: \"must_fix\"` and the expectation `repair regression remains blocked`; the two fields at the top of this file are copied from that row rather than chosen here, and `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking` in `crates/sure-testkit/tests/fixture_apps.rs` fails if either drifts. The project is graded in process by `crates/sure-core/tests/repair_fixture_e2e.rs`, which copies the directory to `target/tmp` before it changes a byte: the shipped fixture is the defective project and stays that way. The directory therefore ships a `package.json`, which makes it a Node fixture rather than a stub, and it is named in `TYPESCRIPT_FIXTURES` for the reason that file gives — a directory that ships a `package.json` is a Node application and belongs in the runnability sweep. What it does not ship is an entry-point block, for the reason `project.why_no_entry_point_block` records. Measured at `P14-T009`: `sure check` on a copy of this directory plans three checks — the two above plus `start the project`, the runtime probe `crates/sure-core/src/runtime_probes.rs` builds from the root `start` script — and under the default mode reports all three as not checked, because none of them may run without the person at the keyboard allowing it. The probe's evidence class is `ObservedFact`, and `crates/sure-core/src/repair_impact.rs` requires a `DeterministicCheck` for the regression rule, so the two member checks are the only plan entries this case's selection can ever add."
 }

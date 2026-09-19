@@ -1,0 +1,9 @@
+{
+  "name": "@sure-fixture/billing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The package whose check passes before the repair, and is broken by the careless one.",
+  "scripts": {
+    "test": "node tests/refund.js"
+  }
+}

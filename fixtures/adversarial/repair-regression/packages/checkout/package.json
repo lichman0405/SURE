@@ -1,0 +1,9 @@
+{
+  "name": "@sure-fixture/checkout",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The package whose check fails before the repair.",
+  "scripts": {
+    "test": "node tests/total.js"
+  }
+}

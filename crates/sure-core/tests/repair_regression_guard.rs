@@ -350,7 +350,9 @@ fn the_fixture_status_is_implemented() {
     let grader = include_str!("repair_fixture_e2e.rs");
     assert!(
         grader.contains("const FIXTURE: &str = \"repair-regression\";")
-            && grader.contains("fn a_careless_repair_that_breaks_the_other_member_cannot_close_the_finding")
+            && grader.contains(
+                "fn a_careless_repair_that_breaks_the_other_member_cannot_close_the_finding"
+            )
             && grader.contains("fn a_complete_repair_closes_the_finding_on_new_passing_evidence"),
         "the file the scenario names as this fixture's grader does not grade both of its \
          outcomes, so `graded_by` points at a claim rather than at a test"

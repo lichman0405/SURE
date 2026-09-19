@@ -155,10 +155,7 @@ impl Repair {
     const fn edits(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Self::Careless => &[(THE_DEFECT, THE_CORRECTION)],
-            Self::Complete => &[
-                (THE_DEFECT, THE_CORRECTION),
-                (THE_CALL, THE_REPAIRED_CALL),
-            ],
+            Self::Complete => &[(THE_DEFECT, THE_CORRECTION), (THE_CALL, THE_REPAIRED_CALL)],
         }
     }
 
@@ -426,7 +423,9 @@ fn result_of(proposal: &CheckProposal, outcome: &Outcome, state: &FingerprintId)
             CheckResult::fail(id, title, severity, critical, class, state.clone()).with_reason(
                 match code {
                     Some(code) => format!("the command exited with code {code}"),
-                    None => "the command was ended by a signal, so there is no exit code".to_owned(),
+                    None => {
+                        "the command was ended by a signal, so there is no exit code".to_owned()
+                    }
                 },
             )
         }
@@ -549,7 +548,12 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
             "{} is a `test` script and the manager the project names is npm",
             proposal.title()
         );
-        assert_eq!(proposal.severity(), Severity::MustFix, "{}", proposal.title());
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "{}",
+            proposal.title()
+        );
         assert!(proposal.critical(), "{}", proposal.title());
         assert_eq!(
             proposal.evidence_class(),
@@ -990,11 +994,7 @@ fn a_complete_repair_closes_the_finding_on_new_passing_evidence() {
          open: {}",
         update.kept_open.len()
     );
-    assert!(
-        update.kept_open.is_empty(),
-        "{:#?}",
-        update.kept_open
-    );
+    assert!(update.kept_open.is_empty(), "{:#?}", update.kept_open);
     let closed = &update.resolved[0];
     assert_eq!(closed.status, FindingStatus::Resolved);
     // The same issue, by the identity this module says survives a run: a

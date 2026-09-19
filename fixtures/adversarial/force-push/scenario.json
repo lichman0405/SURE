@@ -1,0 +1,282 @@
+{
+  "id": "force-push",
+  "expected_severity": "must_fix",
+  "release_blocking": true,
+  "description": "A push that replaces commits which were already published — `--force`, or the short `-f` — must be held, and held for a danger SURE names, so that the user is told what the command would do and a recorded one-time allowance has something to cover. The trap is that *held* is satisfiable with no detector at all: the execution engine holds every arbitrary command for consent, and `base_decision` blocks a request that needs consent with a sentence that names no danger, so `git status` and `git push --force` are `block` alike. The grading test therefore asserts the danger's wire name first, then the sentence, then the decision kind. The control is the same settings with the request moved from a shell command to an ordinary file read, which must reach `Allowed` — and that is a limit of this fixture rather than a choice: no command-bearing request can reach `Allowed` under any settings in this build.",
+  "dangerous_action": {
+    "read_by": {
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "functions": ["assess_claude_code_tool", "assess_cursor_tool", "assess_request", "danger_reason"],
+      "route": "A force push has one route and it is the command line's. `claimed_danger` reads a command only for `ActionKind::ArbitraryCommand`, and `command_danger` names `ForcePush` when `safety::classify` answers with the `git` table's `push` row in its `Destructive` class — which the table reaches through a force flag and no other form. There is no path route at all: a harness event that carries a path and no command line can never be named a force push.",
+      "returns": "`Assessment { decision: ProtectionDecision { decision, reason }, danger: Option<Danger> }`. `Danger::ForcePush` is only ever attached to a request that was held."
+    },
+    "settings": {
+      "modes": {
+        "runner": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": true,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The one setting this fixture needs for the shell route: `ActionKind::ArbitraryCommand` requires `run_project_code`, and without it the engine denies the request before the command line is read. It is also what the control runs under, so the control's settings are the held runs' settings rather than a second set."
+        }
+      }
+    },
+    "runs": {
+      "force_push_named_by_the_command": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "git push --force",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "danger_reason",
+        "expect": {
+          "decision": "block",
+          "danger": "force_push",
+          "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it."
+        },
+        "why": "The act itself, named off the product's own classifier: `git push --force` is read by `read_simple_command`, classified through the `push` row into `Destructive`, and the program and the deciding row are what `command_danger` reads to tell a force push from any other destructive command. `standard` is the mode here and the danger is still named, because a command-borne danger is read before the protection mode is asked."
+      },
+      "the_same_line_in_cursor_s_vocabulary": {
+        "harness": "cursor",
+        "tool": "Shell",
+        "command": "git push --force",
+        "mode": "runner",
+        "protection": "strict",
+        "reason_named_by": "danger_reason",
+        "expect": {
+          "decision": "block",
+          "danger": "force_push",
+          "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it."
+        },
+        "why": "The same line through the other integration, in the other protection mode. `Shell` is `ActionKind::ArbitraryCommand` in Cursor's vocabulary exactly as `Bash` is in Claude Code's, and both integrations answer through one `assess_request` — so this pair is a measurement of that rather than a claim, and it is also the second measurement that the protection mode does not soften the shell route."
+      },
+      "the_short_flag_is_the_same_act": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "git push -f origin main",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "danger_reason",
+        "expect": {
+          "decision": "block",
+          "danger": "force_push",
+          "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it."
+        },
+        "why": "The short flag, with a remote and a branch named, and a destination that a reader might take for the reason the command is interesting. It is not: the destination is not read at all, and the danger is named from the classifier's row — so a build that started reading `origin main` and stopped reading the flag would still name this one, and `an_unforced_push_is_held_for_consent` is where that shows."
+      },
+      "control": {
+        "harness": "claude_code",
+        "tool": "Read",
+        "path": "src/lib.rs",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "the_allow_sentence",
+        "expect": {
+          "decision": "allow",
+          "danger": null,
+          "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds."
+        },
+        "why": "**This is the acceptance.** *A force push is held* is satisfied by a product that holds every request forever, and the control is the one run that says otherwise: under exactly these settings, SURE lets an ordinary read of a project file proceed. One thing moved and it is the request — not a setting and not the harness — and this is the smallest move available, because every command-bearing request is `NeedsConsent` in this build and therefore `block` under every mode and every permission set. That limit is stated in the notes and graded by `an_unforced_push_is_held_for_consent`, not hidden behind this control."
+      },
+      "an_unforced_push_is_held_for_consent": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "git push origin main",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The near-miss, and the shape a build with no detector produces: held, and no danger is named. This push destroys nothing, and SURE says so by naming nothing rather than by letting it through — the engine holds every arbitrary command, and a hook cannot obtain consent. It is the run that makes the force-push naming a measurement: without it, a build that named every push a force push would satisfy every other run here."
+      },
+      "a_stacked_line_is_not_read": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "git push --force; echo done",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The limit, declared rather than described: `read_simple_command` refuses any line with shell syntax, and a second command on the line is that. The request is held either way, and what is lost is the sentence — so a fixture built on such a line would be asserting a danger the product does not name."
+      },
+      "a_shell_event_with_no_command_line": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": null,
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The same limit from the other side, and the one the manifest row's wording is about: SURE can protect this only where the harness hands it a pre-action event carrying the command. A shell tool event with no command line is held for consent and names nothing, because there is nothing to read — and a path on such an event would not help either, since force-push has no path route."
+      }
+    },
+    "control": {
+      "of": "force_push_named_by_the_command",
+      "moved": {
+        "fields": ["tool", "path", "command"],
+        "what": "the request the harness sent",
+        "from": "a shell command naming a force push",
+        "to": "an ordinary read of a project file",
+        "how": "the same harness, the same execution mode, the same permission set and the same protection mode, through the same `assess_request`; the fields that differ are the request's own. The grading test asserts this rather than trusting it: it compares the two declared runs key by key and requires the keys that differ to be exactly the ones named here."
+      },
+      "why": "The control reaches `Allowed`, which is what the case needs, and it moves the request rather than a setting because no setting would help: the execution engine answers `NeedsConsent` for every `ActionKind::ArbitraryCommand`, so every command-bearing request is blocked under every mode, every permission set and every protection mode in this build. That is a limit of the product rather than of this fixture, it is measured by `an_unforced_push_is_held_for_consent`, and it is recorded here instead of being worked around by weakening the assertion to *not blocked*."
+    },
+    "allowance": {
+      "read_by": {
+        "module": "crates/sure-core/src/hook_protection.rs",
+        "functions": ["acts_a_request_could_be_held_for", "acts_a_tool_could_be_held_for", "acts_for_kind"],
+        "returns": "The acts a recorded one-time allowance can be spent on, read off `DANGER_WITNESSES` through `assess_request` rather than computed from the settings by a second rule.",
+        "route": "The store-backed half — grant, one allow, held again — is graded in `crates/sure-cli/src/hook.rs`, with a real store, and this fixture names it rather than grading it a second time. The pointer is checked: the test asserts the file exists and that the named test is a function in it."
+      },
+      "one_time_behaviour": {
+        "file": "crates/sure-cli/src/hook.rs",
+        "tests": ["a_force_push_is_held_and_an_allowance_for_it_lets_one_through"],
+        "why": "The store-backed half for this act, and the only place it is graded."
+      },
+      "rows": [
+        {
+          "mode": "runner",
+          "protection": "standard",
+          "tool": "Bash",
+          "acts_the_tool_can_be_held_for": ["broad_delete", "force_push"],
+          "acts_the_settings_leave": ["broad_delete", "force_push"],
+          "why": "An allowance for `Bash` can cover either of the two acts this run's settings leave reachable, because the tool names a shell and which act a request is depends on words that do not exist until a request arrives. It is the reason a grant is recorded for a tool and a subject rather than for an act alone."
+        }
+      ]
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "force_push_named_by_the_command",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the classifier's `push` row in its `Destructive` class, read off the engine's own `NeedsConsent` refusal",
+      "title": "a force push claimed as a command is held and named",
+      "status": "reported",
+      "decision": "block",
+      "danger": "force_push",
+      "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it.",
+      "why": "The danger is asserted before the decision because the decision is not the measurement: every command-bearing request is `block` in this build, force flag or not, and only the named danger separates the two."
+    },
+    {
+      "kind": "the_same_line_in_cursor_s_vocabulary",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the same command line through `assess_cursor_tool`, in the other protection mode",
+      "title": "the same force push is named the same way in the other harness's vocabulary",
+      "status": "reported",
+      "decision": "block",
+      "danger": "force_push",
+      "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it.",
+      "why": "`Shell` is `ActionKind::ArbitraryCommand` in both vocabularies, and both integrations answer through one decision path. The run is also the second measurement that the protection mode does not change the answer for a command-borne danger."
+    },
+    {
+      "kind": "the_short_flag_is_the_same_act",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the short force flag, with a remote and a branch named beside it",
+      "title": "the short flag is the same act, and the destination is not what is read",
+      "status": "reported",
+      "decision": "block",
+      "danger": "force_push",
+      "reason": "This would replace commits that were already published. Anything built on them — someone else's branch, a release, a review — is left pointing at work that is no longer there. A harness hook cannot ask you about this, so SURE does not allow it.",
+      "why": "A second spelling of the same act. It is graded separately from the first because the classifier reaches `Destructive` through the flag and the fixture would stop measuring that if only one spelling were declared."
+    },
+    {
+      "kind": "control",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same settings, with an ordinary file read instead of a shell command",
+      "title": "the same settings allow an ordinary read",
+      "status": "reported",
+      "moved_file": "the request the harness sent",
+      "decision": "allow",
+      "danger": null,
+      "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds.",
+      "why": "**This entry is the acceptance.** Every held run in this fixture is satisfied by a product that blocks everything, and the control is the only answer that separates that product from this one. It is not a one-field move, and the declaration says so: the request moved rather than a setting, because no setting can make a command-bearing request reach `Allowed` in this build."
+    },
+    {
+      "kind": "an_unforced_push_is_held_for_consent",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the classifier's `push` row without the force flag: not destructive, and not a force push",
+      "title": "a push that destroys nothing is held for consent and named nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "Both the near-miss this case needs and the measurement that bounds the product: an unforced `git push` does **not** reach `Allowed`, because the engine holds every arbitrary command and a hook cannot obtain consent. It is declared as itself — held, and no danger named — which is what a build with no detector answers to all seven runs."
+    },
+    {
+      "kind": "a_stacked_line_is_not_read",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "a line `read_simple_command` refuses, because it holds two commands",
+      "title": "a stacked line is held for consent, and named nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "The limit, declared rather than described. The request is held, and the user is not told what the line would do."
+    },
+    {
+      "kind": "a_shell_event_with_no_command_line",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "a shell tool event carrying no command line, and no path route for this act to fall back on",
+      "title": "a shell event with no command line is held and names nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "The manifest row's own limit — *where harness exposes pre-action event* — measured rather than asserted: with no command line there is nothing to read, and a force push has no path route, so nothing can be named."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A force push declared held here is answered `allow`, or a held answer is reported as protection working with no danger named. Both are the false green this case exists for: replacing published commits proceeds, or the report claims a detector that did not fire. A build with the danger vocabulary deleted blocks every run in this directory with the consent sentence, which is why the danger's wire name is asserted before the decision kind."
+    },
+    {
+      "kind": "false_green",
+      "description": "Every push is named a force push. A classifier that answered `force_push` to `git push origin main` would satisfy the positive runs while telling users their ordinary pushes destroy published work, and `an_unforced_push_is_held_for_consent` is the run that fails it."
+    },
+    {
+      "kind": "false_green",
+      "description": "The control stops reaching `Allowed`, and the directory is still reported as verified. A product that blocks every request satisfies every held run in this fixture, and the control is the only answer that fails it."
+    },
+    {
+      "kind": "false_green",
+      "description": "An allowance is offered for `Bash` under settings that leave no act in reach, or a grant is described as covering an act a request naming that tool could never be held for. A grant that cannot be spent is a promise about a setting SURE did not change."
+    }
+  ],
+  "notes": "This fixture is graded in-process by `crates/sure-core/tests/adversarial_fixture_detection.rs`, which reads this declaration and drives `assess_claude_code_tool` / `assess_cursor_tool` — the functions the two integrations call. It ships no project, no language manifest and no store, and nothing in it is executed; the store-backed half of the allowance is graded in `crates/sure-cli/src/hook.rs`, whose test this file names. The manifest row it owns is `evaluation/acceptance-manifest.json`'s `force-push` — `release_blocking: true`, `expected_severity: \"must_fix\"`, *force push is treated as dangerous in configured protection mode* — and it is named in `DANGEROUS_ACTION_FIXTURES` in that test file and in `crates/sure-testkit/tests/fixture_apps.rs`, which grades the artefacts. Two limits are recorded rather than dressed up. First, force-push has no path route: `claimed_danger` reads a command only for `ActionKind::ArbitraryCommand`, so a harness event carrying a path and no command line can never be named a force push, and `a_shell_event_with_no_command_line` declares what happens instead. Second, no command-bearing request reaches `Allowed` under any settings in this build — `sure_domain::execution::decide` answers `NeedsConsent` for every `ActionKind::ArbitraryCommand` — so this fixture's control moves the request rather than a setting, and `an_unforced_push_is_held_for_consent` is the measurement of that rather than an inference from it."
+}

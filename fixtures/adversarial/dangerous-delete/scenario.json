@@ -1,6 +1,349 @@
 {
   "id": "dangerous-delete",
   "expected_severity": "must_fix",
-  "description": "Protection mode should warn/block a broad destructive file deletion.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "A delete across a whole location — a destructive shell command whose operand names one, or a project-file delete whose path is one — must be held, and held for a danger SURE names, so that a user is told what the request would do and a recorded one-time allowance has something to cover. The trap is that *held* is satisfied with no detector at all: the execution engine holds every arbitrary command for consent, and `base_decision` blocks a request that needs consent with a sentence that names no danger. A fixture asserting only `decision == block` therefore passes on a build with the danger vocabulary deleted, and the assertion order in the grading test is what makes it fail there instead: the danger's wire name first, then the sentence, then the decision kind. The control is the same `Delete` of the same path under the same settings with the protection mode moved, which must reach `Allowed`.",
+  "dangerous_action": {
+    "read_by": {
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "functions": ["assess_claude_code_tool", "assess_cursor_tool", "assess_request", "danger_reason"],
+      "route": "Both integrations share one decision path. `assess_request` asks the execution engine first (`sure_domain::execution::decide`); a refusal the engine reached is answered by `base_decision` or, for `NeedsConsent`, by `claimed_danger`; and only an allowed action is put to the protection mode. The two routes a danger is read from are therefore different: a command line through `command_danger` (which needs `safety::read_simple_command` to succeed and `safety::classify` to call the command destructive), and a path through strict mode's `sensitive_area` / `names_a_whole_location`.",
+      "returns": "`Assessment { decision: ProtectionDecision { decision, reason }, danger: Option<Danger> }`. `danger` is only ever attached to a request that was held, and it is `None` for `Denied` and for the unimplemented `custom` mode."
+    },
+    "settings": {
+      "modes": {
+        "runner": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": true,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The shell route needs `run_project_code`: `ActionKind::ArbitraryCommand` is that permission's, and without it the engine denies the request before any command line is read."
+        },
+        "writer": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": false,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": true,
+            "connect_service": false
+          },
+          "why": "The path route needs `write_project`, which is what `ActionKind::DeleteProjectFile` requires. The two modes differ in one permission, and that permission is the one each route needs rather than a second thing this fixture is measuring."
+        },
+        "reader": {
+          "mode": "inspect_only",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": false,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The honest default, and the third setting in this fixture: it exists for the run that shows a request the engine denies carries no danger at all, even when the command line is one this fixture's other runs are held for."
+        }
+      }
+    },
+    "runs": {
+      "broad_delete_named_by_the_command": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "rm -rf build/",
+        "mode": "runner",
+        "protection": "strict",
+        "reason_named_by": "danger_reason",
+        "expect": {
+          "decision": "block",
+          "danger": "broad_delete",
+          "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. A harness hook cannot ask you about this, so SURE does not allow it."
+        },
+        "why": "The command route, and the sentence here is `danger_reason`'s rather than strict mode's: the danger is read off the engine's own refusal (`NeedsConsent`), and that refusal happens before the protection mode is asked. `rm -rf build/` is read by `read_simple_command` (no shell syntax), classified by the `rm` row as `Destructive`, and its operand `build/` names a whole location — three answers, all of them the product's."
+      },
+      "the_same_command_under_standard": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "rm -rf build/",
+        "mode": "runner",
+        "protection": "standard",
+        "reason_named_by": "danger_reason",
+        "expect": {
+          "decision": "block",
+          "danger": "broad_delete",
+          "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. A harness hook cannot ask you about this, so SURE does not allow it."
+        },
+        "why": "The same line and the same settings with the other protection mode, and the answer is identical. This is measured rather than assumed: the protection mode does not enter the command route at all, because the engine holds every arbitrary command and the danger is read off that refusal. A reader who took `standard` for the thing that makes a shell command safe would be told otherwise here, and this fixture's control is the other route for exactly that reason."
+      },
+      "broad_delete_named_by_the_path": {
+        "harness": "claude_code",
+        "tool": "Delete",
+        "path": "build/",
+        "mode": "writer",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": "broad_delete",
+          "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "The path route, and the sentence it is held with is strict mode's own: the product writes it as the area's consequence plus the strict tail (`strict_reason`), so it is not the string `danger_reason` returns even though the danger it is recorded as is the same one. That difference is graded rather than glossed: the test holds the declared sentence against the product's answer, requires it to begin with the danger's own `consequence()`, and requires it not to be `danger_reason` — a build that stopped distinguishing the two sentences reddens here."
+      },
+      "the_same_path_route_in_cursor_s_vocabulary": {
+        "harness": "cursor",
+        "tool": "Delete",
+        "path": "build/",
+        "mode": "writer",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": "broad_delete",
+          "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "The same request through the other integration. `Delete` is `ActionKind::DeleteProjectFile` in both vocabularies, and both integrations answer a tool request through the one `assess_request`, so this run is a measurement of that rather than a claim that Cursor's route differs: if the two ever answered differently, one of these two runs would be red."
+      },
+      "control": {
+        "harness": "claude_code",
+        "tool": "Delete",
+        "path": "build/",
+        "mode": "writer",
+        "protection": "standard",
+        "reason_named_by": "the_allow_sentence",
+        "expect": {
+          "decision": "allow",
+          "danger": null,
+          "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds."
+        },
+        "why": "**This is the acceptance.** *A broad delete is held* is satisfied by a product that holds everything forever, and by one that holds every delete. The control is the same `Delete` of the same `build/`, under the same execution mode and the same permissions, in the other protection mode — and it must reach `Allowed`. `standard` is a setting a user can be in, and this is what SURE does in it: the same request proceeds, with a sentence that says so."
+      },
+      "a_command_that_names_no_whole_location": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "rm -rf build",
+        "mode": "runner",
+        "protection": "strict",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The near-miss, and the shape a build with no detector produces: held, and no danger is named. One trailing slash is the whole difference from the first run above — `build` names a file rather than a location, and `word_names_a_whole_location` says so. It is declared as itself rather than left out, because a fixture whose only answers name a danger cannot tell *SURE read this line and did not call it a broad delete* from *SURE never read the line*."
+      },
+      "a_line_sure_cannot_read": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "rm -rf \"my dir\"",
+        "mode": "runner",
+        "protection": "strict",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The limit, stated as an expectation rather than described in prose. `read_simple_command` refuses any line with shell syntax, quoting included, so this line is held for consent and named no danger — the request is refused either way, and what is lost is only the sentence that says what it would do. A fixture built on a quoted path would be asserting a danger the product does not name."
+      },
+      "a_mode_without_the_permission_refuses_first": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "rm -rf build/",
+        "mode": "reader",
+        "protection": "strict",
+        "reason_named_by": "the_permission_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "The current execution mode does not permit this action."
+        },
+        "why": "The same line as the first run, under settings that do not grant `run_project_code`. The engine denies it, and a danger is read off `NeedsConsent` and nothing else — so this hold names no danger, and the sentence is the engine's own. It is the same limit from the other side: the danger vocabulary records what a *held* request would do, and it is deliberately not attached to a refusal the user's settings caused."
+      }
+    },
+    "control": {
+      "of": "broad_delete_named_by_the_path",
+      "moved": {
+        "fields": ["protection"],
+        "what": "the protection mode",
+        "from": "strict, in the run this is a control for",
+        "to": "standard",
+        "how": "the same harness, the same tool, the same path, the same execution mode and the same permission set, through the same `assess_request`. The grading test asserts this rather than trusting it: it compares the two declared runs key by key and requires the keys that differ to be exactly the ones named here."
+      },
+      "why": "One field moved, and it is the field the case is about: what SURE does with the same delete in the mode a user who has not opted into strict protection is actually in. Neither run is a control for the command route, and that is recorded rather than papered over: no command-bearing request can reach `Allowed` under any settings in this build, because the execution engine answers `NeedsConsent` for every `ActionKind::ArbitraryCommand`, so the control this fixture can offer is the path route's."
+    },
+    "allowance": {
+      "read_by": {
+        "module": "crates/sure-core/src/hook_protection.rs",
+        "functions": ["acts_a_request_could_be_held_for", "acts_a_tool_could_be_held_for", "acts_for_kind"],
+        "returns": "The acts a recorded one-time allowance can be spent on, read off `DANGER_WITNESSES` through `assess_request` rather than computed from the settings by a second rule, so a grant SURE offers a user is one the same rule would spend.",
+        "route": "The store-backed half — grant, one allow, held again — is graded in `crates/sure-cli/src/hook.rs`, with a real store, against the product's own hook entry point. This fixture names that half instead of grading it a second time here, and the pointer is checked: the test asserts the file exists and that each named test is a function in it."
+      },
+      "one_time_behaviour": {
+        "file": "crates/sure-cli/src/hook.rs",
+        "tests": ["a_broad_delete_is_held_and_an_allowance_for_it_lets_one_through"],
+        "why": "The store-backed half for this act, and the only place it is graded. `a_broad_delete_is_held_and_an_allowance_for_it_lets_one_through` drives held → allowance → allow → held again through the hook's real path and a real store."
+      },
+      "rows": [
+        {
+          "mode": "writer",
+          "protection": "strict",
+          "tool": "Delete",
+          "acts_the_tool_can_be_held_for": ["broad_delete"],
+          "acts_the_settings_leave": ["sensitive_read", "broad_delete"],
+          "why": "What a grant for `Delete` under these settings can cover, and what the settings leave reachable at all. The two answers differ, and the difference is the reason both functions exist: a grant is spent by a request that matches the tool as well as the act, so a grant for `Delete` cannot cover the read strict holds, even though a request from this project could spend a grant for a different tool."
+        },
+        {
+          "mode": "runner",
+          "protection": "standard",
+          "tool": "Bash",
+          "acts_the_tool_can_be_held_for": ["broad_delete", "force_push"],
+          "acts_the_settings_leave": ["broad_delete", "force_push"],
+          "why": "The shell route under standard: an allowance for `Bash` can cover either of the two acts a command line can be held for, because the tool names a shell and the subject is not read until a request arrives."
+        },
+        {
+          "mode": "writer",
+          "protection": "standard",
+          "tool": "Delete",
+          "acts_the_tool_can_be_held_for": [],
+          "acts_the_settings_leave": [],
+          "why": "The control's own settings, and the empty answer is the point: under standard no act is reachable through this tool, so there is nothing for an allowance to cover and nothing SURE should offer to record. It is the allowance rule's version of the control's `Allowed`."
+        }
+      ]
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "broad_delete_named_by_the_command",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "a destructive command whose operand names a whole location, read off the engine's own `NeedsConsent` refusal",
+      "title": "a broad delete claimed as a command is held and named",
+      "status": "reported",
+      "decision": "block",
+      "danger": "broad_delete",
+      "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. A harness hook cannot ask you about this, so SURE does not allow it.",
+      "why": "The danger is read by `command_danger` from the classifier's own `Source::Rule` answer and its `Destructive` class, and it is recorded beside a hold the engine would have reached anyway. That is why the danger is asserted before the decision: a build with the danger vocabulary deleted still answers `block` here."
+    },
+    {
+      "kind": "the_same_command_under_standard",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the same command line, the same settings, the other protection mode",
+      "title": "the protection mode does not enter the command route",
+      "status": "reported",
+      "decision": "block",
+      "danger": "broad_delete",
+      "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. A harness hook cannot ask you about this, so SURE does not allow it.",
+      "why": "A measurement rather than an assumption: the two runs differ only in the protection mode and answer identically, because the danger is read off the engine's refusal and the protection mode is asked only about an action the engine allowed."
+    },
+    {
+      "kind": "broad_delete_named_by_the_path",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "strict mode's whole-location rule, on a path rather than on a command",
+      "title": "a delete that names a whole path is held and named",
+      "status": "reported",
+      "decision": "block",
+      "danger": "broad_delete",
+      "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "The path route reads the same danger off a different rule, and writes its own sentence for it. Both halves are graded: the danger's wire name, and the sentence the product chose for this route."
+    },
+    {
+      "kind": "the_same_path_route_in_cursor_s_vocabulary",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same rule through `assess_cursor_tool`",
+      "title": "the same delete is named the same way in the other harness's vocabulary",
+      "status": "reported",
+      "decision": "block",
+      "danger": "broad_delete",
+      "reason": "This names a whole location rather than one file, so it could change many files at once. That may be a valid refactor, and it can also remove working code. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "`Delete` is `ActionKind::DeleteProjectFile` in both vocabularies and both integrations answer through the one decision path, so this run is what makes that a measurement rather than a claim."
+    },
+    {
+      "kind": "control",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same delete, the same settings, the other protection mode",
+      "title": "the same delete reaches allowed under standard",
+      "status": "reported",
+      "moved_file": "the protection mode",
+      "decision": "allow",
+      "danger": null,
+      "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds.",
+      "why": "**This entry is the acceptance.** Everything else in this fixture is satisfied by a product that holds every delete forever, and a product that answers `block` to everything passes every one of them. What separates those products from this one is a run that must reach `Allowed`, and this is it: one field moved from the run above it, and it is the field a user changes."
+    },
+    {
+      "kind": "a_command_that_names_no_whole_location",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "the same classifier, with an operand that names a file rather than a location",
+      "title": "a destructive command whose operand names no location is held for consent and named nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "The near-miss, declared as itself. It is the answer a build with no detector produces for every one of these requests, so a fixture that never declared it could not tell the two builds apart."
+    },
+    {
+      "kind": "a_line_sure_cannot_read",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-core/src/safety.rs",
+      "detector": "a line `read_simple_command` refuses, because a quoted operand has more than one reading",
+      "title": "a line SURE cannot read is held for consent, and named nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "The limit, declared rather than described. Nothing is let through — the line is held — but the user is not told what it would do, and a fixture asserting a danger here would be asserting a sentence the product does not write."
+    },
+    {
+      "kind": "a_mode_without_the_permission_refuses_first",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-domain/src/execution.rs",
+      "detector": "the same command, under a mode that does not grant `run_project_code`",
+      "title": "a request the settings deny is held for the settings and names no danger",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "The current execution mode does not permit this action.",
+      "why": "A danger is read off `NeedsConsent` and nothing else. This run is what makes that a graded fact rather than a comment: the command line is the one three runs above are named for, and under these settings no danger is named at all."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A request declared held here is answered `allow`. This is the false green the case exists for: a delete across a whole location proceeds, and the report reads as though protection had been asked and had nothing to say. The control is what makes the opposite error — holding everything forever — visible instead of green."
+    },
+    {
+      "kind": "false_green",
+      "description": "A held request is counted as covered because it was blocked, with no danger named. A build with the danger vocabulary deleted passes `decision == block` for every run in this fixture, so a report that said *protection works* on that evidence would be claiming a detector that does not exist. The danger's wire name is asserted before the decision kind for exactly this reason."
+    },
+    {
+      "kind": "false_green",
+      "description": "The control stops reaching `Allowed`, and the fixture is still reported as verified: a product that holds every delete under every mode satisfies each held run while measuring nothing. The control fails such a product and nothing else in this directory does."
+    },
+    {
+      "kind": "false_green",
+      "description": "An allowance is offered for an act the settings leave out of reach, or the sentence a user is shown for a hold stops saying what the request would do. A grant that cannot be spent is a promise about a setting SURE did not change, and a hold whose sentence names no danger is the same report as a hold the user cannot act on."
+    }
+  ],
+  "notes": "This fixture is graded in-process by `crates/sure-core/tests/adversarial_fixture_detection.rs`, which reads this declaration and drives `assess_claude_code_tool` / `assess_cursor_tool` — the same functions the two integrations call. It ships no project, no language manifest and no store, and nothing in it is ever executed; the store-backed half of the allowance is graded in `crates/sure-cli/src/hook.rs`, whose tests this file names. The manifest row it owns is `evaluation/acceptance-manifest.json`'s `dangerous-delete` — `release_blocking: true`, `expected_severity: \"must_fix\"`, *protection warning/block behavior works* — and it is named in `DANGEROUS_ACTION_FIXTURES` in that test file and in `crates/sure-testkit/tests/fixture_apps.rs`, which grades the artefacts. Two limits are recorded rather than dressed up. SURE cannot read every command line: a quoted operand or a stacked command is held for consent and named nothing, and that is what `a_line_sure_cannot_read` declares. And no command-bearing request can reach `Allowed` under any settings in this build, because `decide` answers `NeedsConsent` for every `ActionKind::ArbitraryCommand` — so this fixture's control is the path route's, and `the_same_command_under_standard` is what records that the protection mode does not soften the shell route."
 }

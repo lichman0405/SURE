@@ -1,0 +1,318 @@
+{
+  "id": "sensitive-read",
+  "expected_severity": "must_fix",
+  "release_blocking": true,
+  "description": "A read of a file where credentials or keys live must be held under strict protection, and held for a danger SURE names, so that the user is told that opening the file is what exposes it and a recorded one-time allowance has something to cover. The trap is that *held* is satisfiable with no detector at all — the strict-mode hold has a sentence of its own, and a build that named no danger would still answer `block` — so the grading test asserts the danger's wire name first, then the sentence, then the decision kind. The mode pair is the control and it is exact: the same read of the same secret path under `standard` must reach `Allowed`, and the protection mode is the only thing that moves.",
+  "dangerous_action": {
+    "read_by": {
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "functions": ["assess_claude_code_tool", "assess_cursor_tool", "assess_request", "danger_reason"],
+      "route": "The path route, and only under strict protection. `assess_request` asks the execution engine first; a read of a project file is `inspect` and needs nothing further, so under standard the request is allowed with `STANDARD_ALLOWS` and no danger. Under strict it is put to `sensitive_area`, which asks whether the path is one where secret material lives and whether the role is a read — and `danger_of` names `SensitiveRead` for exactly that pair, so a *change* to the same file is held by the same rule and named nothing.",
+      "returns": "`Assessment { decision: ProtectionDecision { decision, reason }, danger: Option<Danger> }`. `danger` is only ever attached to a request that was held, and it is `None` for the unimplemented `custom` mode and for a request the execution engine denied."
+    },
+    "settings": {
+      "modes": {
+        "reader": {
+          "mode": "inspect_only",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": false,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "Reading a file needs `inspect` and no more, so the default mode is what this fixture runs in: the two halves of the mode pair differ in the protection mode and in nothing else, which is what makes the pair a control rather than two runs that happen to disagree."
+        },
+        "runner": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": true,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The shell route's permission, for the run that shows a command line carries no path: `ActionKind::ArbitraryCommand` requires `run_project_code`."
+        },
+        "writer": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": false,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": true,
+            "connect_service": false
+          },
+          "why": "The permission a change to a project file requires, for the run that shows strict mode holds a change to the secret area and names no danger for it."
+        }
+      }
+    },
+    "runs": {
+      "credential_area_read_under_strict": {
+        "harness": "claude_code",
+        "tool": "Read",
+        "path": ".env",
+        "mode": "reader",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": "sensitive_read",
+          "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "The act the case is named for. The sentence is strict mode's own — the area's consequence plus the strict tail — and it says what strict mode does (*asks you about this*) rather than that the read was prevented, because both integrations are Observed and a sentence claiming the read did not happen would be a false green of its own."
+      },
+      "control": {
+        "harness": "claude_code",
+        "tool": "Read",
+        "path": ".env",
+        "mode": "reader",
+        "protection": "standard",
+        "reason_named_by": "the_allow_sentence",
+        "expect": {
+          "decision": "allow",
+          "danger": null,
+          "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds."
+        },
+        "why": "**This is the acceptance, and it is the mode pair.** *A read of credentials is held* is satisfied by a product that holds every read forever, and this run is the same read of the same file under the same execution mode and the same permissions: one field moved, and it is the protection mode. The sentence is deliberate about what it does not claim — it does not say the read is safe, only that standard asks no further question — because this is the read standard lets through, and it is the difference between the two modes."
+      },
+      "a_key_file_in_a_named_directory": {
+        "harness": "claude_code",
+        "tool": "Read",
+        "path": "secrets/prod.yaml",
+        "mode": "reader",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": "sensitive_read",
+          "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "A second shape of the same area: a file whose *directory* is what makes it secret material, rather than one of the names that is always held. Declaring both is what says the rule reads the path rather than one hard-coded filename."
+      },
+      "the_same_read_in_cursor_s_vocabulary": {
+        "harness": "cursor",
+        "tool": "Read",
+        "path": ".env",
+        "mode": "reader",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": "sensitive_read",
+          "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "The same read through the other integration. `Read` is `ActionKind::ReadFile` in both vocabularies and both integrations answer through one `assess_request`, so this run makes that a measurement rather than a claim."
+      },
+      "an_ordinary_source_read_is_allowed_under_strict": {
+        "harness": "claude_code",
+        "tool": "Read",
+        "path": "src/lib.rs",
+        "mode": "reader",
+        "protection": "strict",
+        "reason_named_by": "the_allow_sentence",
+        "expect": {
+          "decision": "allow",
+          "danger": null,
+          "reason": "Strict protection does not hold this: it is not a database migration, CI/CD configuration, credentials or keys, SURE's settings for this project, or a change that names a whole location, and the permissions in force do not stop it."
+        },
+        "why": "Strict protection is not a mode that holds reads, and this run is what says so: the same mode, the same permissions, a different path, and the answer is an allow whose sentence names what strict looked for and did not find. Without it, `credential_area_read_under_strict` could be read as *strict blocks reads*, which is false and would make the fixture's own subject disappear."
+      },
+      "a_command_line_hides_the_path": {
+        "harness": "claude_code",
+        "tool": "Bash",
+        "command": "cat .env",
+        "mode": "runner",
+        "protection": "strict",
+        "reason_named_by": "the_consent_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked."
+        },
+        "why": "The limit, declared as an expectation rather than described in prose. A shell request carries a command line and no path, and `DANGER_WITNESSES`' read is a path rule — so the same file that is named above is reached here with no name put on it. The request is held either way, and the danger vocabulary cannot say *sensitive read* about a path it was never given. The path is also not echoed into any sentence SURE writes, which is what keeps SURE from turning a secret's location into text a reader copies."
+      },
+      "a_change_to_the_secret_area_is_held_without_a_danger": {
+        "harness": "claude_code",
+        "tool": "Write",
+        "path": ".env",
+        "mode": "writer",
+        "protection": "strict",
+        "reason_named_by": "the_strict_hold_sentence",
+        "expect": {
+          "decision": "block",
+          "danger": null,
+          "reason": "This would change a file that holds credentials or keys. Changing one can break a deployment quietly, or write a secret somewhere it was not. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it."
+        },
+        "why": "The same area, the other role, and the distinction the danger vocabulary is built on: strict mode holds a change to this file too, and names **no danger** for it, because `danger_of` answers `SensitiveRead` for the read pair and for nothing else. It is the honest boundary of what a one-time allowance can cover, and it is declared here so that a reader does not take *strict held it* for *SURE will let a grant through*."
+      }
+    },
+    "control": {
+      "of": "credential_area_read_under_strict",
+      "moved": {
+        "fields": ["protection"],
+        "what": "the protection mode",
+        "from": "strict, in the run this is a control for",
+        "to": "standard",
+        "how": "the same harness, the same tool, the same path, the same execution mode and the same permission set, through the same `assess_request`. The grading test asserts this rather than trusting it: it compares the two declared runs key by key and requires the keys that differ to be exactly the ones named here."
+      },
+      "why": "One field moved, and it is the field the manifest row's own phrasing is about: *can be protected where harness exposes pre-action event*. The pair states both halves of that limit as measurements — protected under strict, allowed under standard — instead of leaving a reader to infer which mode the claim was about."
+    },
+    "allowance": {
+      "read_by": {
+        "module": "crates/sure-core/src/hook_protection.rs",
+        "functions": ["acts_a_request_could_be_held_for", "acts_a_tool_could_be_held_for", "acts_for_kind"],
+        "returns": "The acts a recorded one-time allowance can be spent on, read off `DANGER_WITNESSES` through `assess_request` rather than computed from the settings by a second rule.",
+        "route": "The store-backed half — grant, one allow, held again — is graded in `crates/sure-cli/src/hook.rs`, with a real store, and this fixture names it rather than grading it a second time. The pointer is checked: the test asserts the file exists and that the named test is a function in it."
+      },
+      "one_time_behaviour": {
+        "file": "crates/sure-cli/src/hook.rs",
+        "tests": ["a_read_of_credentials_is_held_under_strict_and_an_allowance_for_it_lets_one_through"],
+        "why": "The store-backed half for this act, and the only place it is graded."
+      },
+      "rows": [
+        {
+          "mode": "reader",
+          "protection": "strict",
+          "tool": "Read",
+          "acts_the_tool_can_be_held_for": ["sensitive_read"],
+          "acts_the_settings_leave": ["sensitive_read"],
+          "why": "A grant recorded for `Read` under strict has exactly one act to cover, and it is this one."
+        },
+        {
+          "mode": "reader",
+          "protection": "standard",
+          "tool": "Read",
+          "acts_the_tool_can_be_held_for": [],
+          "acts_the_settings_leave": [],
+          "why": "The control's settings, and the empty answer is the point: under standard the same tool can be held for no act at all, so there is nothing for an allowance to cover and nothing SURE should offer to record. It is the allowance rule's version of the control's `Allowed`."
+        },
+        {
+          "mode": "writer",
+          "protection": "strict",
+          "tool": "Write",
+          "acts_the_tool_can_be_held_for": ["broad_delete"],
+          "acts_the_settings_leave": ["sensitive_read", "broad_delete"],
+          "why": "Why `a_change_to_the_secret_area_is_held_without_a_danger` is a limit rather than an omission, stated as the rule's own answer: a grant for `Write` under these settings can cover a broad delete, and the hold this fixture declares for that mode — a change to the secret area — is not one of the acts at all. A user told their grant would cover it would have been told something no rule in this build answers."
+        }
+      ]
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "credential_area_read_under_strict",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "strict mode's secret-material rule on a read, read as `Danger::SensitiveRead`",
+      "title": "a read of the credential file is held and named under strict",
+      "status": "reported",
+      "decision": "block",
+      "danger": "sensitive_read",
+      "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "The danger is asserted before the decision because strict mode holds this file under the same sentence whether or not a danger is recorded — `danger_of` is a separate answer from `sensitive_area`, and a build that lost it would still answer `block`."
+    },
+    {
+      "kind": "control",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same read, the same settings, standard protection",
+      "title": "the same read reaches allowed under standard",
+      "status": "reported",
+      "moved_file": "the protection mode",
+      "decision": "allow",
+      "danger": null,
+      "reason": "The settings in force do not stop this request, and standard protection asks no further question about it, so it proceeds.",
+      "why": "**This entry is the acceptance.** Everything else in this fixture is satisfied by a product that holds every read, and a product that answered `block` to everything would pass every one of them. The control moves one field, it is the mode a user chooses, and the pair is the manifest row's `where`."
+    },
+    {
+      "kind": "a_key_file_in_a_named_directory",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same rule, on a path whose directory is what makes it secret material",
+      "title": "a key file in a named directory is held and named too",
+      "status": "reported",
+      "decision": "block",
+      "danger": "sensitive_read",
+      "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "A second shape, declared so that the rule is measured as a rule about paths rather than about one filename."
+    },
+    {
+      "kind": "the_same_read_in_cursor_s_vocabulary",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "the same rule through `assess_cursor_tool`",
+      "title": "the same read is named the same way in the other harness's vocabulary",
+      "status": "reported",
+      "decision": "block",
+      "danger": "sensitive_read",
+      "reason": "This would read a file that holds credentials or keys. Reading one is enough to put the secret in the agent's context, where it can come back out in what the agent writes. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "`Read` is `ActionKind::ReadFile` in both vocabularies, and both integrations answer through one decision path."
+    },
+    {
+      "kind": "an_ordinary_source_read_is_allowed_under_strict",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "strict mode asked about an ordinary source file, and holding it for nothing",
+      "title": "strict protection allows an ordinary source read",
+      "status": "reported",
+      "decision": "allow",
+      "danger": null,
+      "reason": "Strict protection does not hold this: it is not a database migration, CI/CD configuration, credentials or keys, SURE's settings for this project, or a change that names a whole location, and the permissions in force do not stop it.",
+      "why": "The second allow, and it is not a control: it exists so that *strict holds reads* is refuted inside this directory rather than left to a reader. Its sentence names what strict looked for, which is the useful half of an allow."
+    },
+    {
+      "kind": "a_command_line_hides_the_path",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "reading_module": "crates/sure-domain/src/execution.rs",
+      "detector": "a shell command reading the same file, carrying no path for the rule to read",
+      "title": "a command line that reaches the same file is held and names no danger",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This action needs explicit approval; the hook cannot obtain consent, so it is blocked.",
+      "why": "The near-miss this case needs, and a limit: the danger is a path rule, a shell request carries no path, and the request is held for consent instead. A build that read the command line looking for filenames would be inventing a rule this module does not have."
+    },
+    {
+      "kind": "a_change_to_the_secret_area_is_held_without_a_danger",
+      "family": "dangerous_action",
+      "surface": "hook_protection",
+      "module": "crates/sure-core/src/hook_protection.rs",
+      "detector": "strict mode's secret-material rule on a write, which names no danger",
+      "title": "a change to the secret area is held and named nothing",
+      "status": "reported",
+      "decision": "block",
+      "danger": null,
+      "reason": "This would change a file that holds credentials or keys. Changing one can break a deployment quietly, or write a secret somewhere it was not. Strict protection asks you about this, and a harness hook cannot ask you, so SURE does not allow it.",
+      "why": "The boundary of the allowance, declared rather than left to be inferred from the code: the hold is real, and `danger_of` names nothing for it, so no one-time allowance can cover it. A fixture that declared a danger here would be asking for a product change, not measuring one."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A read of the credential file declared held here is answered `allow` under strict, or the read is reported as protected while no danger is named. Both are the false green this case exists for: the secret is put in the agent's context, or the report claims a detector that did not fire. A build with the danger vocabulary deleted blocks every run in this directory with the strict sentence, which is why the danger's wire name is asserted before the decision kind."
+    },
+    {
+      "kind": "false_green",
+      "description": "The control stops reaching `Allowed`, and the directory is still reported as verified. A product that holds every read — or every request — satisfies every held run in this fixture, and only the mode pair fails it. A report that said the read *was prevented* rather than *would be asked about* is the same false green from the other side, because both integrations are Observed and neither can confirm the harness honoured the answer."
+    },
+    {
+      "kind": "false_green",
+      "description": "The act is claimed for a request SURE was never given the path of. A build that named a sensitive read off a shell command line, or off an event carrying no path, would be reporting a detector that is not there; `a_command_line_hides_the_path` is the run that fails it."
+    },
+    {
+      "kind": "false_green",
+      "description": "An allowance is described as covering a change to the secret area, or offered for a tool under settings that leave no act in reach. A grant that cannot be spent is a promise about a setting SURE did not change, and this fixture's declared hold for that mode is not an act at all."
+    }
+  ],
+  "notes": "This fixture is graded in-process by `crates/sure-core/tests/adversarial_fixture_detection.rs`, which reads this declaration and drives `assess_claude_code_tool` / `assess_cursor_tool` — the functions the two integrations call. It ships no project, no language manifest and no store, and nothing in it is executed; the store-backed half of the allowance is graded in `crates/sure-cli/src/hook.rs`, whose test this fixture names. The manifest row it owns is `evaluation/acceptance-manifest.json`'s `sensitive-read` — `release_blocking: true`, `expected_severity: \"must_fix\"`, *sensitive-key read can be protected where harness exposes pre-action event* — and it is named in `DANGEROUS_ACTION_FIXTURES` in that test file and in `crates/sure-testkit/tests/fixture_apps.rs`, which grades the artefacts. Three limits are recorded rather than dressed up, and the first is the one the row's own wording carries: **this read is protected only under `strict`**, and only where the harness hands SURE a pre-action event naming the path — under `standard` the same read is allowed, which the control measures rather than implies. Second, a request whose command line reads the same secret is held for consent and named nothing, because the rule is a path rule. Third, a *change* to the secret area is held under the same strict sentence and named no danger at all, so no one-time allowance can cover it; that is `danger_of`'s declared boundary rather than a gap."
+}

@@ -126,6 +126,18 @@ const RUST_FIXTURES: &[&str] = &["rust-tests-fail", "rust-tests-pass"];
 /// the second would then be read as a claim about the first.
 const CLAIM_FIXTURES: &[&str] = &["tests-not-run", "stale-test-evidence", "unknown-evidence"];
 
+/// The `P14-T005` fixtures: a project, and the intent SURE compares it against.
+///
+/// Unlike the claim fixtures above, these *are* projects — small ones, read by
+/// `sure_core::discover` — but they ship no language manifest and are graded
+/// in-process by `crates/sure-core/tests/adversarial_fixture_detection.rs`,
+/// which is the third thing a list in this file can mean and the reason it is
+/// separate from the three above rather than chained into one of them: a list
+/// that meant "runnable with npm" cannot also mean "compared against a goal
+/// supplied in-process", because the second would then be read as a claim about
+/// the first.
+const INTENT_FIXTURES: &[&str] = &["missing-user-intent", "intent-mismatch"];
+
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
 ///
@@ -154,6 +166,15 @@ const FIXTURES_WITHOUT_A_MANIFEST_CASE: &[(&str, &str)] = &[
         "the same as `rust-tests-fail`, whose control this half is: it exists so that the failing half's \
          verdict is a measurement rather than a checker that refuses every Rust project, and the manifest \
          has no case for a project that is meant to come back green",
+    ),
+    (
+        "intent-mismatch",
+        "the manifest has one case about a request and the project it is compared against, and it is the \
+         opposite situation: `missing-user-intent` is a project with no request at all, and its row asks \
+         that nothing be claimed about fulfilment. This fixture has the request and SURE may report one \
+         candidate about it, so the row's trap — a claim made without trusted intent — is not this \
+         fixture's defect and renaming this directory after that case would make its row grade a fixture \
+         that has exactly the trusted intent the row is about the absence of",
     ),
 ];
 
@@ -261,6 +282,7 @@ fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
         .chain(PYTHON_FIXTURES)
         .chain(RUST_FIXTURES)
         .chain(CLAIM_FIXTURES)
+        .chain(INTENT_FIXTURES)
         .copied()
 }
 
@@ -1049,6 +1071,48 @@ fn every_claim_fixture_is_a_directory_this_repository_ships() {
                 && !PYTHON_FIXTURES.contains(id)
                 && !RUST_FIXTURES.contains(id),
             "{id} is in a language list as well, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn every_intent_fixture_is_a_directory_this_repository_ships() {
+    // The `P14-T005` fixtures, and the one thing they must not grow. They are
+    // projects — two source files and a route — but nothing in them is run:
+    // they are read by `sure_core::discover` and compared against a goal
+    // supplied in-process, so a language manifest in one of these directories
+    // would put it into a runnability sweep whose entry point it does not have.
+    for id in INTENT_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no declaration to grade"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md for a non-programmer to read"
+        );
+        for manifest in [
+            "package.json",
+            "pyproject.toml",
+            "requirements.txt",
+            "Cargo.toml",
+        ] {
+            assert!(
+                !dir.join(manifest).is_file(),
+                "{id} ships a {manifest}: these fixtures are graded from a `Discovery`, and a \
+                 runnability manifest would claim an entry point they do not have"
+            );
+        }
+    }
+    for id in INTENT_FIXTURES {
+        assert!(
+            !TYPESCRIPT_FIXTURES.contains(id)
+                && !PYTHON_FIXTURES.contains(id)
+                && !RUST_FIXTURES.contains(id)
+                && !CLAIM_FIXTURES.contains(id),
+            "{id} is in two lists, so one of the two halves is misdescribed"
         );
     }
 }

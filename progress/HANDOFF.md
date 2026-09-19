@@ -3,55 +3,56 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T010` — *"Implement benign false-positive corpus"* — is **dispatched**, not
-accepted, from base `44406d2` (the `P14-T009` acceptance), with its brief at
-`target/tmp/brief-p14t010.md` and the tree clean at dispatch. Its criterion is *"Test mocks/examples/docs
-TODOs do not become indiscriminate must-fix findings."* and it is the task `P14-T011` — the product eval
-runner — waits behind.
+**In flight:** nothing, as of this paragraph. `P14-T010` — *"Implement benign false-positive corpus"* — is
+**accepted as `48356af`**, over four worker commits from base `44406d2` (the `P14-T009` acceptance), with its
+brief at `target/tmp/brief-p14t010.md` and the tree clean at dispatch and at acceptance. "What `P14-T010`
+added" and "Validation of `P14-T010`" below carry the detail. The criterion — *"Test mocks/examples/docs
+TODOs do not become indiscriminate must-fix findings."* — is met by a corpus that is **read** rather than
+ignored: `fixtures/adversarial/benign-test-mocks/` ships a twelve-file Node project whose five
+vocabulary-carrying files are each read by one of the five candidate detectors and each come back `note`,
+with the severity, anchor and context asserted per file against what the fixture itself declares.
 
-**What exists, measured at the base.** The case is already in the contract:
-`evaluation/acceptance-manifest.json:89-93` names `benign-test-mocks`, `release_blocking: false`,
-`expected_severity: "note"` — and `fixtures/adversarial/` holds **no directory for it**. It is the only
-id the manifest names with neither a directory nor a measured answer. The filter the criterion is about
-is `candidate_context.rs`'s `CandidateContext`/`classify_path`, whose five call sites are the detectors
-(`candidate_scanner.rs:338`, `noop_heuristics.rs:384`, `demo_data_heuristics.rs:414`,
-`route_consistency.rs:152`, `ui_action_bridge.rs:190`), and the gate that makes the note is
-`finding_gravity.rs:282` — `(_, Reach::NotProduction) => INFORMATIONAL`, beside the single `must_fix`
-lift at `:285`.
+**What the corpus is for, and the false green it refuses.** The case has been in
+`evaluation/acceptance-manifest.json:89-93` since the manifest was written — `release_blocking: false`,
+`expected_severity: "note"` — and until this task there was **no directory behind it**: what answered it was
+`finding_severity_rule.rs` asserting that the case has no fixture app, on the stated ground that its note
+"cannot be measured by running anything". That premise is dead. The corpus could have satisfied a weaker
+reading of the criterion by being *invisible* — a run that says nothing about benign files is exactly as
+green as one that grades them — so every assertion is positive, and three controls keep the `note` from
+being silence: taking the directory convention away from `tests/checkout.js` leaves the same bytes detected
+at `can_fix_later`; writing the project's whole vocabulary in markdown moves the proposal set by nothing at
+all, because markdown is never a scan candidate; and copying `src/gateway.mock.js` onto `src/gateway.js`
+reaches **`must_fix`**, because a placeholder address in production is a `SubstitutedAction` — the only gap
+kind `finding_gravity` ever lifts — where `UnfinishedMarker` is capped one level below it whatever the path
+says.
 
-**The fact that decides this task, and the reason the brief spends its length on the level.** The
-sentence is currently **asserted by shape rather than measured**: `finding_severity_rule.rs:600-618`
-reads the manifest case and asserts `!fixture_has_an_app("benign-test-mocks")`, with the comment *"Its
-fixture is a stub, so its `note` cannot be measured by running anything."* Once a fixture exists and is
-driven, that premise is dead. And the negative half is **free unless the detectors actually fire** — the
-same shape as `P14-T008`'s deleted danger and `P14-T009`'s product that closes nothing — so the corpus
-must show its benign files are **detected** and land below `must_fix`, with a control proving the
-detectors are not silent on its own vocabulary.
+**The sentences the corpus made false**, corrected in the tree rather than in a report: the fourth
+correction to `fixture_has_an_app`'s doc comment, whose list of ids with no directory is now **empty**; the
+tripwire comment that said the case could not be measured by running anything, with **the assertion itself
+untouched**, so the tripwire still fires the day the fixture gains an `entry_points` key; and
+`intent-mismatch/scenario.json`'s clause about the only id with no directory, which shrank to nothing rather
+than being rewritten. Every number the rewritten comment states was re-measured: 25 directories under
+`fixtures/adversarial/`, exactly the 14 ids that answer `false` to `fixture_has_an_app`, five of them
+directories no manifest case names.
 
-**Two traps in the vocabulary, measured rather than guessed.** Markdown is never a scan candidate:
-`is_source_candidate` (`references.rs:725-733`) accepts only js/jsx/mjs/cjs/ts/tsx/mts/cts, py/pyi and
-rs, and the three text detectors each filter on it (`candidate_scanner.rs:305`,
-`noop_heuristics.rs:351`, `demo_data_heuristics.rs:381`) — so a docs TODO that lives in markdown
-reaches no detector at all and would prove nothing. And `mock` is matched only as a dot-separated
-file-name segment or a `mocks`/`stubs`/`fixtures` directory, so `src/mockServer.js` classifies as
-`Product` rather than `MockFixture`.
+**What this task is not, and the boundary that is easy to overstate.** It is **not** the first time a
+produced severity met a declared one for a non-release-blocking case: `the_benign_cases_did_not_escalate` has
+compared the detectors' reading of `demo-analytics` against the manifest since it was written, and
+`fixture_apps.rs` holds every fixture's own `scenario.json` and the manifest to the same severity. What is
+new is narrower and exact — the corpus's own **per-outcome** declarations (`required_severity`,
+`path_context`, `anchor`, per file, read out of the fixture's own scenario) had never been held against what
+the product produced, and this case had no directory to measure at all. The task's `notes` records that
+boundary so it is not re-derived wrongly.
 
-**Sentences the work makes false**, all measured at the base and named in the brief: the
-`fixture_has_an_app` doc comment at `finding_severity_rule.rs:349-388`, which names
-`benign-test-mocks` as the id *"with no fixture directory at all"* — the fourth correction in a history
-that already records three, and the second where a name moves between its two groups rather than a
-wording being fixed; the comment at `:600-603`; and `fixtures/adversarial/intent-mismatch/scenario.json:190`,
-whose *"the only id that contract names with no directory under `fixtures/adversarial/` is
-`benign-test-mocks`"* stops being true the moment the directory is created.
-
-**The base is stated rather than assumed.** `44406d2` is the `P14-T009` acceptance: three files, all
-supervisor-owned — `progress/HANDOFF.md`, `progress/state.json`, `SHA256SUMS.txt` — and nothing in
-`crates/` reads any of them; all 194 digests in `SHA256SUMS.txt` verify against the files. Its CI run
-`35429750260` is green on four of its five jobs at dispatch — `rust (ubuntu-latest)`,
-`rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary` — with
-`rust (windows-latest)` still running; the full reading is owed to the next entry. The ubuntu and
-macOS jobs are the two that first exercised `P14-T009`'s `node`-spawning test under CI, and both
-passed, which is the answer to the risk that acceptance recorded.
+**The base is stated rather than assumed.** `44406d2` is the `P14-T009` acceptance, and its CI run
+`35429750260` came back **green on all five jobs**, including all three `rust` matrix jobs that ran
+`P14-T009`'s new `node`-spawning tests — so the risk that acceptance recorded as unmeasured is **retired**;
+its dependency on whatever Node the runner image ships is still unpinned in the workflow and still worth
+recording. The dispatch commit `08536f3`'s own run `35430022867` is **red on `rust (ubuntu-latest)` only**:
+the runner's `/usr/bin/chromium` never opened a debugging port in 30 seconds, and
+`browser_driver.rs::a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence` reports that
+as a **failure rather than an absence** — the product working as designed, at a new site, on a commit that
+changed no code at all.
 
 **In flight:** nothing, as of this paragraph. `P14-T009` — *"Implement repair E2E/regression
 fixture"* — is **accepted as `6f5cc0e`**, over three worker commits from base `a39e769` (the `P14-T008`
@@ -2323,6 +2324,105 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T010` added
+
+One fixture project, the test file that grades it, and the sentences the fixture made false. Sixteen files
+`+1472/-15` against base `08536f3`; `git diff --name-only` over every `crates/*/src`, over `progress/`,
+`tasks/`, `evaluation/` and `SHA256SUMS.txt` is empty — **no product code, severity or threshold moved**.
+
+**The corpus.** `fixtures/adversarial/benign-test-mocks/` is twelve files, 506 lines, and runs with nothing
+installed but Node: a checkout service that keeps its test double, its worked example, its documentation
+snippet and its stand-in for a service it does not own beside the code they describe. Five files carry the
+vocabulary and each is classified by a different mechanism, so `classify_path` is exercised both ways —
+`tests/checkout.js` and `stubs/pricing-api.js` by their directory, `docs/snippets/usage.js` by its directory,
+`examples/quickstart.js` by its directory, and `src/gateway.mock.js` by a dot-separated **file-name** segment,
+which is the half the in-process shape in `finding_severity_rule.rs` does not reach. The documentation half
+is a `.js` file inside `docs/` on purpose: `is_source_candidate` accepts only source extensions and all three
+text detectors filter on it, so a TODO in a `.md` file would have reached no detector and the corpus would
+have answered `note` because nothing looked.
+
+Because `CandidateScanner`, `NoOpHeuristics` and `DemoDataHeuristics` each report **at most one proposal per
+category per project**, anchored at the first matching file in sort order, exactly one file carries the word
+`mock` and exactly one carries `TODO`. A second benign file with the same word would not be measured; the
+corpus's own `notes` records that limit rather than leaving it to be discovered, and it is P7-T011's
+territory.
+
+**The grader.** `crates/sure-core/tests/benign_fixture_e2e.rs`, 902 lines, seven tests. It drives the real
+discovery and the five candidate detectors in process over the shipped directory where it lives, and over
+three control copies under `target/tmp`, and it reads each required outcome's `anchor`, `path_context` and
+`required_severity` **out of `scenario.json`** rather than restating them, so corpus and grader cannot drift
+apart unnoticed. Each detector's title is checked against `classify_path`'s own answer as a second
+assertion, because the corpus's `title` was copied from the measurement and a title whose context word
+contradicted the classifier would otherwise pass. The file opens with a "what is not claimed" section: a
+candidate is not a verdict, `false_positive` declarations are prose nothing enforces, and this records what
+the product produced on the day it was written rather than a calibration.
+
+**The three controls**, which are what make the corpus a measurement. *Convention removed from the
+directory*: `tests/checkout.js` moved to `checkout.js` on a copy — the same bytes are still detected and the
+severity moves to `can_fix_later`, so the shipped `note` is the gravity rule's answer about where the file
+stands and not a detector that never ran. *Vocabulary in markdown*: the whole vocabulary written into
+`docs/setup.md` moves the proposal set by **not one entry**, which is the measurement behind
+`is_source_candidate`. *Convention removed from the file name*: `src/gateway.mock.js` copied onto
+`src/gateway.js` with the double removed reaches `must_fix` — the boundary of the acceptance measured rather
+than assumed, since `UnfinishedMarker` is capped below `must_fix` whatever the path says and only this
+control can show the context gate is doing work. That third control displaces the project's real client, and
+what keeps the displacement from being a silent second variable is asserted rather than assumed: the grader
+first proves the displaced `src/gateway.js` produced no reading in the shipped fixture.
+
+**The reconciliation.** `finding_severity_rule.rs` `+64/-33` across four sites, `intent-mismatch/scenario.json`
+one line, and `crates/sure-testkit/tests/fixture_apps.rs` `+17/-0` adding `"benign-test-mocks"` to
+`TYPESCRIPT_FIXTURES` with the paragraph explaining why the grader lives one crate closer — a severity is
+decided by `sure_core::finding_gravity`, which is reachable from `sure-core`'s own tests and not from there.
+`SHA256SUMS.txt` grew from 194 to 195 lines in the acceptance commit, not in the worker's: the corpus added
+one `scenario.json` and edited another, and the covered family is every `scenario.json` under
+`fixtures/adversarial/` plus its README. The new line went between `README.md` and `check-crash`, where the
+block's alphabetical order puts it, and the stale `intent-mismatch` digest was refreshed; both are changes
+`target/tmp/regen-sums.mjs` cannot make, since it updates listed entries only and can neither add nor reorder.
+
+## Validation of `P14-T010`
+
+**Gates.** My own six-gate run at `48356af`, from the PowerShell tool (label `p14t010-sup`): all six exit 0,
+77 result lines, **2588 passed, 0 failed**, 12 ignored, 67 headers, bootstrap 17 phases / 187 tasks, taskctl
+187 tasks, non-Windows green, store identical, worktree clean. It reproduces the worker's reported numbers
+exactly. The baseline grader run was `7 passed` before my mutations and `7 passed` again after both were
+restored.
+
+**My two mutations**, each the smallest edit that could make the corpus free, each run at `48356af` and each
+restored with the tree asserted clean. *Silence* — the five detectors neutered so nothing reads the corpus —
+turns **five of the seven tests red**, which is the whole point: a corpus that passes because nothing looked
+is the false green this task exists to refuse. *The context gate made blind* — `classify_path` forced to
+`Product` for every path — turns **two of the seven red**, reading `CanFixLater` where the corpus declares
+`note`. Neither count is taken from the worker.
+
+**The counts, re-measured rather than read back.** 25 directories under `fixtures/adversarial/`; exactly the
+14 ids the rewritten comment lists answer `false` to `fixture_has_an_app`; five directories are named by no
+manifest case (`container-unavailable`, `intent-mismatch`, `missing-config`, `rust-tests-fail`,
+`rust-tests-pass`). Every number in that comment is what the disk says. The summed file was verified whole
+after the edit: **195 of 195 digests match**, and the file still ends without a trailing newline as it did
+before.
+
+**CI, read from the API rather than assumed.** `35429750260` (`44406d2`, the `P14-T009` acceptance) — success
+on all five jobs, retiring the `node`-spawning risk that acceptance recorded as unmeasured. `35430022867`
+(`08536f3`, the dispatch) — failure on `rust (ubuntu-latest)` only, on
+`browser_driver.rs::a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence` at `:397:53`:
+"/usr/bin/chromium ran for 29.999912 seconds without reporting a debugging port", with dbus and `Fontconfig
+error: No writable cache directories` in the detail, 4 passed / 1 failed. That commit changed no code, the
+test is untouched by this task, and the failure is the runner's browser not starting — a new site, not either
+of the two flakes recorded so far. The test's own wording is the product working as designed: a browser that
+was found and could not be driven is reported as a **failure**, not passed over as an absence. This
+acceptance's own CI run is owed to the next entry.
+
+**The store.** `C:\Users\lishi\AppData\Local\SURE\sure.db` is byte-identical at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853` before and after my gate run, both
+mutations and both grader runs; the corpus passes `store: None` everywhere and its three control copies are
+made under `target/tmp` and removed after each run.
+
+**Recorded follow-ups, not quietly fixed.** The one-proposal-per-category-per-project limit in the three text
+detectors (P7-T011's territory, recorded in the corpus and in the grader rather than hidden); `lying-readme`'s
+severity, which is still shape-asserted now that it is the last such case; the two unbound
+`DANGEROUS_ACTION_FIXTURES` lists and `hook_protection.rs:1078-1079`; and the two ETXTBSY flake sites, now
+with a third environmental site beside them on ubuntu.
 
 ## What `P14-T009` added
 

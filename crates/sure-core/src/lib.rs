@@ -61,6 +61,7 @@ pub mod recheck_lifecycle;
 pub mod recording_projection;
 pub mod redact;
 pub mod references;
+pub mod release_gate;
 pub mod repair_impact;
 pub mod route_consistency;
 pub mod runtime_probes;

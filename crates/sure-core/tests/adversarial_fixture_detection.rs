@@ -141,6 +141,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -151,7 +152,8 @@ use sure_core::claim_checker::{
     CheckedClaim, ClaimDocument, check_claims_against_events, check_claims_in_store,
 };
 use sure_core::claim_report::render_claim_section;
-use sure_core::config::{Config, ExecutionSettings};
+use sure_core::config::{Authority, Config, ExecutionSettings};
+use sure_core::container::{Availability, OVERCLAIMS, Runtime, isolation_claim, overclaims};
 use sure_core::db_migrations::{MigrationsReport, Record};
 use sure_core::demo_data_heuristics::DemoDataHeuristics;
 use sure_core::discover::{DiscoverOptions, Discovery, discover};
@@ -166,12 +168,14 @@ use sure_core::ids::{ClaimId, EventId, FingerprintId};
 use sure_core::intent::{ProjectIntent, may_claim_full_fulfilment};
 use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_project};
 use sure_core::noop_heuristics::NoOpHeuristics;
+use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome};
 use sure_core::project_intent::explicit_goal;
 use sure_core::project_verdict::render_summary;
 use sure_core::recording_projection::{BuildTestKind, StandardProjection, project};
 use sure_core::references::KeyStatus;
 use sure_core::route_consistency::RouteConsistency;
+use sure_core::scan::{ScanOptions, scan};
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::severity::Severity;
 use sure_core::status::{CheckStatus, NotCheckedReason};
@@ -2164,12 +2168,26 @@ fn shipped_project_files(id: &str) -> Vec<String> {
 /// store, and nothing here needs one. `inspect_only` is the same promise for the
 /// project — the run reads it and never executes anything in it.
 fn pipelined(root: &Path, goal: Option<&str>) -> PipelineOutcome {
+    pipelined_with(root, goal, ExecutionSettings::inspect_only())
+}
+
+/// The same run, with what the user has allowed the one argument that changes.
+///
+/// `ExecutionSettings` is the pair `sure check` hands the pipeline, and the
+/// settings here come from `Authority::execution()` rather than from a literal:
+/// a fixture whose control moved the mode by writing a different literal would
+/// be measuring this file's idea of the rule rather than the rule.
+fn pipelined_with(
+    root: &Path,
+    goal: Option<&str>,
+    execution: ExecutionSettings,
+) -> PipelineOutcome {
     let config = Config::default();
     Pipeline {
         project: root,
         purpose: Purpose::Check,
         config: &config,
-        execution: ExecutionSettings::inspect_only(),
+        execution,
         store: None,
         goal,
     }
@@ -2223,10 +2241,19 @@ fn required_outcome<'a>(id: &str, outcomes: &'a [Value], kind: &str) -> &'a Valu
 }
 
 /// Whether an outcome is one of the kinds that records an answer.
+///
+/// `control` is deliberately not one: it is collected on its own, against the
+/// control's own declaration, because the two blocks are one thing apart and
+/// grading them as a single set would let the pair agree on a wrong answer.
 fn records_an_answer(kind: &str) -> bool {
     matches!(
         kind,
-        "intent_status" | "comparison_detail" | "intent_implementation"
+        "intent_status"
+            | "comparison_detail"
+            | "intent_implementation"
+            | "execution_refusal"
+            | "container_absence"
+            | "container_limit"
     )
 }
 
@@ -3055,5 +3082,1131 @@ fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_f
         control_lines.as_slice(),
         "{id}: the control changed a line of the summary other than the one about the check that \
          could not run"
+    );
+}
+
+// --- execution trust: the two fixtures P14-T006 implemented ----------------
+//
+// What SURE may do, and what it can do it in. The first fixture is a check that
+// was refused for want of authorisation and has to stay visible as refused; the
+// second is a missing container runtime, which is a value with a sentence rather
+// than an error, and a limit this build states rather than hides.
+
+/// The `P14-T006` fixtures, named for the reason every list in this file is: a
+/// test that discovered them would pass on an empty directory.
+///
+/// The same two ids are named in `crates/sure-testkit/tests/fixture_apps.rs`,
+/// which grades the artefacts — the schema, the false-green rule, the README and
+/// the runnability sweep. This file is where the answers are graded, and
+/// `every_execution_trust_fixture_these_assertions_name_is_a_fixture_this_repository_ships`
+/// is what says the two files are talking about the same directories.
+const EXECUTION_TRUST_FIXTURES: &[&str] = &["dynamic-not-authorized", "container-unavailable"];
+
+/// The `execution_refusal` block of one fixture's scenario.
+fn execution_block(id: &str) -> Value {
+    scenario_of(id)
+        .get("execution_refusal")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "fixtures/adversarial/{id}/scenario.json declares no execution_refusal block, so \
+                 there is no declaration of what the unauthorised run answers"
+            )
+        })
+}
+
+/// The `container_absence` block of one fixture's scenario.
+fn container_block(id: &str) -> Value {
+    scenario_of(id)
+        .get("container_absence")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "fixtures/adversarial/{id}/scenario.json declares no container_absence block, so \
+                 there is no declaration of what the machine question answers"
+            )
+        })
+}
+
+/// One of SURE's answers, compared with the fixture's declaration of it.
+///
+/// The comparison is an equality on the whole value and it is made in both
+/// directions by construction: this asserts that SURE says what the fixture
+/// declares, and `assert_the_outcomes_account_for_the_declared_expectation`
+/// asserts that the fixture declares everything the corpus records. A key the
+/// fixture does not declare is a red test here rather than a silent `null`.
+fn assert_declared_answer(id: &str, key: &str, answer: Value, declared: &Value) {
+    let expected = declared.get(key).unwrap_or_else(|| {
+        panic!(
+            "{id}: this test asserts SURE's answer for `{key}`, and the fixture declares no such \
+             key, so the assertion has nothing to be checked against"
+        )
+    });
+    assert_eq!(
+        &answer, expected,
+        "{id}: SURE's answer for `{key}` is not the one the fixture declares"
+    );
+}
+
+/// How many results a run refused for want of authorisation.
+///
+/// The predicate the first acceptance sentence is about, and the one the control
+/// is measured by. Deliberately not a count of passes and deliberately not the
+/// aggregate: a check that was refused and a check that ran are different facts,
+/// and this whole fixture exists to keep them apart. The control asserts the
+/// *absence* of this reason rather than the presence of a greener anything,
+/// because a check that is no longer refused is still not a check that ran.
+fn unauthorised_refusals(outcome: &PipelineOutcome) -> usize {
+    record_of(outcome)
+        .report
+        .results()
+        .iter()
+        .filter(|result| {
+            result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized)
+        })
+        .count()
+}
+
+/// The keys two declared answer blocks disagree about, sorted.
+///
+/// What moves between a fixture and its control, read off the declarations
+/// rather than listed by hand in a second place: a control that stopped moving
+/// something, or started moving something else, would otherwise be a change
+/// nobody noticed.
+fn disagreeing_keys(left: &Value, right: &Value) -> Vec<String> {
+    let left = left
+        .as_object()
+        .unwrap_or_else(|| panic!("a declared answer block is not an object: {left}"));
+    let right = right
+        .as_object()
+        .unwrap_or_else(|| panic!("a declared answer block is not an object: {right}"));
+    let mut differing: Vec<String> = left
+        .keys()
+        .chain(right.keys())
+        .filter(|key| left.get(*key) != right.get(*key))
+        .cloned()
+        .collect();
+    differing.sort();
+    differing.dedup();
+    differing
+}
+
+/// The file that defines the container module, which therefore names it.
+const THE_CONTAINER_MODULE: &str = "sure-core/src/container.rs";
+
+/// Every line of *shipped* code that calls into the container module.
+///
+/// This is the second half of criterion 2, measured rather than described:
+/// `crates/sure-core/src/container.rs` is declared in `crates/sure-core/src/lib.rs`
+/// and nothing else in the tree reaches it, so no run of SURE's pipeline and no
+/// command line can ask whether a container runtime is there. The walk uses the
+/// product's own scanner, so "a file in this crate" means here what it means
+/// everywhere else in the suite, and it is asserted complete — a source check
+/// over an unknown subset of the sources is the false green this file exists to
+/// prevent.
+///
+/// The filter is `src` and not `tests`, because the rule is about what ships and
+/// because this file itself names the module; it is tested without a separator,
+/// because the separator is the platform's. The file that defines the module is
+/// skipped for the same reason: it has to name what it defines. Line comments
+/// are stripped before the search, so a doc comment pointing at the module —
+/// there is one, and a later phase will write more — is not mistaken for a
+/// caller.
+fn container_call_sites() -> Vec<String> {
+    let crates = sure_testkit::repository_root().join("crates");
+    let walked = scan(&crates, ScanOptions::default()).expect("crates/ is a directory");
+    assert!(
+        walked.is_complete(),
+        "the source tree could not be read completely, so the limit this test records would be \
+         checked against an unknown subset of it"
+    );
+    let mut found = Vec::new();
+    let mut scanned = 0;
+    for entry in walked.files() {
+        if !entry
+            .path
+            .extension()
+            .is_some_and(|extension| extension == "rs")
+        {
+            continue;
+        }
+        let path = entry.display_path();
+        if !path.contains("src") || path.ends_with(THE_CONTAINER_MODULE) {
+            continue;
+        }
+        scanned += 1;
+        let full = crates.join(&entry.path);
+        let text = std::fs::read_to_string(&full)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", full.display()));
+        for (number, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            if code.contains("container::") || code.contains("Availability::") {
+                found.push(format!("{path}:{}: {}", number + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        scanned > 100,
+        "the source walk found {scanned} shipped files, which is not this repository — the filter \
+         is matching the wrong thing"
+    );
+    found
+}
+
+/// The suffix a program is stored under on this platform.
+///
+/// The same rule `crate::doctor` searches with, restated here because the test
+/// has to write the file the search is supposed to find.
+#[cfg(windows)]
+const EXECUTABLE_SUFFIX: &str = ".exe";
+/// See above: on a Unix-like platform the name is the file name.
+#[cfg(not(windows))]
+const EXECUTABLE_SUFFIX: &str = "";
+
+/// A directory holding one executable named after each runtime asked for, as a
+/// search path of exactly that directory.
+///
+/// `OsString` rather than `PathBuf`, because a search path is the value
+/// [`Availability::in_path`] takes and a path is not: the conversion is the
+/// caller's, which is what makes "this is a search path" not look like "this is
+/// a directory".
+fn search_path_holding(where_: &Path, runtimes: &[Runtime]) -> OsString {
+    std::fs::create_dir_all(where_)
+        .unwrap_or_else(|error| panic!("cannot create {}: {error}", where_.display()));
+    for runtime in runtimes {
+        let path = where_.join(format!("{}{EXECUTABLE_SUFFIX}", runtime.program()));
+        std::fs::write(&path, b"not a program")
+            .unwrap_or_else(|error| panic!("cannot write {}: {error}", path.display()));
+        // On a Unix-like platform a file with no execute bit is not a program
+        // the search will accept, so the bit is part of writing it there.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path)
+                .expect("metadata for a file just written")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&path, permissions).unwrap_or_else(|error| {
+                panic!("cannot make {} executable: {error}", path.display())
+            });
+        }
+    }
+    std::env::join_paths([where_]).expect("a search path with one entry in it")
+}
+
+#[test]
+fn a_missing_container_runtime_is_a_value_and_the_control_moves_the_search_path() {
+    let id = "container-unavailable";
+    let block = container_block(id);
+    assert_the_outcomes_account_for_the_declared_expectation(id, &block);
+
+    assert_eq!(
+        shipped_project_files(id),
+        declared_lines(&block["project"]["files"], "the declared project"),
+        "{id} ships a different project from the one it declares"
+    );
+    let files_before = shipped_project_files(id);
+    let declared = &block["expect"];
+
+    // The absence, and the reason no assertion here can be a test of the
+    // machine: the search path is an argument, and this one holds nothing.
+    // `OsStr::new("")` is not a directory, so this is `Absent` on every platform
+    // in every terminal — and it is compared with the variant rather than with
+    // `is_found()`, because "absent" is a value that has to compare equal to
+    // itself, not the lack of one.
+    let nothing_to_find = Availability::in_path(OsStr::new(""));
+    assert_eq!(
+        nothing_to_find,
+        Availability::Absent,
+        "{id}: an empty search path found something"
+    );
+    assert_declared_answer(id, "is_found", json!(nothing_to_find.is_found()), declared);
+    assert_declared_answer(
+        id,
+        "runtime",
+        json!(nothing_to_find.runtime().map(Runtime::as_str)),
+        declared,
+    );
+    assert_declared_answer(id, "sentence", json!(nothing_to_find.explain()), declared);
+    assert_declared_answer(
+        id,
+        "runtimes_looked_for",
+        json!(
+            Runtime::ALL
+                .iter()
+                .map(|runtime| runtime.as_str())
+                .collect::<Vec<_>>()
+        ),
+        declared,
+    );
+
+    // The sentence has to do three things at once, and the fixture declares the
+    // whole of it: what was not found, what happens instead, and what was looked
+    // for. The third of those is asserted against the list the search itself
+    // uses rather than against a copy, so a module that started looking for a
+    // third runtime would have to change the sentence as well.
+    for runtime in Runtime::ALL {
+        assert!(
+            nothing_to_find.explain().contains(runtime.as_str()),
+            "{id}: the sentence does not name {} as something SURE looked for",
+            runtime.as_str()
+        );
+    }
+    for phrase in OVERCLAIMS {
+        assert!(
+            !overclaims(&nothing_to_find.explain(), phrase),
+            "{id}: the sentence about a missing runtime makes the claim `{phrase}`"
+        );
+    }
+
+    // The claim the mode is described with, quoted whole and held to the
+    // module's own rule about overclaiming rather than to a search for a word.
+    // It is the one sentence a person reads *before* agreeing to run a
+    // stranger's code, which is why `sandbox` may not appear in it as a promise.
+    assert_declared_answer(id, "isolation_claim", json!(isolation_claim()), declared);
+    assert_declared_answer(id, "overclaim_phrases", json!(OVERCLAIMS), declared);
+    assert_declared_answer(
+        id,
+        "phrases_found_in_the_claim",
+        json!(
+            OVERCLAIMS
+                .iter()
+                .copied()
+                .filter(|phrase| overclaims(isolation_claim(), phrase))
+                .count()
+        ),
+        declared,
+    );
+
+    // The limit, measured rather than described: nothing that ships reaches the
+    // container module, so no run of the pipeline and no command line can ask
+    // this question today. A test that fails here has found a caller.
+    let call_sites = container_call_sites();
+    assert!(
+        call_sites.is_empty(),
+        "{id}: the container module is reached from shipped code, so the limit this fixture records \
+         is no longer true and the declaration has to be re-made deliberately rather than \
+         discovered by a reader:\n  {}",
+        call_sites.join("\n  ")
+    );
+    assert_declared_answer(id, "unwired_call_sites", json!(call_sites.len()), declared);
+
+    // And what a run of this fixture produces, which is nothing: the absence is
+    // refused by no rule, because nothing in this build asks whether a runtime
+    // is there. This is the sentence the fixture's own notes state, measured
+    // instead of described — no planned check, no finding, no candidate and no
+    // not-checked row either.
+    let outcome = pipelined(&fixture(id), None);
+    let record = record_of(&outcome);
+    assert!(
+        record.schedule.checks().is_empty(),
+        "{id}: the fixture's project now plans a check, so the container question has been wired in \
+         somewhere and this declaration has to be re-made: {:?}",
+        record
+            .schedule
+            .checks()
+            .iter()
+            .map(|check| check.proposal().id().as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        record.verdict.not_checked.len(),
+        0,
+        "{id}: a run of this project reports a check that did not run, and nothing here asked for one"
+    );
+    assert_eq!(
+        record.candidates.material.len(),
+        0,
+        "{id}: a missing runtime was reported as a defect of the project"
+    );
+    assert_eq!(
+        record.candidates.style_noise.len(),
+        0,
+        "{id}: a missing runtime produced a style-noise candidate"
+    );
+
+    // The control. One thing moves, and it is not this computer's `PATH`: a
+    // search path this test owns, holding one file named after one runtime.
+    let control = &block["control"];
+    assert_eq!(
+        control["moved"]["what"].as_str(),
+        Some("the search path"),
+        "{id}: the control says it moved something other than the search path, and a control that \
+         changed the machine or the project would measure a different thing"
+    );
+    let declared_control = &control["expect"];
+    let scratch = Scratch::under("adversarial execution trust controls", "container search");
+    let docker_only = search_path_holding(&scratch.project.join("docker-only"), &[Runtime::Docker]);
+    let found = Availability::in_path(&docker_only);
+    let found_program = scratch
+        .project
+        .join("docker-only")
+        .join(format!("docker{EXECUTABLE_SUFFIX}"));
+    assert_eq!(
+        found,
+        Availability::Found {
+            runtime: Runtime::Docker,
+            program: found_program.clone(),
+        },
+        "{id}: a directory holding one program named docker did not come back as that program, so \
+         the reported runtime and path are not both read out of the search path"
+    );
+    assert_declared_answer(id, "is_found", json!(found.is_found()), declared_control);
+    assert_declared_answer(
+        id,
+        "runtime",
+        json!(found.runtime().map(Runtime::as_str)),
+        declared_control,
+    );
+
+    // The sentence for a found runtime, by equality. The value is constructed
+    // with a program path this file fixes rather than with the scratch one,
+    // because a scratch path is unique per run — and then the sentence the
+    // search actually produced is compared with that same declaration once the
+    // one part that cannot be fixed, the path of the program, is put in its
+    // place. Equality on the template and equality on the path are together
+    // equality on the whole sentence.
+    let constructed = Availability::Found {
+        runtime: Runtime::Docker,
+        program: PathBuf::from("sure-fixture/bin/docker"),
+    };
+    assert_declared_answer(
+        id,
+        "sentence",
+        json!(constructed.explain()),
+        declared_control,
+    );
+    let declared_sentence = declared_control["sentence"].as_str().unwrap_or_default();
+    assert_eq!(
+        found.explain(),
+        declared_sentence.replace(
+            "sure-fixture/bin/docker",
+            &found_program.display().to_string()
+        ),
+        "{id}: the sentence about a runtime that was found is not the declared one with the path \
+         that was actually found in it"
+    );
+
+    // The order in `Runtime::ALL` decides when a machine has both, and the name
+    // that comes back is the name that was written — which is what makes the
+    // reported runtime a measurement rather than the program's preference.
+    let both = search_path_holding(
+        &scratch.project.join("both"),
+        &[Runtime::Docker, Runtime::Podman],
+    );
+    assert_declared_answer(
+        id,
+        "both_present",
+        json!(Availability::in_path(&both).runtime().map(Runtime::as_str)),
+        declared_control,
+    );
+    let podman_only = search_path_holding(&scratch.project.join("podman-only"), &[Runtime::Podman]);
+    assert_declared_answer(
+        id,
+        "podman_only",
+        json!(
+            Availability::in_path(&podman_only)
+                .runtime()
+                .map(Runtime::as_str)
+        ),
+        declared_control,
+    );
+
+    // The flip, declared as well as made: the two halves of this fixture answer
+    // opposite questions, and a fixture that asserted one of them unconditionally
+    // would be measuring nothing.
+    assert_ne!(
+        declared["is_found"], declared_control["is_found"],
+        "{id}: the fixture and its control declare the same answer, so nothing here is measured"
+    );
+
+    // The one call that reads this computer's own `PATH`, asserted in its shape
+    // and nothing else: which arm it takes is a fact about the machine running
+    // the test. The match has two arms and no wildcard, so a third variant — an
+    // error, which is the shape this whole fixture is about the absence of —
+    // would not compile here.
+    let on_this_machine = Availability::on_this_machine();
+    let sentence = on_this_machine.explain();
+    assert!(
+        !sentence.is_empty(),
+        "{id}: a probe of this machine answered with no sentence at all"
+    );
+    for phrase in OVERCLAIMS {
+        assert!(
+            !overclaims(&sentence, phrase),
+            "{id}: the sentence about this machine makes the claim `{phrase}`"
+        );
+    }
+    match on_this_machine {
+        Availability::Found { runtime, .. } => {
+            assert!(
+                Runtime::ALL.contains(&runtime),
+                "{id}: a probe of this machine reported a runtime no search would have looked for"
+            );
+            assert!(
+                sentence.starts_with("Checks can run in a container: "),
+                "{id}: a runtime that was found was described in words the fixture does not declare: \
+                 {sentence}"
+            );
+        }
+        Availability::Absent => {
+            // On a machine with nothing on its `PATH`, the probe's answer is the
+            // fixture's answer word for word. On one with a runtime, that
+            // assertion is not made — and the sentence is still held to the same
+            // shape above.
+            assert_declared_answer(id, "sentence", json!(sentence), declared);
+        }
+    }
+
+    assert_eq!(
+        shipped_project_files(id),
+        files_before,
+        "{id}: the fixture's own project changed while it was being read"
+    );
+
+    // The search paths this test owned, removed rather than left behind: every
+    // file under them was written here, under the repository's own ignored
+    // directory, and a test that leaves its own state around is one the next run
+    // has to reason about.
+    std::fs::remove_dir_all(&scratch.project).unwrap_or_else(|error| {
+        panic!(
+            "{id}: cannot remove the scratch directory {}: {error}",
+            scratch.project.display()
+        )
+    });
+    assert!(
+        !scratch.project.exists(),
+        "{id}: the scratch directories are still there after the test"
+    );
+}
+
+#[test]
+fn every_execution_trust_fixture_these_assertions_name_is_a_fixture_this_repository_ships() {
+    // The guard every list in this file has, for the same reason: a renamed
+    // directory would make every assertion below about a project nobody ships.
+    for id in EXECUTION_TRUST_FIXTURES {
+        let dir = fixture(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+        // The two shapes this one list mixes, asserted rather than described: a
+        // reader who took it for a language list would expect both members to
+        // be runnable, and one of them is deliberately not.
+        let block = match *id {
+            "dynamic-not-authorized" => execution_block(id),
+            _ => container_block(id),
+        };
+        assert!(
+            block.get("control").is_some(),
+            "{id}/scenario.json declares no control, and a fixture whose answer is a permission or \
+             an absence is worth nothing without one"
+        );
+        assert!(
+            block["control"]["moved"]["what"].as_str().is_some(),
+            "{id}/scenario.json declares a control that does not say what moved"
+        );
+        assert!(
+            !block["control"]["why"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty(),
+            "{id}/scenario.json declares a control with no reason given"
+        );
+    }
+    // The one that ships a `package.json` is a Node application, so the
+    // runnability sweep in `fixture_apps.rs` owns it too and the two lists must
+    // agree about that. The other ships no manifest at all — the absence it is
+    // about is a fact about the computer — so no language list may claim it.
+    assert!(
+        fixture("dynamic-not-authorized")
+            .join("package.json")
+            .is_file(),
+        "dynamic-not-authorized declares a dynamic check, and a dynamic check needs a manifest to \
+         declare it in"
+    );
+    for manifest in [
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "Cargo.toml",
+    ] {
+        assert!(
+            !fixture("container-unavailable").join(manifest).is_file(),
+            "container-unavailable ships a {manifest}, and the case is a fact about the machine \
+             rather than about the project"
+        );
+    }
+}
+
+#[test]
+fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_own_file() {
+    let id = "dynamic-not-authorized";
+    let block = execution_block(id);
+    assert_the_outcomes_account_for_the_declared_expectation(id, &block);
+
+    // The fixture is the project it declares, asserted before either run, so a
+    // fixture edited without this file being edited stays a red test.
+    assert_eq!(
+        shipped_project_files(id),
+        declared_lines(&block["project"]["files"], "the declared project"),
+        "{id} ships a different project from the one it declares"
+    );
+    let files_before = shipped_project_files(id);
+    let root = fixture(id);
+    let declared = &block["expect"];
+
+    // The user's own configuration root, under the repository's ignored
+    // `target/tmp`. The machine's real configuration directory is never read and
+    // never written: `Paths::from_roots` is the same constructor `sure check`
+    // uses when it is pointed somewhere else, and the file the control writes
+    // goes into a directory this test owns.
+    let scratch = Scratch::under("adversarial execution trust controls", id);
+    let paths = Paths::from_roots(scratch.project.join("data"), scratch.project.join("config"))
+        .unwrap_or_else(|error| {
+            panic!("{id}: cannot put SURE's configuration root under target/tmp: {error}")
+        });
+    // `Paths::from_roots` validates the two roots and creates neither, so the
+    // directory the control's file goes in is made here — by this test, under
+    // `target/tmp`, and never in the machine's real configuration directory.
+    for root in [scratch.project.join("data"), scratch.project.join("config")] {
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("{id}: cannot create {}: {error}", root.display()));
+    }
+    assert!(
+        !paths.user_config_file().is_file(),
+        "{id}: the control's configuration file is there before the fixture has run, so the two \
+         halves would not be one file apart"
+    );
+
+    // The fixture's own `sure.yaml` asks for execution and cannot grant it. The
+    // request is asserted rather than assumed, because a build that read the
+    // mode out of the project would show the check below as allowed.
+    let authority = Authority::load(&root, &paths.user_config_file())
+        .unwrap_or_else(|error| panic!("{id}: cannot read the fixture's configuration: {error}"));
+    let asked = authority.privileges();
+    assert_declared_answer(id, "project_ask_count", json!(asked.len()), declared);
+    assert_declared_answer(id, "project_ask_request", json!(asked[0].request), declared);
+    assert_declared_answer(
+        id,
+        "project_ask_asked_by",
+        json!(
+            asked[0]
+                .asked_by
+                .iter()
+                .map(|layer| layer.as_str())
+                .collect::<Vec<_>>()
+        ),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "project_ask_refused_escalation",
+        json!(asked[0].is_refused_escalation()),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "project_ask_granted",
+        json!(asked[0].is_granted()),
+        declared,
+    );
+
+    // The run: SURE's real pipeline, over the project where it ships, under the
+    // settings the authority resolved to and nothing else.
+    let outcome = pipelined_with(&root, None, authority.execution());
+    let record = record_of(&outcome);
+    assert_eq!(
+        record.mode,
+        authority.execution().mode,
+        "{id}: the run's mode is not the one the configuration resolved to, so what is asserted \
+         below is a run nobody asked for"
+    );
+    assert_declared_answer(id, "mode", json!(record.mode), declared);
+    assert_declared_answer(
+        id,
+        "run_project_code",
+        json!(record.permissions.run_project_code),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "plan_checks",
+        json!(record.schedule.checks().len()),
+        declared,
+    );
+
+    // The check the declared script became, found by id rather than by position:
+    // a plan that reordered its entries would still be the same plan.
+    let check_id = declared["check_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the fixture declares no check id"))
+        .to_owned();
+    let check = record
+        .schedule
+        .checks()
+        .iter()
+        .find(|check| check.proposal().id().as_str() == check_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: the plan no longer holds the check the fixture declares. It holds: {:?}",
+                record
+                    .schedule
+                    .checks()
+                    .iter()
+                    .map(|check| check.proposal().id().as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_declared_answer(id, "check_title", json!(check.proposal().title()), declared);
+    assert_declared_answer(id, "check_may_run", json!(check.may_run()), declared);
+    assert_declared_answer(id, "check_decision", json!(check.decision()), declared);
+    assert_declared_answer(id, "check_blocked_by", json!(check.blocked_by()), declared);
+
+    // What became of it. The status is `skipped` and never a "not authorized"
+    // one: the frozen vocabulary in `crates/sure-domain/src/status.rs` has no
+    // such status, and a build that invented one would fail here.
+    let result = record
+        .report
+        .results()
+        .iter()
+        .find(|result| result.id.as_str() == check_id)
+        .unwrap_or_else(|| {
+            panic!("{id}: the run produced no result for the check the fixture declares")
+        });
+    assert_declared_answer(id, "check_status", json!(result.status), declared);
+    assert_declared_answer(
+        id,
+        "check_not_checked_reason",
+        json!(result.not_checked_reason),
+        declared,
+    );
+    assert_declared_answer(id, "check_reason", json!(result.reason), declared);
+    assert_declared_answer(
+        id,
+        "check_evidence_class",
+        json!(result.evidence_class),
+        declared,
+    );
+    assert_declared_answer(id, "check_critical", json!(result.critical), declared);
+    assert_declared_answer(id, "check_severity", json!(result.severity), declared);
+    assert_declared_answer(
+        id,
+        "refusals",
+        json!(unauthorised_refusals(&outcome)),
+        declared,
+    );
+
+    // Visible in four places, because a field on a struct is not a report a
+    // person reads: in the verdict's own list of checks that did not run, in the
+    // coverage summary, in the aggregate's list of critical checks that were not
+    // checked and in the count `render_summary` prints. The last of those is
+    // asserted with the whole summary below.
+    assert_declared_answer(
+        id,
+        "not_checked_count",
+        json!(record.verdict.not_checked.len()),
+        declared,
+    );
+    assert!(
+        record
+            .verdict
+            .not_checked
+            .iter()
+            .any(|listed| listed.id.as_str() == check_id),
+        "{id}: the verdict no longer lists the refused check among the ones that did not run: {:?}",
+        record
+            .verdict
+            .not_checked
+            .iter()
+            .map(|listed| listed.id.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_declared_answer(
+        id,
+        "coverage_checked",
+        json!(record.coverage.checked_count),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "coverage_skipped",
+        json!(record.coverage.skipped_count),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "coverage_could_not_run",
+        json!(record.coverage.could_not_run_count),
+        declared,
+    );
+    let entry = record
+        .coverage
+        .not_checked
+        .iter()
+        .find(|entry| entry.check_id == check_id)
+        .unwrap_or_else(|| {
+            panic!("{id}: the coverage summary does not list the refused check as not checked")
+        });
+    assert_eq!(
+        entry.reason,
+        declared["check_reason"].as_str().unwrap_or_default(),
+        "{id}: the reason in the coverage summary is not the frozen sentence the result carries"
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_severity",
+        json!(record.verdict.aggregate.severity),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_headline",
+        json!(record.verdict.aggregate.headline),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_skipped",
+        json!(record.verdict.aggregate.counts.skipped),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_unknown",
+        json!(record.verdict.aggregate.counts.unknown),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "critical_not_checked",
+        json!(
+            record
+                .verdict
+                .aggregate
+                .coverage
+                .critical_not_checked
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+        ),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "blocking",
+        json!(
+            record
+                .verdict
+                .aggregate
+                .blocking
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+        ),
+        declared,
+    );
+    assert_declared_answer(
+        id,
+        "is_ready_for_hand_off",
+        json!(record.verdict.is_ready_for_hand_off()),
+        declared,
+    );
+
+    // The whole of what a person reads, by equality rather than by substring.
+    // The count of checks that could not run is one of these lines, and so is
+    // `No open findings.` — which is why the count has to be there, or a reader
+    // takes the silence for a pass on the one thing SURE could not do.
+    assert_declared_answer(
+        id,
+        "summary_lines",
+        json!(rendered_summary(&outcome)),
+        declared,
+    );
+
+    // And nothing was invented about the project: the `must_fix` on the check is
+    // the weight of the check, not a verdict about code nobody ran.
+    assert_eq!(
+        record.candidates.material.len(),
+        0,
+        "{id}: an unauthorised check produced a material finding about the project"
+    );
+    assert_eq!(
+        record.candidates.style_noise.len(),
+        0,
+        "{id}: an unauthorised check produced a style-noise candidate"
+    );
+
+    // The control. One thing moves, and it is not in the project: the user's own
+    // configuration file appears, granting what the project's file asked for.
+    let control = &block["control"];
+    assert_eq!(
+        control["moved"]["what"].as_str(),
+        Some("the user's own configuration file"),
+        "{id}: the control says it moved something other than the user's own file, and a control \
+         that changed the project would measure a different thing"
+    );
+    let grant = control["moved"]["file"]["contents"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the control declares no file to write"));
+    std::fs::write(paths.user_config_file(), grant).unwrap_or_else(|error| {
+        panic!(
+            "{id}: cannot write the control's configuration file at {}: {error}",
+            paths.user_config_file().display()
+        )
+    });
+
+    let control_authority = Authority::load(&root, &paths.user_config_file())
+        .unwrap_or_else(|error| panic!("{id}: cannot read the control's configuration: {error}"));
+    let control_asked = control_authority.privileges();
+    let declared_control = &control["expect"];
+    assert_declared_answer(
+        id,
+        "project_ask_count",
+        json!(control_asked.len()),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "project_ask_asked_by",
+        json!(
+            control_asked[0]
+                .asked_by
+                .iter()
+                .map(|layer| layer.as_str())
+                .collect::<Vec<_>>()
+        ),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "project_ask_refused_escalation",
+        json!(control_asked[0].is_refused_escalation()),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "project_ask_granted",
+        json!(control_asked[0].is_granted()),
+        declared_control,
+    );
+
+    let control_outcome = pipelined_with(&root, None, control_authority.execution());
+    let control_record = record_of(&control_outcome);
+    assert_eq!(
+        control_record.project_root, record.project_root,
+        "{id}: the control read a different project, so what it measures is no longer the file"
+    );
+    assert_declared_answer(id, "mode", json!(control_record.mode), declared_control);
+    assert_declared_answer(
+        id,
+        "run_project_code",
+        json!(control_record.permissions.run_project_code),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "plan_checks",
+        json!(control_record.schedule.checks().len()),
+        declared_control,
+    );
+    let control_check = control_record
+        .schedule
+        .checks()
+        .iter()
+        .find(|check| check.proposal().id().as_str() == check_id)
+        .unwrap_or_else(|| {
+            panic!("{id}: the control's plan no longer holds the check the fixture declares")
+        });
+    assert_declared_answer(
+        id,
+        "check_may_run",
+        json!(control_check.may_run()),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "check_decision",
+        json!(control_check.decision()),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "check_blocked_by",
+        json!(control_check.blocked_by()),
+        declared_control,
+    );
+    let control_result = control_record
+        .report
+        .results()
+        .iter()
+        .find(|result| result.id.as_str() == check_id)
+        .unwrap_or_else(|| {
+            panic!("{id}: the control produced no result for the check the fixture declares")
+        });
+    assert_declared_answer(
+        id,
+        "check_status",
+        json!(control_result.status),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "check_not_checked_reason",
+        json!(control_result.not_checked_reason),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "check_reason",
+        json!(control_result.reason),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "coverage_checked",
+        json!(control_record.coverage.checked_count),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "coverage_skipped",
+        json!(control_record.coverage.skipped_count),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "coverage_could_not_run",
+        json!(control_record.coverage.could_not_run_count),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_skipped",
+        json!(control_record.verdict.aggregate.counts.skipped),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_unknown",
+        json!(control_record.verdict.aggregate.counts.unknown),
+        declared_control,
+    );
+
+    // The negative half, by the predicate rather than by a count: with the
+    // user's own file granting execution, no result anywhere in the run carries
+    // the not-authorized reason. A reporter hard-wired to deny — the failure
+    // this fixture exists to catch — satisfies every positive assertion above
+    // and fails here.
+    assert!(
+        !control_record
+            .report
+            .results()
+            .iter()
+            .any(|result| result.not_checked_reason
+                == Some(NotCheckedReason::ExecutionNotAuthorized)),
+        "{id}: a check the user's own file authorised was still refused as unauthorised: {:?}",
+        control_record
+            .report
+            .results()
+            .iter()
+            .map(|result| (result.id.as_str(), result.not_checked_reason))
+            .collect::<Vec<_>>()
+    );
+    assert_declared_answer(
+        id,
+        "refusals",
+        json!(unauthorised_refusals(&control_outcome)),
+        declared_control,
+    );
+
+    // And the difference is asserted as a difference, in both directions: the
+    // two halves of one fixture are one file apart and their answers must not be
+    // the same, or the fixture measures nothing.
+    assert_ne!(
+        unauthorised_refusals(&control_outcome),
+        unauthorised_refusals(&outcome),
+        "{id}: the same run with the user's own file present and absent refused the same number of \
+         checks, so nothing here is being measured"
+    );
+    assert_ne!(
+        json!(control_record.mode),
+        json!(record.mode),
+        "{id}: the mode did not move, so the file the control writes is not what decides it"
+    );
+
+    // What moved is declared rather than left to be read off: the two answer
+    // blocks must differ in exactly the keys the fixture names, so a change that
+    // moved something else — or stopped moving something — is a red test.
+    assert_eq!(
+        disagreeing_keys(declared, declared_control),
+        declared_lines(&control["moved"]["keys"], "the keys the control moves"),
+        "{id}: the keys the control moves are not the keys the two declarations disagree about"
+    );
+
+    // What did *not* move, asserted beside it: consent changes what SURE is
+    // allowed to do and does not make anything checked. The summary a person
+    // reads is the same six lines on both sides, word for word — that is the
+    // honest half of this fixture, and a later build that learns to carry a
+    // planned check out will have to change this declaration deliberately rather
+    // than discover it.
+    assert_declared_answer(
+        id,
+        "summary_lines",
+        json!(rendered_summary(&control_outcome)),
+        declared_control,
+    );
+    assert_eq!(
+        rendered_summary(&control_outcome),
+        rendered_summary(&outcome),
+        "{id}: granting execution changed the summary a person reads, and a check that is no longer \
+         refused is still not a check that ran"
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_headline",
+        json!(control_record.verdict.aggregate.headline),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "aggregate_severity",
+        json!(control_record.verdict.aggregate.severity),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "not_checked_count",
+        json!(control_record.verdict.not_checked.len()),
+        declared_control,
+    );
+    assert!(
+        !control_record.verdict.is_ready_for_hand_off(),
+        "{id}: the control reports the project ready to hand off, and nothing in it was checked"
+    );
+
+    assert_eq!(
+        shipped_project_files(id),
+        files_before,
+        "{id}: a run wrote into the fixture's own project"
+    );
+
+    // The configuration root this test owned, removed rather than left behind:
+    // the only file under it is the user's grant, and it is under the
+    // repository's own ignored directory rather than anybody's real one.
+    std::fs::remove_dir_all(&scratch.project).unwrap_or_else(|error| {
+        panic!(
+            "{id}: cannot remove the scratch directory {}: {error}",
+            scratch.project.display()
+        )
+    });
+    assert!(
+        !scratch.project.exists(),
+        "{id}: the configuration root this test wrote is still there after the test"
     );
 }

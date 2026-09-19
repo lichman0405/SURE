@@ -91,10 +91,22 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// The fixtures this task implemented, named rather than discovered.
+/// Every Node fixture this repository ships, named rather than discovered.
 ///
 /// A test that discovered them would pass on an empty directory, which is the
 /// one way this file could quietly stop testing anything.
+///
+/// `P14-T001`'s six are what this list meant when it was written.
+/// `dynamic-not-authorized` joined it in `P14-T006` because the rule
+/// [`every_runnable_fixture_directory_is_named_in_this_file`] applies is about
+/// the manifest rather than about a task: a directory that ships a
+/// `package.json` is a Node application, and a Node fixture left out of this
+/// list would be excused the entry point, runnability, schema and false-green
+/// checks every other one gets. What the list does **not** mean is that the
+/// halves are graded by the same test — this file checks the artefacts, and
+/// `dynamic-not-authorized`'s answers come out of SURE's real pipeline in
+/// `crates/sure-core/tests/adversarial_fixture_detection.rs`, where the task
+/// that wrote it is named by [`EXECUTION_TRUST_FIXTURES`] below.
 const TYPESCRIPT_FIXTURES: &[&str] = &[
     "fake-payment",
     "fake-auth",
@@ -102,6 +114,7 @@ const TYPESCRIPT_FIXTURES: &[&str] = &[
     "dead-button",
     "demo-analytics",
     "route-mismatch",
+    "dynamic-not-authorized",
 ];
 
 /// The `P14-T002` fixtures, named for the same reason as the list above.
@@ -137,6 +150,27 @@ const CLAIM_FIXTURES: &[&str] = &["tests-not-run", "stale-test-evidence", "unkno
 /// supplied in-process", because the second would then be read as a claim about
 /// the first.
 const INTENT_FIXTURES: &[&str] = &["missing-user-intent", "intent-mismatch"];
+
+/// The `P14-T006` fixtures: the two halves of execution trust.
+///
+/// *May SURE run this project's code*, and *what would it run it in*. The first
+/// is a permission nobody has granted — a check that is refused and must stay
+/// visible as refused — and the second is a container runtime this computer does
+/// not have, where the honest answer is a value with a sentence rather than an
+/// error. They are one list because they are one question asked twice: what
+/// SURE is allowed to do, and what it can do it in.
+///
+/// This list is a fourth thing a list in this file can mean, and it is why the
+/// pair is not chained into `TYPESCRIPT_FIXTURES` and its siblings: a list that
+/// meant "runnable with npm" cannot also mean "answers to SURE's own pipeline",
+/// because the second would then be read as a claim about the first. The two
+/// members are deliberately not the same shape, and
+/// `every_execution_trust_fixture_is_a_directory_this_repository_ships` asserts
+/// both halves of that rather than leaving it to be inferred: the first ships a
+/// `package.json` and is therefore in `TYPESCRIPT_FIXTURES` as well, and the
+/// second ships no manifest at all, because the absence it is about is a fact
+/// about the computer rather than about the project.
+const EXECUTION_TRUST_FIXTURES: &[&str] = &["dynamic-not-authorized", "container-unavailable"];
 
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
@@ -175,6 +209,16 @@ const FIXTURES_WITHOUT_A_MANIFEST_CASE: &[(&str, &str)] = &[
          candidate about it, so the row's trap — a claim made without trusted intent — is not this \
          fixture's defect and renaming this directory after that case would make its row grade a fixture \
          that has exactly the trusted intent the row is about the absence of",
+    ),
+    (
+        "container-unavailable",
+        "every case in the manifest is about a defect in a project — a payment path that contacts nobody, \
+         a route that was never built, a claim with no recording behind it — and none of them is about a \
+         machine. The nearest by name, `dynamic-not-authorized`, is a different defect: there a check was \
+         *refused* by a rule about consent, and its refusal is the thing that has to stay visible; here \
+         nothing is refused by the absence at all, because nothing in this build asks whether a container \
+         runtime is there. Renaming this fixture after that case would make its row grade a fixture whose \
+         check is planned and denied when this one's is never planned",
     ),
 ];
 
@@ -283,6 +327,7 @@ fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
         .chain(RUST_FIXTURES)
         .chain(CLAIM_FIXTURES)
         .chain(INTENT_FIXTURES)
+        .chain(EXECUTION_TRUST_FIXTURES)
         .copied()
 }
 
@@ -1023,6 +1068,90 @@ fn every_python_fixture_is_a_directory_this_repository_ships() {
         assert!(
             !PYTHON_FIXTURES.contains(id),
             "{id} is in both lists, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn every_execution_trust_fixture_is_a_directory_this_repository_ships() {
+    // The guard every other list in this file has, for the same reason: a
+    // renamed directory would make every assertion about it — here and in
+    // `crates/sure-core/tests/adversarial_fixture_detection.rs`, which names the
+    // same two — about a project nobody ships.
+    for id in EXECUTION_TRUST_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+        assert!(
+            !scenario_text(id).contains(NOT_IMPLEMENTED),
+            "fixtures/adversarial/{id}/scenario.json is still a stub"
+        );
+    }
+
+    // The two members are not the same shape, and that is the point rather than
+    // an accident: a reader who took this list for a language list would expect
+    // both to be runnable, and one of them is deliberately not.
+    //
+    // `dynamic-not-authorized` declares a `test` script that becomes a planned
+    // check, so it ships a manifest and the sweep above owns it.
+    let node = fixture_dir("dynamic-not-authorized");
+    assert!(
+        node.join("package.json").is_file(),
+        "dynamic-not-authorized declares a dynamic check, and a dynamic check needs a manifest to \
+         declare it in"
+    );
+    assert!(
+        TYPESCRIPT_FIXTURES.contains(&"dynamic-not-authorized"),
+        "dynamic-not-authorized ships a package.json and TYPESCRIPT_FIXTURES does not name it, so \
+         the runnability sweep is not checking the fixture that has the most to be wrong"
+    );
+
+    // `container-unavailable` ships no manifest at all: the absence it is about
+    // is a fact about the computer, so there is no language half to run and no
+    // language list may claim one.
+    let container = fixture_dir("container-unavailable");
+    for manifest in [
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "Cargo.toml",
+    ] {
+        assert!(
+            !container.join(manifest).is_file(),
+            "container-unavailable ships a {manifest}: the case is a fact about the machine rather \
+             than about the project, so there is no language half for a runnability sweep to run"
+        );
+    }
+    for (name, list) in [
+        ("TYPESCRIPT_FIXTURES", TYPESCRIPT_FIXTURES),
+        ("PYTHON_FIXTURES", PYTHON_FIXTURES),
+        ("RUST_FIXTURES", RUST_FIXTURES),
+        ("CLAIM_FIXTURES", CLAIM_FIXTURES),
+        ("INTENT_FIXTURES", INTENT_FIXTURES),
+    ] {
+        assert!(
+            !list.contains(&"container-unavailable"),
+            "container-unavailable is in {name} as well as in EXECUTION_TRUST_FIXTURES, so one of \
+             the two halves is misdescribed"
+        );
+    }
+
+    // And neither half is a second name for a fixture another task already
+    // lists: the answer these two are graded on comes out of SURE's pipeline,
+    // which is what makes them one list rather than four entries scattered
+    // across the ones above.
+    for id in EXECUTION_TRUST_FIXTURES {
+        assert!(
+            !INTENT_FIXTURES.contains(id) && !CLAIM_FIXTURES.contains(id),
+            "{id} is in EXECUTION_TRUST_FIXTURES and in a list about a different answer, so one of \
+             the two is misdescribed"
         );
     }
 }

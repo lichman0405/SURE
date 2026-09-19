@@ -1,0 +1,191 @@
+{
+  "id": "intent-mismatch",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "description": "A small Node project that serves one route, and an explicit user goal asking for something it does not have. The project is not defective: what it does, it does. The gap is between the request and the code, and the question the fixture answers is how far SURE is allowed to go in saying so — one candidate, at the weakest level the gravity rule allows, filed as style noise rather than as a blocker.",
+  "intent_comparison": {
+    "read_by": {
+      "module": "crates/sure-core/src/intent_implementation.rs",
+      "function": "compare_intent_to_project",
+      "plain_report_module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "route": "the goal yields no keyword anchor in the project, so `build_findings` emits one `declared_intent_proposal` through `gravity_of(EvidenceClass::Inference, Reach::NotProduction, GapKind::DeclaredIntent)`, and the aggregator files it as style noise",
+      "returns": "one `CheckProposal` at `Severity::Note`, `critical == false`, `EvidenceClass::Inference`, which `is_style_noise` keeps out of `material()`"
+    },
+    "goal_text": "add CSV export of the monthly totals",
+    "why_no_goal_in_the_project": "The goal is supplied in-process rather than written into the project, because an explicit goal is a statement about the project, not a file inside it. `sure_core::project_intent::explicit_goal` is the door the `--goal` flag goes through, so what is graded is the path a real request takes.",
+    "project": {
+      "files": ["src/invoices.js", "src/server.js"],
+      "route": "/invoices, declared in src/server.js line 4"
+    },
+    "expect": {
+      "requirement_claim": "comparable",
+      "intent_caveat": null,
+      "user_requirements_checked": 1,
+      "matched": 0,
+      "unmatched": 1,
+      "limitation": null,
+      "findings": 1,
+      "finding_id": "chk_intentunmatched73e4cdd0384d3b2b",
+      "finding_title": "requirement `add CSV export of the monthly totals` has no implementation evidence",
+      "finding_severity": "note",
+      "finding_critical": false,
+      "finding_evidence_class": "inference",
+      "finding_because": "SURE found `add CSV export of the monthly totals` in goal on line 1.",
+      "aggregate_material": 0,
+      "aggregate_style_noise": 1,
+      "aggregate_duplicates_dropped": 0,
+      "not_checked": 1,
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings.",
+        "1 check(s) could not run or were skipped."
+      ]
+    },
+    "control": {
+      "moved": {
+        "what": "the project",
+        "from": "src/invoices.js and src/server.js, the fixture exactly as it ships",
+        "to": "the same two files, byte for byte, plus one file: src/csv-export.js",
+        "added_file": {
+          "path": "src/csv-export.js",
+          "first_line": "// csv export of the monthly totals for the billing screen",
+          "contents": "// csv export of the monthly totals for the billing screen\nfunction csvExport() {\n  return [];\n}\n\nmodule.exports = { csvExport };\n"
+        }
+      },
+      "why": "One thing moves and it is not the goal: the same request is compared against the same project with one file added, and the answer must reach the opposite conclusion. The test copies the fixture's own two files verbatim rather than restating them, asserts the control's file list is the fixture's plus exactly this one path, and asserts the shared files are byte-identical before it reads an outcome — so a second difference cannot hide in the project. A checker that reported every stated requirement as unimplemented would satisfy the fixture's outcome above and fails here.",
+      "goal_text": "add CSV export of the monthly totals",
+      "expect": {
+        "requirement_claim": "comparable",
+        "intent_caveat": null,
+        "user_requirements_checked": 1,
+        "matched": 1,
+        "unmatched": 0,
+        "limitation": null,
+        "findings": 0,
+        "aggregate_material": 0,
+        "aggregate_style_noise": 0,
+        "aggregate_duplicates_dropped": 0,
+        "not_checked": 0,
+        "matched_anchor": {
+          "kind": "source_file",
+          "path": "src/csv-export.js",
+          "line": 1,
+          "context": "// csv export of the monthly totals for the billing screen"
+        },
+        "summary_lines": [
+          "Not enough could be checked to say whether this is ready.",
+          "This project is not ready to hand off.",
+          "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+          "No open findings."
+        ]
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "intent_implementation",
+      "family": "intent_implementation",
+      "surface": "intent_implementation",
+      "module": "crates/sure-core/src/intent_implementation.rs",
+      "reading_module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "detector": "compare_intent_to_project over an ExplicitUserGoal, then false_completion_aggregator::aggregate over what it returned",
+      "title": "an explicit goal nothing implements yields exactly one note, filed as style noise and not as material",
+      "status": "reported",
+      "requirement_claim": "comparable",
+      "intent_caveat": null,
+      "user_requirements_checked": 1,
+      "matched": 0,
+      "unmatched": 1,
+      "limitation": null,
+      "findings": 1,
+      "finding_id": "chk_intentunmatched73e4cdd0384d3b2b",
+      "finding_title": "requirement `add CSV export of the monthly totals` has no implementation evidence",
+      "finding_severity": "note",
+      "finding_critical": false,
+      "finding_evidence_class": "inference",
+      "finding_because": "SURE found `add CSV export of the monthly totals` in goal on line 1.",
+      "aggregate_material": 0,
+      "aggregate_style_noise": 1,
+      "aggregate_duplicates_dropped": 0,
+      "not_checked": 1,
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings.",
+        "1 check(s) could not run or were skipped."
+      ],
+      "why": "The acceptance sentence is *explicit intent mismatch can yield grounded finding*, and what this outcome records is how far that reaches today, by equality rather than by paraphrase. One requirement was checked and exactly one came back unmatched; `limitation` is `None`, which is what separates this fixture from `missing-user-intent` — SURE had a request and compared against it. The one proposal is `Severity::Note`, non-critical and `EvidenceClass::Inference`, which `false_completion_aggregator`'s `is_style_noise` rule files in `style_noise()`, so the report shows it in the noise bucket while `material()` is empty. Both buckets are asserted, because `style_noise == 1` alone would be satisfied by a proposal that also appeared in `material()`. The title, the identifier and the sentence a reader is shown are compared whole: the identifier is `check_id(\"goal\", \"intentunmatched\")`, so a change to how a requirement is named changes it and this test goes red. `not_checked` is asserted at one because the plan surfaces the proposal as a check that could not run, and the last line of the summary is that count — a sentence a reader sees and would otherwise take on the product's word."
+    },
+    {
+      "kind": "ceiling",
+      "family": "intent_implementation",
+      "surface": "intent_implementation",
+      "module": "crates/sure-core/src/intent_implementation.rs",
+      "reading_module": "crates/sure-domain/src/finding.rs",
+      "detector": "AssessmentSource::Inference::supports_severity(Severity::MustFix)",
+      "title": "the same proposal cannot reach must_fix, because its evidence class cannot support it",
+      "status": "reported",
+      "evidence_class": "inference",
+      "cannot_support": "must_fix",
+      "supports_must_fix": false,
+      "why": "This is the half that says *why* the level above is what it is rather than merely that it is. `supports_severity` returns true for every source when the severity does not block hand-off, so a `note` is grounded the moment it has one evidence item — and `Severity::MustFix` is the only severity that blocks hand-off, so `AssessmentSource::Inference` cannot carry it. The rule is asserted as a fact of the source rather than read off this proposal, and the proposal's own class is asserted equal to it, so a change that promoted the proposal's severity would fail here as well as above. Raising it would make every requirement SURE failed to keyword-match a hand-off blocker, and `evaluation/acceptance-manifest.json` asks for `note` on the case this comparison belongs to."
+    },
+    {
+      "kind": "control",
+      "family": "intent_implementation",
+      "surface": "intent_implementation",
+      "module": "crates/sure-core/src/discover/mod.rs",
+      "reading_module": "crates/sure-core/src/intent_implementation.rs",
+      "status": "not_checked",
+      "title": "the same goal with the implementing file present",
+      "goal_text": "add CSV export of the monthly totals",
+      "moved_file": "src/csv-export.js",
+      "requirement_claim": "comparable",
+      "intent_caveat": null,
+      "user_requirements_checked": 1,
+      "matched": 1,
+      "unmatched": 0,
+      "limitation": null,
+      "findings": 0,
+      "aggregate_material": 0,
+      "aggregate_style_noise": 0,
+      "aggregate_duplicates_dropped": 0,
+      "not_checked": 0,
+      "matched_anchor": {
+        "kind": "source_file",
+        "path": "src/csv-export.js",
+        "line": 1,
+        "context": "// csv export of the monthly totals for the billing screen"
+      },
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings."
+      ],
+      "why": "The control the fixture cannot do without. A reporter that called every stated requirement unimplemented would satisfy the outcome above; with the file present the answer must flip — one requirement matched, nothing unmatched, no proposal at all, and the rendered summary losing exactly the `1 check(s) could not run or were skipped.` line and gaining nothing. The file is added to a copy of the fixture's own two sources rather than to a project written out here, and the test asserts that copy differs from the fixture by that one path before it reads either answer."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "SURE stays silent about a requirement the user stated and nothing implements. The goal is a fact of the session, not a hint: a report that shows the capability line and `No open findings.` while saying nothing about the requested CSV export leaves the reader to conclude the request was met."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project is reported as ready to hand off, as passing, or as verified against the request. Nothing in this directory implements the export — no route, no command, no file — so any of those words is a green light on work that is not there."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The mismatch is raised above the level the gravity rule allows: `must_fix`, `critical = true`, a `Finding` rather than a candidate, or a hand-off blocker. The anchor is the requirement's own identifier, which is not a file a reader can open, and the statement is about SURE's reading rather than about the project. `evaluation/acceptance-manifest.json` asks for `note` on this case, and a wrong blocker is as serious here as a false green."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The project is reported as broken, or its `/invoices` route as a defect. The route is implemented and declared; what is missing is the thing the user asked for, and the two must not be conflated."
+    }
+  ],
+  "notes": "There is no case for this fixture in `evaluation/acceptance-manifest.json` — the five ids with no directory are `missing-user-intent`, `benign-test-mocks`, `dynamic-not-authorized`, `force-push` and `sensitive-read`, and none of them is an intent mismatch. It is named in `FIXTURES_WITHOUT_A_MANIFEST_CASE` in `crates/sure-testkit/tests/fixture_apps.rs` with the nearest row and the reason it is a different defect; `every_fixture_without_a_manifest_case_is_one_named_here` checks that claim against the manifest rather than trusting it. `expected_severity` and `release_blocking` are therefore the level the product actually reaches rather than a row copied from the contract, and they agree with `missing-user-intent`'s row because both cases are the same kind of statement: SURE reporting on its own reading of a request. SURE produces no `Finding` for this case at all, and the fixture does not pretend otherwise: what it pins is the permission — one note, style noise and not material, and a ceiling that cannot be raised through an `Inference` source. The pipeline is driven with `store: None`, so grading this fixture writes nothing anywhere, and the project is read where it ships rather than copied, so a fixture edited without the test being edited is a red test."
+}

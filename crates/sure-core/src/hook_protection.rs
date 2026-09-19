@@ -68,6 +68,18 @@
 //! sentence an allowance produces says *SURE would let this through*, and the
 //! limit is the same one every other answer in this module has.
 //!
+//! Since `P13-T010` the writer reads the settings as well as the words, because
+//! a grant is only worth recording where an act can be named at all: an act is
+//! named for a request SURE *holds*, a hold depends on the execution and
+//! protection settings in force, and a grant recorded under settings that hold
+//! nothing is one no request can ever spend. [`acts_a_request_could_be_held_for`]
+//! answers which acts are reachable and
+//! [`allowance_could_not_be_spent_reason`] is the sentence the writer refuses
+//! with when the answer is none. Both are questions put to [`assess_request`]
+//! rather than a second rule beside it, so what a user is told cannot drift from
+//! the rule that would answer their request. The *subject* is still unread at
+//! write time, for the reason `PROTECTION_MODE.md` gives.
+//!
 //! # Capability tier honesty
 //!
 //! Both integrations are **Observed** (Tier 1) and neither can confirm the
@@ -546,6 +558,38 @@ impl Danger {
             Self::SensitiveRead => SensitiveArea::SecretMaterial.consequence(PathRole::Read),
         }
     }
+
+    /// A list of acts as one sentence names them: the words of
+    /// [`Danger::as_str`], comma-separated with `or` before the last.
+    ///
+    /// One place lists the acts for every sentence that lists them, so that two
+    /// sentences a user meets — the confirmation `sure hook allow-once` writes
+    /// and the refusal it writes instead — cannot disagree about what an
+    /// allowance covers. Every act reads as a clause of *because it would …*,
+    /// which is the frame both sentences put them in, and that is why the list
+    /// of three reads as one sentence rather than three.
+    ///
+    /// An empty list is an empty string. No sentence here asks for one: a
+    /// sentence naming no act would be a sentence about nothing, and the two
+    /// callers both have a non-empty list by construction.
+    #[must_use]
+    pub fn in_a_sentence(acts: &[Self]) -> String {
+        let mut sentence = String::new();
+        for (index, act) in acts.iter().enumerate() {
+            if index > 0 {
+                sentence.push_str(match (index + 1, acts.len()) {
+                    // The comma is Oxford's and it is there for three or more:
+                    // "a or b" needs none, and "a, b, or c" is the list this
+                    // module's own sentences already write.
+                    (last, len) if last == len && len > 2 => ", or ",
+                    (last, len) if last == len => " or ",
+                    _ => ", ",
+                });
+            }
+            sentence.push_str(act.as_str());
+        }
+        sentence
+    }
 }
 
 /// What a force push costs, in the user's words.
@@ -716,6 +760,204 @@ fn word_names_a_whole_location(word: &str) -> bool {
     let folded = folded(word);
     let folded = folded.as_str();
     names_a_whole_location(folded, fold_segments(folded).count())
+}
+
+/// One request per way [`assess_request`] can reach a [`Danger`].
+///
+/// These are not examples, and the list is the whole of what a danger can be
+/// read from: a destructive command whose operand names a location, a push that
+/// replaces published commits, and strict mode's three path rules — a read of
+/// secret material, a change that names a whole location, and a change that
+/// names no path at all, which `sensitive_area` answers as the same
+/// whole-location change. Nothing else in [`assess_request`] can produce a
+/// danger, so the acts that some witness produces *are* the acts a request from
+/// this project could be held for.
+///
+/// The tool names are the harnesses' vocabulary, but no classifier reads them
+/// here: [`assess_request`] is handed the [`ActionKind`] directly, which is what
+/// the tool maps at the top of this module produce, so a witness cannot be
+/// right or wrong about an integration. `every_witness_names_its_danger` holds
+/// this list to the rule — it fails if a witness stops producing the danger it
+/// exists for, which is the only way the list can go stale.
+const DANGER_WITNESSES: [(ActionKind, ToolRequest<'static>); 5] = [
+    (
+        ActionKind::ArbitraryCommand,
+        ToolRequest::running("Bash", "rm -rf build/"),
+    ),
+    (
+        ActionKind::ArbitraryCommand,
+        ToolRequest::running("Bash", "git push --force"),
+    ),
+    (ActionKind::ReadFile, ToolRequest::at("Read", ".env")),
+    (
+        ActionKind::WriteProjectFile,
+        ToolRequest::at("Write", "build/"),
+    ),
+    (ActionKind::WriteProjectFile, ToolRequest::of("Write")),
+];
+
+/// Which of the three acts a request from this project could be held for, under
+/// one set of settings.
+///
+/// Empty means no allowance recorded under these settings can ever be spent:
+/// the three acts are the *only* thing an allowance lets through, an act is
+/// named only for a request SURE holds, and this answers whether any hold of
+/// that kind is reachable at all. `P13-T010` is the caller that has to say so to
+/// a user, and
+/// [`allowance_could_not_be_spent_reason`] is the sentence it says it with.
+///
+/// The answer is read off [`assess_request`] through [`DANGER_WITNESSES`] rather
+/// than computed from the settings by a second rule, which is the point: a rule
+/// stated twice is a rule that can be stated two ways, and this one decides
+/// whether SURE tells a user their grant is worth recording.
+#[must_use]
+pub fn acts_a_request_could_be_held_for(
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
+) -> Vec<Danger> {
+    let mut acts: Vec<Danger> = Vec::new();
+    for (action_kind, request) in DANGER_WITNESSES {
+        let Some(danger) =
+            assess_request(action_kind, &request, mode, permissions, protection).danger
+        else {
+            continue;
+        };
+        // In witness order, which is the order `Danger::ALL` declares, and
+        // once each: two witnesses name a broad delete and a sentence must not
+        // say so twice.
+        if !acts.contains(&danger) {
+            acts.push(danger);
+        }
+    }
+    acts
+}
+
+/// Why no allowance recorded under these settings could ever be spent, in the
+/// user's own words, when that is so.
+///
+/// `None` is the answer that matters: at least one of the three acts is
+/// reachable here, so a matching request can be held for it and spend the grant.
+/// `Some` is the sentence `sure hook allow-once` refuses with, and it names the
+/// setting that would have to change — `docs/security/PROTECTION_MODE.md` is
+/// careful to keep the setting *out* of the sentence a held request is answered
+/// with, because the user's next act there is allow or deny; here the user's
+/// next act is to change a setting, and a refusal that named the consequence
+/// and not the setting would leave them nothing to do with it.
+///
+/// Both recommendations are *asked of the same rule* rather than asserted —
+/// `host_confirmed` with the permission it needs, and `strict` with the settings
+/// unchanged — so the sentence can only offer a change that would work. A
+/// sentence telling a user to change the wrong setting is the failure this
+/// function is here to avoid.
+///
+/// **Settings only, and the limit is deliberate.** Whether the *subject* the
+/// user named is a request SURE would hold is not knowable here: there is no
+/// request to read when a grant is written, and reading the words for a danger
+/// would be a second rule about what is dangerous beside this module's. So a
+/// grant recorded in a project where some act is reachable may still be spent by
+/// nothing, and `docs/security/PROTECTION_MODE.md` says so.
+#[must_use]
+pub fn allowance_could_not_be_spent_reason(
+    mode: ExecutionMode,
+    permissions: &ExecutionPermissions,
+    protection: ProtectionMode,
+) -> Option<String> {
+    if !acts_a_request_could_be_held_for(mode, permissions, protection).is_empty() {
+        return None;
+    }
+
+    let opening = format!(
+        "A one-time allowance is spent by a request SURE holds because it would {}. Under the \
+         settings in force for this project no request can be held for any of those acts, so a \
+         grant would sit in SURE's store and be spent by nothing.",
+        Danger::in_a_sentence(Danger::ALL)
+    );
+
+    // The mode this release cannot apply is answered on its own, because it is
+    // the one value where nothing else about the settings is the cause: the
+    // reason is the value itself. The arm is here because a value this release
+    // cannot produce from a file is still a value this function is total over;
+    // `crate::config` refuses `custom` in a file and `hook.rs`'s reader falls
+    // back to `strict`, so no user reaches this sentence today.
+    if protection == ProtectionMode::Custom {
+        return Some(format!(
+            "{opening} `protection.mode` is `custom`, and this release cannot apply that mode. \
+             {CUSTOM_PROTECTION_EXPLANATION} {CUSTOM_PROTECTION_INSTEAD}"
+        ));
+    }
+
+    // The two settings that would make an act reachable, each verified against
+    // the rule before it is offered. The first is the user's own file naming a
+    // mode that runs project code, which is what grants `RunProjectCode`; the
+    // second is the stricter protection mode, which holds a read of secret
+    // material, and the permission an inspection already has is what lets that
+    // hold be reached (`Authority::permissions` starts from
+    // `ExecutionPermissions::inspect_only`).
+    let with_project_code = {
+        let mut permissions = permissions.clone();
+        permissions.run_project_code = true;
+        acts_a_request_could_be_held_for(ExecutionMode::HostConfirmed, &permissions, protection)
+    };
+    let with_strict = acts_a_request_could_be_held_for(mode, permissions, ProtectionMode::Strict);
+
+    let mut reason = opening;
+
+    // What is in force, and only it: each clause is here because it is a reason
+    // nothing is held, and a clause about a setting that is not blocking would
+    // be a sentence telling a user to change the wrong thing.
+    if !with_project_code.is_empty() {
+        reason.push_str(&format!(
+            " `execution.mode` is `{}` here, so SURE does not run this project's own code, and a \
+             command is refused on that ground before SURE asks what it would do.",
+            mode.as_str()
+        ));
+    }
+    if with_strict.is_empty() {
+        // Strict names a danger for a read of secret material and for a change
+        // that names a whole location, so a run under which neither is reachable
+        // is one whose permissions do not let SURE read or change a file. That
+        // is a set `Authority::permissions` cannot build — it starts from
+        // `inspect_only` — and the clause is here because this function is total
+        // over the values it takes, not because a user can meet it.
+        reason.push_str(
+            " The permissions in force do not let SURE read or change this project's own files, \
+             so not even the question strict protection asks about a read of secret material is \
+             reached.",
+        );
+    } else {
+        reason.push_str(&format!(
+            " `protection.mode` is `{}`, which asks no further question of its own about a read \
+             or a change.",
+            protection.as_str()
+        ));
+    }
+
+    // What would make one reachable, and nothing else. The user's own settings
+    // file is named as the file rather than as "your settings", because a
+    // project's `sure.yaml` cannot do this and a user who edited that one would
+    // have changed nothing (`P13-T009`).
+    if !with_project_code.is_empty() {
+        reason.push_str(&format!(
+            " Name `execution.mode: host_confirmed` in your own settings file — the one \
+             `sure doctor` prints, not the project's `sure.yaml` — which lets SURE run this \
+             project's own code on this machine; a request SURE holds because it would {} would \
+             then be within reach of an allowance.",
+            Danger::in_a_sentence(&with_project_code)
+        ));
+    }
+    if !with_strict.is_empty() {
+        reason.push_str(&format!(
+            " Set `protection.mode: strict`, and a request SURE holds because it would {} is \
+             within reach of one.",
+            Danger::in_a_sentence(&with_strict)
+        ));
+    }
+
+    reason.push_str(
+        " Nothing was written, and SURE records no allowance that a request here could not spend.",
+    );
+    Some(reason)
 }
 
 /// The sentence SURE answers with when the mode in force is the one this
@@ -1920,5 +2162,215 @@ mod tests {
                 "{tool} {path}"
             );
         }
+    }
+
+    // --- what the writer reads before it writes (`P13-T010`) ------------------
+
+    /// Settings under which nothing in `assess_request` stops a witness: the
+    /// user's own file named the mode that runs project code, and every
+    /// permission an act could need is granted. The three dangers are reachable
+    /// from here, which is what makes this the reading the witness list is
+    /// checked against.
+    fn everything_granted() -> ExecutionPermissions {
+        let mut permissions = writer();
+        permissions.run_project_code = true;
+        permissions
+    }
+
+    /// The witness list is the whole of what a danger can be read from, and this
+    /// is what holds it to that: each witness must produce the danger it exists
+    /// for under settings that reach every rule, and the five of them must name
+    /// all three acts. It fails if the rule changes so that a witness stops
+    /// naming its danger — the one way the list can go stale — and it fails if a
+    /// fourth act is added with no witness to reach it, because the acts the
+    /// list produces would then be shorter than the vocabulary.
+    #[test]
+    fn every_witness_names_its_danger() {
+        let permissions = everything_granted();
+        let expected = [
+            Danger::BroadDelete,
+            Danger::ForcePush,
+            Danger::SensitiveRead,
+            Danger::BroadDelete,
+            Danger::BroadDelete,
+        ];
+        for ((action_kind, request), expected) in DANGER_WITNESSES.iter().zip(expected) {
+            let assessment = assess_request(
+                *action_kind,
+                request,
+                ExecutionMode::HostConfirmed,
+                &permissions,
+                ProtectionMode::Strict,
+            );
+            assert_eq!(
+                assessment.danger,
+                Some(expected),
+                "{} is no longer held for {}",
+                request.subject().expect("every witness names a subject"),
+                expected.as_str()
+            );
+        }
+        assert_eq!(
+            acts_a_request_could_be_held_for(
+                ExecutionMode::HostConfirmed,
+                &permissions,
+                ProtectionMode::Strict
+            ),
+            Danger::ALL.to_vec(),
+            "an act in the vocabulary has no witness that reaches it"
+        );
+    }
+
+    /// The list the writer carries into its confirmation, at the settings that
+    /// decide it, and the invariant that the list and the refusal can never
+    /// disagree: a refusal is exactly the case where the list is empty.
+    #[test]
+    fn the_acts_left_for_an_allowance_are_read_off_the_rule() {
+        let inspect_only = ExecutionPermissions::inspect_only();
+        let runner = everything_granted();
+
+        // The default configuration — no `sure.yaml` that says anything and no
+        // user settings file — leaves nothing. This is the case the brief for
+        // `P13-T010` measured as the one every user is in.
+        assert_eq!(
+            acts_a_request_could_be_held_for(
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Standard
+            ),
+            Vec::new(),
+            "the default settings were read as leaving an act an allowance could be spent on"
+        );
+        // Strict puts one back, on the permission every run has: a read of a
+        // file credentials live in. So a grant written in this project is
+        // spendable, and the confirmation may say so.
+        assert_eq!(
+            acts_a_request_could_be_held_for(
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Strict
+            ),
+            vec![Danger::SensitiveRead]
+        );
+        // The user's own file naming the mode, with standard protection: the two
+        // destructive shell acts, in the order the vocabulary declares them, and
+        // the read is not among them because standard asks no question about a
+        // read.
+        assert_eq!(
+            acts_a_request_could_be_held_for(
+                ExecutionMode::HostConfirmed,
+                &runner,
+                ProtectionMode::Standard
+            ),
+            vec![Danger::BroadDelete, Danger::ForcePush]
+        );
+        // Everything at once, which is where a user who took both remedies
+        // lands: all three, once each, in the vocabulary's own order.
+        assert_eq!(
+            acts_a_request_could_be_held_for(
+                ExecutionMode::HostConfirmed,
+                &runner,
+                ProtectionMode::Strict
+            ),
+            Danger::ALL.to_vec()
+        );
+
+        // The invariant, over every combination the two enums and a few
+        // permission sets can make — including ones no authority builds.
+        let mut blind = ExecutionPermissions::inspect_only();
+        blind.inspect = false;
+        blind.write_project = false;
+        for mode in ExecutionMode::ALL {
+            for protection in ProtectionMode::ALL {
+                for permissions in [
+                    inspect_only.clone(),
+                    runner.clone(),
+                    writer(),
+                    blind.clone(),
+                ] {
+                    let acts = acts_a_request_could_be_held_for(*mode, &permissions, *protection);
+                    assert_eq!(
+                        allowance_could_not_be_spent_reason(*mode, &permissions, *protection)
+                            .is_none(),
+                        !acts.is_empty(),
+                        "{mode:?} {protection:?} {permissions:?}: the sentence and the list disagree"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The sentence a user reads in the settings they actually have, and the
+    /// rule that keeps its remedies honest: every change it offers must be one
+    /// the same rule says would work.
+    #[test]
+    fn the_refusal_names_the_setting_and_only_a_change_that_would_work() {
+        let reason = allowance_could_not_be_spent_reason(
+            ExecutionMode::InspectOnly,
+            &ExecutionPermissions::inspect_only(),
+            ProtectionMode::Standard,
+        )
+        .expect("the default settings leave nothing an allowance could be spent on");
+
+        // The setting — not the value alone — and the act the allowance is for.
+        for needle in [
+            "execution.mode",
+            "inspect_only",
+            "protection.mode",
+            "standard",
+            "host_confirmed",
+            "strict",
+            "sure doctor",
+            "sure.yaml",
+            "Nothing was written",
+        ] {
+            assert!(
+                reason.contains(needle),
+                "the refusal does not say {needle}: {reason}"
+            );
+        }
+        assert!(
+            reason.contains(&Danger::in_a_sentence(Danger::ALL)),
+            "the refusal does not name the acts an allowance covers: {reason}"
+        );
+
+        // And the case where one of the two remedies would not work: SURE may
+        // not read or change this project's files, so strict protection would
+        // ask its question of nobody. The sentence must offer the mode and not
+        // the protection, because a user who did as they were told and was
+        // refused again has been told the wrong thing.
+        let mut blind = ExecutionPermissions::inspect_only();
+        blind.inspect = false;
+        blind.write_project = false;
+        let reason = allowance_could_not_be_spent_reason(
+            ExecutionMode::InspectOnly,
+            &blind,
+            ProtectionMode::Standard,
+        )
+        .expect("no act is reachable when SURE may not read or change a file");
+        assert!(
+            reason.contains("execution.mode"),
+            "the refusal dropped a remedy that would work: {reason}"
+        );
+        assert!(
+            !reason.contains("Set `protection.mode: strict`"),
+            "the refusal offers a change that would leave the grant unspendable: {reason}"
+        );
+        assert!(
+            reason.contains("do not let SURE read or change"),
+            "the refusal does not say why that remedy is not offered: {reason}"
+        );
+
+        // The mode this release cannot apply is answered with the value named,
+        // and with the sentences the configuration reader already refuses it
+        // with rather than a second explanation of the same value.
+        let reason = allowance_could_not_be_spent_reason(
+            ExecutionMode::HostConfirmed,
+            &everything_granted(),
+            ProtectionMode::Custom,
+        )
+        .expect("a mode this release cannot apply holds every request, so no act is reachable");
+        assert!(reason.contains("`protection.mode` is `custom`"), "{reason}");
+        assert!(reason.contains(CUSTOM_PROTECTION_INSTEAD), "{reason}");
     }
 }

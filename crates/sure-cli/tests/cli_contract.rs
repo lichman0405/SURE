@@ -48,6 +48,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use sure_core::config::{Authority, ProtectionMode};
+use sure_core::execution::ExecutionMode;
 use sure_core::hook_protection::{Danger, ProtectionDecisionKind};
 use sure_core::paths::Paths;
 use sure_core::protection_history;
@@ -266,12 +268,15 @@ const EVERY_COMMAND: &[&[&str]] = &[
     &["config", "show"],
     &["config", "validate"],
     &["hook", "ingest"],
-    // A one-time allowance, recorded against the store this file named and
-    // against the directory the child process starts in — the default for
-    // `--project`, and a directory that is not the store. It writes one row,
-    // into a store that belongs to this test, for a request that does nothing
-    // anywhere, so the run is destructive in shape and inert in fact, like
-    // `history delete --all` above.
+    // A one-time allowance, asked against the store this file named and against
+    // the directory the child process starts in — the default for `--project`,
+    // and a directory that is not the store. Since `P13-T010` the command reads
+    // the settings in force before it writes, and that directory declares none:
+    // no request there can be held for any of the three acts an allowance
+    // covers, so this invocation is refused and writes nothing at all. Its own
+    // tests, below and in `crate::hook`, are where an allowance really being
+    // written is checked, against a `--project` whose settings leave one
+    // spendable.
     &[
         "hook",
         "allow-once",
@@ -2359,6 +2364,273 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
         "the delete did not report removing both decision rows: {deleted}"
     );
     assert_untouched(&machine, "by runs that named a store");
+}
+
+// --- an allowance that cannot be spent, at the command line ---------------
+//
+// `P13-T010`. The defect was that `sure hook allow-once` reads no configuration
+// at all, so it recorded a grant in projects where nothing could ever spend it
+// and told the user, in one unconditional sentence, that the next matching
+// request would be let through. The evidence the acceptance asks for is the
+// command's *own output* — stdout, stderr and the status a shell sees — which
+// is why the two tests below run the binary rather than the function.
+
+/// Every allowance row a store holds, as `(grants nothing has spent, uses)`.
+///
+/// Read through the same serde-tagged document the writer writes, because "the
+/// store is consistent" is a claim about a row and not about how many rows there
+/// are: the two cases here are a store with *no* allowance row at all and a
+/// store with one grant and no use of it, and neither is visible from a count.
+/// Spending does not edit the grant — it writes a second row carrying the id of
+/// the grant it used — so a grant is outstanding when nothing names it, which is
+/// the question [`sure_core::allowance::outstanding`] asks of the same rows.
+fn allowance_rows(store: &Path) -> (Vec<i64>, Vec<i64>) {
+    let rows = open_the_store(store)
+        .history(
+            &HistoryFilter {
+                project_fingerprint: None,
+                kind: Some(RecordKind::Allowance),
+                include_recordings: false,
+            },
+            sure_core::allowance::SCAN_LIMIT,
+        )
+        .expect("the allowance rows read back");
+
+    let mut grants: Vec<i64> = Vec::new();
+    let mut spent: Vec<i64> = Vec::new();
+    for row in rows {
+        match sure_core::allowance::read_back(row.clone()) {
+            Ok(sure_core::allowance::AllowanceRecord::Grant(_)) => grants.push(row.id),
+            Ok(sure_core::allowance::AllowanceRecord::Spent(use_of)) => spent.push(use_of.grant),
+            Err(error) => panic!("an unreadable allowance row: {error}"),
+        }
+    }
+    grants.retain(|id| !spent.contains(id));
+    (grants, spent)
+}
+
+#[test]
+fn an_allowance_the_settings_cannot_spend_is_refused_and_the_store_stays_empty() {
+    // Acceptance line 1 and line 4, in the project the default configuration
+    // makes: a `sure.yaml` that declares nothing, and a user who has written no
+    // settings file of their own. `execution.mode` is `inspect_only`, so a shell
+    // request is refused before SURE asks what it would do, and `protection.mode`
+    // is `standard`, which asks no question of its own about a read or a change —
+    // so no request from this project can be held for any of the three acts an
+    // allowance covers, and a grant recorded here would be spent by nothing.
+    //
+    // **Which branch this machine is in is not a choice the test makes.** The
+    // only file that can name a mode that runs project code is the user's own
+    // (`P13-T009`), no flag moves it (`Paths::discover_at` moves the store and
+    // deliberately not the settings), and no test may write it. So the test asks
+    // the same reader SURE asks, and asserts what follows from the answer. On a
+    // machine with no settings file — which is this one, and every machine until
+    // a person writes one — that is the refusal below. On a machine where
+    // somebody has named `host_confirmed`, the same command can be spent and the
+    // record branch is asserted instead; the refusal itself is then exercised
+    // only by `crate::hook`'s own test, which builds its own paths and is
+    // therefore the same on every machine.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    let paths =
+        Paths::discover().expect("this machine reports a per-user location for SURE's files");
+    // The settings in force, resolved the way `crate::hook`'s reader resolves
+    // them, including its fallback for a settings file SURE cannot read. The
+    // project declares nothing, so the whole of this answer comes from the
+    // machine's own file and from the defaults.
+    let settings = match Authority::load(&project, &paths.user_config_file()) {
+        Ok(authority) => (authority.execution_mode(), authority.protection().value),
+        Err(_) => (ExecutionMode::InspectOnly, ProtectionMode::Strict),
+    };
+    let nothing_can_be_held = settings == (ExecutionMode::InspectOnly, ProtectionMode::Standard);
+
+    let command = [
+        "hook",
+        "allow-once",
+        "--project",
+        &project.to_string_lossy(),
+        "--tool",
+        "Shell",
+        "--command",
+        "rm -rf build/",
+    ];
+    let run = run_in_a_store(&store, &command);
+    let (grants, spent) = allowance_rows(&store);
+
+    if nothing_can_be_held {
+        assert_ne!(
+            run.status, 0,
+            "an allowance no request in this project could spend was answered with success:\n\
+             stdout: {}\nstderr: {}",
+            run.stdout, run.stderr
+        );
+        // It is a complaint, so it goes to stderr, and it says what did not
+        // happen rather than only what is wrong with the settings.
+        assert!(
+            run.stdout.is_empty(),
+            "a refusal wrote to the stream a script reads as the answer:\n{}",
+            run.stdout
+        );
+        for needed in [
+            "SURE will not record an allowance that no request could spend.",
+            "execution.mode",
+            "inspect_only",
+            "protection.mode",
+            "standard",
+            "host_confirmed",
+            "Nothing was written",
+        ] {
+            assert!(
+                run.stderr.contains(needed),
+                "the refusal does not say {needed:?}:\n{}",
+                run.stderr
+            );
+        }
+        // The sentence the previous build wrote here, and the reason this task
+        // exists: it promised the next matching request would be let through.
+        assert!(
+            !run.stdout.contains("let that one request through")
+                && !run.stderr.contains("let that one request through"),
+            "the refusal still promises an outcome the settings make unreachable:\n{}",
+            run.stderr
+        );
+        assert!(
+            grants.is_empty() && spent.is_empty(),
+            "the writer refused the grant and wrote {grants:?} (spent: {spent:?}) anyway"
+        );
+    } else {
+        // This machine's own settings name a mode that runs project code, so a
+        // broad delete is recordable here. The record branch asserts the other
+        // half of acceptance line 4 — a grant that *is* written is one a matching
+        // request can spend — and the refusal above is not exercised on this
+        // machine. `crate::hook`'s test of the same two cases is.
+        assert_eq!(run.status, 0, "{}", run.stderr);
+        assert_eq!(
+            grants.len(),
+            1,
+            "a recorded grant is not in the store: {grants:?}"
+        );
+        assert!(
+            spent.is_empty(),
+            "a grant was spent before any request arrived"
+        );
+    }
+
+    // And the machine form of the same run, so a script reading the frame is told
+    // the same thing the person reading the sentence is.
+    let mut machine_command = vec!["--format", "json"];
+    machine_command.extend_from_slice(&command);
+    let run = run_in_a_store(&store, &machine_command);
+    let frame = hook_frame(&run);
+    if nothing_can_be_held {
+        assert_eq!(frame["outcome"], "failed", "{frame}");
+        assert_ne!(frame["exit_code"].as_i64(), Some(0), "{frame}");
+        assert_eq!(
+            frame["details"]["what"],
+            "SURE will not record an allowance that no request could spend.",
+            "{frame}"
+        );
+    } else {
+        assert_eq!(frame["outcome"], "ok", "{frame}");
+        assert_eq!(frame["exit_code"].as_i64(), Some(0), "{frame}");
+    }
+    assert_untouched(&machine, "by runs that named a store");
+    let _ = std::fs::remove_dir_all(&store);
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn a_recorded_allowance_is_one_the_request_it_names_spends() {
+    // The other half of acceptance line 4, and acceptance line 3's first half, at
+    // the process: a project whose settings leave an act — strict protection
+    // holds a read of a file credentials live in, and the permission to read is
+    // one every run has — records, says what it recorded in one act rather than
+    // three, and the store shows the row being spent by the request it names.
+    // This project's settings are the project's own to write, so unlike the test
+    // above this one is the same on every machine.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    std::fs::write(project.join("sure.yaml"), "protection:\n  mode: strict\n")
+        .expect("write the project's settings");
+
+    let recorded = run_in_a_store(
+        &store,
+        &[
+            "hook",
+            "allow-once",
+            "--project",
+            &project.to_string_lossy(),
+            "--tool",
+            "Read",
+            "--path",
+            ".env",
+        ],
+    );
+    assert_eq!(
+        recorded.status, 0,
+        "a project where a grant can be spent refused to record one:\n{}",
+        recorded.stderr
+    );
+    assert!(
+        recorded.stdout.contains("read a file of credentials"),
+        "the confirmation does not name the act this project leaves:\n{}",
+        recorded.stdout
+    );
+    assert!(
+        !recorded.stdout.contains("delete a whole location"),
+        "the confirmation names an act these settings cannot hold a request for:\n{}",
+        recorded.stdout
+    );
+
+    let (grants, spent) = allowance_rows(&store);
+    assert_eq!(
+        grants.len(),
+        1,
+        "the recorded grant is not in the store: {grants:?}"
+    );
+    assert!(
+        spent.is_empty(),
+        "a grant was spent before any request arrived"
+    );
+
+    // The request it names — and only that one — spends it.
+    let ordinary = ingest_payload(
+        &store,
+        &read_request(&project, "p13t010-ordinary", "src/lib.rs"),
+        true,
+    );
+    assert_eq!(ordinary.status, 0, "{}", ordinary.stdout);
+    assert_eq!(
+        allowance_rows(&store).0,
+        grants,
+        "a request the allowance was not recorded for spent it"
+    );
+
+    let named = ingest_payload(
+        &store,
+        &read_request(&project, "p13t010-named", ".env"),
+        true,
+    );
+    assert_eq!(named.status, 0, "{}", named.stdout);
+    let frame = hook_frame(&named);
+    assert_eq!(frame["decision"].as_str(), Some("allow"), "{frame}");
+    assert!(
+        frame["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("one-time allowance")),
+        "the allow does not say it came from the allowance the store shows: {frame}"
+    );
+    let (grants_after, spent_after) = allowance_rows(&store);
+    assert!(
+        grants_after.is_empty() && !spent_after.is_empty(),
+        "the request the grant was recorded for did not spend it: {grants_after:?} {spent_after:?}"
+    );
+
+    assert_untouched(&machine, "by runs that named a store");
+    let _ = std::fs::remove_dir_all(&store);
+    let _ = std::fs::remove_dir_all(&project);
 }
 
 #[test]

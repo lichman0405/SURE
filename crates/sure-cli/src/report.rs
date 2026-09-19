@@ -291,6 +291,18 @@ pub struct HookAllowance {
     pub grant: i64,
     /// When it stops being usable, in milliseconds since the epoch.
     pub not_after_ms: i64,
+    /// Which of the three acts a request could be held for under the settings in
+    /// force when this was recorded.
+    ///
+    /// Carried because the sentence a user reads must not name an act those
+    /// settings make unreachable: an allowance covers a request SURE holds, and
+    /// which holds exist is a fact about the settings — the mode, the
+    /// permissions and the protection mode — that
+    /// [`sure_core::hook_protection::acts_a_request_could_be_held_for`] answers
+    /// from the rule itself. `sure hook allow-once` refuses to record at all
+    /// when the answer is empty, so this is non-empty in every report that
+    /// carries it.
+    pub acts: Vec<sure_core::hook_protection::Danger>,
 }
 
 /// One Model Context Protocol message, on its way to the caller.
@@ -785,13 +797,23 @@ impl Report {
                 }
             },
             // What the user asked for is one sentence, and the conditions on it
-            // are the rest: the grant covers one request that SURE itself names
-            // as one of the three dangerous acts, it is spent by a request whose
-            // tool and words match this one exactly, and nothing else about SURE
-            // changes. Every sentence is *would* rather than *will*: both
-            // integrations are Observed (Tier 1), and this build cannot confirm
-            // that a harness reads the answer — see
+            // are the rest: the grant covers one request that SURE itself holds
+            // for one of the three dangerous acts *reachable under the settings
+            // in force*, and it is spent by a request whose tool and words match
+            // this one exactly. Every sentence is *would* rather than *will*:
+            // both integrations are Observed (Tier 1), and this build cannot
+            // confirm that a harness reads the answer — see
             // `docs/security/PROTECTION_MODE.md`.
+            //
+            // `P13-T010` rewrote this. It used to say that the first matching
+            // request spends the grant and that SURE would let it through if it
+            // named it as one of the three acts — unconditionally, and it was
+            // the same in every project. Both halves were too much: a matching
+            // request SURE does not hold spends nothing (the grant survives
+            // it), and an act the settings in force cannot hold a request for
+            // can never be the one a request is let through on. The acts now
+            // come from `HookAllowance::acts`, which is what the writer read off
+            // the settings, and the spend condition is stated as a condition.
             Self::HookAllowance(allowance) => {
                 writeln!(
                     out,
@@ -801,18 +823,24 @@ impl Report {
                 writeln!(out)?;
                 writeln!(
                     out,
-                    "It is for '{}', it lasts {}, and the first request that matches both the \
-                     tool and the words exactly spends it.",
+                    "It is for '{}' and it lasts {}. It is spent by the first request that \
+                     matches both the tool and the words exactly and that SURE holds for one of \
+                     the acts an allowance covers: under the settings in force here, a request \
+                     SURE would hold is one it would {}. A matching request SURE does not hold — \
+                     one it allows outright, or one it refuses for another reason — spends \
+                     nothing and leaves the allowance where it is.",
                     allowance.project,
-                    minutes(allowance.minutes)
+                    minutes(allowance.minutes),
+                    sure_core::hook_protection::Danger::in_a_sentence(&allowance.acts)
                 )?;
                 writeln!(out)?;
                 writeln!(
                     out,
-                    "SURE would then let that one request through, if SURE names it as deleting \
-                     a whole location, overwriting published commits, or reading a file of \
-                     credentials. Any other request is held exactly as it was before, and a \
-                     second request with the same words is not covered."
+                    "SURE would then let that one request through. Any other request is held \
+                     exactly as it was before, and a second request with the same words is not \
+                     covered. Whether the request you named is one of those is decided when it \
+                     arrives: this command does not read the words it is given for what they \
+                     would do."
                 )
             }
             // A protocol message has no human form: it is JSON-RPC and its
@@ -988,9 +1016,13 @@ impl Report {
             }
             // The grant the user just recorded, built from the same values the
             // human form renders. `grant` is the store row, so a script can find
-            // the row again, and `not_after_ms` is when the window closes — the
-            // two facts about an allowance that a reader outside SURE has no
-            // other way to learn.
+            // the row again, `not_after_ms` is when the window closes, and
+            // `acts` is what the settings in force leave for a request to be
+            // held for — the three facts about an allowance that a reader
+            // outside SURE has no other way to learn. `acts` is a list of the
+            // stored names (`Danger::wire_name`), not the sentences the human
+            // form writes, for the reason the enum gives: a script reads this,
+            // and a sentence may be reworded.
             Self::HookAllowance(allowance) => {
                 frame["details"] = json!({
                     "tool": allowance.tool,
@@ -999,6 +1031,11 @@ impl Report {
                     "minutes": allowance.minutes,
                     "grant": allowance.grant,
                     "not_after_ms": allowance.not_after_ms,
+                    "acts": allowance
+                        .acts
+                        .iter()
+                        .map(|danger| danger.wire_name())
+                        .collect::<Vec<_>>(),
                 });
             }
             // The session summary is a report like any other and keeps the
@@ -1339,6 +1376,12 @@ mod tests {
 
     /// A one-time allowance the user recorded, as `sure hook allow-once` reports
     /// one. The words are a user's own — this report never carries a harness's.
+    ///
+    /// The two acts are the ones a project that may run its own code reaches a
+    /// hold through: the subject is a shell command, which is held for a danger
+    /// only where `execution.mode` lets project code run, so a report carrying
+    /// this subject cannot also carry `SensitiveRead` — that one comes through
+    /// strict mode's read rule and a shell request never reaches it.
     fn a_recorded_allowance() -> Report {
         Report::HookAllowance(Box::new(HookAllowance {
             tool: "Bash".to_owned(),
@@ -1347,6 +1390,10 @@ mod tests {
             minutes: sure_core::allowance::DEFAULT_MINUTES,
             grant: 41,
             not_after_ms: 1_700_001_800_000,
+            acts: vec![
+                sure_core::hook_protection::Danger::BroadDelete,
+                sure_core::hook_protection::Danger::ForcePush,
+            ],
         }))
     }
 
@@ -1957,5 +2004,67 @@ mod tests {
             !never.contains("agreed to speak"),
             "a session with no handshake claims a version:\n{never}"
         );
+    }
+
+    #[test]
+    fn a_recorded_allowance_names_the_acts_the_settings_left_for_it() {
+        // The confirmation is the only thing the user has to go on, and
+        // `P13-T010` is about the half of it that was unconditional: it promised
+        // that the first matching request would be let through without saying
+        // that SURE has to hold that request for one of three acts, and it named
+        // the acts a project could not hold a request for. So this asserts both
+        // halves — the spend condition is stated as a condition, and the acts
+        // named are the ones the writer actually read off the settings.
+        let written = text(&a_recorded_allowance(), false);
+        for needed in [
+            "delete a whole location",
+            "overwrite published commits",
+            "spent by the first request that matches both the tool and the words exactly",
+            "spends nothing and leaves the allowance where it is",
+            "decided when it arrives",
+        ] {
+            assert!(
+                written.contains(needed),
+                "the confirmation does not say {needed:?}:\n{written}"
+            );
+        }
+        assert!(
+            !written.contains("read a file of credentials"),
+            "the confirmation named an act the settings in force cannot hold \
+             a request for:\n{written}"
+        );
+
+        // And a report carrying one act names one act. The fixture above is a
+        // shell subject, which cannot also carry the read; this is the project
+        // where the read is the only act left.
+        let read_only = Report::HookAllowance(Box::new(HookAllowance {
+            tool: "Read".to_owned(),
+            subject: ".env".to_owned(),
+            project: "C:\\work\\app".to_owned(),
+            minutes: sure_core::allowance::DEFAULT_MINUTES,
+            grant: 42,
+            not_after_ms: 1_700_001_800_000,
+            acts: vec![sure_core::hook_protection::Danger::SensitiveRead],
+        }));
+        let written = text(&read_only, false);
+        assert!(
+            written.contains("read a file of credentials"),
+            "the confirmation dropped the act the settings left:\n{written}"
+        );
+        assert!(
+            !written.contains("delete a whole location"),
+            "the confirmation named an act the settings cannot hold a request \
+             for:\n{written}"
+        );
+
+        // The machine form carries the same three acts under their stored
+        // names, which is what a script has instead of a sentence.
+        let frame = a_recorded_allowance().frame();
+        assert_eq!(
+            frame["details"]["acts"],
+            json!(["broad_delete", "force_push"]),
+            "the frame does not name the acts the settings left"
+        );
+        assert_eq!(a_recorded_allowance().exit_code(), exit::OK);
     }
 }

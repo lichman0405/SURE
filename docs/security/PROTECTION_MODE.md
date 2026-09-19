@@ -75,6 +75,21 @@ words is held again. The window is thirty minutes unless the user says otherwise
 never more than a day, and the spend is one store transaction — two hooks racing
 on one allowance cannot both spend it.
 
+**The command reads the settings before it writes, and refuses when they leave
+nothing an allowance could be spent on.** An act is named only for a request SURE
+holds, and whether any request from a project is held is a question about
+`execution.mode`, the permissions and `protection.mode` — not about the words the
+user typed. Under the default configuration no request can be held for any of the
+three acts below, so `sure hook allow-once` refuses, names the setting that would
+have to change, and writes no row. A grant recorded there would sit in the store
+looking like a permission while being a promise SURE cannot keep, and the user
+would learn that only when the request it names arrived and was held anyway.
+Where an act is reachable the command records, and the sentence it answers with
+says which acts the settings in force leave — so a confirmation cannot describe
+an outcome those settings make unreachable. Which *subject* is a request SURE
+would hold is still not knowable at write time, and the grant is still spent by
+nothing if no request ever matches it.
+
 An allowance reaches the three acts this document calls dangerous and nothing
 else:
 
@@ -97,10 +112,14 @@ build can confirm — see the paragraph above.
 
 `sure hook allow-once` is a command a **person** runs. Nothing a checked project
 can write and nothing an agent can say records an allowance: the grant is a row
-in SURE's own store, written on a command line the user typed. The subject is not
-checked against the rule table at write time, because there is no request to read
-then — the danger is named when a request arrives, and a grant no request ever
-matches is spent by nothing and expires.
+in SURE's own store, written on a command line the user typed, and the settings
+the command reads to decide whether to write are read to *describe* them and
+never to grant anything — a project file asking for `host_confirmed` is still a
+request the user's own file has to agree to, and in this build the only setting
+that puts an act within reach is one the user writes themselves. The subject is
+not checked against the rule table at write time, because there is no request to
+read then — the danger is named when a request arrives, and a grant no request
+ever matches is spent by nothing and expires.
 
 Every integration must document whether its hook failure behavior is fail-open or fail-closed for the relevant event.
 

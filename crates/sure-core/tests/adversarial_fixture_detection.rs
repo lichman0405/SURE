@@ -2456,6 +2456,49 @@ fn missing_user_intent_never_claims_fulfilment_and_the_control_supplies_the_requ
         ProjectIntent::empty(),
         "{id}: the run compared against something other than an empty intent"
     );
+
+    // The comparison itself, reached directly: the pipeline keeps only
+    // `.findings` and drops the other four fields, so `checked == 0` and the
+    // limitation are reachable here and nowhere else. `checked == 0` is what
+    // says SURE compared nothing at all; `unmatched == 0` is what says the
+    // empty comparison is not the report of one that failed and found nothing;
+    // `findings == 0` is what says nothing was invented about a project that
+    // was never asked to do anything.
+    let project = discovery(id);
+    let compared = compare_intent_to_project(&ProjectIntent::empty(), &project);
+    let outcomes = scenario_of(id)["required_outcomes"]
+        .as_array()
+        .cloned()
+        .expect("required_outcomes is an array");
+    let comparison = required_outcome(id, &outcomes, "comparison_detail");
+    assert_eq!(
+        json!(compared.user_requirements_checked),
+        comparison["user_requirements_checked"],
+        "{id}: the number of user requirements SURE checked without a request has changed"
+    );
+    assert_eq!(
+        json!(compared.matched.len()),
+        comparison["matched"],
+        "{id}: something matched against an intent with no requirements in it"
+    );
+    assert_eq!(
+        json!(compared.unmatched.len()),
+        comparison["unmatched"],
+        "{id}: the empty comparison reports a requirement that did not match"
+    );
+    assert_eq!(
+        json!(compared.limitation),
+        comparison["limitation"],
+        "{id}: the comparison's own limitation field is no longer the frozen sentence. It is what \
+         the reader-facing half carries by a different route, and `None` would say SURE had a \
+         request it could compare against."
+    );
+    assert_eq!(
+        json!(compared.findings.len()),
+        comparison["findings"],
+        "{id}: the comparison of an empty intent invented a proposal"
+    );
+
     assert_eq!(
         json!(record.intent.requirement_claim()),
         declared["requirement_claim"],
@@ -2500,6 +2543,18 @@ fn missing_user_intent_never_claims_fulfilment_and_the_control_supplies_the_requ
     let goal = control["goal_text"]
         .as_str()
         .unwrap_or_else(|| panic!("{id}: the control declares no goal"));
+    let supplied = explicit_goal(goal).expect("the declared control goal is a goal");
+
+    // The control's comparison, reached the same way as the fixture's: the
+    // supplied request against the same project, read a second time, with the
+    // two reads asserted equal so the intent is the only thing that moved.
+    let control_project = discovery(id);
+    assert_eq!(
+        control_project, project,
+        "{id}: the control read a different project from the one the fixture was graded against, so \
+         it is no longer the intent that flipped the answer"
+    );
+    let control_compared = compare_intent_to_project(&supplied, &control_project);
 
     let control_outcome = pipelined(&fixture(id), Some(goal));
     let control_record = record_of(&control_outcome);
@@ -2517,6 +2572,81 @@ fn missing_user_intent_never_claims_fulfilment_and_the_control_supplies_the_requ
         declared_control["requirement_claim"],
         "{id}: supplying the request did not make the project comparable"
     );
+
+    // The control's comparison, by equality on every answer it declares — none
+    // of them is left standing on its own. A request supplied against a project
+    // that answers it must check one requirement and match it; anything less
+    // means the fixture's silence about fulfilment is a reporter's pessimism
+    // rather than a fact about the missing request.
+    assert_eq!(
+        json!(control_compared.user_requirements_checked),
+        declared_control["user_requirements_checked"],
+        "{id}: the supplied request was not checked as one requirement"
+    );
+    assert_eq!(
+        json!(control_compared.matched.len()),
+        declared_control["matched"],
+        "{id}: the supplied request did not match the fixture's own route"
+    );
+    assert_eq!(
+        json!(control_compared.unmatched.len()),
+        declared_control["unmatched"],
+        "{id}: the control still reports an unmatched requirement"
+    );
+    assert_eq!(
+        json!(control_compared.limitation),
+        declared_control["limitation"],
+        "{id}: the control's limitation changed, and `None` is what says a comparable request has \
+         nothing to caveat"
+    );
+    assert_eq!(
+        json!(control_compared.findings.len()),
+        declared_control["findings"],
+        "{id}: the control produced a proposal, and the whole fixture rests on it producing none"
+    );
+
+    // The anchor the control matched on, by its parts rather than by a debug
+    // string: this is what makes `matched == 1` a measurement rather than a
+    // count somebody could satisfy by matching anything.
+    let declared_anchor = &declared_control["matched_anchor"];
+    assert_eq!(
+        control_compared.matched[0].anchors.len(),
+        1,
+        "{id}: the control's requirement matched more than one anchor, so the fixture's record of \
+         where it matched is incomplete"
+    );
+    assert_eq!(
+        declared_anchor["kind"].as_str(),
+        Some("route"),
+        "{id}: the control's declared anchor is no longer a route"
+    );
+    match &control_compared.matched[0].anchors[0] {
+        IntentMatchAnchor::Route {
+            path,
+            declared_in,
+            line,
+        } => {
+            assert_eq!(
+                path,
+                declared_anchor["path"].as_str().unwrap_or_default(),
+                "{id}: the control matched a different route"
+            );
+            assert_eq!(
+                declared_in,
+                declared_anchor["declared_in"].as_str().unwrap_or_default(),
+                "{id}: the control matched a route declared in a different file"
+            );
+            assert_eq!(
+                json!(line),
+                declared_anchor["line"],
+                "{id}: the control matched a route declared on a different line"
+            );
+        }
+        other => {
+            panic!("{id}: the control matched on {other:?}, and the fixture declares a route")
+        }
+    }
+
     assert_eq!(
         rendered_summary(&control_outcome),
         declared_lines(
@@ -2559,7 +2689,6 @@ fn missing_user_intent_never_claims_fulfilment_and_the_control_supplies_the_requ
     // zero, true from one requirement's worth of fresh evidence up. A gate that
     // answered false to everything would satisfy the fixture above and fails
     // here.
-    let supplied = explicit_goal(goal).expect("the declared control goal is a goal");
     assert_eq!(
         supplied.user_requirements().count(),
         1,

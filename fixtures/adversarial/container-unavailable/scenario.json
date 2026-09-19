@@ -1,0 +1,119 @@
+{
+  "id": "container-unavailable",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "description": "A machine with no container runtime and a project whose check would have run in one. The case is not a defect in the project and not a failure of SURE: a missing runtime is a fact about the computer, SURE's answer to it is a value rather than an error, and the honest answer says what happens instead. The trap is a check whose result depends on the machine it happens to run on, and the second half of the case is a limit stated rather than dressed up: nothing in this build reaches the container module from the pipeline or the command line.",
+  "container_absence": {
+    "read_by": {
+      "module": "crates/sure-core/src/container.rs",
+      "function": "Availability::in_path",
+      "plain_report_module": "crates/sure-core/src/container.rs",
+      "route": "the search path is a parameter rather than ambient state, so the answer is a function of the path handed to it and of nothing else; `Availability::on_this_machine` is the only caller that reads the process's own `PATH`",
+      "returns": "`Availability`, which has two variants and no error: `Found { runtime, program }` or `Absent`. A caller who ignores the absence gets a compiler error rather than a runtime failure, because there is nothing to propagate and nothing to `?`"
+    },
+    "project": {
+      "files": ["src/run-check.js"],
+      "no_manifest": "This fixture deliberately ships no `package.json`, `pyproject.toml` or `Cargo.toml`. The absence it is about is a fact about the computer and not about a project, so there is no language half to run and nothing for a runnability sweep to execute — the same stance `missing-user-intent` takes."
+    },
+    "why_not_the_runner": "**No assertion in this fixture may depend on whether the machine running it has Docker.** `Availability::Absent` on a developer's laptop and `Availability::Found` on a CI machine are the same program answering a question about two different computers, and a fixture that recorded one of them would be a test of the runner. So both answers are produced on any machine from one function with one thing moved — the search path — and `on_this_machine()` is only ever asserted in its shape.",
+    "expect": {
+      "is_found": false,
+      "runtime": null,
+      "sentence": "No container runtime was found, so checks run on this computer instead. SURE looked for docker or podman on PATH.",
+      "runtimes_looked_for": ["docker", "podman"],
+      "isolation_claim": "A container gives the check its own filesystem and its own process namespace, and it does not give it a separate kernel or a promise about what it can reach. The project directory is visible inside it, and whether that is read-only is a setting you can see. This is limited isolation: it narrows what a check can touch, and it is not a sandbox.",
+      "overclaim_phrases": ["isolated container", "isolated environment"],
+      "phrases_found_in_the_claim": 0,
+      "unwired_call_sites": 0
+    },
+    "control": {
+      "moved": {
+        "what": "the search path",
+        "from": "no entries at all, which is what `OsStr::new(\"\")` is",
+        "to": "a directory this test owns, holding a file named after a runtime",
+        "how": "the same `Availability::in_path` call, on the same machine and in the same process, with the argument the only thing that differs. The directory is under `target/tmp` and is removed before the test ends."
+      },
+      "why": "A fixture that asserted `Absent` on the machine it was written on would be measuring the runner. Here the two answers are produced on every machine: with an empty search path there is nothing to find, and with a directory holding `docker` there is exactly one thing to find. The absence and the presence are therefore both facts about the argument, and the test asserts them by equality on the whole value, including the path of the program that was found — so an answer that guessed a runtime rather than reading the directory would fail. A third path holds only `podman`, which is what makes the reported *name* a measurement rather than an assumption.",
+      "search_paths": {
+        "empty": "`OsStr::new(\"\")`, which is not a directory and holds nothing",
+        "docker_only": "a scratch directory holding one file named `docker` (plus the platform's executable suffix)",
+        "podman_only": "a scratch directory holding one file named `podman`"
+      },
+      "expect": {
+        "is_found": true,
+        "runtime": "docker",
+        "sentence": "Checks can run in a container: docker was found at sure-fixture/bin/docker.",
+        "both_present": "docker",
+        "podman_only": "podman"
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "container_absence",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-domain/src/execution.rs",
+      "detector": "Availability::in_path over a search path with nothing in it, and Availability::explain over the answer it returns",
+      "title": "no container runtime is a value with a sentence, not an error and not a silence",
+      "status": "reported",
+      "is_found": false,
+      "runtime": null,
+      "sentence": "No container runtime was found, so checks run on this computer instead. SURE looked for docker or podman on PATH.",
+      "runtimes_looked_for": ["docker", "podman"],
+      "isolation_claim": "A container gives the check its own filesystem and its own process namespace, and it does not give it a separate kernel or a promise about what it can reach. The project directory is visible inside it, and whether that is read-only is a setting you can see. This is limited isolation: it narrows what a check can touch, and it is not a sandbox.",
+      "overclaim_phrases": ["isolated container", "isolated environment"],
+      "phrases_found_in_the_claim": 0,
+      "unwired_call_sites": 0,
+      "why": "The answer is a value: `Availability::Absent` compares equal to itself, `is_found()` is false, and `runtime()` is `None`, so a caller cannot get a runtime out of it without handling the possibility that there is none. The sentence is compared whole rather than searched for a word, and it has to do three things at once — say what was not found, say what happens instead (*checks run on this computer*), and name what was looked for, or a reader cannot act on it. The acceptance sentence is *container unavailable path is honest*, and the second half of honesty is the claim the mode is described with: `isolation_claim` is quoted whole too, and the test asserts that neither sentence contains an `OVERCLAIMS` phrase used as a claim, by the module's own `overclaims` rule rather than by a substring search. A sentence that promised a sandbox would be the expensive kind of wrong, because it is read by the person deciding whether to switch the mode on."
+    },
+    {
+      "kind": "container_limit",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-core/src/lib.rs",
+      "detector": "a scan of every shipped Rust file for a call site of the container module",
+      "title": "container execution is not reachable from the pipeline or the command line, and the fixture says so",
+      "status": "not_checked",
+      "unwired_call_sites": 0,
+      "why": "This is the limit, recorded rather than repaired. `crates/sure-core/src/container.rs` is declared in `crates/sure-core/src/lib.rs` and nothing else in the shipped tree calls it: across the non-test Rust files under `crates/`, no line of code outside the module itself names `container::` or `Availability::` — only comments do. The test measures that instead of describing it: it walks the tree with the product's own scanner, asserts the walk was complete and non-trivial, strips line comments, and compares the list of call sites against this declaration. `unwired_call_sites` is zero today and this entry is what will have to change, deliberately, when a later phase wires the mode in — a test that fails here has found a caller, which is the thing this fixture records not existing."
+    },
+    {
+      "kind": "control",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-core/src/doctor.rs",
+      "status": "not_checked",
+      "title": "the same call, with the search path the one thing moved",
+      "moved_file": "the search path",
+      "is_found": true,
+      "runtime": "docker",
+      "sentence": "Checks can run in a container: docker was found at sure-fixture/bin/docker.",
+      "both_present": "docker",
+      "podman_only": "podman",
+      "why": "A fixture that answered *no runtime found* unconditionally would satisfy every positive assertion above and would measure nothing; here one directory holding one file flips the answer. The pair is asserted as equality in both directions — the empty path on the same machine, in the same process, answers `Absent`, and the populated path answers `Found { runtime: Podman or Docker, program: <the file that was written> }` — so the two halves differ in the argument and in nothing else. The directory holding both names is what says the order in `Runtime::ALL` decides, and the directory holding only `podman` is what says the reported name comes from the directory rather than from the program's preference."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A missing container runtime is reported as the project being verified, as passing, or as safe to run. Nothing about the project changed and nothing was run in a container or anywhere else: the check this project declares is still unchecked, and a report that reads as a green light because a runtime was absent has turned SURE's own limit into a verdict on somebody's code."
+    },
+    {
+      "kind": "false_green",
+      "description": "The absence is silent. If the report says nothing about the mode and the machine, a reader takes the run for the one they asked for — the whole point of the container mode is that the person switching it on is told what they are and are not getting."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The absence is reported as a defect of the project, or as a failure of the check. A computer without Docker is not the repository's problem, and `Availability` has no error variant precisely so that no caller can turn it into one."
+    },
+    {
+      "kind": "false_green",
+      "description": "The claim about the mode says more than the mode does: the word `sandbox`, or `isolated container` used as a claim rather than denied. This is the one wrong sentence a person reads *before* agreeing to run a stranger's code, which is why the repository forbids it in prose as well as here."
+    }
+  ],
+  "notes": "There is no case for this fixture in `evaluation/acceptance-manifest.json`: the manifest is the release contract, and its twenty cases are about defects in a project — a payment path that contacts nobody, a route that was never built, a claim with no recording behind it. None of them is about a machine, and the nearest by name, `dynamic-not-authorized`, is a different defect: there a check was *refused* by a rule about consent and its refusal is the thing that has to stay visible, while here nothing is refused by the absence at all — this build plans the same checks with a runtime on `PATH` and without one, because nothing in it asks. `expected_severity` and `release_blocking` are therefore the level the product actually reaches rather than a row copied from the contract: SURE produces no finding for this case, no candidate, and no not-checked row, and `note` is a ceiling it stays under. It is named once in `FIXTURES_WITHOUT_A_MANIFEST_CASE` in `crates/sure-testkit/tests/fixture_apps.rs` with the reason, and `every_fixture_without_a_manifest_case_is_one_named_here` checks the exemption against the manifest rather than trusting it. The project is read where it ships and the scratch search paths live under `target/tmp` and are removed before the test ends, so nothing outside the repository's own ignored directory is written."
+}

@@ -30,20 +30,40 @@
 //!
 //! **Coverage of the whole corpus.** Six release-blocking cases have a fixture
 //! app, and all six are measured here. The other seven release-blocking cases
-//! have no fixture app and are not measured here: `check-crash`,
-//! `repair-regression`, `stale-test-evidence` and `tests-not-run` hold a
-//! declaration or a recording and no project, and `dangerous-delete`,
-//! `force-push` and `sensitive-read` are now the same shape — a declaration of
-//! requests and no project. That sentence was not true when this file was
-//! written: `dangerous-delete` was then a stub directory and `force-push` and
+//! have no fixture app and are not measured here. `check-crash`,
+//! `stale-test-evidence` and `tests-not-run` hold a declaration or a recording
+//! and no project, and `dangerous-delete`, `force-push` and `sensitive-read` are
+//! now the same shape — a declaration of requests and no project.
+//! `repair-regression` is the seventh, and it stopped being that shape at
+//! `P14-T009`: the fixture now ships a real npm workspace, two members with
+//! their own `test` scripts and a shared helper whose defect one member notices
+//! and the other does not. It is still not measured here, and the reason is the
+//! one the function below reads rather than a shape this comment describes:
+//! `fixture_has_an_app` is a substring test for `entry_points`, this fixture
+//! declares none, and the reason it declares none is recorded in the fixture
+//! itself — `project.why_no_entry_point_block` in its `scenario.json`. So the
+//! case answers `false` below as it did before. What grades it is
+//! `crates/sure-core/tests/repair_fixture_e2e.rs`, which drives discovery, the
+//! checks layer, SURE's own process runner, selection and the re-check lifecycle
+//! over a copy of the directory in process.
+//!
+//! That paragraph has been corrected three times, and each correction was a
+//! sentence that `ls` had outgrown. It was not true when this file was written:
+//! `dangerous-delete` was then a stub directory and `force-push` and
 //! `sensitive-read` had no directory at all, and what stopped being true is the
 //! shape rather than the conclusion, because all three answer `false` to
 //! `fixture_has_an_app` now as they did then. `P14-T008` wrote those three
 //! declarations and the test that grades them in-process —
 //! `adversarial_fixture_detection.rs`, driving `hook_protection` over each
-//! declared run — so the seven are graded somewhere, by other files, and what is
-//! claimed here has not moved: a release-blocking case with a fixture app is
-//! measured, and one without is not. Of the cases that do have an app,
+//! declared run. The third is `P14-T009`'s, and its text is kept rather than
+//! overwritten: this paragraph used to say that `repair-regression` was one of
+//! the cases that "hold a declaration or a recording and no project", which was
+//! true from the file's first commit until `P14-T009` gave the directory a
+//! project to be about, and the measurement it recorded — the case is not in
+//! the set this test measures — has not moved. So the seven are graded
+//! somewhere, by other files, and what is claimed here has not changed: a
+//! release-blocking case with a fixture app is measured, and one without is not.
+//! Of the cases that do have an app,
 //! `missing-migration` is measured by `db_migrations` rather than by a candidate
 //! detector. This file measures what exists and names what does not, rather than
 //! asserting over a set it quietly shrank.
@@ -328,17 +348,17 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 
 /// Whether a corpus id has a fixture app rather than a stub or nothing at all.
 ///
-/// Two shapes are counted the same way here, because neither has a project a
-/// scanner can discover: a corpus id with no fixture directory at all
-/// (`benign-test-mocks`) and one whose directory holds no fixture app — no
-/// `entry_points` in its `scenario.json`. The second set is read off the disk by
-/// the line below rather than enumerated here, which is what keeps this comment
-/// from being a second place to maintain it; at `P14-T008` it holds `check-crash`,
+/// Two shapes are counted the same way here, because neither is a project a
+/// scanner is handed an entry point into: a corpus id with no fixture directory
+/// at all (`benign-test-mocks`) and one whose directory ships no `entry_points`
+/// in its `scenario.json`. The second set is read off the disk by the line below
+/// rather than enumerated here, which is what keeps this comment from being a
+/// second place to maintain it; at `P14-T008` it holds `check-crash`,
 /// `container-unavailable`, `dangerous-delete`, `dynamic-not-authorized`,
 /// `force-push`, `intent-mismatch`, `lying-readme`, `missing-user-intent`,
 /// `repair-regression`, `sensitive-read`, `stale-test-evidence`, `tests-not-run`
-/// and `unknown-evidence`, and it moves whenever a fixture gains or loses a
-/// project.
+/// and `unknown-evidence`, and it moves whenever a fixture gains or loses an
+/// `entry_points` key.
 ///
 /// **The lists are read off the disk rather than inherited**, and names in them
 /// moved. `missing-user-intent` used to be listed with the ids that have no
@@ -354,6 +374,18 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 /// that task wrote the three declarations. They still answer `false` here — none
 /// of the three holds a project — so the reading was correct while the sentence
 /// describing it was not.
+///
+/// `P14-T009`'s correction is the third, and it is the first that is not a name
+/// moving from one group to the other. This comment used to say the second shape
+/// was one that "holds no fixture app", which was a synonym for "holds no
+/// project" in every case until that task wrote a real npm workspace into
+/// `repair-regression`. The directory now holds a project, two members with
+/// their own `test` scripts, and still no `entry_points` — so it stays in the
+/// set and still answers `false` here, and the reading was right while the words
+/// around it were not. The same edit corrected the sentence about the set
+/// moving: it said the list "moves whenever a fixture gains or loses a project",
+/// and by that reading `P14-T009` should have moved it and did not, because the
+/// key this function reads is `entry_points` rather than a directory listing.
 fn fixture_has_an_app(id: &str) -> bool {
     let path = fixture(id).join("scenario.json");
     std::fs::read_to_string(&path).is_ok_and(|scenario| scenario.contains("\"entry_points\""))
@@ -431,7 +463,7 @@ fn every_release_blocking_case_with_a_fixture_app_meets_the_manifest() {
     // The set, named. A release-blocking case that gained a fixture app, or one
     // of these that lost one, stops this test rather than silently shrinking what
     // the assertion above covers. The other seven release-blocking cases have no
-    // fixture app and are not measured here: `check-crash`, `repair-regression`,
+    // fixture app and are not measured here: `check-crash`,
     // `stale-test-evidence` and `tests-not-run` hold a declaration or a recording
     // and no project, and `dangerous-delete`, `force-push` and `sensitive-read`
     // are the same shape since `P14-T008`. This comment used to say `force-push`
@@ -440,9 +472,20 @@ fn every_release_blocking_case_with_a_fixture_app_meets_the_manifest() {
     // written and stopped being true at `P14-T008`, which wrote the three
     // declarations and the test that grades them in-process
     // (`adversarial_fixture_detection.rs`, driving `hook_protection` over each
-    // declared run). What has not changed is why none of the seven is in the list
-    // below: not one of them is a project the candidate detectors here can
-    // discover, so none of them can be measured by this test.
+    // declared run).
+    //
+    // `repair-regression` is the seventh and the second correction here. This
+    // comment used to list it with those first three — "hold a declaration or a
+    // recording and no project" — and that stopped being true at `P14-T009`,
+    // which gave the directory an npm workspace whose two members' own checks
+    // really run; the fixture's own `project.why_no_entry_point_block` records
+    // why it still declares no entry-point block. What has not changed is why
+    // none of the seven is in the list below: the five candidate detectors here
+    // are about a project's false completion claims, a repair lifecycle is not
+    // one of those shapes, and this file reads a severity only from what one of
+    // them proposes. `repair-regression` is graded one crate closer instead, by
+    // `crates/sure-core/tests/repair_fixture_e2e.rs`, which runs its two checks
+    // and drives the lifecycle in process.
     let ids: Vec<&str> = measured.iter().map(|(id, _)| id.as_str()).collect();
     assert_eq!(
         ids,

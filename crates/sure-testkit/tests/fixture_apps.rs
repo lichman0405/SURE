@@ -107,6 +107,24 @@ use serde_json::Value;
 /// `dynamic-not-authorized`'s answers come out of SURE's real pipeline in
 /// `crates/sure-core/tests/adversarial_fixture_detection.rs`, where the task
 /// that wrote it is named by [`EXECUTION_TRUST_FIXTURES`] below.
+///
+/// `repair-regression` joined it in `P14-T009` for the same reason and no
+/// other: the fixture was a scenario-only stub until that task gave it an npm
+/// workspace to be about, so from then on it ships a `package.json` and the
+/// rule above applies to it. The name is about the manifest rather than about
+/// how its halves are graded — nothing in this file runs it, and its two
+/// answers come out of `crates/sure-core/tests/repair_fixture_e2e.rs`, which
+/// drives discovery, the checks layer, SURE's own process runner, selection and
+/// the re-check lifecycle over a copy of this directory. What that test needs
+/// from this file is the four artefact checks every other Node fixture gets:
+/// that the shipped entry point names a file that exists, that nothing has to
+/// be installed, that the scenario parses and agrees with the release manifest,
+/// and that the release-blocking case says in machine-readable form that a
+/// green reading of it is forbidden. The guard that holds the two halves of
+/// this fixture together — the scenario that declares the case and the E2E
+/// that grades it — lives one crate closer, in
+/// `crates/sure-core/tests/repair_regression_guard.rs`, because only there is
+/// the module the scenario names reachable.
 const TYPESCRIPT_FIXTURES: &[&str] = &[
     "fake-payment",
     "fake-auth",
@@ -115,6 +133,7 @@ const TYPESCRIPT_FIXTURES: &[&str] = &[
     "demo-analytics",
     "route-mismatch",
     "dynamic-not-authorized",
+    "repair-regression",
 ];
 
 /// The `P14-T002` fixtures, named for the same reason as the list above.

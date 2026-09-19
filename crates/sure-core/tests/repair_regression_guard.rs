@@ -5,8 +5,20 @@
 //! with affected and regression checks from the schedule, and by refusing to
 //! resolve a previous finding unless every selected re-check passes.
 //!
-//! This test is the mandatory `repair-regression` adversarial fixture: the
-//! project can never turn green while the regression check is failing.
+//! This file is the mandatory `repair-regression` adversarial fixture's
+//! **decision rule**, read from outside the module that implements it: the
+//! project can never turn green while the regression check is failing. Its
+//! `CheckResult`s are typed in here, which is the right shape for a test about
+//! the rule and not evidence that anything can be repaired — this file used to
+//! say of itself that it *is* the fixture, which was all there was to say while
+//! `fixtures/adversarial/repair-regression/` held a 186-byte descriptor and
+//! nothing else. `P14-T009` gave the directory a real npm workspace to be about
+//! and `crates/sure-core/tests/repair_fixture_e2e.rs` to grade it, over checks
+//! that really run and a project whose bytes really change. What is left here is
+//! the half a synthetic result is good for: the rule stated sharply, including
+//! the case where the regression check is selected and fails while every other
+//! selected check passes. `the_fixture_status_is_implemented` holds this file
+//! and that directory together.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -268,13 +280,79 @@ fn a_repair_with_all_selected_checks_passing_can_resolve() {
     assert!(update.kept_open.is_empty());
 }
 
+/// The `scripts.<role>` command a fixture manifest declares.
+///
+/// Written out rather than inferred, because the point of the test below is that
+/// the marker and the directory agree: a script that names a file which is not
+/// there is the shape a stub would keep.
+fn declared_script(fixture: &std::path::Path, manifest: &str, role: &str) -> String {
+    let path = fixture.join(manifest);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+    let document: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("{} is not valid JSON: {error}", path.display()));
+    document["scripts"][role]
+        .as_str()
+        .unwrap_or_else(|| panic!("{manifest} declares no {role} script"))
+        .to_owned()
+}
+
 #[test]
 fn the_fixture_status_is_implemented() {
-    // The mandatory `repair-regression` adversarial fixture is covered by the
-    // tests above and marked as implemented in its scenario descriptor.
+    // `P9-T006` wrote this test while the fixture was a 186-byte descriptor, and
+    // what it asserted was that the text `implemented` appeared in it. That is a
+    // claim about a string rather than about a fixture: the directory could have
+    // been emptied and the test would still have passed. `P14-T009` gave the
+    // directory a project and a grader, so the same test now holds three things
+    // that can each go red on their own — the marker, the project the marker
+    // claims, and the grader the scenario names. The old reading is kept here
+    // because it is what the marker meant until then.
+    let fixture = sure_testkit::repository_root().join("fixtures/adversarial/repair-regression");
     let scenario = include_str!("../../../fixtures/adversarial/repair-regression/scenario.json");
     assert!(
-        scenario.contains("implemented"),
+        scenario.contains("\"fixture_status\": \"implemented\""),
         "the repair-regression fixture must be marked as implemented"
+    );
+
+    // The project, read off the disk. A directory that went back to being a stub
+    // fails here whichever half of it was removed: the root manifest, the two
+    // member manifests, or the files their scripts name.
+    let start = declared_script(&fixture, "package.json", "start");
+    assert_eq!(
+        start, "node scripts/demo.js",
+        "the root manifest's start script is what a reviewer with nothing but Node runs"
+    );
+    let mut members = Vec::new();
+    for member in ["packages/checkout", "packages/billing"] {
+        let manifest = format!("{member}/package.json");
+        let test = declared_script(&fixture, &manifest, "test");
+        let entry = test
+            .strip_prefix("node ")
+            .unwrap_or_else(|| panic!("{manifest}'s test script must run node directly: `{test}`"));
+        assert!(
+            fixture.join(member).join(entry).is_file(),
+            "{manifest}'s test script names {entry}, which is not a file in the fixture"
+        );
+        assert!(
+            scenario.contains(&manifest),
+            "the scenario does not name {manifest}, so the project it describes is not this one"
+        );
+        members.push(test);
+    }
+    assert_ne!(
+        members[0], members[1],
+        "the two members must run their own checks, or there is nothing for a repair to break"
+    );
+
+    // And the grader the two outcomes in `scenario.json` name. `include_str!`
+    // rather than a path read at run time, so a deleted grader cannot leave a
+    // guard behind that still passes: the file missing stops the build.
+    let grader = include_str!("repair_fixture_e2e.rs");
+    assert!(
+        grader.contains("const FIXTURE: &str = \"repair-regression\";")
+            && grader.contains("fn a_careless_repair_that_breaks_the_other_member_cannot_close_the_finding")
+            && grader.contains("fn a_complete_repair_closes_the_finding_on_new_passing_evidence"),
+        "the file the scenario names as this fixture's grader does not grade both of its \
+         outcomes, so `graded_by` points at a claim rather than at a test"
     );
 }

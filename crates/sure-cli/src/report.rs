@@ -825,10 +825,10 @@ impl Report {
                     out,
                     "It is for '{}' and it lasts {}. It is spent by the first request that \
                      matches both the tool and the words exactly and that SURE holds for one of \
-                     the acts an allowance covers: under the settings in force here, a request \
-                     SURE would hold is one it would {}. A matching request SURE does not hold — \
-                     one it allows outright, or one it refuses for another reason — spends \
-                     nothing and leaves the allowance where it is.",
+                     the acts an allowance covers: under the settings in force when it was \
+                     recorded, a request SURE would hold is one it would {}. A matching request \
+                     SURE does not hold — one it allows outright, or one it refuses for another \
+                     reason — spends nothing and leaves the allowance where it is.",
                     allowance.project,
                     minutes(allowance.minutes),
                     sure_core::hook_protection::Danger::in_a_sentence(&allowance.acts)
@@ -2022,6 +2022,11 @@ mod tests {
             "spent by the first request that matches both the tool and the words exactly",
             "spends nothing and leaves the allowance where it is",
             "decided when it arrives",
+            // Acceptance line 4's reading, in the sentence and not only in the
+            // hand-back: the acts are read off the settings in force *when the
+            // grant is recorded*, because a user who changes their settings
+            // afterwards has changed what the grant can be spent on.
+            "under the settings in force when it was recorded",
         ] {
             assert!(
                 written.contains(needed),

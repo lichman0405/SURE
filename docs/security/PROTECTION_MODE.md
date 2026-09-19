@@ -85,8 +85,14 @@ have to change, and writes no row. A grant recorded there would sit in the store
 looking like a permission while being a promise SURE cannot keep, and the user
 would learn that only when the request it names arrived and was held anyway.
 Where an act is reachable the command records, and the sentence it answers with
-says which acts the settings in force leave — so a confirmation cannot describe
-an outcome those settings make unreachable. Which *subject* is a request SURE
+says which acts the settings in force **when it was recorded** leave — so a
+confirmation cannot describe an outcome those settings make unreachable, and a
+reader can tell it is describing the moment of recording rather than claiming
+the answer is fixed for the window's life. A user who changes their settings
+afterwards has changed what the grant can be spent on: a request the new
+settings hold for an act an allowance covers can spend it, and a request they no
+longer hold for one — or refuse for another reason, including the mode — spends
+nothing. Which *subject* is a request SURE
 would hold is still not knowable at write time, and the grant is still spent by
 nothing if no request ever matches it.
 

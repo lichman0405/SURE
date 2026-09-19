@@ -2800,6 +2800,26 @@ mod tests {
     /// What the test asserts is therefore two things about one store: the
     /// writer refuses, and the requests that were supposed to spend the grant it
     /// used to write spend nothing because there is nothing to spend.
+    ///
+    /// **Which refusal, and why `P13-T011` moved it.** The sentence this test
+    /// used to assert was `P13-T010`'s: the action needs a permission *no
+    /// setting in this build grants*, so the refusal named no setting at all.
+    /// `P13-T011` decided that the user's own settings file may grant that
+    /// permission — `execution.allow_project_write`, which a project's
+    /// `sure.yaml` cannot — so the sentence names it now, and the assertion that
+    /// the build's own limit is the reason is false of this build. It is
+    /// replaced by the assertion that is true of it, on the same setup:
+    /// measured with a user file naming `mode: host_confirmed` and no
+    /// `allow_project_write`, `allow-once --tool Edit --path src/lib.rs` refuses
+    /// with *"A request naming it is one that would change files inside your
+    /// project, and the permissions in force do not grant SURE that"*, followed
+    /// by `execution.allow_project_write: true` in the user's own file **and**
+    /// `protection.mode: strict` as the remedy. The half of the test below it is
+    /// untouched, because the writer still refuses: with the permission not in
+    /// force, no request naming `Edit` can be held for any act, so the row the
+    /// old union-reading would have written is still not written. That is the
+    /// defect coming back that this test exists to catch, and it is caught the
+    /// same way under either sentence.
     #[test]
     fn edit_is_read_in_the_vocabulary_that_claims_it_and_a_grant_for_it_is_refused() {
         // The settings the defect was measured under: the user's own file
@@ -2818,16 +2838,9 @@ mod tests {
         );
         match &refused {
             Report::Failed(failure) => {
-                // The same reason `Write` and `Delete` are refused with: the
-                // act the tool names needs a permission no setting grants, and
-                // the sentence says so rather than naming `execution.mode`.
-                assert!(
-                    failure
-                        .detail
-                        .contains("No setting in this build grants it"),
-                    "the refusal does not say the limit is the build's: {}",
-                    failure.detail
-                );
+                // What an `Edit` is read as: a change to this project's files,
+                // and not the shell command Cursor's unrecognised-name fallback
+                // would also have made of the name.
                 assert!(
                     failure
                         .detail
@@ -2835,7 +2848,34 @@ mod tests {
                     "the refusal does not say what an `Edit` would do: {}",
                     failure.detail
                 );
-                for absent in ["host_confirmed", "`execution.mode`", "`protection.mode`"] {
+                // The remedy, and both halves of it: the permission, in the
+                // file that can grant it — named as the file, because a
+                // project's cannot — and the mode that holds a change naming a
+                // whole location, which is the only act a grant could be spent
+                // on here.
+                for needed in [
+                    "execution.allow_project_write: true",
+                    "a project's `sure.yaml` cannot grant this one",
+                    "sure doctor",
+                    "and set `protection.mode: strict`",
+                    "Nothing was written",
+                ] {
+                    assert!(
+                        failure.detail.contains(needed),
+                        "the refusal does not say {needed:?}: {}",
+                        failure.detail
+                    );
+                }
+                // And what it must not say: the build's own limit, which is
+                // what this sentence said before `P13-T011`, and the mode,
+                // which is not the cause — `decide` never consults the mode
+                // about a change, because writing a file does not run the
+                // project's code.
+                for absent in [
+                    "No setting in this build grants it",
+                    "host_confirmed",
+                    "`execution.mode`",
+                ] {
                     assert!(
                         !failure.detail.contains(absent),
                         "the refusal names {absent}, which is not the cause: {}",

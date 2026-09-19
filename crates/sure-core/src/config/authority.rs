@@ -726,6 +726,7 @@ execution:
   mode: host_confirmed
   allow_dependency_install: true
   allow_network: true
+  allow_project_write: true
 privacy:
   full_recording: true
   telemetry: true

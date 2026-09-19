@@ -1159,6 +1159,44 @@ pub fn allowance_could_not_be_spent_reason(
     let with_strict =
         acts_a_tool_could_be_held_for(tool, mode, permissions, ProtectionMode::Strict);
 
+    // The third permission a tool's action can need and not have, and the only
+    // one whose remedy can be **two** settings rather than one.
+    //
+    // A change to the project's files needs `write_project`, which a user's own
+    // settings file can grant and a project's `sure.yaml` cannot. Granting it is
+    // asked first under the protection **in force**, the same question the two
+    // clauses above ask, because for a user who is already in `strict` the
+    // permission is the whole of the remedy. Only where that leaves the grant
+    // unspendable is the stricter mode the second half — and there it is the
+    // half that is easy to mistake for the whole: under `standard` a granted
+    // change is *allowed*, so it is held for no danger and an allowance is spent
+    // by nothing. `strict` is what holds a change that names a whole location,
+    // which is the one act of the three a change can reach at all.
+    //
+    // The candidate is computed only for a tool whose action needs *that*
+    // permission, because the rule answers about the tool's own question: with
+    // `write_project` granted, a `Read` reaches strict's credentials danger
+    // whether or not a change was ever involved, and a sentence built on that
+    // would tell a user to set a permission their read has no use for.
+    let (with_project_write, the_permission_alone_is_not_enough) =
+        if action_kind.required_permission() == Permission::WriteProject
+            && !permissions.allows(Permission::WriteProject)
+        {
+            let mut granted = permissions.clone();
+            granted.write_project = true;
+            let alone = acts_a_tool_could_be_held_for(tool, mode, &granted, protection);
+            if alone.is_empty() {
+                (
+                    acts_a_tool_could_be_held_for(tool, mode, &granted, ProtectionMode::Strict),
+                    true,
+                )
+            } else {
+                (alone, false)
+            }
+        } else {
+            (Vec::new(), false)
+        };
+
     let mut reason = opening;
 
     // What is in force, and only it: each clause is here because it is a reason
@@ -1181,6 +1219,21 @@ pub fn allowance_could_not_be_spent_reason(
             " `execution.mode` is `{}` here, so SURE does not run this project's own code, and a \
              command is refused on that ground before SURE asks what it would do.",
             mode.as_str()
+        ));
+    }
+    // The same shape of clause for the permission a change needs, and it is the
+    // clause whose absence a reader would notice first: a user refused for
+    // `Write`, `Edit` or `Delete` under the default settings is refused because
+    // nothing has granted SURE the right to change their files, and a sentence
+    // that named only `protection.mode` would leave them looking at a setting
+    // that is not what stopped them.
+    if action_kind.required_permission() == Permission::WriteProject
+        && !permissions.allows(Permission::WriteProject)
+    {
+        reason.push_str(&format!(
+            " A request naming it is one that would {}, and the permissions in force do not grant \
+             SURE that.",
+            permission_in_a_sentence(Permission::WriteProject)
         ));
     }
     if acts_a_request_could_be_held_for(mode, permissions, ProtectionMode::Strict).is_empty() {
@@ -1233,6 +1286,33 @@ pub fn allowance_could_not_be_spent_reason(
             Danger::in_a_sentence(&with_strict)
         ));
     }
+    // The pair, and it is offered where the permission is the half that is
+    // missing. Where the user has already granted it, `with_strict` above is
+    // non-empty and names the half that is left, so the two clauses never both
+    // appear: this one is computed only while the permission is not in force.
+    //
+    // The user's own settings file is named as the file rather than as "your
+    // settings", and the project's is named as the one that cannot do this,
+    // because `Layer::can_grant` answers `false` for a project — the same
+    // distinction `P13-T009` made for `execution.mode`.
+    //
+    // Whether the mode is named beside the permission is read off the rule and
+    // not off the setting: it is the case exactly when granting the permission
+    // under the protection already in force left the grant unspendable, so a
+    // user who is already in `strict` is asked for the permission and nothing
+    // else.
+    if !with_project_write.is_empty() {
+        reason.push_str(&format!(
+            " {NAME_THE_WRITE_PERMISSION}{}, and a request SURE holds because it would {} is \
+             within reach of one.",
+            if the_permission_alone_is_not_enough {
+                " — and set `protection.mode: strict`"
+            } else {
+                ""
+            },
+            Danger::in_a_sentence(&with_project_write)
+        ));
+    }
 
     reason.push_str(
         " Nothing was written, and SURE records no allowance that a request naming this tool \
@@ -1257,9 +1337,9 @@ pub fn allowance_could_not_be_spent_reason(
 /// sentence built on this answer true when either vocabulary changes: `variants!`
 /// puts every variant in its list, so a request or a mode added later is asked
 /// about the moment it exists, and a claim of *no setting grants this* cannot
-/// outlive the fact it was read from. `no_setting_grants_the_permission_a_change
-/// _to_the_project_needs` is what says the answer has changed, rather than
-/// leaving it to a reader of the sentence.
+/// outlive the fact it was read from.
+/// `every_permission_is_in_reach_of_a_setting_now` is what says the answer has
+/// changed, rather than leaving it to a reader of the sentence.
 fn a_setting_grants(permission: Permission) -> bool {
     ExecutionMode::ALL
         .iter()
@@ -1282,8 +1362,17 @@ fn a_setting_grants(permission: Permission) -> bool {
 /// What is *not* in the sentence is as deliberate as what is: no `execution.mode`
 /// value, no `protection.mode` value and no remedy. Naming any of them would be
 /// naming a setting that is not the cause — the failure
-/// [`allowance_could_not_be_spent_reason`] exists to avoid — and for these tools
-/// no change to one would make the grant spendable.
+/// [`allowance_could_not_be_spent_reason`] exists to avoid — and where this
+/// sentence is reached, no change to one would make the grant spendable.
+///
+/// **Nothing reaches it in this build, and that is not a reason to drop it.**
+/// The guard that chooses it asks [`a_setting_grants`] of the permission the
+/// tool's action needs, so the sentence is what a later build answers with if a
+/// permission ever becomes unreachable again — instead of advice naming a
+/// setting that would not help. `P13-T011` is the dispatch in which the last
+/// permission out of reach became grantable, and
+/// `the_sentence_about_the_builds_own_limit_is_reached_by_no_tool_now` is what
+/// says so and holds this sentence to its shape meanwhile.
 #[must_use]
 fn an_action_no_setting_can_grant_reason(tool: &str, action_kind: ActionKind) -> String {
     format!(
@@ -1357,6 +1446,19 @@ const STRICT_ALLOWS: &str = "Strict protection does not hold this: it is not a d
 /// green.
 const STRICT_TAIL: &str = " Strict protection asks you about this, and a harness hook cannot ask \
      you, so SURE does not allow it.";
+
+/// The one remedy for a tool whose action would change the project's own files:
+/// the user's own settings file, named as the file rather than as "your
+/// settings", because a project's `sure.yaml` cannot grant it
+/// ([`crate::config::Layer::can_grant`]) and a user who edited that one would
+/// have changed nothing — the distinction `P13-T009` made for
+/// `execution.mode`.
+///
+/// The clause that follows it is built rather than written here, because the
+/// permission is half of that remedy for a user in `standard` and the whole of
+/// it for a user already in `strict`.
+const NAME_THE_WRITE_PERMISSION: &str = "Name `execution.allow_project_write: true` in your own settings file — the one `sure doctor` \
+     prints; a project's `sure.yaml` cannot grant this one";
 
 /// Why the existing engine refused, unchanged.
 ///
@@ -2533,6 +2635,47 @@ mod tests {
         permissions
     }
 
+    /// Every permission set the six booleans can make — sixty-four of them,
+    /// including ones no authority builds and ones `ExecutionPermissions`' own
+    /// documentation says cannot exist.
+    ///
+    /// The sweeps that read this are exhaustive rather than representative,
+    /// because the claims they hold are about sentences a user reads: a sampled
+    /// sweep would leave *no configuration can print this false thing* as a
+    /// statement about the sample.
+    fn every_permission_set() -> Vec<ExecutionPermissions> {
+        (0u8..64)
+            .map(|bits| ExecutionPermissions {
+                inspect: bits & 1 != 0,
+                run_project_code: bits & 2 != 0,
+                install_dependencies: bits & 4 != 0,
+                network: bits & 8 != 0,
+                write_project: bits & 16 != 0,
+                connect_service: bits & 32 != 0,
+            })
+            .collect()
+    }
+
+    /// The tool names a grant can be recorded for: every name either harness's
+    /// vocabulary carries, plus one neither harness knows — which is the arm
+    /// that falls back to `ActionKind::ArbitraryCommand`.
+    ///
+    /// One list, read by the sweeps that ask what a user can be told about a
+    /// tool, because a name missing from one of them would leave that sweep's
+    /// claim *every tool a user can name* as a statement about the names it
+    /// happened to carry.
+    fn tool_names_a_user_can_name() -> [&'static str; 7] {
+        [
+            "Shell",
+            "Bash",
+            "Read",
+            "Write",
+            "Edit",
+            "Delete",
+            "A Tool Neither Harness Sends",
+        ]
+    }
+
     /// The witness list is the whole of what a danger can be read from, and this
     /// is what holds it to that: each witness must produce the danger it exists
     /// for under settings that reach every rule, and the seven of them must name
@@ -2684,13 +2827,22 @@ mod tests {
     /// [`a_setting_grants`] iterates both `ALL` lists, so a request added later
     /// that grants one of the six permissions is asked about the moment it
     /// exists. What this test adds is the other direction: it says **which**
-    /// permissions are ungrantable now, so that a build in which the answer
-    /// changed fails here rather than silently printing a sentence about a
-    /// limitation that no longer holds. That is the way *no setting grants it*
-    /// survives a vocabulary change: the sentence is computed, and this is the
-    /// alarm when what it computes stops being true.
+    /// permissions are out of reach of every setting, so that a build in which
+    /// the answer changed fails here rather than silently keeping a sentence
+    /// about a limitation that is no longer there.
+    ///
+    /// **`P13-T011` is the build in which the answer changed, and this is the
+    /// assertion that changed with it.** The out-of-reach set used to be exactly
+    /// `[WriteProject]`, and a change to the project's files was refused with
+    /// the build's own limit because of it. The decision that task reached, with
+    /// the evidence for it in `progress/HANDOFF.md`, is that the permission is
+    /// one a **user's own settings file** grants and a project's `sure.yaml`
+    /// cannot: `execution.allow_project_write` is how that file says it. So the
+    /// set is empty, and *nothing is out of reach* is the claim — a different
+    /// and equally checkable one, which is why the test is renamed rather than
+    /// relaxed: the old name is now false of the code.
     #[test]
-    fn no_setting_grants_the_permission_a_change_to_the_project_needs() {
+    fn every_permission_is_in_reach_of_a_setting_now() {
         // The two action kinds a change to a project's files is read as, and the
         // permission both of them need. `DeleteProjectFile` shares it with
         // `WriteProjectFile` (`ActionKind::required_permission`), which is why
@@ -2702,25 +2854,25 @@ mod tests {
                 "{action_kind:?} no longer needs the permission this refusal is about"
             );
             assert!(
-                !a_setting_grants(action_kind.required_permission()),
-                "{action_kind:?} needs a permission some setting grants, so the refusal that \
-                 says no setting does is false"
+                a_setting_grants(action_kind.required_permission()),
+                "{action_kind:?} needs a permission no setting grants, so the refusal that says \
+                 no setting does is true again"
             );
         }
 
-        // And the whole partition of the six, so that a permission added later
-        // is visited and a permission that becomes grantable is named. Exactly
-        // one is out of reach today, and it is the one above.
+        // And the whole partition of the six. Empty is the claim: a permission
+        // that becomes unreachable again fails here, and so does a permission
+        // added later that no mode and no request hands over — which is the
+        // alarm this test exists to be, in both directions.
         let out_of_reach: Vec<Permission> = Permission::ALL
             .iter()
             .copied()
             .filter(|permission| !a_setting_grants(*permission))
             .collect();
-        assert_eq!(
-            out_of_reach,
-            vec![Permission::WriteProject],
-            "the set of permissions no setting grants has changed, so the sentence built on it \
-             has to be revisited"
+        assert!(
+            out_of_reach.is_empty(),
+            "these permissions are out of reach of every setting, so a tool whose action needs \
+             one is refused with this build's own limit again: {out_of_reach:?}"
         );
     }
 
@@ -2856,30 +3008,13 @@ mod tests {
         // below it are about sentences a user reads: a sampled sweep would leave
         // "no configuration can print this false thing" as a statement about the
         // sample.
-        let permission_sets: Vec<ExecutionPermissions> = (0u8..64)
-            .map(|bits| ExecutionPermissions {
-                inspect: bits & 1 != 0,
-                run_project_code: bits & 2 != 0,
-                install_dependencies: bits & 4 != 0,
-                network: bits & 8 != 0,
-                write_project: bits & 16 != 0,
-                connect_service: bits & 32 != 0,
-            })
-            .collect();
+        let permission_sets = every_permission_set();
         for mode in ExecutionMode::ALL {
             for protection in ProtectionMode::ALL {
                 for permissions in &permission_sets {
                     let acts = acts_a_request_could_be_held_for(*mode, permissions, *protection);
                     let mut union: Vec<Danger> = Vec::new();
-                    for tool in [
-                        "Shell",
-                        "Bash",
-                        "Read",
-                        "Write",
-                        "Edit",
-                        "Delete",
-                        "A Tool Neither Harness Sends",
-                    ] {
+                    for tool in tool_names_a_user_can_name() {
                         let narrowed =
                             acts_a_tool_could_be_held_for(tool, *mode, permissions, *protection);
                         for danger in &narrowed {
@@ -2957,7 +3092,7 @@ mod tests {
                         // Every remedy in the sentence, applied to the settings
                         // it names, must leave an act this tool can reach —
                         // otherwise the sentence has told the user to change
-                        // something that would not have helped. The two are the
+                        // something that would not have helped. The three are the
                         // only remedies this function offers, and each is
                         // asserted by the change it tells the user to make.
                         if refusal.contains("Name `execution.mode: host_confirmed`") {
@@ -2988,6 +3123,56 @@ mod tests {
                                 "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
                                  offers `strict` and it would leave the grant just as \
                                  unspendable: {refusal}"
+                            );
+                        }
+                        // The third remedy, and the only one that can be **two**
+                        // settings rather than one: a change needs the
+                        // permission, and a user in `standard` needs the stricter
+                        // mode with it, because a granted change under `standard`
+                        // is allowed and so held for no act at all.
+                        //
+                        // Three claims, and the last is the one that keeps the
+                        // sentence from being either incomplete or padded: the
+                        // pair must work, and the mode must be named beside the
+                        // permission exactly when the permission alone would not
+                        // do. A sentence that named the mode to a user already in
+                        // it, or left it out for a user who needs it, would be
+                        // sending them to change a setting that is not what
+                        // stopped them.
+                        if refusal.contains("execution.allow_project_write: true") {
+                            let mut with_write = permissions.clone();
+                            with_write.write_project = true;
+                            assert_eq!(
+                                action_kind_a_tool_name_names(tool).required_permission(),
+                                Permission::WriteProject,
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal offers \
+                                 the write permission to a tool whose action does not need it: \
+                                 {refusal}"
+                            );
+                            assert!(
+                                !acts_a_tool_could_be_held_for(
+                                    tool,
+                                    *mode,
+                                    &with_write,
+                                    ProtectionMode::Strict,
+                                )
+                                .is_empty(),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
+                                 offers the write permission and `strict` together and they \
+                                 would leave the grant just as unspendable: {refusal}"
+                            );
+                            assert_eq!(
+                                refusal.contains("and set `protection.mode: strict`"),
+                                acts_a_tool_could_be_held_for(
+                                    tool,
+                                    *mode,
+                                    &with_write,
+                                    *protection,
+                                )
+                                .is_empty(),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
+                                 names the mode beside the permission where the permission alone \
+                                 would work, or leaves it out where it would not: {refusal}"
                             );
                         }
                     }
@@ -3119,91 +3304,176 @@ mod tests {
         assert!(reason.contains(CUSTOM_PROTECTION_INSTEAD), "{reason}");
     }
 
-    /// The third case, and the one `P13-T010`'s third dispatch adds: a tool
-    /// whose action needs a permission **no configuration in this build can
-    /// grant**, where the sentence must say that rather than name a setting.
+    /// The sentence about **this build's own limit**, and the two things that are
+    /// true of it now that every permission is in reach of a setting.
     ///
-    /// Measured on the binary before the fix, under the settings this test uses:
-    /// `--tool Write` and `--tool Delete` printed a sentence whose only clause
-    /// about a setting was the protection mode, and **offered no remedy at
-    /// all**; `--tool Edit` printed one offering `execution.mode:
-    /// host_confirmed`, and a grant recorded after taking that advice was spent
-    /// by no request from either harness. The settings below are the ones each
-    /// measurement was taken under, and every one of them must now read as the
-    /// build's own limit and not as the user's settings.
+    /// It used to be reached by `Write`, `Edit` and `Delete` under every set of
+    /// settings, and it was measured on the binary: those three printed a
+    /// sentence naming no setting at all, because there was none that could
+    /// grant the permission their action needed. `P13-T011` is the dispatch that
+    /// decided otherwise — a user's own settings file may grant it, a project's
+    /// `sure.yaml` may not — and the three are now refused with that setting
+    /// named. The claim the old test made is false of this build, so the test is
+    /// replaced by the claim that is true of it rather than deleted.
+    ///
+    /// What is kept is the sentence itself, and deliberately: the branch above it
+    /// is *computed* — it asks [`a_setting_grants`] of the permission the tool's
+    /// own action needs — so if a permission is ever out of reach again, a tool
+    /// that needs one is answered with this instead of with advice that would not
+    /// help. A branch nobody reaches is exactly the one that rots unnoticed, so
+    /// the sentence's own shape is asked for directly here.
+    ///
+    /// Two claims: the sentence still says the limit is the build's and offers no
+    /// setting, and no tool name under any settings this build can build is
+    /// answered with it.
     #[test]
-    fn a_tool_whose_permission_no_setting_grants_is_refused_without_naming_a_setting() {
-        let inspect_only = ExecutionPermissions::inspect_only();
-        for (tool, mode, permissions, protection) in [
-            (
-                "Write",
-                ExecutionMode::InspectOnly,
-                &inspect_only,
-                ProtectionMode::Standard,
-            ),
-            (
-                "Delete",
-                ExecutionMode::InspectOnly,
-                &inspect_only,
-                ProtectionMode::Standard,
-            ),
-            (
-                "Edit",
-                ExecutionMode::InspectOnly,
-                &inspect_only,
-                ProtectionMode::Standard,
-            ),
-            // The setting the old sentence named for `Write`, and the one it
-            // offered to `Edit`: neither changes this answer.
-            (
-                "Write",
-                ExecutionMode::InspectOnly,
-                &inspect_only,
-                ProtectionMode::Strict,
-            ),
-            (
-                "Edit",
-                ExecutionMode::HostConfirmed,
-                &inspect_only,
-                ProtectionMode::Standard,
-            ),
+    fn the_sentence_about_the_builds_own_limit_is_reached_by_no_tool_now() {
+        // The sentence, asked for as the guard would ask for it: the tool, what
+        // its action would do, the build's own limit, and not one setting — a
+        // user who acted on advice naming one would be refused again, which is
+        // the failure this sentence exists to avoid.
+        let sentence = an_action_no_setting_can_grant_reason("Write", ActionKind::WriteProjectFile);
+        for needed in [
+            "'Write'",
+            "change files inside your project",
+            "No setting in this build grants it",
+            "Nothing was written",
         ] {
-            let reason = allowance_could_not_be_spent_reason(tool, mode, permissions, protection)
-                .unwrap_or_else(|| {
-                    panic!("{tool} needs a permission no setting grants, so it cannot be recorded")
-                });
+            assert!(
+                sentence.contains(needed),
+                "the sentence about this build's own limit does not say {needed}: {sentence}"
+            );
+        }
+        for absent in [
+            "`execution.mode`",
+            "`protection.mode`",
+            "host_confirmed",
+            "strict",
+        ] {
+            assert!(
+                !sentence.contains(absent),
+                "the sentence about this build's own limit names {absent}, which is not the cause \
+                 and would not help — and it is only ever read where no setting can: {sentence}"
+            );
+        }
 
-            // The reason it gives: the request would change this project's
-            // files, the permissions in force do not allow that, and no setting
-            // in this build grants it.
+        // And who reaches it: nobody, and for the reason the guard gives rather
+        // than because the branch was dropped. Both halves are asked — that the
+        // guard's own predicate is false for every name a user can type, and
+        // that no refusal this build can print is this sentence.
+        for tool in tool_names_a_user_can_name() {
+            let permission = action_kind_a_tool_name_names(tool).required_permission();
             assert!(
-                reason.contains("would change files inside your project"),
-                "{tool}: the refusal does not say what the request would do: {reason}"
+                a_setting_grants(permission),
+                "a request naming {tool} is refused with this build's own limit: no setting grants \
+                 {permission:?}"
             );
-            assert!(
-                reason.contains("No setting in this build grants it"),
-                "{tool}: the refusal does not say the limit is the build's: {reason}"
-            );
-            assert!(
-                reason.contains("Nothing was written"),
-                "{tool}: the refusal does not say nothing was written: {reason}"
-            );
+        }
+        for mode in ExecutionMode::ALL {
+            for protection in ProtectionMode::ALL {
+                for permissions in every_permission_set() {
+                    for tool in tool_names_a_user_can_name() {
+                        if let Some(refusal) = allowance_could_not_be_spent_reason(
+                            tool,
+                            *mode,
+                            &permissions,
+                            *protection,
+                        ) {
+                            assert!(
+                                !refusal.contains("No setting in this build grants it"),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal says \
+                                 no setting grants the permission its action needs, and this \
+                                 build has one: {refusal}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-            // And what it must not say: a setting. Not one as the cause, and
-            // not one as a remedy — a user who took either advice would be
-            // refused again, which is the failure this function exists to
-            // avoid.
-            for absent in [
-                "`execution.mode`",
-                "`protection.mode`",
-                "host_confirmed",
-                "strict",
-            ] {
-                assert!(
-                    !reason.contains(absent),
-                    "{tool}: the refusal names {absent}, which is not the cause and would not \
-                     help: {reason}"
-                );
+    /// The brief for `P13-T011`, §4: **the answer is one rule and not two.**
+    ///
+    /// Three pieces of code answer whether SURE may change this project's own
+    /// files — `sure_domain::execution::decide` (the permission and the mode),
+    /// the protection mode's own question in [`assess_request`], and the
+    /// reachable-act computation `P13-T010`'s writer reads. All three are asked
+    /// the same question here, of the same witness: a change that names a whole
+    /// location, which is the one act of the three a change can reach at all.
+    ///
+    /// They must give one answer, and the test is written so that moving one of
+    /// them without the others fails here rather than at the sentence a user
+    /// reads — because the sentence's promise is read off the writer's list, and
+    /// a list that disagreed with the decision path would promise reach that does
+    /// not exist. That is the shape of the defect `P13-T010`'s second send-back
+    /// found (`host_confirmed` offered for a grant its tool could not spend), and
+    /// the reason this is a test rather than a comment saying the three agree.
+    #[test]
+    fn the_domain_the_protection_question_and_the_writers_list_answer_a_change_the_same_way() {
+        let kind = ActionKind::WriteProjectFile;
+        let change = ToolRequest::at("Write", "build/");
+
+        for mode in ExecutionMode::ALL {
+            for protection in ProtectionMode::ALL {
+                for permissions in every_permission_set() {
+                    let base = decide(kind, *mode, &permissions);
+                    let assessed = assess_request(kind, &change, *mode, &permissions, *protection);
+                    let listed =
+                        acts_a_tool_could_be_held_for("Write", *mode, &permissions, *protection);
+
+                    // 1. The domain refuses a change exactly while the permission
+                    //    is not granted, and **the mode does not enter it** — this
+                    //    assertion is asked of all three modes, so a build in
+                    //    which one of them started refusing a change fails here.
+                    //    That is what makes the permission, and not
+                    //    `execution.mode`, the setting the refusal names for
+                    //    `Write`, `Edit` and `Delete`.
+                    assert_eq!(
+                        base == ExecutionDecision::Denied,
+                        !permissions.allows(Permission::WriteProject),
+                        "{mode:?} {permissions:?}: the domain refuses a change for something other \
+                         than the permission, which is not the setting a refusal can name"
+                    );
+                    assert_ne!(
+                        base,
+                        ExecutionDecision::NeedsConsent,
+                        "{mode:?} {permissions:?}: a change is held for consent, which nothing the \
+                         user can write would put right"
+                    );
+
+                    // 2. The protection mode's own question, asked of that same
+                    //    answer: a request the domain refused is never held for a
+                    //    danger — an allowance is not a way to run under settings
+                    //    the user did not change — and one it allowed is held
+                    //    exactly when the mode in force asks about a whole
+                    //    location.
+                    assert_eq!(
+                        assessed.danger.is_some(),
+                        base == ExecutionDecision::Allowed && *protection == ProtectionMode::Strict,
+                        "{mode:?} {protection:?} {permissions:?}: the protection layer holds a \
+                         change where the domain and the mode do not say to"
+                    );
+
+                    // 3. And the writer's list is that same fact read for the
+                    //    tool. Empty is the answer the writer refuses a grant on,
+                    //    so a list that disagreed with the protection question
+                    //    would refuse a grant for a request SURE does hold — or
+                    //    record one for a request it does not.
+                    assert_eq!(
+                        listed.is_empty(),
+                        assessed.danger.is_none(),
+                        "{mode:?} {protection:?} {permissions:?}: the acts the writer lists are \
+                         not the acts the protection layer holds"
+                    );
+                    if let Some(danger) = assessed.danger {
+                        assert!(
+                            listed.contains(&danger),
+                            "{mode:?} {protection:?} {permissions:?}: the protection layer holds \
+                             this change for {danger:?} and the writer does not list it, so a \
+                             grant would be refused for an act SURE does hold"
+                        );
+                    }
+                }
             }
         }
     }

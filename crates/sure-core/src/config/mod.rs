@@ -140,6 +140,24 @@ pub struct ExecutionConfig {
     pub allow_dependency_install: bool,
     /// Whether checks may reach the network.
     pub allow_network: bool,
+    /// Whether SURE may change files inside the project: write them, or delete
+    /// them.
+    ///
+    /// The key that makes
+    /// [`Permission::WriteProject`](sure_domain::execution::Permission::WriteProject)
+    /// reachable, and with it the protection mode's own rule about a change.
+    /// Without a grant the mode is never consulted for a write or a delete —
+    /// `decide` refuses on the missing permission first — so `standard` and
+    /// `strict` answer an ordinary change identically and every sentence
+    /// `docs/security/PROTECTION_MODE.md` writes about *which* changes `strict`
+    /// holds describes nothing a run can reach.
+    ///
+    /// **A user's own file is the only layer that can grant this.** It is a
+    /// [`ProjectRequest`] like the two above, so a project's `sure.yaml` that
+    /// names it leaves a refused escalation rather than an authorisation: a
+    /// repository the user merely opened does not get to decide that the agent
+    /// working in it may rewrite that repository.
+    pub allow_project_write: bool,
 }
 
 impl Default for ExecutionConfig {
@@ -150,6 +168,9 @@ impl Default for ExecutionConfig {
             mode: ExecutionMode::InspectOnly,
             allow_dependency_install: false,
             allow_network: false,
+            // And a change to the project's files without an explicit grant is
+            // the same kind of bug: SURE does not edit a project unasked.
+            allow_project_write: false,
         }
     }
 }
@@ -384,6 +405,9 @@ impl Config {
         }
         if self.execution.allow_network {
             requests.push(ProjectRequest::Network);
+        }
+        if self.execution.allow_project_write {
+            requests.push(ProjectRequest::WriteProject);
         }
         if self.privacy.full_recording {
             requests.push(ProjectRequest::FullRecording);

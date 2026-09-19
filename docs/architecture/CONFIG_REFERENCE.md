@@ -138,13 +138,22 @@ than what the harness did.
 | `mode` | enum | `inspect_only` | `inspect_only`, `host_confirmed` |
 | `allow_dependency_install` | boolean | `false` | `true`, `false` |
 | `allow_network` | boolean | `false` | `true`, `false` |
+| `allow_project_write` | boolean | `false` | `true`, `false` |
 
 `inspect_only` runs none of the project's code. `host_confirmed` allows the
 project's code to run on this machine, and always needs confirmation for an
 action SURE cannot classify.
 
-Both booleans are **requests for a permission**, never a grant. Setting
+All three booleans are **requests for a permission**, never a grant. Setting
 `mode: host_confirmed` is a request to run project code; it does not grant it.
+The same is true of `allow_project_write`, with one more restriction on top: the
+permission it asks for is one a project's own file cannot be given. Only the
+user's own configuration grants it, so this key in a project's `sure.yaml` is
+refused and recorded as a refusal, and a change to the project's files is then
+blocked with *the current execution mode does not permit this action*. Nor does
+the mode stand in the way of a change: `write_project` is what a change needs,
+and a change is allowed in `inspect_only` once the user grants it, because
+writing the project's files does not run the project's code.
 
 ### `analysis`
 
@@ -224,6 +233,7 @@ each request becomes is in `docs/architecture/CONFIG_AUTHORITY.md`:
 | `execution.mode` other than `inspect_only` | run project code |
 | `execution.allow_dependency_install: true` | install dependencies |
 | `execution.allow_network: true` | network access |
+| `execution.allow_project_write: true` | change this project's own files |
 | `privacy.full_recording: true` | full recording |
 | `privacy.full_recording_retention_days` longer than the user allowed | keep recorded content for longer than you allowed |
 | `privacy.telemetry: true` | telemetry |

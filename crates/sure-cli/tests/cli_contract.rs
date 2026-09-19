@@ -49,7 +49,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::config::{Authority, ProtectionMode};
-use sure_core::execution::ExecutionMode;
+use sure_core::execution::{ExecutionMode, ExecutionPermissions, Permission};
 use sure_core::hook_protection::{Danger, ProtectionDecisionKind};
 use sure_core::paths::Paths;
 use sure_core::protection_history;
@@ -2410,39 +2410,127 @@ fn allowance_rows(store: &Path) -> (Vec<i64>, Vec<i64>) {
 }
 
 #[test]
-fn a_tool_no_setting_can_let_change_a_file_is_refused_without_naming_a_setting() {
-    // Acceptance line 1 for the case `P13-T010`'s second send-back measured: a
-    // tool whose action would change the project's files, where the permission
-    // that act needs is one no configuration in this build grants. `Write` and
-    // `Delete` are that case in every mode; `Edit` joined them when the tool
-    // name stopped being read as the union over both harnesses' tables — the
-    // union also read it through Cursor's unrecognised-name fallback and took
-    // the more permissive reading, which is why the writer used to *record* a
-    // grant for it and then have no request from either harness spend it.
+fn a_change_is_refused_with_the_setting_that_would_let_it_through() {
+    // Acceptance line 1 for the change `P13-T011` decided: a tool whose action
+    // would change the project's files, and what a user is told about it.
     //
-    // The machine's own settings file cannot change any of this, so unlike the
-    // test above this one is the same on every machine: the permission these
-    // three actions need is granted by no `execution.mode` and by no request a
-    // file may ask for, so `host_confirmed` in somebody's settings is not a
-    // branch this test has to ask about.
+    // **What changed, and why this is not the test it was.** `P13-T010`
+    // measured `--tool Write`, `--tool Edit` and `--tool Delete` refused with
+    // *"No setting in this build grants it"*, because no `execution.mode` and no
+    // request a file could make granted `write_project`. `P13-T011` decided that
+    // the **user's own settings file** may grant it — by
+    // `execution.allow_project_write`, which a project's `sure.yaml` still
+    // cannot — so the build's own limit is no longer the reason those three are
+    // refused and the refusal names the setting instead. Nothing is weakened
+    // here: the assertion that the build has no such limit is replaced by the
+    // assertion that is true of it, and the sentence is now held to *which*
+    // setting it names and *which layer* may set it.
     //
-    // What it asserts is what a user reads and what the store shows: exit 5, a
-    // sentence that names the tool, the act and the build's own limit, no
-    // setting-named-as-a-remedy anywhere in it, and no store directory left
-    // behind — because the refusal returns before anything is opened.
+    // **Which branch this machine is in is not a choice the test makes.** No
+    // flag names the user's settings file (`Paths::discover_at` moves the store
+    // and deliberately not the settings) and no test may write the file the
+    // person running the suite uses, so the state of the answer is read from the
+    // reader SURE reads it with, and every branch is asserted in full. On a
+    // machine with no settings file — which is this one, and every machine until
+    // a person writes one — that is the third branch below.
     let project = a_project_of_our_own();
     let machine = the_store_on_this_machine();
+    let paths =
+        Paths::discover().expect("this machine reports a per-user location for SURE's files");
+    let (mode, permissions, protection) = match Authority::load(&project, &paths.user_config_file())
+    {
+        Ok(authority) => (
+            authority.execution_mode(),
+            authority.permissions(),
+            authority.protection().value,
+        ),
+        Err(_) => (
+            ExecutionMode::InspectOnly,
+            ExecutionPermissions::inspect_only(),
+            ProtectionMode::Strict,
+        ),
+    };
+    // The branch, from the settings themselves and not from the rule the command
+    // applies: whether SURE has been given the permission a change needs, and
+    // whether the protection in force holds a change that names a whole
+    // location. Both halves are needed — a granted change under `standard` is
+    // allowed outright and so is held for no act at all, which is why a grant
+    // recorded there would be spent by nothing.
+    //
+    // The mode is resolved here and then read nowhere: writing a file does not
+    // run the project's code (`ActionKind::executes_project_code`), so `decide`
+    // never consults the mode about a change, and the sentence must not name the
+    // mode in force whichever one it is. That is `mode.as_str()`'s place in the
+    // absent list below, and it is what makes `execution.mode` the wrong advice
+    // for these three tools.
+    let writes = permissions.allows(Permission::WriteProject);
+    let strict = protection == ProtectionMode::Strict;
+    let a_grant_would_be_spendable = writes && strict;
+    let project_arg = project.to_string_lossy().into_owned();
+    // The three tool names a change to the project's files is spelled with, and
+    // the act each of them reaches. `Edit` is the name that was read through
+    // Cursor's unrecognised-name fallback until `P13-T010`
+    // (`crate::hook`'s own test is the one that measured that), so this loop is
+    // over the names and not over one harness's vocabulary.
+    let changes = [
+        ("Write", "build/out.txt"),
+        ("Edit", "src/lib.rs"),
+        ("Delete", "build/out.txt"),
+    ];
+
+    // The branch every machine until somebody writes a settings file is in, and
+    // the one the paragraph above is about: nobody has granted SURE the
+    // permission, so no grant can be spent, and the user is told which setting
+    // in *their own* file would change that.
+    if a_grant_would_be_spendable {
+        let store = a_store_of_our_own();
+        for (tool, subject) in changes {
+            let run = run_in_a_store(
+                &store,
+                &[
+                    "hook",
+                    "allow-once",
+                    "--project",
+                    &project_arg,
+                    "--tool",
+                    tool,
+                    "--path",
+                    subject,
+                ],
+            );
+            assert_eq!(
+                run.status, 0,
+                "a grant the settings in force would let a request spend was not recorded for \
+                 {tool}:\nstdout: {}\nstderr: {}",
+                run.stdout, run.stderr
+            );
+            for needed in [
+                "SURE recorded a one-time allowance",
+                "delete a whole location",
+            ] {
+                assert!(
+                    run.stderr.contains(needed),
+                    "the record for {tool} does not say {needed:?}:\n{}",
+                    run.stderr
+                );
+            }
+        }
+        let (grants, spent) = allowance_rows(&store);
+        assert_eq!(
+            (grants.len(), spent.len()),
+            (3, 0),
+            "three grants were recorded and none of them used"
+        );
+        assert_untouched(&machine, "by runs that named a store");
+        let _ = std::fs::remove_dir_all(&project);
+        return;
+    }
+
     // The store this test names does **not** exist, which is the point: a store
     // SURE has never written is a directory that is not there, and a refusal
     // that created one would be a refusal that wrote something.
     let store = a_store_of_our_own().join("not-created");
-    let project_arg = project.to_string_lossy().into_owned();
-
-    for (tool, subject) in [
-        ("Write", "build/out.txt"),
-        ("Edit", "src/lib.rs"),
-        ("Delete", "build/out.txt"),
-    ] {
+    for (tool, subject) in changes {
         let run = run_in_a_store(
             &store,
             &[
@@ -2469,8 +2557,7 @@ fn a_tool_no_setting_can_let_change_a_file_is_refused_without_naming_a_setting()
         );
         for needed in [
             "SURE will not record an allowance that no request could spend.",
-            "would change files inside your project",
-            "No setting in this build grants it",
+            &format!("'{tool}'"),
             "Nothing was written",
         ] {
             assert!(
@@ -2479,20 +2566,54 @@ fn a_tool_no_setting_can_let_change_a_file_is_refused_without_naming_a_setting()
                 run.stderr
             );
         }
-        // The setting the previous build named here was provably not the cause:
-        // `protection: {mode: strict}` refuses this command again, and
-        // `execution.mode: host_confirmed` was measured changing nothing. So
-        // neither may appear, as a cause or as a remedy.
+        // The sentence the previous build wrote here, and what this task
+        // decided: no setting in this build can grant a change is false of the
+        // build now — one can — so it may not be said of any tool.
         for absent in [
+            "No setting in this build grants it",
             "`execution.mode`",
-            "`protection.mode`",
             "host_confirmed",
             "inspect_only",
+            mode.as_str(),
         ] {
             assert!(
                 !run.stderr.contains(absent),
                 "the refusal for {tool} names {absent}, which is not the cause and would not \
                  make the grant spendable:\n{}",
+                run.stderr
+            );
+        }
+        if writes {
+            // The setting is already in force here, so naming it would be advice
+            // to change something that is not what stopped the request: what is
+            // left is the mode, and only the mode.
+            assert!(
+                run.stderr.contains("Set `protection.mode: strict`")
+                    && !run.stderr.contains("execution.allow_project_write"),
+                "the refusal for {tool} offers a setting the settings in force already grant, or \
+                 drops the one that would work:\n{}",
+                run.stderr
+            );
+        } else {
+            for needed in [
+                "would change files inside your project",
+                "execution.allow_project_write: true",
+                "sure doctor",
+                "a project's `sure.yaml` cannot grant this one",
+            ] {
+                assert!(
+                    run.stderr.contains(needed),
+                    "the refusal for {tool} does not say {needed}:\n{}",
+                    run.stderr
+                );
+            }
+            // The mode is the second half of the remedy exactly while the mode
+            // in force is not already the one that holds a whole location.
+            assert_eq!(
+                run.stderr.contains("and set `protection.mode: strict`"),
+                !strict,
+                "the refusal for {tool} names the mode beside the permission where the permission \
+                 alone would work, or leaves it out where it would not:\n{}",
                 run.stderr
             );
         }

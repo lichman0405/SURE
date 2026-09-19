@@ -111,13 +111,27 @@ user has no way to check. That is the sentence `--tool Shell` and `--tool Read`
 are refused with. Where the action needs a permission **no** setting in this
 build grants, no settings change makes such a grant spendable and the refusal
 says that instead: it does not name `execution.mode` or `protection.mode`,
-because neither is the cause and there is nothing the user could change. In this
-build that is a tool whose action would change the project's own files —
-`Write`, `Edit` and `Delete` — because nothing here grants SURE the permission to
-change them. Which of the two sentences a tool gets is read off the vocabularies
-rather than written down beside them, so a later release that makes that
-permission grantable answers with the first sentence and a test fails until it
-does. Which *subject* is a request SURE would hold is still not knowable at write
+because neither is the cause and there is nothing the user could change. Which of
+the two sentences a tool gets is read off the vocabularies rather than written
+down beside them, so a release that makes such a permission grantable answers
+with the first sentence with no sentence here to edit — and a test fails until
+someone says so. **`P13-T011` is that release, and this is where the document said
+it would be.** Until it, the case was a tool whose action would change the
+project's own files — `Write`, `Edit` and `Delete` — because nothing granted SURE
+the permission to change them then. That permission is now one the **user's own
+settings file** grants, by `execution.allow_project_write`; a project's `sure.yaml`
+still cannot grant it, and both halves are observed at the process boundary: the
+same request under the same setting is allowed when the user's file names it, and
+blocked with *the current execution mode does not permit this action* when the
+project's does. Those three tools are refused today with that setting named rather
+than with this build's own limit, and the test the paragraph above promised would
+fail — `no_setting_grants_the_permission_a_change_to_the_project_needs` — is the
+test that failed. It is now `every_permission_is_in_reach_of_a_setting_now` and
+asserts the other direction, *nothing is out of reach*. The sentence about the
+build's own limit is kept and still computed, so a build in which some permission
+is once again out of reach answers with it rather than with advice that would not
+help: a promise that a test fails is only worth making if the sentence outlives
+the fact it was read from. Which *subject* is a request SURE would hold is still not knowable at write
 time: the words are read when a request arrives, so a grant recorded for a tool
 that can reach an act may still name a request SURE never holds and be spent by
 nothing when its window expires.

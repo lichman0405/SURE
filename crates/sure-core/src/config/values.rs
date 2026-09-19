@@ -299,6 +299,29 @@ pub enum ProjectRequest {
     /// Reach the network.
     #[serde(rename = "network")]
     Network,
+    /// Change files inside the project: write them, or delete them.
+    ///
+    /// The one request whose permission is about the project's own files rather
+    /// than about what SURE starts or reaches. It exists because
+    /// [`ActionKind::WriteProjectFile`](sure_domain::execution::ActionKind::WriteProjectFile)
+    /// and
+    /// [`ActionKind::DeleteProjectFile`](sure_domain::execution::ActionKind::DeleteProjectFile)
+    /// need [`Permission::WriteProject`](sure_domain::execution::Permission::WriteProject),
+    /// and a permission a file can *ask* for and the user's own file may
+    /// *grant* is what makes the protection mode's own rule about a change
+    /// reachable at all: under no grant SURE refuses a change before the mode is
+    /// consulted, so `strict` and `standard` would answer a change identically
+    /// and the paragraph `docs/security/PROTECTION_MODE.md` devotes to which
+    /// changes `strict` holds would describe nothing.
+    ///
+    /// **Only the user's own file can grant it.** A project's `sure.yaml` that
+    /// names it leaves a refused escalation like every other request here
+    /// ([`Layer::can_grant`](crate::config::authority::Layer::can_grant)), which
+    /// is the same rule `execution.mode` and `privacy.full_recording` are held
+    /// to: a repository the user merely opened may not decide that the agent
+    /// working in it is allowed to rewrite that repository.
+    #[serde(rename = "write_project")]
+    WriteProject,
     /// Keep full transcripts rather than the standard record.
     #[serde(rename = "full_recording")]
     FullRecording,
@@ -328,6 +351,7 @@ variants!(
         RunProjectCode,
         InstallDependencies,
         Network,
+        WriteProject,
         FullRecording,
         Telemetry,
         ExternalAnalysis,
@@ -343,6 +367,7 @@ impl ProjectRequest {
             Self::RunProjectCode => "run_project_code",
             Self::InstallDependencies => "install_dependencies",
             Self::Network => "network",
+            Self::WriteProject => "write_project",
             Self::FullRecording => "full_recording",
             Self::Telemetry => "telemetry",
             Self::ExternalAnalysis => "external_analysis",
@@ -363,6 +388,10 @@ impl ProjectRequest {
             Self::RunProjectCode => Some(Permission::RunProjectCode),
             Self::InstallDependencies => Some(Permission::InstallDependencies),
             Self::Network => Some(Permission::Network),
+            // The one request that is about the project's own files. It is a
+            // permission like any other, and the user's own file is the only
+            // layer that can grant it.
+            Self::WriteProject => Some(Permission::WriteProject),
             // Reaching a model service is a connection to a service. It is not a
             // licence to send source code anywhere, which is why the request is
             // still recorded separately.
@@ -380,6 +409,7 @@ impl ProjectRequest {
             Self::RunProjectCode => "run this project's own commands on this computer",
             Self::InstallDependencies => "install this project's dependencies",
             Self::Network => "use the internet",
+            Self::WriteProject => "change this project's own files",
             Self::FullRecording => "keep full transcripts of the session",
             Self::Telemetry => "send usage data to SURE's authors",
             Self::ExternalAnalysis => "send project content to a model service",
@@ -493,6 +523,7 @@ mod tests {
                 "run_project_code",
                 "install_dependencies",
                 "network",
+                "write_project",
                 "full_recording",
                 "telemetry",
                 "external_analysis",

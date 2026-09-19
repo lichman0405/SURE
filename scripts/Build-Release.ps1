@@ -149,7 +149,7 @@
 # Falsifiability - what reddens this script
 # =============================================================================
 #
-# A check that cannot fail is the defect. Three mutations were run against this
+# A check that cannot fail is the defect. Four mutations were run against this
 # file on 2026-09-19 and each is reproducible from this comment alone.
 #
 # **Mutation 0 - write the checksum line with `Set-Content`.** In the checksum
@@ -190,6 +190,29 @@
 # the mutated script pass, which is how the assertion is shown to be the thing
 # doing the work rather than the filesystem.
 #
+# **Mutation 3 - take `logs\` back out of the `Verify` path.** Move the
+# `New-Item` that creates `$LogDirectory`, which P15-T002's repair put above the
+# phase branch, back inside the `if ($Phase -eq 'All')` branch, which is where
+# it was before that repair, and run `-Phase Verify` against a directory holding
+# only the archive and its `.sha256`. Expected and measured 2026-09-19: the gate
+# passes, the archive matches its checksum, the extraction succeeds, and the run
+# then dies inside `Invoke-Captured` with
+#
+#   FAILED: Could not find a part of the path '...\logs\extracted-doctor.json.txt'.
+#
+# and exit 1. This is a mutation of a *creation* rather than of a check, and its
+# blast radius is that one failure - nothing else can go red, because the
+# failure is before the binary is started and the `running_from` comparison is
+# never reached. It is a false red rather than a false green: the same archive
+# in a directory that has a `logs\` exits 0 and prints OK, and the artifact
+# itself is untouched. It is, though, the reading a fresh folder of a downloaded
+# artifact is most likely to get, and it arrives *after* the reader has been
+# told the checksum is good.
+#
+# Deleting the line instead of moving it is a *different* mutation with a wider
+# blast radius: `-Phase All` redirects into `logs\` in its own first step, so
+# that version reddens both phases rather than only `Verify`.
+#
 # A third property - that this cannot pass over a stale extraction - is not
 # asserted by a mutation but by construction: the extraction directory is
 # deleted before it is written, so a run that does not extract cannot find a
@@ -197,9 +220,21 @@
 
 [CmdletBinding()]
 param(
-    # `All` builds, packages, checksums and checks. `Verify` checks an archive
-    # this script already produced, without building and without writing
-    # anything next to it.
+    # `All` builds, packages, checksums and checks. `Verify` re-checks an
+    # archive this script already produced and does not build: it reads the one
+    # `sure-*-$Target.zip` in `-OutputDirectory` and never writes the archive or
+    # its `.sha256`, so a directory holding just those two files is enough.
+    #
+    # It is not read-only next to that archive, and this comment used to claim
+    # it was - "without building and without writing anything next to it". The
+    # **sentence** was changed rather than the behaviour, because the writing it
+    # denied is the run's own evidence: `logs\` holds the captured stdout and
+    # stderr of the two `doctor` runs, and `scratch\` holds the extraction the
+    # binary is started from. Both are under `-OutputDirectory`, and a reader
+    # looking at a failed verification is already looking there; moving them
+    # elsewhere would be a place to hide the reason it failed. Measured
+    # 2026-09-19: `-Phase Verify` into a directory holding only the archive and
+    # its `.sha256` exits 0 and prints OK.
     [ValidateSet('All', 'Verify')]
     [string] $Phase = 'All',
 
@@ -382,9 +417,35 @@ Re-run it:  cargo test -p sure-core --test acceptance_report_runner
     $shaPath = ''
     $version = ''
 
+    # `logs\` is created here, where both phases reach it, and not inside the
+    # `-Phase All` branch below, which is where it used to be the only
+    # `New-Item` for it in this file. `-Phase Verify` redirects two `doctor` runs
+    # into `$LogDirectory` as well, so a Verify into a directory that had no
+    # `logs\` died inside `Invoke-Captured` at "Could not find a part of the path
+    # '...\logs\extracted-doctor.json.txt'" - *after* the checksum had matched
+    # and the archive had extracted, so a good artifact in a fresh folder was
+    # reported as FAILED. `target\tmp\release` passed only because an earlier
+    # `-Phase All` had left a `logs\` behind in it.
+    #
+    # **Mutation.** Move this line back inside the `if ($Phase -eq 'All')`
+    # branch below, which is where it was before this repair, and run
+    #
+    #   & .\scripts\Build-Release.ps1 -Phase Verify -OutputDirectory <a
+    #     directory holding only sure-*.zip and its sure-*.zip.sha256>
+    #
+    # Expected and measured 2026-09-19: exit 1 with that FAILED line, the trace
+    # landing on `Invoke-Captured`'s redirection and on the `Run the extracted
+    # binary` step, and nothing else red - the run never reaches the
+    # `running_from` comparison, so this cannot be confused with Mutation 2. It
+    # is a false *red*, not a false green: the artifact is untouched and the same
+    # archive in a directory that has a `logs\` exits 0. Deleting the line rather
+    # than moving it is a different mutation with a wider blast radius, because
+    # `-Phase All` redirects into `logs\` in its own first step: that one reddens
+    # both phases.
+    New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
+
     if ($Phase -eq 'All') {
         Write-Step 'Version'
-        New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 
         $metaOut = Join-Path $LogDirectory 'cargo-metadata.json'
         $metaErr = Join-Path $LogDirectory 'cargo-metadata.err.txt'

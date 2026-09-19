@@ -3,57 +3,38 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T009` — *"Implement repair E2E/regression fixture"* — is **dispatched**, not
-accepted, from base `a39e769` (the `P14-T008` acceptance), with its brief at
-`target/tmp/brief-p14t009.md` and the tree clean at dispatch. Its criterion is *"Repair can close only
-with new passing evidence; regression variant blocked."* and it is the task `P10-T008`'s read-back
-handed the real end-to-end claim to — item 78 below — on the ground that the round trip carrying that
-name never invokes `sure check`, `sure repair` or `sure recheck`.
+**In flight:** nothing, as of this paragraph. `P14-T009` — *"Implement repair E2E/regression
+fixture"* — is **accepted as `6f5cc0e`**, over three worker commits from base `a39e769` (the `P14-T008`
+acceptance), with its brief at `target/tmp/brief-p14t009.md` and the tree clean at dispatch and at
+acceptance. "What `P14-T009` added" and "Validation of `P14-T009`" below carry the detail. The
+criterion — *"Repair can close only with new passing evidence; regression variant blocked."* — is met by
+a real two-member npm workspace whose one shared helper is wrong, **in process**: the product's own
+discovery, checks layer, runner, selection rule and lifecycle are driven over it, and the fixture's two
+checks really run and really disagree.
 
-**What exists, measured at the base.** The rule is one function — `recheck_passed`
-(`crates/sure-core/src/recheck_lifecycle.rs:185-200`): no list, or an empty list, or any selected check
-that is not `CheckStatus::Pass`, and the finding stays open — deciding at `:158-171` between
-`Resolved` and `Open`. Selection is `repair_impact::select_impacted_checks` (`repair_impact.rs:32`),
-and it has **no caller outside tests**. The fixture itself is **one 186-byte `scenario.json` in a
-directory that holds nothing else**, named at `finding_severity_rule.rs:34` and `:434` among the
-release-blocking cases that "have no fixture app and are not measured here", and in no list in
-`fixture_apps.rs` at all.
+**The fixture, and why its defect is a pair.** `fixtures/adversarial/repair-regression/` was a five-line
+`scenario.json` stub with no project behind it. It now ships `shared/pricing.js`, whose
+`less(total, amount)` adds `amount` to `total` instead of taking it off: `packages/checkout` calls it
+as `less(subtotal, discount)` and fails as shipped, while `packages/billing` calls it as
+`less(paid, -fee)`, so the same defect cancels out and its check passes. The one-line repair that
+corrects the helper is the same line that breaks billing — the regression variant is the fixture's own
+shape rather than a scenario bolted onto it.
 
-**The fact that decides the task, and the reason the brief spends its length on the level.** The live
-path **cannot close anything**: `pipeline.rs:1109-1117` calls `reconcile` with `rechecks: &[]`, and
-`:1102-1108` gives the reason in as many words — *"rather than inventing a re-check list that would let
-it close findings on evidence nobody gathered."* Stage 11 is `NotRun` whenever there is a finding
-(`:1133-1171`). So *"the regression variant is blocked"* is satisfied in this build by a product that
-closes nothing at all, and the **positive half** — a finding that does resolve on new passing evidence
-— is what makes the negative half mean anything. The brief therefore has the worker drive SURE's real
-modules over a real fixture project, the way `rust_fixture_apps.rs` drives the Rust pair, and forbids
-the one change that would make closure reachable through the binary — wiring `select_impacted_checks`
-into the pipeline — as a different task with a different acceptance.
+**The level, stated here because the task's title says more than this build can do.** The live path
+**still cannot close anything** — `pipeline.rs:1114` passes `rechecks: &[]`, and
+`select_impacted_checks` still has no caller outside tests — so *"the regression variant is blocked"*
+would be satisfied by a product that closes nothing at all. `P14-T009` therefore carries the positive
+half the way `rust_fixture_apps.rs` carries the Rust pair: the real modules, over a real project, with
+real check processes. A process-level `sure check` / `sure repair` / `sure recheck` round trip that
+closes a finding is **not reachable in this build and is not claimed**. Item 78 below is corrected
+accordingly, and the correction is in the task's own `notes` field rather than made quietly.
 
-**The fixture's own claim is already a claim.** `scenario.json` says `"fixture_status": "implemented"`
-and a test asserts it by grepping for the word (`repair_regression_guard.rs:272-278`), so "implemented"
-currently means "a test greps for the string", which is the species of green this task exists to
-replace.
-
-**Sentences the work makes false**, named in the brief so they are reconciled rather than left:
-`finding_severity_rule.rs:34` and `:434`; the comment above `the_fixture_status_is_implemented`; the
-fixture's own `scenario.json`; and whatever `fixture_apps.rs` should now say — which the worker decides
-by measurement, because that file documents why a list in it is a claim rather than a register.
-
-**The base is stated rather than assumed.** `a39e769` is the `P14-T008` acceptance: four files, 308
-insertions, 73 deletions, and `git diff --stat a39e769 -- crates/` is empty — three supervisor files
-plus one `tasks/tasks.json` reconciliation, none of which anything in `crates/` reads.
-
-**The CI reading owed to this entry is discharged, and it is red for a flake.** Run `35427975530` for
-`a39e769` is **failure** — `rust (ubuntu-latest)` only; bootstrap, shellcheck, macOS and Windows are
-green. The failure is `a_service_that_is_dropped_is_stopped_anyway`, panicking at
-`crates/sure-core/tests/service_supervisor.rs:745:10` inside `.expect("a service that starts")` with
-`message: "Text file busy (os error 26)"` on the test's own `working/python`. That is the ETXTBSY errno
-already on record in this tree from `analysis_provider/mod.rs:591`, at a **second site** and an
-**earlier assertion** than the `:793:5` sighting recorded for this same test name; what the message
-shows is that this one executes a script in the test's **own** scratch directory, where the recorded
-sighting was a shared path under `target/tmp`. It is test-side, it is on Linux, and it is not repaired
-here.
+**Both CI readings, and the one still owed.** Discharged from the dispatch paragraph this one replaces:
+run `35427975530` for `a39e769` is **failure** — `rust (ubuntu-latest)` only, on
+`a_service_that_is_dropped_is_stopped_anyway` at `crates/sure-core/tests/service_supervisor.rs:745:10`,
+`Text file busy (os error 26)`, a **second site and an earlier assertion** than the `:793:5` sighting
+already on record for that test. The dispatch commit `8241385` is run `35428339155`, **success on all
+five jobs**. The acceptance commit's own run is owed to the next entry.
 
 **In flight:** nothing, as of this paragraph. `P14-T008` — *"Implement dangerous-action fixtures"* —
 is **accepted as `22363b3`**, on the **second submission**, over five worker commits from base
@@ -1385,8 +1366,14 @@ tree is or is not intact would be reading a claim the file does not make.
     its word would believe the orchestrator has an end-to-end test that it does
     not have. Recorded against `P10-T008` and handed to `P14-T009`, whose
     acceptance ("repair can close only with new passing evidence; regression
-    variant blocked") is the real end-to-end claim and the only thing that can
-    honestly carry it. No task was added: the graph stays at 172.
+    variant blocked") was expected to be the real end-to-end claim. **Corrected 2026-09-19, when that
+    task was accepted as `6f5cc0e`:** the claim it could honestly carry is **smaller** than this item
+    assumed. The binary cannot close a finding at all — `pipeline.rs:1114` passes `rechecks: &[]`, and
+    `select_impacted_checks` has no caller outside tests — so `P14-T009` carried it in process, over a
+    real project whose checks really run and really disagree, and a process-level round trip through
+    `sure check`, `sure repair` and `sure recheck` that closes a finding is still not reachable in this
+    build and is still not tested anywhere. The correction is in that task's own `notes` field too.
+    No task was added: the graph stays at 172.
 79. A worker agent completed `P1-T012` — *Give the store a location a caller can
     choose* — as commit `7c0f355`. The supervisor re-ran all five gates from
     PowerShell, hashed the real store before and after its own full workspace
@@ -2286,6 +2273,133 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T009` added
+
+One test file, one fixture project, one decision rule bound to it, and the sentences the fixture made
+false. Sixteen files `+1530/-28` against base `a39e769`; `git diff --stat` over every `crates/*/src` is
+**empty**, so no product code moved. The criterion is *"repair can close only with new passing evidence;
+regression variant blocked"*, and the task was dispatched because the second half of that sentence is
+**free in this build** — nothing closes — which is why the first half is what the work is measured on.
+
+### The two members, and the one line that separates them
+
+`shared/pricing.js` exports `less(total, amount)` and adds where it should subtract. `packages/checkout`
+calls it as `less(subtotal, discount)` and its check fails as shipped; `packages/billing` calls it as
+`less(paid, -fee)`, so the same defect cancels and its check passes. The careless repair corrects the
+helper and breaks billing; the complete repair is the same one line. That is the regression, and it is
+the fixture's own shape — the E2E needed no second project to test the negative half.
+
+The project is an npm workspace with **no dependencies**, so a reviewer with nothing but Node can run
+it, and the two checks are declared in the members' own manifests rather than in SURE's vocabulary. The
+fixture's `scenario.json` states the defect, the two members, the two checks and their roles, and two
+required outcomes with one control each.
+
+### The four tests, and the one thing the file supplies
+
+`crates/sure-core/tests/repair_fixture_e2e.rs` (1050 lines) runs the real modules over the real project,
+in process: discovery, the checks layer, `PlanBuilder` under `ExecutionMode::HostConfirmed` with the
+permissions granted — `:594` asserts `may_run().count() == 2`, because a host-confirmed run with
+permission must be allowed to run **both** member checks — the runner, then `select_impacted_checks` and
+`recheck_lifecycle`. Its four tests are
+`the_shipped_fixture_fails_its_own_check_and_its_other_member_passes` (`:766`),
+`a_careless_repair_that_breaks_the_other_member_cannot_close_the_finding` (`:821`),
+`a_complete_repair_closes_the_finding_on_new_passing_evidence` (`:918`) and
+`neither_half_is_a_member_of_this_workspace` (`:1030`).
+
+What the file **supplies** is the finding's re-check list to start with, because no module in this build
+derives one: the contract it builds names **only** `packages/checkout`'s check. Every check that joins it
+is added by the product's own regression rule — runs project code, is a `DeterministicCheck`, is
+`MustFix|ShouldFixFirst` (`repair_impact.rs:121-139`) — so the test's second half is that the check
+which catches the regression gets in **that** way rather than by being named. The one thing the file
+cannot supply, it says it cannot: a probe is `ObservedFact` and can never join a re-check list.
+
+### The sentence the fixture's own status was
+
+`repair_regression_guard.rs` was the file that said the fixture was implemented, by grepping a string.
+It now says it is the fixture's **decision rule** and not the fixture, which is what it had become, and
+`the_fixture_status_is_implemented` holds the marker, the project block and the grader **together**
+instead of the marker alone — a stub with a grader can no longer pass as implemented. `+85/-5`.
+
+The entry-point key is refused, and the refusal is written into the fixture rather than into a report:
+`finding_severity_rule.rs:389-392` reads that key to decide which release-blocking cases have a fixture
+app and measures each with five candidate detectors, none of which has anything to say about a repair
+lifecycle — so the key would put the case into an exact set it does not belong to and the measurement
+would **panic rather than answer**. `scenario.json` carries that as `why_no_entry_point_block`, naming
+the precedent: `check-crash` (`P14-T007`) and the three dangerous-action fixtures (`P14-T008`) declare
+none either. `finding_severity_rule.rs` itself is `+64/-21` across six sites, each rewritten in house
+style with the old reading kept on record.
+
+### The limits, written into the fixture rather than dressed up
+
+The fixture declares why it carries no entry-point block; the E2E's module doc records what the binary
+does with the fixture and states that it is **measured rather than asserted**; the test names the one
+fact it supplies and why the module that should supply it does not exist yet. What is not claimed
+anywhere is that the round trip goes through the three commands.
+
+## Validation of `P14-T009`
+
+Everything below was measured at `6f5cc0e` by the supervisor, from the tree, and not taken from the
+worker's report.
+
+### Two mutations, one per half, and each reddens alone
+
+The load-bearing measurement, because the negative half of the criterion is free in a build that closes
+nothing. **M3** — `&& false` appended to `recheck_passed`'s expression at
+`crates/sure-core/src/recheck_lifecycle.rs:198`, the build that closes nothing: `3 passed; 1 failed`,
+and the **only** red test is the positive half, panicking at `:990:5` with *"every selected check passed
+over a repaired project and the finding did not close; kept open: 1"*. **M2** — `.all(` becomes
+`.any(` on that same line, a build that closes on any passing check: `3 passed; 1 failed`, and the only
+red test is the negative half. So each half is falsifiable on its own and neither is carried by the
+other. Both were restored through git with the tree asserted clean, and no `crates/*/src` file is
+changed at the accepted head.
+
+### The binary on the fixture, measured here rather than taken from the file
+
+`sure check` on a scratch copy under the **default** mode: it reads the project (`1/12`, node, level B,
+all of it read), takes a fingerprint, plans three checks — start the project, run the tests in
+`packages/billing`, run the tests in `packages/checkout` — and **stops all three**, because all three
+would run the project's code and the run does not allow that. *"3 check(s) could not run or were
+skipped. 3 of them are critical."*; two of the twelve stages marked `NOT CHECKED`; verdict *"Not enough
+could be checked to say whether this is ready"*; exit 1, which the binary distinguishes in its own
+output from the 3 that means the build cannot check a project at all. Nothing was recorded and the
+store's digest is unchanged.
+
+Two of those three checks are this fixture's; the third is the probe built from the root `start` script.
+The E2E's module doc (`:48-58`) records this same behaviour and calls it measured — **my run reproduces
+it verbatim, all three check names included**, which is the corroboration the file asked for.
+
+### CI, one row per commit, including the ones with no row
+
+`a39e769` (the base, and the head the previous entry accepted) is run `35427975530`, **failure** —
+`rust (ubuntu-latest)` only, on `a_service_that_is_dropped_is_stopped_anyway` at
+`service_supervisor.rs:745:10`, `Text file busy (os error 26)`, a second site and an earlier assertion
+than the `:793:5` sighting already recorded, with the other four jobs green. **That reading was owed by
+the previous entry and is discharged here.** The dispatch commit `8241385` is run `35428339155`,
+**success on all five jobs**. The three worker commits — `c4e5af0`, `17ba38d`, `6f5cc0e` — have **no
+run of their own**: `origin/claude/v0.1-autonomous` is still `8241385` and this acceptance commit is the
+first push carrying them. The acceptance commit's own run is owed to the next entry.
+
+The local gate run is green on all six: `passed=2581 failed=0 ignored=12 not-ok=0`, 76 result lines,
+bootstrap 17 phases / 187 tasks, taskctl 187 tasks, store identical, worktree clean. The worker's two
+runs at the same head are both kept, and neither is withdrawn: the first red on
+`runtime_start.rs:1184:5` (`2580 passed; 1 failed`) — the flake `P14-T006`, `P14-T007` and `P14-T008`
+each recorded before it — and the second green at 2581.
+
+### What is not claimed
+
+That a process-level `sure check` / `sure repair` / `sure recheck` round trip closes a finding: it does
+not, and `pipeline.rs:1114` with its reason at `:1102-1108` is why. That the three worker commits are
+individually CI-verified: they are not, and the row above says so. That the fixture's `.js` and
+`package.json` files are covered by `SHA256SUMS.txt`: they are not — the covered fixture family is the
+24 `scenario.json` files plus `fixtures/adversarial/README.md`, and extending it is a convention
+decision this task did not make. That this suite has started a `node` process under CI before: this is
+the first test in the workspace whose own code starts one, measured by grep over the test tree, where
+every other mention of `node` is a string being classified or a manifest being read; `.github/workflows/ci.yml`
+runs `actions/setup-node@v4` **only** in `bootstrap-validate-windows` (`:9-15`), while the `rust` matrix
+job (`:54`) runs `cargo test --workspace --no-fail-fast` on whatever Node the runner image happens to
+ship. That the `runtime_start` flake has a bounded rate: one more suite failure is a measurement and not
+a rate.
 
 ## What `P14-T008` added
 

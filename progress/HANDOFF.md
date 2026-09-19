@@ -3,97 +3,63 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T007` — *"Implement checker-error/unknown fixtures"* — is **dispatched**, not
-accepted, from base `7fb4564` (the `P14-T006` acceptance), with its brief at
-`target/tmp/brief-p14t007.md` and the tree clean at dispatch. Its single criterion is
-*"Critical error/skipped/unknown cannot aggregate green."* and it is the first of the four `P14`
-fixture criteria that is a **negative** claim, which is what makes it the sharpest trap in the phase
-so far.
+**In flight:** nothing, as of this paragraph. `P14-T007` — *"Implement checker-error/unknown
+fixtures"* — is **accepted as `f1a6764`**, on the **second submission**, over eight worker commits
+from base `7fb4564` (the `P14-T006` acceptance), with its brief at `target/tmp/brief-p14t007.md`
+and the tree clean. "What `P14-T007` added" and "Validation of `P14-T007`" below carry the detail.
+The single criterion — *"Critical error/skipped/unknown cannot aggregate green."* — is met, and it is
+met in the way that is hard to fake: the fixture asserts that the check is **in the plan**, then that
+the report **has a row for it**, and only then that the run is not green, with a control on the same
+schedule that must reach `Green`.
 
-**Why a negative claim is the trap.** *"Cannot aggregate green"* is satisfied by three different
-broken things, and none of them looks like one. A product that **never produced a result at all**
-satisfies it vacuously: `aggregate_run` (`crates/sure-core/src/aggregation.rs:175-210`) walks the
-*schedule* rather than the results, so a check with no result becomes a row only because that walk
-puts it there — drop the check from the schedule and the criterion still holds with nothing recorded.
-A product that answered `NotEnoughChecked` **unconditionally** satisfies it too, including for a run
-where everything passed. And a test asserting only `!severity.is_green()` satisfies it while
-measuring nothing, because that assertion is true for `NeedsAttention`, `NotReady`,
-`NotEnoughChecked` **and for an empty plan** (`status.rs:656-659`, `aggregate(&[])` is
-`NotEnoughChecked`). The corpus names this failure mode in its own words at
-`adversarial_fixture_detection.rs:88-91`. The defence is the one the last three tasks used and it is
-not optional: a **control**, the same schedule with one thing moved, that must reach **`Green`**.
+**What it was, and what it is.** `fixtures/adversarial/check-crash/` — the `release_blocking: true`,
+`must_fix` manifest row this criterion owns — was a **208-byte, 5-line stub** from the bootstrap
+commit `0c85181`, named in **no** `*_FIXTURES` const and read by **no** test: the only test touching
+it read the *directory listing*. It is now two critical checks in two modes and **six declared runs**
+graded in-process — `checker_failure_unknown`, `checker_failure_skipped` and `checker_error`, all
+`not_enough_checked`; `scope_limit_alone`, `not_enough_checked`; `scope_limit_beside_a_pass`,
+`needs_attention`; and `control`, **`green`** — with six `required_outcomes` and four
+`forbidden_outcomes`, every one of them `false_green`.
 
-**What the reconnaissance changed about this task, and it is most of the task.** `check-crash` — the
-manifest row this criterion owns, `release_blocking: true`, `must_fix` — is a **208-byte, 5-line stub**
-from the bootstrap commit `0c85181`, never touched since. It is named in **no** `*_FIXTURES` const and
-reached by **no** test that reads a byte of it: the only test that touches it reads the *directory
-listing* and asserts a manifest row exists. It would fail two tests the moment it is listed, because
-it has no `required_outcomes` (the expectation schema requires it) and it still carries the anti-stub
-marker `to_be_implemented_by_task_graph` that `fixture_apps.rs:226` exists to catch. The second thing
-the reconnaissance found is a **name collision**: `fixtures/adversarial/unknown-evidence/` is fully
-built and wired into both corpora, but its "unknown" is `ClaimAssessment::CannotConfirm` plus
-`StalenessReason::UnknownProvenance` — **two different enums** — and a *successful* claim check
-returns **no `CheckResult` at all** (`pipeline.rs:1037`), so it never reaches `aggregate` and does
-**not** cover `CheckStatus::Unknown`. A reader who saw that fixture in the corpus list and concluded
-the `Unknown` status was covered would be reading a false green, so the brief requires the README to
-say so in the same voice `container-unavailable` uses for its limit.
+**The trap this phase named in advance, and how it is closed.** A negative criterion is satisfied by
+products that are broken in ways that do not look alike: one that never produced a result at all,
+one that answers `NotEnoughChecked` to everything, and one whose test asserts only `!is_green()`.
+My **probe G** mutated production code — `aggregate_run`'s `(None, None)` arm made to `continue`
+instead of pushing the row — and the fixture **reddens at `:4817`**, *"the planned check is absent
+from the verdict rather than reported in it"*, where a fixture asserting only non-greenness would have
+stayed green. The control is the other half: `:4909-4913` asserts that exactly one run reaches `Green`
+and that it is the control, because `aggregate(&[])` is `NotEnoughChecked` too and a product that
+refused everything would otherwise pass.
 
-**What the criterion is read as, decided before dispatch.** The real route is
-`aggregate_run`'s schedule walk — production code that **no fixture currently reaches** — whose
-`(None, None)` arm makes a scheduled check that reported nothing a `CheckResult::unknown` carrying
-the proposal's own `critical` flag (`aggregation.rs:204-207`, `268-282`). So the fixture must assert
-four things about one run, and `!is_green()` is none of them: that the check is **present** as a row
-in `report.unreported` and never `Passed`; that it carries the product's own sentence **by
-equality**; that the **exact** severity is pinned; and that the **control reaches `Green`**.
+**Sent back once, and the send-back is part of the record.** The first submission wrote in the
+fixture's README that *"no route in shipping code produces a `CheckResult::errored` today"*. That is
+false, and pre-existing code disproves it: `check_claims` builds one at `pipeline.rs:1051`, and
+`browser.rs:708`, `probe.rs:823` and `runtime_start.rs:434` are three more shipping mappings into
+`errored`. The `scenario.json` beside it had it right and the README contradicted it — a false
+statement about limits, in a file whose purpose is stating limits honestly. The worker corrected it
+and, in doing so, **corrected my note as well**: `pipeline.rs:1051` is `Severity::Note, critical:
+false` and is skipped by the coverage loop at `status.rs:631`, so it reaches `counts.error` and
+`not_checked()` but **not** `critical_errored`. I verified all four claims before accepting. The
+route that really puts an id in `critical_errored` is the probe, which passes `Severity::MustFix`
+and `true` from `http_routes.rs:1583-1588`.
 
-**Fixed ground, and one thing measured rather than read.** None of `Error`, `Skipped` or `Unknown`
-can reach green by any route — `status.rs:630-670` sends `Error` and `Unknown` to
-`NotEnoughChecked` and a scope-limited `Skipped` to `NeedsAttention`, and `AggregateSeverity`
-(`:455-473`) has **no `Unknown` variant**. The scope-limit escape at `:433-445` is guarded by
-`self.status == CheckStatus::Skipped`, so it cannot fire for `Error` or `Unknown` at all. And one
-measurement was taken that the brief is built on: **deleting `status.rs:665`
-(`|| !critical_out_of_scope.is_empty()`) leaves all 2572 tests green.** The clause is strictly
-redundant, because `not_checked()` counts `skipped + error + unknown` (`:554-556`) so `:662` always
-fires first and reaches the same answer. That is recorded as a constraint and not as a curiosity: **no
-fixture may claim to pin that clause**, because the two states are identical and no assertion can
-tell them apart. The one claim left as *read rather than measured* is the ordering of `:656` against
-`:662` for a lone scope-limited critical skip; the brief requires the worker to measure it and says
-the measurement wins.
+**The flake, seen this time rather than not seen.** My own gate run at `f1a6764` failed the test gate —
+exit 101, 2573 passed, 1 failed — on
+`runtime_start.rs::a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named` at
+`:1184`, the same test `P14-T006` recorded failing **2 of 5** suite runs. It is characterised rather
+than explained away: **6 of 6** passes in isolation at `f1a6764`, 3.65–3.75s each, and it fails under
+the full parallel suite, which is what a load-dependent timing assertion looks like. The whole gate
+bundle was then re-run at the same commit and came back **green, 2574 passed**, and **both runs are
+recorded**: the red one is not withdrawn and the green one is not a re-run of it.
 
-**One tripwire, verified rather than assumed.** `crates/sure-core/tests/finding_severity_rule.rs:384`
-(the test at `:411-423`) asserts the **exact list** of release-blocking cases with a fixture app, and
-`fixture_has_an_app` (`:329-332`) decides that by whether `scenario.json` contains `"entry_points"`.
-`check-crash` is `release_blocking: true`, so adding that key would pull it into the list — reddening
-the equality assertion **and** very likely panicking in `measured_severity` (`:377`), which refuses to
-guess when nothing readable spoke about a fixture. This is by design, in the test's own words. The
-brief forbids it: `check-crash` is a schedule and a set of declared outcomes graded by a Rust test,
-not a project with runnable code.
-
-**One stale comment found while verifying the ground.** `finding_severity_rule.rs:319-328` classifies
-corpus ids by shape and lists `missing-user-intent` under *"a corpus id with no fixture directory"* —
-but that directory **exists**, created by `P14-T005`. Measured against the disk: `force-push`,
-`sensitive-read` and `benign-test-mocks` are correctly listed as having none, and `missing-user-intent`
-is not. No test breaks either way, since `fixture_has_an_app` returns false for all of them, so this
-is a documentation defect rather than a red test. The brief asks for it to be corrected or recorded
-and explicitly **not** made the acceptance.
-
-**The base was measured rather than inherited.** `7fb4564`, six gates from native PowerShell all exit
-0, **2572 passed**, 0 failed, 12 ignored, 65 case-sensitive headers, bootstrap reading 17 phases / 187
-tasks, taskctl 187 tasks, worktree clean, and the machine's store byte-identical throughout at
-`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`. The two targets the brief names
-were counted at that base with `Select-String '^#\[test\]'`: `adversarial_fixture_detection` **28** and
-`fixture_apps` **25**. The gate script is now parameterised (`target/tmp/gates.ps1 -Label <name>`),
-after being re-created once already following a worker's `cargo clean`; its two recorded instrument
-defects — the case-insensitive header count and the ignored total read off the wrong line — are fixed
-in it and are commented as such, because each rewrite is a chance to reintroduce one.
-
-**The CI reading owed to this entry is discharged.** Run `35423922710` for `7fb4564`, the `P14-T006`
-acceptance commit, is **success at attempt 1 on all five jobs** — including `rust (ubuntu-latest)`,
-which is the job that failed on the `P14-T006` dispatch commit `e34c222`. That makes six data points
-in the `ETXTBSY` sequence: `4697bbf` red, `9329e63` green, `8df2bbf` green, `1356683` green,
-`e34c222` red, and now `7fb4564` green. This dispatch commit's own run is owed to the next entry, and
-no run is ever re-run: `gh run rerun --failed` mints no second run id, so a green re-run would erase
-the row's own state.
+**CI, chained rather than summarised.** The dispatch commit `9512989` is **red** — run `35424276573`,
+`rust (windows-latest)`, `service_supervisor.rs::a_service_that_is_dropped_is_stopped_anyway` at
+`:793:5`, a process-supervision flake with this exact file, test and line already recorded above, in a
+commit that adds no Rust at all. Three of the eight worker commits — `c194fe8`, `9f4879d`, `8d2cc13`,
+written within fifteen seconds of each other — have **no run of their own**, because they were
+superseded in a single push whose tip `51df157` is green; that is stated rather than glossed, and it
+is the one thing in this task not individually CI-verified. `f1a6764`'s own run `35425807272` was
+still in flight when this paragraph was written and is owed to the next entry.
 
 **In flight:** nothing, as of this paragraph. `P14-T006` — *"Implement
 execution-trust fixtures"* — is **accepted as `7a57b09`**, on the **first submission**, over four
@@ -2204,6 +2170,185 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T007` added
+
+One adversarial fixture that was a stub, one test file that grades it, the manifest wiring, a
+visibility change in the product, and a stale comment corrected. Six files `+1752/-15` in the
+worker's own commits; nine files `+1850/-21` from the base counting the dispatch commit.
+
+| file | |
+|---|---|
+| `fixtures/adversarial/check-crash/scenario.json` | 675 lines, `+672/-3`, from a 5-line stub |
+| `fixtures/adversarial/check-crash/README.md` | 204 lines, new |
+| `crates/sure-core/tests/adversarial_fixture_detection.rs` | 5048 lines, `+824/-2` |
+| `crates/sure-core/src/aggregation.rs` | 886 lines, `+16/-2` |
+| `crates/sure-testkit/tests/fixture_apps.rs` | 1644 lines, `+19/-0` |
+| `crates/sure-core/tests/finding_severity_rule.rs` | 648 lines, `+17/-8` |
+
+### The six runs, and what each one pins
+
+| run | subject | asserted `aggregate_severity` |
+|---|---|---|
+| `checker_failure_unknown` | a scheduled critical check with no result | `not_enough_checked` |
+| `checker_failure_skipped` | the same, reported `Skipped` | `not_enough_checked` |
+| `checker_error` | the same, reported `Error` | `not_enough_checked` |
+| `scope_limit_alone` | a scope-limited critical skip, no other check | `not_enough_checked` |
+| `scope_limit_beside_a_pass` | that same skip beside one pass | `needs_attention` |
+| `control` | the first run's plan with a `Passed` in place of nothing | **`green`** |
+
+Each run asserts the **exact** severity rather than `!is_green()`, and the last row is the one that
+makes the other five mean something. `aggregate(&[])` is `NotEnoughChecked` (`status.rs:656-659`), so
+a product that never produced a result and a product that refused everything satisfy five sixths of
+this table; the control is the only row they fail.
+
+### The criterion is graded against the plan, not against the results
+
+`aggregate_run` (`aggregation.rs:189-224`) walks the **schedule**, not the results, and its
+`(None, None)` arm turns a scheduled check that reported nothing into a `CheckResult::unknown`
+carrying the proposal's own `critical` flag (`:204-207`, `:268-282`). That is the route the criterion
+is really about, and no fixture reached it before this one. Because the walk is over the schedule, a
+build that dropped the check would satisfy *"cannot aggregate green"* while recording nothing — so the
+grading test asserts, in order, that the check **is in the plan** (`:4809`, reading the ids out of the
+fixture's own `expect` block so that the edit which empties the schedule cannot also empty the
+expectation), that the report **has a row for it** (`:4817`, via `rows_of` at `:4553-4581`, which
+joins each `report.critical()` row to its result), that the row is **never `Passed`**, and that its
+sentence **equals** the product's own constant (`:4931`, `:4935`) rather than a third copy of it.
+
+### The only production change is a visibility change, and why it is there
+
+`NOTHING_CAME_BACK` (`aggregation.rs:147`) became `pub`, with a doc paragraph. Its **value is
+unchanged** — the re-wrap across the line continuation strips the leading whitespace on both sides, so
+the string is byte-identical and the existing assertion on it still holds. The precedent quoted in that
+paragraph is real: `NO_TRUSTED_INTENT_LIMITATION` is `pub` at `status.rs:694` and
+`missing-user-intent/scenario.json` quotes it whole at six places. What the visibility buys is that the
+fixture holds the produced sentence against the **product's** constant instead of against a copy in the
+test, so a change to the sentence is a red test rather than a silent divergence.
+
+### The limits, written into the fixture rather than dressed up
+
+The `checker_error` detail sentence is a copy agreeing with itself: `CheckResult::errored` carries
+whatever the checker said, so the test supplies the string and reads it back, and the fixture's own
+`why` says so. The scope-limit runs are hand-built results, because `ScheduledCheck::not_run` only ever
+produces `ExecutionNotAuthorized`. The control's pass is hand-built, because this build plans checks
+and runs none of them. And the fixture reaches `aggregate_run` **directly rather than through the
+pipeline**, which `why_not_the_pipeline` records as deliberate: with no runner for a planned check, every
+allowed check a real run plans is recorded as `unknown`, and grading that would measure the absence of a
+runner rather than the aggregation rule.
+
+### The clause nothing may claim to pin
+
+`status.rs:665` (`|| !critical_out_of_scope.is_empty()`) is **strictly redundant**: `not_checked()`
+counts `skipped + error + unknown` (`:554-556`), so `:662` always fires first and reaches the same
+answer. Deleting it leaves the whole suite green. No entry in this fixture claims to pin it and the
+README says so in as many words — a fixture that claimed to would be pinning a distinction no assertion
+can observe.
+
+### One stale comment corrected, and one tripwire left alone
+
+`finding_severity_rule.rs:319-328` classified corpus ids by shape and listed `missing-user-intent` under
+*"a corpus id with no fixture directory"* — but that directory **exists**, created by `P14-T005`. The
+replacement groups ids by whether `scenario.json` carries `entry_points`, which is what `fixture_has_an_app`
+(`:329-332`) actually reads, and records that the old grouping was true when written and stopped being
+true. No test changes state either way, which is why the brief called it a documentation defect and
+explicitly not the acceptance.
+
+`check-crash` is `release_blocking: true`, so adding `"entry_points"` to its `scenario.json` would pull it
+into the exact-list assertion at `finding_severity_rule.rs:384` and very likely panic in
+`measured_severity` (`:377`), which refuses to guess when nothing readable spoke. It is a schedule and a
+set of declared outcomes, not a project with runnable code, and the key was never added — probe H below
+is the measurement that this tripwire is still armed.
+
+## Validation of `P14-T007`
+
+**Verified, not re-read.** Tree clean at `f1a6764`, the worker's eight commits and their diffstat matching
+the report, `origin` untouched by the worker, and the two files the dispatch commit wrote — `HANDOFF.md`
+and `SHA256SUMS.txt` — **byte-identical** throughout the task: the supervisor's own files were not
+edited under it. The machine's store was byte-identical before and after every gate run and every probe at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`; all scratch went under `target/tmp`
+and nothing under `%LOCALAPPDATA%\SURE\` was written.
+
+| | base `7fb4564` | `2e799b16` | `f1a6764` run A | `f1a6764` run B |
+|---|---|---|---|---|
+| fmt / clippy / bootstrap / taskctl / nonwindows | exit 0 | exit 0 | exit 0 | exit 0 |
+| test | exit 0 | exit 0 | **exit 101** | exit 0 |
+| passed | 2572 | 2574 | 2573 | **2574** |
+| failed | 0 | 0 | **1** | 0 |
+| ignored | 12 | 12 | 12 | 12 |
+| headers (case-sensitive) | 65 | 65 | 65 | 65 |
+| `adversarial_fixture_detection` `#[test]` | 28 | 30 | 30 | 30 |
+| `fixture_apps` `#[test]` | 25 | 25 | 25 | 25 |
+
+Run A's single failure is the `runtime_start` budget test at `:1184`; the same test run **six times in
+isolation at `f1a6764` passed 6 of 6**, exit 0 each, 3.65–3.75s, tree clean after. That is the whole of
+the characterisation: the sample bounds no rate, and both runs stand in the record.
+
+### Eight supervisor probes, of which the worker attempted none
+
+Each was applied to the tree with a single-site guard, the test run, and the file restored through `git`
+with the tree asserted clean afterwards. **All eight reddened.**
+
+| probe | mutation | where it fires |
+|---|---|---|
+| A | the fixture's schedule emptied | `:4809`, the assertion that names the missing check |
+| B | the `checker_error` `required_outcomes` entry deleted | `:2236`, the P14-T005 defect shape |
+| C | a declared severity moved to `green` | `:2335`, the corpus agreement |
+| D | the control edited into a copy of the run beside it | `:4711`, *nothing can reach green has not measured the refusal* |
+| E | the sentence rewritten in the fixture's `expect` block | `:2335`, the corpus agreeing with `required_outcomes` |
+| E2 | the sentence rewritten in **both** declared copies | `:4935`, the product's sentence alone |
+| F | `NOTHING_CAME_BACK` rewritten in the product | `:4935` |
+| G | `aggregate_run`'s `(None, None)` arm made to `continue` | `:4817`, no row for a planned check |
+| H | `entry_points` added to the fixture | `:4730`, the tripwire |
+
+**Probe G is the one that matters**, and it is the one the worker did not attempt: it is a change to
+**production** code, and it leaves the fixture asserting nothing about a build that stopped turning a
+scheduled check into a row. It reddens at `:4817`. **Probe E was mis-specified first time** and the
+correction is part of the record: moving one declared copy reddens the corpus agreement at `:2335`
+instead — a stronger answer than I was testing for, since the corpus is a second independent copy — so
+E2 moves both and shows `:4935` is load-bearing rather than shadowed.
+
+### The false statement that caused the send-back
+
+The first submission's README said *"no route in shipping code produces a `CheckResult::errored`
+today"*. Four shipping mappings into `errored` were already in the tree — `pipeline.rs:1051`,
+`browser.rs:708`, `probe.rs:823`, `runtime_start.rs:434` — and the same fixture's `scenario.json`
+contradicted its own README. The send-back asked for the claim to be made true or removed, with evidence
+and an explicit instruction **not to redesign**: the correction was documentation-only, `+53/-17` in one
+commit, and the tree had been clean before and after.
+
+**The worker's replacement was more precise than my note, and I verified it rather than accepting it:**
+`pipeline.rs:1054-1055` is `Severity::Note, critical: false`, and the coverage loop skips non-critical
+results (`status.rs:631`), so that route reaches `counts.error` and `not_checked()` but **not**
+`critical_errored`. The route that does is the probe: `ProbeOutcome::Unreachable` is `CheckStatus::Error`
+(`probe.rs:880`), `ProbeOutcome::verdict` passes the caller's severity and `critical` through
+(`:791-796`, building the errored result at `:823`), and the production caller passes `Severity::MustFix`
+and `true` (`http_routes.rs:1583-1588`). The README now says exactly that, so the status path the fixture
+grades is product behaviour rather than a shape only a test produces.
+
+### CI, one row per commit, including the ones with no row
+
+| commit | run | result |
+|---|---|---|
+| `7fb4564` (`P14-T006` acceptance) | `35423922710` | success, attempt 1, all five jobs |
+| `9512989` (dispatch) | `35424276573` | **FAILURE**, attempt 1, `rust (windows-latest)` |
+| `c194fe8`, `9f4879d`, `8d2cc13` | — | **no run of their own**; superseded in one push |
+| `51df157` (that push's tip) | — | success, attempt 1 |
+| `86c2002`, `2c03080`, `2e799b16` | — | success, attempt 1, each |
+| `f1a6764` | `35425807272` | in flight when this was written; owed to the next entry |
+
+The dispatch commit's failure is `service_supervisor.rs::a_service_that_is_dropped_is_stopped_anyway` at
+`:793:5` — a process-supervision flake with that exact file, test and line already recorded in this
+handoff — in a commit that adds no Rust. Nothing is ever re-run: `gh run rerun --failed` mints no second
+run id, so a green re-run would erase the state the row is.
+
+### What is not claimed
+
+That a real run reaches the claim-checking error arm **in practice** — what was verified is that the path
+exists and reaches `aggregate_run`, which is what the README now says. That the three superseded commits
+are CI-verified. That `status.rs:665` is pinned by anything. That the `runtime_start` flake has a bounded
+rate: six isolated passes and one suite failure is a measurement, not a rate. And that the fixture grades
+a **run** rather than `aggregate_run` — it hands the product the results it would have had, which the
+fixture's own README states where a reader will meet it.
 
 ## What `P14-T006` added
 

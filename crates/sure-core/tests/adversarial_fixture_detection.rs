@@ -151,6 +151,7 @@ use sure_core::claim_checker::{
     CheckedClaim, ClaimDocument, check_claims_against_events, check_claims_in_store,
 };
 use sure_core::claim_report::render_claim_section;
+use sure_core::config::{Config, ExecutionSettings};
 use sure_core::db_migrations::{MigrationsReport, Record};
 use sure_core::demo_data_heuristics::DemoDataHeuristics;
 use sure_core::discover::{DiscoverOptions, Discovery, discover};
@@ -162,7 +163,12 @@ use sure_core::external_service::ExternalServiceChecks;
 use sure_core::false_completion_aggregator::aggregate;
 use sure_core::harness_event::{IngestedEvent, ingest_event_str};
 use sure_core::ids::{ClaimId, EventId, FingerprintId};
+use sure_core::intent::{ProjectIntent, may_claim_full_fulfilment};
+use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_project};
 use sure_core::noop_heuristics::NoOpHeuristics;
+use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome};
+use sure_core::project_intent::explicit_goal;
+use sure_core::project_verdict::render_summary;
 use sure_core::recording_projection::{BuildTestKind, StandardProjection, project};
 use sure_core::references::KeyStatus;
 use sure_core::route_consistency::RouteConsistency;
@@ -172,6 +178,7 @@ use sure_core::status::{CheckStatus, NotCheckedReason};
 use sure_core::store::Store;
 use sure_core::ui_action_bridge::UiActionBridge;
 use sure_core::vocabulary::Claim;
+use sure_domain::finding::AssessmentSource;
 
 /// Every fixture `P14-T001` is about, and the language half it belongs to.
 const TYPESCRIPT_FIXTURES: &[&str] = &[
@@ -2033,4 +2040,891 @@ fn a_write_whose_own_timestamp_cannot_be_read_does_not_supersede_the_run() {
     assert_eq!(recorded.answer.evidence.len(), 1);
     assert_eq!(recorded.answer.evidence[0].locator, "2026-06-30T23:59:58Z");
     assert_eq!(recorded.answer.evidence[0].freshness, Freshness::Fresh);
+}
+
+// --- the intent fixtures -------------------------------------------------
+//
+// `P14-T005` added `missing-user-intent` and `intent-mismatch`. They fire no
+// scanner and ship no recording: each is a **project**, small and honest, plus
+// an intent supplied in-process through `sure_core::project_intent::explicit_goal`
+// — the door the `--goal` flag goes through. What is compared here is what SURE
+// says when it puts the two together, and the two halves are the two acceptance
+// sentences:
+//
+// - with no intent at all, SURE may claim nothing about fulfilment, and the
+//   report carries the frozen sentence. That half is **swept**, not
+//   spot-checked: a gate written to answer `false` for nothing at all would pass
+//   a check at zero and would be measuring nothing.
+// - with an explicit goal nothing implements, SURE may say so — once, at the
+//   level the gravity rule allows, and no further. The fixture pins both the
+//   level and the ceiling above it, because a fixture that recorded only "it is
+//   a note today" would leave the next person free to raise it.
+//
+// Each half carries a control that must reach the opposite answer, because the
+// failure this task exists to catch is not a wrong answer: it is a reporter that
+// says `cannot_confirm` to everything, or `requirement not met` to everything.
+// Either would satisfy the positive half and would measure nothing.
+//
+// The projects ship no language manifest, for the reason the claim fixtures ship
+// none: `every_runnable_fixture_directory_is_named_in_this_file` in
+// `crates/sure-testkit/tests/fixture_apps.rs` fires the moment a `package.json`
+// appears, and these are graded from a `Discovery` rather than by running
+// anything.
+
+/// Every fixture `P14-T005` is about, named rather than discovered for the same
+/// reason the lists above are: a test that discovered them would pass on an
+/// empty directory.
+const INTENT_FIXTURES: &[&str] = &["missing-user-intent", "intent-mismatch"];
+
+/// The keys of a `required_outcomes` entry that are prose about where an answer
+/// comes from rather than the answer itself.
+///
+/// Everything outside this list is a fact the corpus records about what SURE
+/// says, and every one of those is compared against the product.
+const OUTCOME_PROSE: &[&str] = &[
+    "kind",
+    "family",
+    "surface",
+    "module",
+    "reading_module",
+    "detector",
+    "title",
+    "status",
+    "why",
+    "goal_text",
+    "moved_file",
+];
+
+/// The `intent_comparison` block of one fixture's scenario.
+fn intent_block(id: &str) -> Value {
+    scenario_of(id)
+        .get("intent_comparison")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!("fixtures/adversarial/{id}/scenario.json declares no intent_comparison block")
+        })
+}
+
+/// The goal the fixture declares.
+///
+/// `None` is not a missing declaration: it is the `missing-user-intent` case,
+/// where the whole point is that no request was ever provided, and the assertion
+/// that the fixture declares no goal is what keeps the two halves apart.
+fn declared_goal(id: &str, block: &Value) -> Option<String> {
+    match block.get("goal_text") {
+        Some(Value::Null) => None,
+        Some(Value::String(text)) => Some(text.clone()),
+        other => panic!(
+            "{id}/scenario.json declares `goal_text` as {other:?}, which is neither a goal nor the \
+             absence of one"
+        ),
+    }
+}
+
+/// Every file one directory holds, relative to it, with forward slashes and
+/// sorted.
+///
+/// The two files every fixture here declares itself in are left out: what this
+/// answers for is the project, and a fixture whose declaration counted itself as
+/// part of the project could not be compared against the control.
+fn project_files(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
+        {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .expect("a file under the directory being walked")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative == "scenario.json" || relative == "README.md" {
+                continue;
+            }
+            found.push(relative);
+        }
+    }
+    found.sort();
+    found
+}
+
+fn shipped_project_files(id: &str) -> Vec<String> {
+    project_files(&fixture(id))
+}
+
+/// SURE's real pipeline over one project, with one goal and nothing else.
+///
+/// `store: None` on purpose: grading a fixture must not write to anybody's
+/// store, and nothing here needs one. `inspect_only` is the same promise for the
+/// project — the run reads it and never executes anything in it.
+fn pipelined(root: &Path, goal: Option<&str>) -> PipelineOutcome {
+    let config = Config::default();
+    Pipeline {
+        project: root,
+        purpose: Purpose::Check,
+        config: &config,
+        execution: ExecutionSettings::inspect_only(),
+        store: None,
+        goal,
+    }
+    .run()
+}
+
+fn record_of(outcome: &PipelineOutcome) -> &RunOutcome {
+    outcome
+        .run
+        .as_ref()
+        .expect("the pipeline finished without a run outcome")
+}
+
+/// The summary a person reads, line by line.
+fn rendered_summary(outcome: &PipelineOutcome) -> Vec<String> {
+    render_summary(&record_of(outcome).verdict)
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A declared list of lines.
+fn declared_lines(value: &Value, what: &str) -> Vec<String> {
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("{what} is not an array of lines"))
+        .iter()
+        .map(|line| {
+            line.as_str()
+                .unwrap_or_else(|| panic!("{what} holds a line that is not a string"))
+                .to_owned()
+        })
+        .collect()
+}
+
+/// The one `required_outcomes` entry of a given kind.
+fn required_outcome<'a>(id: &str, outcomes: &'a [Value], kind: &str) -> &'a Value {
+    let matching: Vec<&Value> = outcomes
+        .iter()
+        .filter(|outcome| outcome["kind"].as_str() == Some(kind))
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "{id}/scenario.json must declare exactly one `{kind}` outcome and declares {}. It is the \
+         entry that says in the corpus what this fixture is graded on; with none, the answer these \
+         tests assert is written down nowhere but in this file, and the two could drift apart.",
+        matching.len()
+    );
+    matching[0]
+}
+
+/// Whether an outcome is one of the kinds that records an answer.
+fn records_an_answer(kind: &str) -> bool {
+    matches!(
+        kind,
+        "intent_status" | "comparison_detail" | "intent_implementation"
+    )
+}
+
+/// What the corpus writes down about an intent fixture and what the fixture
+/// itself declares must be the same answers, in both directions.
+///
+/// The forward direction is the drift check: the entry a reader of `evaluation/`
+/// sees is not a second copy that has gone stale. The reverse direction is the
+/// one that makes deleting an outcome a red test — without it, a corpus entry
+/// could be removed and everything left would still pass while grading less.
+fn assert_the_outcomes_account_for_the_declared_expectation(id: &str, block: &Value) {
+    let outcomes = scenario_of(id)["required_outcomes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{id}/scenario.json requires no outcomes at all"));
+    assert!(
+        !outcomes.is_empty(),
+        "{id}/scenario.json requires no outcomes at all"
+    );
+
+    let main: Vec<(String, Value)> = outcomes
+        .iter()
+        .filter(|outcome| outcome["kind"].as_str().is_some_and(records_an_answer))
+        .flat_map(answer_keys)
+        .collect();
+    assert!(
+        !main.is_empty(),
+        "{id}/scenario.json records no outcome about what SURE answers"
+    );
+    assert_answers_account_for(id, &main, &block["expect"], "the fixture's expect block");
+
+    let control: Vec<(String, Value)> = outcomes
+        .iter()
+        .filter(|outcome| outcome["kind"].as_str() == Some("control"))
+        .flat_map(answer_keys)
+        .collect();
+    let declared_control = block
+        .get("control")
+        .unwrap_or_else(|| panic!("{id}/scenario.json declares no control"));
+    assert!(
+        !control.is_empty(),
+        "{id}/scenario.json records no outcome for its control, and a fixture whose answer is \
+         cannot_confirm is worth nothing without one"
+    );
+    assert_answers_account_for(
+        id,
+        &control,
+        &declared_control["expect"],
+        "the fixture's control",
+    );
+}
+
+/// The answer keys of one outcome, which is everything but the prose.
+fn answer_keys(outcome: &Value) -> Vec<(String, Value)> {
+    outcome
+        .as_object()
+        .unwrap_or_else(|| panic!("a required outcome is not an object: {outcome}"))
+        .iter()
+        .filter(|(key, _)| !OUTCOME_PROSE.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn assert_answers_account_for(id: &str, answers: &[(String, Value)], declared: &Value, what: &str) {
+    let declared = declared
+        .as_object()
+        .unwrap_or_else(|| panic!("{id}: {what} declares no answers"));
+    for (key, value) in answers {
+        let expected = declared.get(key).unwrap_or_else(|| {
+            panic!(
+                "{id}: the corpus records `{key}`, and {what} does not declare it, so the entry \
+                 asserts something no fixture says"
+            )
+        });
+        assert_eq!(
+            expected, value,
+            "{id}: the corpus and {what} disagree about `{key}`"
+        );
+    }
+    for key in declared.keys() {
+        assert!(
+            answers.iter().any(|(recorded, _)| recorded == key),
+            "{id}: {what} declares `{key}` and no required_outcomes entry records it, so nothing \
+             in the corpus grades it"
+        );
+    }
+}
+
+/// Criterion 1's guarantee, swept rather than spot-checked.
+///
+/// The counts come from the fixture, and the sweep is wider than the fixture:
+/// 0..=4096 by loop and the two points at the top of `usize`. A gate that had
+/// been written to answer `false` for nothing at all would pass a check at zero,
+/// and one that counted evidence wrongly would very likely pass a check at 1.
+fn assert_no_count_lets_an_empty_intent_claim_fulfilment(id: &str, declared: &Value) {
+    let points: Vec<usize> = declared["swept_requirement_counts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{id}: the fixture declares no counts to sweep"))
+        .iter()
+        .map(|point| {
+            usize::try_from(point.as_u64().unwrap_or_else(|| {
+                panic!("{id}: a swept requirement count is not a number: {point}")
+            }))
+            .expect("a swept requirement count fits in usize")
+        })
+        .collect();
+    assert!(points.contains(&0), "{id}: the sweep does not include zero");
+    assert_eq!(
+        declared["sweep_includes_the_top_of_the_range"],
+        json!(true),
+        "{id}: the fixture no longer claims to sweep the top of the range"
+    );
+
+    let intent = ProjectIntent::empty();
+    for count in points
+        .iter()
+        .copied()
+        .chain(0..=4096)
+        .chain([usize::MAX - 1, usize::MAX])
+    {
+        assert!(
+            !may_claim_full_fulfilment(&intent, count),
+            "{id}: an intent with no user requirement claimed full fulfilment at {count} pieces of \
+             fresh evidence"
+        );
+    }
+    for count in [0, 4096, usize::MAX] {
+        assert_eq!(
+            json!(may_claim_full_fulfilment(&intent, count)),
+            declared["may_claim_full_fulfilment"],
+            "{id}: the fixture's declared answer about fulfilment and the gate's answer disagree at \
+             {count}"
+        );
+    }
+}
+
+#[test]
+fn every_intent_fixture_these_assertions_name_is_a_fixture_this_repository_ships() {
+    // The same guard the lists above have, for the same reason: a renamed
+    // directory would make every assertion below about a project nobody ships.
+    // The second half is what these fixtures must not grow: they are graded from
+    // a `Discovery`, so a language manifest in one of them would put it in a
+    // runnability sweep that runs nothing.
+    for id in INTENT_FIXTURES {
+        let dir = fixture(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+        for manifest in [
+            "package.json",
+            "pyproject.toml",
+            "requirements.txt",
+            "Cargo.toml",
+        ] {
+            assert!(
+                !dir.join(manifest).is_file(),
+                "{id} ships a {manifest}: these fixtures are projects graded from a `Discovery`, \
+                 and a runnability manifest would claim a language half they do not have"
+            );
+        }
+        let block = intent_block(id);
+        assert!(
+            block.get("control").is_some(),
+            "{id}/scenario.json declares no control, and a fixture whose answer is a permission is \
+             worth nothing without one"
+        );
+        assert!(
+            block["control"]["moved"]["what"].as_str().is_some(),
+            "{id}/scenario.json declares a control that does not say what moved"
+        );
+        assert!(
+            !block["control"]["why"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty(),
+            "{id}/scenario.json declares a control with no reason given"
+        );
+    }
+    for id in PYTHON_FIXTURES
+        .iter()
+        .chain(TYPESCRIPT_FIXTURES)
+        .chain(CLAIM_FIXTURES)
+    {
+        assert!(
+            !INTENT_FIXTURES.contains(id),
+            "{id} is in both lists, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn missing_user_intent_never_claims_fulfilment_and_the_control_supplies_the_request() {
+    let id = "missing-user-intent";
+    let block = intent_block(id);
+    assert_the_outcomes_account_for_the_declared_expectation(id, &block);
+
+    // The fixture is the project it declares, and it is the case where no
+    // request was provided — asserted rather than assumed, because a goal added
+    // here would turn this into the other fixture.
+    assert_eq!(
+        shipped_project_files(id),
+        declared_lines(&block["project"]["files"], "the declared project"),
+        "{id} ships a different project from the one it declares"
+    );
+    assert_eq!(
+        declared_goal(id, &block),
+        None,
+        "{id}/scenario.json declares a goal, and this is the fixture for the case where none was \
+         ever provided"
+    );
+    let files_before = shipped_project_files(id);
+
+    let outcome = pipelined(&fixture(id), None);
+    let record = record_of(&outcome);
+    let declared = &block["expect"];
+
+    // The intent the run compared against is the empty one the sweep above
+    // sweeps, so the two halves of this test are about the same value.
+    assert_eq!(
+        record.intent,
+        ProjectIntent::empty(),
+        "{id}: the run compared against something other than an empty intent"
+    );
+    assert_eq!(
+        json!(record.intent.requirement_claim()),
+        declared["requirement_claim"],
+        "{id}: the claim the report is allowed to make has changed"
+    );
+    assert_eq!(
+        json!(record.verdict.must_caveat_requirements()),
+        json!(true),
+        "{id}: the verdict no longer says the report must carry the caveat"
+    );
+    assert_eq!(
+        json!(record.intent_caveat),
+        declared["intent_caveat"],
+        "{id}: the caveat is no longer the frozen sentence, or is no longer carried at all"
+    );
+    assert!(
+        !record.verdict.is_ready_for_hand_off(),
+        "{id}: the report claims the project is ready to hand off, and it cannot know that"
+    );
+
+    // The whole of what a person reads, by equality — not a substring of it. The
+    // caveat is one of these lines, and so is the sentence that says the project
+    // is not ready, so a report that claimed fulfilment anywhere would have to
+    // disagree with the fixture to do it.
+    assert_eq!(
+        rendered_summary(&outcome),
+        declared_lines(&declared["summary_lines"], "the declared summary"),
+        "{id}: the summary a person reads has changed"
+    );
+
+    assert_no_count_lets_an_empty_intent_claim_fulfilment(id, declared);
+
+    // The control. One thing moves, and it is not in the project: the request
+    // that was never provided is provided.
+    let control = &block["control"];
+    assert_eq!(
+        control["moved"]["what"].as_str(),
+        Some("the intent"),
+        "{id}: the control says it moved something other than the intent, and a control that \
+         rebuilt the project would measure a different thing"
+    );
+    let goal = control["goal_text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the control declares no goal"));
+
+    let control_outcome = pipelined(&fixture(id), Some(goal));
+    let control_record = record_of(&control_outcome);
+    let declared_control = &control["expect"];
+    assert_eq!(
+        control_record.project_root, record.project_root,
+        "{id}: the control read a different project, so what it measures is no longer the intent"
+    );
+    assert_eq!(
+        control_record.intent_caveat, None,
+        "{id}: the caveat survives a request being supplied, so it is not about the missing request"
+    );
+    assert_eq!(
+        json!(control_record.intent.requirement_claim()),
+        declared_control["requirement_claim"],
+        "{id}: supplying the request did not make the project comparable"
+    );
+    assert_eq!(
+        rendered_summary(&control_outcome),
+        declared_lines(
+            &declared_control["summary_lines"],
+            "the declared control summary"
+        ),
+        "{id}: the control's summary is not what the fixture declares"
+    );
+
+    // The flip, in both directions and by equality: the summary loses exactly
+    // the caveat line and gains nothing. Half a flip — a caveat that vanished
+    // along with something else — would still be a reporter changing its answer
+    // for a reason nobody recorded.
+    let fixture_lines = rendered_summary(&outcome);
+    let control_lines = rendered_summary(&control_outcome);
+    let caveat = declared["intent_caveat"]
+        .as_str()
+        .expect("the fixture declares a caveat");
+    assert_eq!(
+        control_lines.len(),
+        fixture_lines.len() - 1,
+        "{id}: the control's summary is not the fixture's with one line fewer"
+    );
+    let without_the_caveat: Vec<String> = fixture_lines
+        .iter()
+        .filter(|line| line.as_str() != caveat)
+        .cloned()
+        .collect();
+    assert_eq!(
+        without_the_caveat.len(),
+        fixture_lines.len() - 1,
+        "{id}: the summary carries the caveat more than once, so removing it is not one thing"
+    );
+    assert_eq!(
+        without_the_caveat, control_lines,
+        "{id}: the control's summary is not the fixture's with the caveat line removed"
+    );
+
+    // The gate over the same intent the control was compared against: false at
+    // zero, true from one requirement's worth of fresh evidence up. A gate that
+    // answered false to everything would satisfy the fixture above and fails
+    // here.
+    let supplied = explicit_goal(goal).expect("the declared control goal is a goal");
+    assert_eq!(
+        supplied.user_requirements().count(),
+        1,
+        "{id}: the supplied goal is not one user requirement"
+    );
+    assert!(
+        !may_claim_full_fulfilment(&supplied, 0),
+        "{id}: a request with no fresh evidence behind it claimed fulfilment"
+    );
+    for count in [1, 2, 64, usize::MAX - 1, usize::MAX] {
+        assert_eq!(
+            json!(may_claim_full_fulfilment(&supplied, count)),
+            declared_control["may_claim_full_fulfilment"],
+            "{id}: the gate and the fixture's control disagree at {count} pieces of fresh evidence"
+        );
+    }
+
+    assert_eq!(
+        shipped_project_files(id),
+        files_before,
+        "{id}: a run wrote into the fixture's own project"
+    );
+}
+
+#[test]
+fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_flips_it() {
+    let id = "intent-mismatch";
+    let block = intent_block(id);
+    assert_the_outcomes_account_for_the_declared_expectation(id, &block);
+
+    let goal = declared_goal(id, &block).expect("the fixture declares a goal");
+    assert_eq!(
+        shipped_project_files(id),
+        declared_lines(&block["project"]["files"], "the declared project"),
+        "{id} ships a different project from the one it declares"
+    );
+    let declared = &block["expect"];
+    let intent = explicit_goal(&goal).expect("the declared goal is a goal");
+    let project = discovery(id);
+
+    // Criterion 2, by equality, from the comparison itself — the pipeline keeps
+    // only `.findings` and drops the other four fields, so what says SURE
+    // compared anything at all is only reachable here.
+    let compared = compare_intent_to_project(&intent, &project);
+    assert_eq!(
+        json!(compared.user_requirements_checked),
+        declared["user_requirements_checked"],
+        "{id}: the number of user requirements SURE checked has changed"
+    );
+    assert_eq!(
+        json!(compared.matched.len()),
+        declared["matched"],
+        "{id}: the number of requirements with an anchor has changed"
+    );
+    assert_eq!(
+        json!(compared.unmatched.len()),
+        declared["unmatched"],
+        "{id}: the number of requirements with no anchor has changed"
+    );
+    assert_eq!(
+        json!(compared.limitation),
+        declared["limitation"],
+        "{id}: the comparison's own limitation field is no longer what the fixture declares. It has \
+         no production reader — the caveat a person sees travels through the verdict — and it is \
+         asserted here because `None` is what says SURE had a request it could compare against."
+    );
+
+    assert_eq!(
+        json!(compared.findings.len()),
+        declared["findings"],
+        "{id}: the mismatch produced a different number of proposals"
+    );
+    let proposal = &compared.findings[0];
+    assert_eq!(
+        proposal.id().as_str(),
+        declared["finding_id"].as_str().unwrap_or_default(),
+        "{id}: the proposal's identifier changed, so the corpus is recording a check nothing emits"
+    );
+    assert_eq!(
+        proposal.title(),
+        declared["finding_title"].as_str().unwrap_or_default(),
+        "{id}: the sentence a person is shown about the mismatch changed"
+    );
+    assert_eq!(
+        json!(proposal.severity()),
+        declared["finding_severity"],
+        "{id}: the mismatch is no longer reported at the level the gravity rule allows"
+    );
+    assert_eq!(
+        json!(proposal.critical()),
+        declared["finding_critical"],
+        "{id}: whether the mismatch holds the project out of green changed"
+    );
+    assert_eq!(
+        json!(proposal.evidence_class()),
+        declared["finding_evidence_class"],
+        "{id}: the class of evidence behind the mismatch changed"
+    );
+
+    // And the bucket it lands in, which is the difference between a proposal
+    // shown to a reader and one filed as noise. Both buckets are asserted: style
+    // noise alone would be satisfied by a candidate that appeared in both.
+    let aggregated = aggregate(compared.findings.clone());
+    assert_eq!(
+        json!(aggregated.material().len()),
+        declared["aggregate_material"],
+        "{id}: the mismatch is being surfaced as material"
+    );
+    assert_eq!(
+        json!(aggregated.style_noise().len()),
+        declared["aggregate_style_noise"],
+        "{id}: the mismatch is no longer filed as style noise"
+    );
+    assert_eq!(
+        json!(aggregated.duplicates_dropped()),
+        declared["aggregate_duplicates_dropped"],
+        "{id}: proposals are being dropped as duplicates that were not before"
+    );
+    assert!(
+        aggregated
+            .style_noise()
+            .iter()
+            .any(|kept| kept.id().as_str() == declared["finding_id"].as_str().unwrap_or_default()),
+        "{id}: the proposal the fixture declares is not one of the ones the aggregator kept"
+    );
+
+    // The ceiling, as a ceiling, and as a fact of the source rather than of this
+    // proposal: an inference cannot support the only severity that blocks a
+    // hand-off, so the level above cannot be reached by relabelling.
+    let outcomes = scenario_of(id)["required_outcomes"]
+        .as_array()
+        .cloned()
+        .expect("required_outcomes is an array");
+    let ceiling = required_outcome(id, &outcomes, "ceiling");
+    assert_eq!(
+        json!(AssessmentSource::Inference.supports_severity(Severity::MustFix)),
+        ceiling["supports_must_fix"],
+        "{id}: the fixture records whether an inference can support must_fix and the rule disagrees"
+    );
+    assert_eq!(
+        ceiling["cannot_support"].as_str(),
+        Some("must_fix"),
+        "{id}: the ceiling no longer names the severity it is about"
+    );
+    assert_eq!(
+        json!(proposal.evidence_class()),
+        ceiling["evidence_class"],
+        "{id}: the ceiling and the proposal are no longer about the same evidence class"
+    );
+
+    // What a person reads, through the real pipeline. The summary is compared
+    // whole, including the line about a check that could not run — the count is
+    // asserted rather than the sentence, so a reader is not told a number the
+    // fixture does not record.
+    let outcome = pipelined(&fixture(id), Some(&goal));
+    let record = record_of(&outcome);
+    assert_eq!(
+        record.intent_caveat, None,
+        "{id}: a request was supplied, so the after-the-fact caveat does not apply"
+    );
+    assert_eq!(
+        json!(record.intent.requirement_claim()),
+        declared["requirement_claim"],
+        "{id}: the claim the report may make about the request changed"
+    );
+    assert_eq!(
+        json!(record.candidates.material.len()),
+        declared["aggregate_material"],
+        "{id}: the run's material list is not what the comparison's bucket says"
+    );
+    assert_eq!(
+        json!(record.candidates.style_noise.len()),
+        declared["aggregate_style_noise"],
+        "{id}: the run's noise bucket is not what the comparison's bucket says"
+    );
+    assert_eq!(
+        json!(record.candidates.duplicates_dropped),
+        declared["aggregate_duplicates_dropped"],
+        "{id}: the run dropped a different number of duplicates"
+    );
+    let surfaced = &record.candidates.style_noise[0];
+    assert_eq!(
+        surfaced.id,
+        declared["finding_id"].as_str().unwrap_or_default(),
+        "{id}: the candidate the report shows is not the proposal the comparison built"
+    );
+    assert_eq!(
+        surfaced.title,
+        declared["finding_title"].as_str().unwrap_or_default(),
+        "{id}: the title a person is shown changed on its way to the report"
+    );
+    assert_eq!(
+        json!(surfaced.severity),
+        declared["finding_severity"],
+        "{id}: the weight the report shows changed"
+    );
+    assert_eq!(
+        json!(surfaced.critical),
+        declared["finding_critical"],
+        "{id}: whether the candidate is critical changed on its way to the report"
+    );
+    assert_eq!(
+        surfaced.because,
+        declared["finding_because"].as_str().unwrap_or_default(),
+        "{id}: the sentence that says why the candidate is shown changed"
+    );
+    assert_eq!(
+        json!(record.verdict.not_checked.len()),
+        declared["not_checked"],
+        "{id}: the number of checks that could not run changed"
+    );
+    assert_eq!(
+        rendered_summary(&outcome),
+        declared_lines(&declared["summary_lines"], "the declared summary"),
+        "{id}: the summary a person reads has changed"
+    );
+
+    // The control: the same goal against the same project with the implementing
+    // file present. The project is built by copying the fixture's own files
+    // rather than by restating them, so a second difference cannot hide in the
+    // copy.
+    let control = &block["control"];
+    let declared_control = &control["expect"];
+    let added = &control["moved"]["added_file"];
+    let added_path = added["path"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the control does not say which file it adds"));
+    let added_contents = added["contents"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the control does not declare the file's contents"));
+    assert_eq!(
+        added_contents.lines().next(),
+        added["first_line"].as_str(),
+        "{id}: the control's declared first line is not the first line of its declared contents"
+    );
+
+    let scratch = Scratch::under("adversarial intent controls", id);
+    for relative in shipped_project_files(id) {
+        let full = fixture(id).join(&relative);
+        let text = std::fs::read_to_string(&full)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", full.display()));
+        scratch.write(&relative, &text);
+    }
+    scratch.write(added_path, added_contents);
+
+    // One thing moved, and nothing else: the control's files are the fixture's
+    // plus exactly the one path, and every shared file is the fixture's own
+    // bytes.
+    let mut expected_files = shipped_project_files(id);
+    expected_files.push(added_path.to_owned());
+    expected_files.sort();
+    assert_eq!(
+        project_files(&scratch.project),
+        expected_files,
+        "{id}: the control is not the fixture with one file added"
+    );
+    for relative in shipped_project_files(id) {
+        assert_eq!(
+            std::fs::read_to_string(scratch.project.join(&relative)).expect("the copied file"),
+            std::fs::read_to_string(fixture(id).join(&relative)).expect("the fixture's file"),
+            "{id}: the control's copy of {relative} is not the fixture's own bytes"
+        );
+    }
+
+    let control_project = scratch.discovery();
+    let control_compared = compare_intent_to_project(&intent, &control_project);
+    assert_eq!(
+        json!(control_compared.matched.len()),
+        declared_control["matched"],
+        "{id}: the same goal against a project that answers it did not match"
+    );
+    assert_eq!(
+        json!(control_compared.unmatched.len()),
+        declared_control["unmatched"],
+        "{id}: the control still reports an unmatched requirement"
+    );
+    assert_eq!(
+        json!(control_compared.limitation),
+        declared_control["limitation"],
+        "{id}: the control's limitation changed"
+    );
+    assert_eq!(
+        json!(control_compared.findings.len()),
+        declared_control["findings"],
+        "{id}: a project that answers the request still produces a mismatch proposal"
+    );
+    assert!(
+        control_compared.findings.is_empty(),
+        "{id}: the control produced a proposal, and the whole fixture rests on it producing none"
+    );
+
+    // The anchor the control matched on, by its parts rather than by a debug
+    // string: this is what makes `matched == 1` a measurement rather than a
+    // count somebody could satisfy by matching anything.
+    let declared_anchor = &declared_control["matched_anchor"];
+    assert_eq!(
+        control_compared.matched[0].anchors.len(),
+        1,
+        "{id}: the control's requirement matched more than one anchor, so the fixture's record of \
+         where it matched is incomplete"
+    );
+    match &control_compared.matched[0].anchors[0] {
+        IntentMatchAnchor::SourceFile {
+            path,
+            line,
+            context,
+        } => {
+            assert_eq!(
+                path,
+                declared_anchor["path"].as_str().unwrap_or_default(),
+                "{id}: the control matched a different file"
+            );
+            assert_eq!(
+                json!(line),
+                declared_anchor["line"],
+                "{id}: the control matched a different line"
+            );
+            assert_eq!(
+                context,
+                declared_anchor["context"].as_str().unwrap_or_default(),
+                "{id}: the control matched on a different text"
+            );
+        }
+        other => {
+            panic!("{id}: the control matched on {other:?}, and the fixture declares a source file")
+        }
+    }
+
+    let control_outcome = pipelined(&scratch.project, Some(&goal));
+    let control_record = record_of(&control_outcome);
+    assert_eq!(
+        json!(control_record.candidates.style_noise.len()),
+        declared_control["aggregate_style_noise"],
+        "{id}: the control's report still shows a mismatch candidate"
+    );
+    assert_eq!(
+        json!(control_record.verdict.not_checked.len()),
+        declared_control["not_checked"],
+        "{id}: the control's report still lists a check that could not run"
+    );
+    assert_eq!(
+        rendered_summary(&control_outcome),
+        declared_lines(
+            &declared_control["summary_lines"],
+            "the declared control summary"
+        ),
+        "{id}: the control's summary is not what the fixture declares"
+    );
+
+    // The flip, in both directions and by equality: the control's summary is the
+    // fixture's with exactly the trailing line about the check that could not
+    // run removed, and nothing else.
+    let fixture_lines = rendered_summary(&outcome);
+    let control_lines = rendered_summary(&control_outcome);
+    assert_eq!(
+        fixture_lines.len(),
+        control_lines.len() + 1,
+        "{id}: the control's summary is not the fixture's with one line fewer: {} against {}",
+        control_lines.len(),
+        fixture_lines.len()
+    );
+    assert_eq!(
+        &fixture_lines[..control_lines.len()],
+        control_lines.as_slice(),
+        "{id}: the control changed a line of the summary other than the one about the check that \
+         could not run"
+    );
 }

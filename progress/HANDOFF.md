@@ -3,6 +3,69 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T008` — *"Implement dangerous-action fixtures"* — is **dispatched**, not accepted,
+from base `83e3e58` (the `P14-T007` acceptance), with its brief at `target/tmp/brief-p14t008.md` and
+the tree clean at dispatch. Its criterion is *"Delete/force-push/sensitive-read expected protection
+behavior tested."* and it is the first `P14` fixture whose subject is **the product's own decision
+about one request** rather than a check result over a project.
+
+**What exists, measured at the base.** All three cases are `release_blocking: true` and `must_fix` in
+`evaluation/acceptance-manifest.json` (`:94`, `:100`, `:106`). `fixtures/adversarial/dangerous-delete/`
+is a **209-byte stub** — five lines, no `README.md`, no `release_blocking` field, and still carrying
+the anti-stub marker `to_be_implemented_by_task_graph` that `fixture_apps.rs:244` exists to catch.
+`fixtures/adversarial/force-push/` and `fixtures/adversarial/sensitive-read/` **do not exist**. So the
+deliverable is one directory filled in and two created, each named in a const list in both corpus
+files — because a fixture directory that no list names is a fixture nothing grades, which is the
+defect the last three tasks were about.
+
+**The trap, and it is a sharper one than `P14-T007`'s.** *"Cannot aggregate green"* was satisfiable by
+three different broken products; *"the dangerous action is blocked"* is satisfiable by **`Danger`
+deleted entirely**, because `base_decision` (`hook_protection.rs:1468`) blocks `NeedsConsent` with a
+sentence that names no danger. A fixture asserting only `kind == Block` passes on a build with no
+detector in it. So the brief fixes the assertion order before the work starts: the **danger by wire
+name** first, then the reason **by equality with `danger_reason`**, and only then the decision kind —
+and every fixture carries a **control**, the same request with exactly one thing moved, that must
+reach `Allowed`, because *"a broad delete is held"* is equally satisfied by a product that holds
+everything forever.
+
+**The product is reachable in-process, so the fixture grades behaviour rather than restating a test.**
+`P13-T005` built `hook_protection` and `lib.rs:43` makes it public: `assess_claude_code_tool` (`:449`),
+`assess_cursor_tool` (`:367`), `Danger` (`:587`), `danger_reason` (`:709`) and the allowance rule
+`acts_a_tool_could_be_held_for` (`:998`) can all be driven from `crates/sure-core/tests/` with no
+store and no binary. The store-backed half — grant, one allow, held again — is already graded in
+`sure-cli` by three named tests (`hook.rs:2223`, `:2303`, `:2334`), and the fixture **names them**
+rather than restating them, which is what `fixtures/privacy/manifest.json:526-548` already says about
+which half is whose.
+
+**The tripwire is a substring, which is worth knowing before it bites.** `fixture_has_an_app`
+(`finding_severity_rule.rs:340`) is `scenario.contains("\"entry_points\"")` — a raw text test for the
+double-quoted token. Two words of prose in a new `scenario.json` would move a fixture into the
+release-blocking-with-an-app set and redden the pinned list at `:421-432`. `check-crash` escapes this
+only because it writes the word in backticks (a count of the double-quoted token in that file is
+zero), and the brief says a red pinned list is never fixed by editing the list.
+
+**Four sentences become false the moment these directories exist**, and the brief names them so they
+are reconciled rather than left: `finding_severity_rule.rs:31-39`; `:319-328`, where `force-push` and
+`sensitive-read` move from the list about directories to the list about keys, as `missing-user-intent`
+did at `P14-T005`; `:412-419`, where `dangerous-delete` stops being a stub directory; and
+`fixtures/privacy/manifest.json:667-674` with its human half at `fixtures/privacy/README.md:69-70` —
+the `seam` entry whose own evidence says the two directories *"are absent, which is a measurement of
+this tree rather than an inference from a brief"* and whose `would_settle_it` is *"P14-T008's
+fixtures."*
+
+**The base is stated rather than assumed.** `83e3e58` differs from `f1a6764`, the last commit measured
+by the whole six-gate bundle, by exactly three supervisor files — `git diff --stat f1a6764 83e3e58`
+is `SHA256SUMS.txt`, `progress/HANDOFF.md`, `progress/state.json` — and nothing in `crates/` reads any
+of them: six grep hits, every one of them a comment. The three gates that do read the tree's text were
+run at `83e3e58` and are green: bootstrap 17 phases / 187 tasks, taskctl 187 tasks, and the non-Windows
+check reporting what it always reports on a machine with no cross C compiler.
+
+**The CI reading owed to this entry is discharged.** Run `35425807272` for `f1a6764` is **success at
+attempt 1** — the `P14-T007` head is CI-green. Run `35426079336` for the base commit `83e3e58` was in
+flight when this was written and is owed to the next entry. The dispatch commit `9512989` stays red on
+the recorded `service_supervisor.rs:793:5` flake, and the three superseded worker commits still have
+no run of their own; nothing is ever re-run, because `gh run rerun --failed` mints no second run id.
+
 **In flight:** nothing, as of this paragraph. `P14-T007` — *"Implement checker-error/unknown
 fixtures"* — is **accepted as `f1a6764`**, on the **second submission**, over eight worker commits
 from base `7fb4564` (the `P14-T006` acceptance), with its brief at `target/tmp/brief-p14t007.md`

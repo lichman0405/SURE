@@ -3,6 +3,98 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T007` — *"Implement checker-error/unknown fixtures"* — is **dispatched**, not
+accepted, from base `7fb4564` (the `P14-T006` acceptance), with its brief at
+`target/tmp/brief-p14t007.md` and the tree clean at dispatch. Its single criterion is
+*"Critical error/skipped/unknown cannot aggregate green."* and it is the first of the four `P14`
+fixture criteria that is a **negative** claim, which is what makes it the sharpest trap in the phase
+so far.
+
+**Why a negative claim is the trap.** *"Cannot aggregate green"* is satisfied by three different
+broken things, and none of them looks like one. A product that **never produced a result at all**
+satisfies it vacuously: `aggregate_run` (`crates/sure-core/src/aggregation.rs:175-210`) walks the
+*schedule* rather than the results, so a check with no result becomes a row only because that walk
+puts it there — drop the check from the schedule and the criterion still holds with nothing recorded.
+A product that answered `NotEnoughChecked` **unconditionally** satisfies it too, including for a run
+where everything passed. And a test asserting only `!severity.is_green()` satisfies it while
+measuring nothing, because that assertion is true for `NeedsAttention`, `NotReady`,
+`NotEnoughChecked` **and for an empty plan** (`status.rs:656-659`, `aggregate(&[])` is
+`NotEnoughChecked`). The corpus names this failure mode in its own words at
+`adversarial_fixture_detection.rs:88-91`. The defence is the one the last three tasks used and it is
+not optional: a **control**, the same schedule with one thing moved, that must reach **`Green`**.
+
+**What the reconnaissance changed about this task, and it is most of the task.** `check-crash` — the
+manifest row this criterion owns, `release_blocking: true`, `must_fix` — is a **208-byte, 5-line stub**
+from the bootstrap commit `0c85181`, never touched since. It is named in **no** `*_FIXTURES` const and
+reached by **no** test that reads a byte of it: the only test that touches it reads the *directory
+listing* and asserts a manifest row exists. It would fail two tests the moment it is listed, because
+it has no `required_outcomes` (the expectation schema requires it) and it still carries the anti-stub
+marker `to_be_implemented_by_task_graph` that `fixture_apps.rs:226` exists to catch. The second thing
+the reconnaissance found is a **name collision**: `fixtures/adversarial/unknown-evidence/` is fully
+built and wired into both corpora, but its "unknown" is `ClaimAssessment::CannotConfirm` plus
+`StalenessReason::UnknownProvenance` — **two different enums** — and a *successful* claim check
+returns **no `CheckResult` at all** (`pipeline.rs:1037`), so it never reaches `aggregate` and does
+**not** cover `CheckStatus::Unknown`. A reader who saw that fixture in the corpus list and concluded
+the `Unknown` status was covered would be reading a false green, so the brief requires the README to
+say so in the same voice `container-unavailable` uses for its limit.
+
+**What the criterion is read as, decided before dispatch.** The real route is
+`aggregate_run`'s schedule walk — production code that **no fixture currently reaches** — whose
+`(None, None)` arm makes a scheduled check that reported nothing a `CheckResult::unknown` carrying
+the proposal's own `critical` flag (`aggregation.rs:204-207`, `268-282`). So the fixture must assert
+four things about one run, and `!is_green()` is none of them: that the check is **present** as a row
+in `report.unreported` and never `Passed`; that it carries the product's own sentence **by
+equality**; that the **exact** severity is pinned; and that the **control reaches `Green`**.
+
+**Fixed ground, and one thing measured rather than read.** None of `Error`, `Skipped` or `Unknown`
+can reach green by any route — `status.rs:630-670` sends `Error` and `Unknown` to
+`NotEnoughChecked` and a scope-limited `Skipped` to `NeedsAttention`, and `AggregateSeverity`
+(`:455-473`) has **no `Unknown` variant**. The scope-limit escape at `:433-445` is guarded by
+`self.status == CheckStatus::Skipped`, so it cannot fire for `Error` or `Unknown` at all. And one
+measurement was taken that the brief is built on: **deleting `status.rs:665`
+(`|| !critical_out_of_scope.is_empty()`) leaves all 2572 tests green.** The clause is strictly
+redundant, because `not_checked()` counts `skipped + error + unknown` (`:554-556`) so `:662` always
+fires first and reaches the same answer. That is recorded as a constraint and not as a curiosity: **no
+fixture may claim to pin that clause**, because the two states are identical and no assertion can
+tell them apart. The one claim left as *read rather than measured* is the ordering of `:656` against
+`:662` for a lone scope-limited critical skip; the brief requires the worker to measure it and says
+the measurement wins.
+
+**One tripwire, verified rather than assumed.** `crates/sure-core/tests/finding_severity_rule.rs:384`
+(the test at `:411-423`) asserts the **exact list** of release-blocking cases with a fixture app, and
+`fixture_has_an_app` (`:329-332`) decides that by whether `scenario.json` contains `"entry_points"`.
+`check-crash` is `release_blocking: true`, so adding that key would pull it into the list — reddening
+the equality assertion **and** very likely panicking in `measured_severity` (`:377`), which refuses to
+guess when nothing readable spoke about a fixture. This is by design, in the test's own words. The
+brief forbids it: `check-crash` is a schedule and a set of declared outcomes graded by a Rust test,
+not a project with runnable code.
+
+**One stale comment found while verifying the ground.** `finding_severity_rule.rs:319-328` classifies
+corpus ids by shape and lists `missing-user-intent` under *"a corpus id with no fixture directory"* —
+but that directory **exists**, created by `P14-T005`. Measured against the disk: `force-push`,
+`sensitive-read` and `benign-test-mocks` are correctly listed as having none, and `missing-user-intent`
+is not. No test breaks either way, since `fixture_has_an_app` returns false for all of them, so this
+is a documentation defect rather than a red test. The brief asks for it to be corrected or recorded
+and explicitly **not** made the acceptance.
+
+**The base was measured rather than inherited.** `7fb4564`, six gates from native PowerShell all exit
+0, **2572 passed**, 0 failed, 12 ignored, 65 case-sensitive headers, bootstrap reading 17 phases / 187
+tasks, taskctl 187 tasks, worktree clean, and the machine's store byte-identical throughout at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`. The two targets the brief names
+were counted at that base with `Select-String '^#\[test\]'`: `adversarial_fixture_detection` **28** and
+`fixture_apps` **25**. The gate script is now parameterised (`target/tmp/gates.ps1 -Label <name>`),
+after being re-created once already following a worker's `cargo clean`; its two recorded instrument
+defects — the case-insensitive header count and the ignored total read off the wrong line — are fixed
+in it and are commented as such, because each rewrite is a chance to reintroduce one.
+
+**The CI reading owed to this entry is discharged.** Run `35423922710` for `7fb4564`, the `P14-T006`
+acceptance commit, is **success at attempt 1 on all five jobs** — including `rust (ubuntu-latest)`,
+which is the job that failed on the `P14-T006` dispatch commit `e34c222`. That makes six data points
+in the `ETXTBSY` sequence: `4697bbf` red, `9329e63` green, `8df2bbf` green, `1356683` green,
+`e34c222` red, and now `7fb4564` green. This dispatch commit's own run is owed to the next entry, and
+no run is ever re-run: `gh run rerun --failed` mints no second run id, so a green re-run would erase
+the row's own state.
+
 **In flight:** nothing, as of this paragraph. `P14-T006` — *"Implement
 execution-trust fixtures"* — is **accepted as `7a57b09`**, on the **first submission**, over four
 worker commits from base `c984275` (the `P14-T005` acceptance), with its brief at

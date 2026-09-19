@@ -178,9 +178,9 @@
 # reach the extraction step, which is the point of comparing first.
 #
 # **Mutation 2 - run whatever `sure` is on `PATH` instead of the extracted
-# one.** In the run step below, change the call from `& $ExePath @arguments` to
-# a bare-name call (`sure.exe`), and run the script with the debug build's
-# directory prepended to `PATH`. Expected and measured: the `running_from`
+# one.** In the run step below, change `Invoke-Captured`'s `-Program
+# $extractedExe` to `-Program 'sure.exe'`, and run the script with the debug
+# build's directory prepended to `PATH`. Expected and measured: the `running_from`
 # assertion fails, naming the extraction directory it required and the path the
 # binary actually reported. This is the subtle one - the run succeeds, the exit
 # status is 0, the frame parses, and `target_env` is still `msvc`, because the

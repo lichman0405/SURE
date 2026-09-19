@@ -2575,9 +2575,11 @@ mod tests {
             Vec::new()
         );
 
-        // The invariant, over every combination the two enums and a few
-        // permission sets can make — including ones no authority builds — and
-        // over both harnesses' whole vocabularies plus a name neither knows.
+        // The invariant, over **every** combination the two enums and the six
+        // permission booleans can make — sixty-four sets, including ones no
+        // authority builds and ones `ExecutionPermissions`' own documentation
+        // says cannot exist — and over both harnesses' whole vocabularies plus a
+        // name neither knows.
         //
         // Three things are held at once, and they are what keeps the narrowed
         // question and the project-wide one from becoming two rules:
@@ -2590,18 +2592,25 @@ mod tests {
         //   answer, because every kind the witnesses name is a kind some name
         //   reaches — so "nothing anywhere" and "nothing for any tool" are the
         //   same statement.
-        let mut blind = ExecutionPermissions::inspect_only();
-        blind.inspect = false;
-        blind.write_project = false;
+        //
+        // The sweep is exhaustive rather than representative because the two
+        // claims below it are about sentences a user reads: a sampled sweep
+        // would leave "no configuration can print this false thing" as a
+        // statement about the sample.
+        let permission_sets: Vec<ExecutionPermissions> = (0u8..64)
+            .map(|bits| ExecutionPermissions {
+                inspect: bits & 1 != 0,
+                run_project_code: bits & 2 != 0,
+                install_dependencies: bits & 4 != 0,
+                network: bits & 8 != 0,
+                write_project: bits & 16 != 0,
+                connect_service: bits & 32 != 0,
+            })
+            .collect();
         for mode in ExecutionMode::ALL {
             for protection in ProtectionMode::ALL {
-                for permissions in [
-                    inspect_only.clone(),
-                    runner.clone(),
-                    writer(),
-                    blind.clone(),
-                ] {
-                    let acts = acts_a_request_could_be_held_for(*mode, &permissions, *protection);
+                for permissions in &permission_sets {
+                    let acts = acts_a_request_could_be_held_for(*mode, permissions, *protection);
                     let mut union: Vec<Danger> = Vec::new();
                     for tool in [
                         "Shell",
@@ -2613,7 +2622,7 @@ mod tests {
                         "A Tool Neither Harness Sends",
                     ] {
                         let narrowed =
-                            acts_a_tool_could_be_held_for(tool, *mode, &permissions, *protection);
+                            acts_a_tool_could_be_held_for(tool, *mode, permissions, *protection);
                         for danger in &narrowed {
                             assert!(
                                 acts.contains(danger),
@@ -2627,7 +2636,7 @@ mod tests {
                         let refusal = allowance_could_not_be_spent_reason(
                             tool,
                             *mode,
-                            &permissions,
+                            permissions,
                             *protection,
                         );
                         assert_eq!(

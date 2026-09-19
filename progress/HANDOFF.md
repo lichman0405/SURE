@@ -3,42 +3,41 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T012` — *"Meet mandatory false-green release metrics"* — is **dispatched**, not
-accepted, from base `2063b19` (the `P14-T011` acceptance), with its brief at
-`target/tmp/brief-p14t012.md` and the tree clean at dispatch. Its criterion has two clauses —
-*"Release-blocking corpus has zero false green."* and *"Any unmet case blocks P15 release
-packaging."* — and it is the task `P14-T013` and then the P15 packaging work wait behind.
+**In flight:** nothing, as of this paragraph. `P14-T012` — *"Meet mandatory false-green release
+metrics"* — is **accepted as `697db64`**, over three worker commits from base `2063b19` (the
+`P14-T011` acceptance), with its brief at `target/tmp/brief-p14t012.md` and the tree clean at dispatch
+and at acceptance. It was **sent back once**, over a claim in a comment rather than over behaviour, and
+the correction is the third commit. It is the task `P14-T013` and then the P15 packaging work wait
+behind.
 
-**What exists, and the gap the two clauses sit in.** The seven metrics are already written down at
-`docs/product/PRODUCT_EVALS.md:5-13` (false green rate 0, fabricated execution claims 0, insufficient
-evidence that becomes confirmed 0, repair-regression caught 100%, secret redaction 100%, benign-mock
-corpus tracked, jargon golden tests), and `:15` constrains the task itself — *"Do not optimize a
-single numeric score at the expense of honest unknowns."* The report those metrics should be computed
-from now exists: P14-T011 measures 20 cases, 13 release-blocking, 19 observed and 1 `cannot_confirm`,
-with `release_blocking_unmet` and `release_blocking_cannot_confirm` already in its totals. What does
-**not** exist is any of the seven as a value, or any gate. And the false-green machinery that does
-exist measures nothing at runtime: `false_green_violations` (`fixture_apps.rs:500`) reads a fixture's
-`forbidden_outcomes` and reports **structural** violations — that the list is non-empty, that one
-outcome has `kind: "false_green"` — and it is green today. It asks whether a fixture *declared* what
-must never happen; nothing asks whether it happened.
+**The two clauses are now one value and one document.** `crates/sure-core/src/release_gate.rs`
+computes a `ReleaseGate` over the report P14-T011 produces — a `decision` of `permitted` or `blocked`,
+a `blocked_by` naming each blocking case with its row's own sentence, the seven metrics as values, and
+the claim of every metric this corpus cannot measure — and
+`crates/sure-core/tests/acceptance_report_runner.rs`, the same binary that writes the report, writes the
+gate to `target/tmp/release-gate.json`, so the two artefacts cannot drift apart.
+`docs/testing/ADVERSARIAL_FIXTURES.md`'s sentence that "a mandatory false green blocks release" now names
+the mechanism that does it instead of asserting that one exists.
 
-**There is no packaging to block, and that is clause 2's whole difficulty.** `scripts/` holds
-bootstrap, install, preflight and validation scripts and nothing else — no artifact, no version
-stamping, no release workflow. The packaging work is P15-T002 through P15-T011, none of it started.
-So *"any unmet case blocks P15 release packaging"* is not "stop something that exists"; it is make
-the block a real thing the packaging tasks will consume, **and demonstrate that it blocks**. A gate
-that has only ever seen a passing corpus has not been shown to block anything.
+**A case nobody measured blocks.** Clause 2's reading is the strict one: `cannot_confirm` on a
+release-blocking case blocks the release, because permitting one over a case nobody measured is exactly
+the green this repository exists to catch. On today's corpus that path has no instance — all thirteen
+release-blocking cases are observed — so it is exercised by the controls under `target/tmp` and by the
+module's own narrower report, which reads `blocked` over `repair-regression`.
 
-**The trap the task is built around: a number that cannot fail.** If the false-green rate is computed
-by asking whether each release-blocking fixture carries a `forbidden_outcomes` entry of
-`kind: "false_green"`, the answer is 0 by construction and always will be, because
-`every_fixture_forbids_the_false_green_shape` (`fixture_apps.rs:1058`) is already green and would have
-to be red for the rate to move — a metric that cannot be non-zero, which is worse than no metric. The
-report's own totals are the second version of the same trap: reporting `release_blocking_unmet: 0`
-back is reporting the report rather than evaluating anything. The task is also asked to be honest
-about the other direction — two of the seven metrics have no machinery behind them at all
-(`fixtures/privacy/manifest.json` is a different corpus, and a jargon golden test may not exist), and
-`PRODUCT_EVALS.md:15` makes an unmeasurable metric read as unmeasured rather than as zero.
+**The metric that could not fail is not the metric that was built.** The brief named the trap: a
+false-green rate computed from `forbidden_outcomes` declarations is `0` by construction and always will
+be, because `every_fixture_forbids_the_false_green_shape` is already green and would have to go red for
+the rate to move. Nothing in the new module reads that field — all four occurrences of it in the file
+are prose saying so. The rate is computed from measured severities against requirements, and it moves to
+`1 of 1` under a control that changes nothing but the contract. Two of the seven metrics have no
+machinery behind them at all and read `unmeasured` with a reason and a place the number is measured
+instead — never `0`, which is `PRODUCT_EVALS.md:15` kept as a property rather than as a promise.
+
+**What it is not.** No packaging machinery exists in this tree, so "any unmet case blocks P15 release
+packaging" is a block on the gate's own document, demonstrated, rather than a block wired into a release
+pipeline; the task that wires it is P15's. Detail in "What `P14-T012` added" and "Validation of
+`P14-T012`" below.
 
 **In flight:** nothing, as of this paragraph. `P14-T011` — *"Implement product eval runner/report"* — is
 **accepted as `909f990`**, over five worker commits from base `b29dc6c` (the `P14-T010` acceptance), with its
@@ -2403,6 +2402,70 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T012` added
+
+The false-green clause, as a value and a document rather than as an assertion.
+
+- **`crates/sure-core/src/release_gate.rs`.** `release_gate(&AcceptanceReport) -> ReleaseGate`, computed
+  from the report P14-T011 already produces. It carries a `decision` of `permitted` or `blocked`, a
+  `blocked_by` naming every release-blocking case that blocks with that row's own sentence, the seven
+  metrics as values, `unmeasured_metrics` for the claims this corpus cannot measure, and a `limitations`
+  list. It opens no store, starts no process and writes nothing — the writing is the runner's.
+- **`crates/sure-core/tests/release_gate_runner.rs`.** Drives the gate over the real corpus and over four
+  controls under `target/tmp`, and asserts the properties the criterion turns on: a release-blocking case
+  nothing observed blocks, a fully met corpus permits, the rate is not the report's unmet total, a rate is
+  never taken over no rows, the two unmeasurable metrics read `unmeasured` with a reason and a place the
+  number is measured instead, and the document matches the schema it ships with.
+- **`schemas/release-gate.schema.json`**, validated the way `acceptance-report.schema.json` is.
+- **The writing of `target/tmp/release-gate.json`**, by `acceptance_report_runner.rs` — the same binary
+  that writes the report it is computed from, so a committed reading cannot go stale with nothing to
+  redden it.
+- **Four controls, one of them the anti-vacuity case.**
+  `an_unmet_case_blocks_the_release_and_moves_the_false_green_rate` puts `benign-test-mocks` under a
+  contract requiring `must_fix` for a case the machinery reaches `note` on: the decision flips to
+  `blocked` and the rate reads `1 of 1` where the real corpus reads `0 of 12`, with no declaration
+  changed and no fixture edited — `the_control_changes_no_declaration` checks the control's
+  `scenario.json` is byte-identical to the shipped one.
+- **`docs/testing/ADVERSARIAL_FIXTURES.md`.** "Every fixture has machine-readable expected outcomes. A
+  mandatory false green blocks release." — an assertion with no mechanism behind it — replaced by a
+  sentence naming `sure_core::release_gate`'s `decision` in `target/tmp/release-gate.json`.
+
+## Validation of `P14-T012`
+
+The supervisor's own run, at `697db64`, from PowerShell (`gates.ps1 -Label p14t012-sup2`): **all six
+gates exit 0**, `result-lines=79 passed=2617 failed=0 ignored=12 not-ok=0`, 69 case-sensitive headers,
+bootstrap and taskctl OK, store byte-identical before and after
+(`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes, mtime unchanged),
+`worktree: []`. A run of mine at `38f8827`, before the send-back, was green with the same counts.
+
+**The task was sent back once, over a claim rather than over behaviour.** The runner's anti-vacuity
+comment instructed a reproducible mutation and then asserted that under it "the first assertion below
+goes red alone while every metric value in the document stays what it is". The supervisor ran it:
+`12 passed; 4 failed`, red at `:617:5`, `:723:5`, `:532:5` and `:369:5` — four tests, not one. The phrase
+has a **checked** meaning in this tree — `acceptance_report_runner.rs:836` uses it, and P14-T011 verified
+it as whole-binary — and the claim was false in principle besides, since three other tests assert the
+blocked verdict unconditionally and no mutation that empties `blocked_by` can redden one test alone. The
+correction (`697db64`, one file, 12 insertions and 3 deletions, the comment only) states the run's own
+output, names why four redden, and names `release_gate.rs:237-238` for why no metric value moves. The
+supervisor re-measured the corrected text rather than taking it on report: `12 passed; 4 failed` at
+`:732:5`, `:626:5`, `:532:5`, `:369:5` — the same four, two shifted by the comment's added lines — and
+read the two cited lines to confirm they are what the comment says they are.
+
+**CI, read from the API job by job.** Run 35433965294 for `2063b19` — the first push carrying the five
+P14-T011 worker commits, none of which has a run of its own — is **success on all five jobs**, including
+`rust (macos-latest)` 203s and `rust (ubuntu-latest)` 153s, which answers what that reading was held for:
+`acceptance_report_runner.rs` behaves the same where corpus paths are resolved on a case-sensitive
+filesystem, and it was the runner's first execution in CI at all. Run 35434033089 for `42d346d` — a
+commit that changed no code, the shape that has carried a red ubuntu job twice for environmental reasons
+— is **success on all five jobs**, ubuntu 139s. Neither environmental race was provoked, so this entry
+owes no failure to name.
+
+**`SHA256SUMS.txt` needed two refreshes and no addition.** The dry run read `195 listed, 193 unchanged,
+2 stale, 0 absent`; the stale entries are `crates/sure-core/src/lib.rs` and
+`docs/testing/ADVERSARIAL_FIXTURES.md`, both listed and both changed by this task. The new
+`schemas/release-gate.schema.json` is deliberately **not** added, following the convention the P14-T011
+entry measured rather than assumed: `schemas/` holds eleven files and lists seven.
 
 ## What `P14-T011` added
 

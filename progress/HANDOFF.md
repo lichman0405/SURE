@@ -3,39 +3,47 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T011` — *"Implement product eval runner/report"* — is **dispatched**, not accepted,
-from base `b29dc6c` (the `P14-T010` acceptance), with its brief at `target/tmp/brief-p14t011.md` and the
-tree clean at dispatch. Its criterion is *"Produces machine-readable acceptance report against
-`evaluation/acceptance-manifest.json`"* and it is the task `P14-T012` — the false-green release metrics —
-and then the P15 packaging work wait behind.
+**In flight:** nothing, as of this paragraph. `P14-T011` — *"Implement product eval runner/report"* — is
+**accepted as `909f990`**, over five worker commits from base `b29dc6c` (the `P14-T010` acceptance), with its
+brief at `target/tmp/brief-p14t011.md` and the tree clean at dispatch and at acceptance. It was **sent back
+once**, and the correction is the substance of the five commits. It is the task `P14-T012` — the false-green
+release metrics — and then the P15 packaging work wait behind. "What `P14-T011` added" and "Validation of
+`P14-T011`" below carry the detail.
 
-**What exists, measured at the base, and the sentence the task turns on.** There is **no runner**: nothing
-in the tree iterates `evaluation/acceptance-manifest.json` and produces a report, and the closest thing is
-`finding_severity_rule.rs:469`, which iterates the manifest but is a single `#[test]`. The contract is an
-object of `schema_version` plus 20 cases — `id`, `release_blocking`, `expected_severity`, `expectation` —
-and **13 of the 20 block a release**. The sentence the acceptance hangs on is `evaluation/README.md:5`:
-*"The release report must include actual observed outcome for every case."* **Actual observed outcome**,
-which is the whole of the quality bar and the whole of the trap.
+**The runner exists now, and it measures.** `evaluation/acceptance-manifest.json` was asserted fixture by
+fixture and never iterated by anything that produced a document; `progress/HANDOFF.md:5879-5884` said so in
+the repo's own words — *"The test file stands in as the runner. The product has no runner of its own yet."*
+The task's footprint is five files: `crates/sure-core/src/acceptance_report.rs` (the report's shape and one
+recipe per case), `crates/sure-core/tests/acceptance_report_runner.rs` (the drive over the real corpus, which
+also supplies the one case a `src` module cannot observe), `schemas/acceptance-report.schema.json`, and two
+one-line registrations — `pub mod acceptance_report;`, and one `MAY_PROPOSE` entry whose written reason is
+that the module proposes for no project because its only caller is the test runner. The report covers **20
+cases, 13 of them release-blocking; 19 observed and 1 `cannot_confirm`**, and it is written to
+`target/tmp/acceptance-report.json` by `two_runs_are_byte_identical` — untracked on purpose, because a
+committed reading of one checkout would go stale with nothing to redden it.
 
-**The trap, and the seven fixtures that make it sharp.** A report that reads `expected_severity` out of
-the manifest and prints it as the observation would agree with itself and read green over exactly the cases
-that disagree: seven fixtures record in their own `scenario.json` that the required severity and what the
-detectors produce are not the same thing — `fake-payment`, `fake-auth`, `fake-email`, `dead-button` and
-`route-mismatch`, all of them release-blocking, plus `demo-analytics`, and `external-unverified`, where the
-product is **heavier** than the manifest asks. Six fixtures also still carry a stale
-`detector_severity_today: "note"` that `P14-T013` exists to correct, so the fixtures' own record is not
-evidence either: the runner has to measure. The second trap is driving the wrong machinery — `check-crash`
-ships no project at all and the three dangerous-action fixtures are hand-built tool-call requests, so a
-uniform `Pipeline::run` over the 20 would produce rows that look like observations and are artefacts of
-asking the wrong question.
+**Sent back once, on the one defect that mattered.** The first submission graded a severity by a floor —
+`reached.rank() >= expected.rank()` — which cannot see an escalation, so a build that turned a benign case's
+`note` into a `must_fix` would have scored `met` over exactly the case `benign-test-mocks` exists to detect: a
+false green inside the artefact whose purpose is to catch them. The rule is now an equality at
+`acceptance_report.rs:793`, both directions of disagreement are `unmet`, and the row's own sentence names
+which way it went. I reproduced both controls myself rather than reading them: restoring the floor reddens
+`an_escalation_does_not_read_met` **alone** at `acceptance_report_runner.rs:828:5` while the miss control
+stays green, so the two are a genuine mirror pair rather than each other restated; and making the observation
+copy the requirement reddens `no_observed_row_copies_the_requirement_it_is_graded_against` **alone** at
+`:498:5`.
 
-**The shape, decided rather than left open.** A report builder in `sure-core` plus a runner under
-`crates/sure-core/tests/`, with a `schemas/` document validated the way `json_report.rs` validates its own
-— and **no new `sure` subcommand**, because the corpus is a repository artefact that a shipped binary could
-not locate; the repo already frames the test file as standing in for the runner, and this is what replaces
-it. The report must cover all 20 cases, measure rather than copy, treat `cannot_confirm` as a valid result
-rather than filling rows in, be byte-identical across runs, carry its own limitations, and be falsifiable —
-a row that should read `unmet` must be able to go red alone.
+**The boundary, stated so it is not re-derived wrongly.** A row may read `met` while its observed severity is
+heavier than the contract asks. That is deliberate and is what the send-back specified: it applies only to
+outcome-axis cases, whose expectation is about the outcome rather than the severity, and the disagreement is
+written into the row's own `comparison`. `external-unverified` is the only instance on this corpus and
+`no_observed_row_copies_the_requirement_it_is_graded_against` asserts it is the only one by equality against a
+named list, so a second would surface as a diff rather than silently. Nine outcome-axis rows carry `null` for
+the observed severity because the machinery that grades them answers with
+`AggregateSeverity::{green,needs_attention,not_ready,not_enough_checked}` or with a decision, and no severity
+in the manifest's vocabulary exists to record — mapping one vocabulary onto the other would be the invented
+fact this repository forbids. `P14-T012` should read those nine as **unmeasured on the severity axis** rather
+than as severities that happen to agree.
 
 **In flight:** nothing, as of this paragraph. `P14-T010` — *"Implement benign false-positive corpus"* — is
 **accepted as `48356af`**, over four worker commits from base `44406d2` (the `P14-T009` acceptance), with its
@@ -2358,6 +2366,71 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T011` added
+
+A runner for the release contract, and the report it produces.
+
+- **`crates/sure-core/src/acceptance_report.rs`.** The report's shape and one recipe per case. It takes a
+  repository root and returns a value: it opens no store, starts no process and writes nothing. Each row
+  carries the requirement and the observation side by side, the surface that observed it, the statements it
+  rests on and its anchors. `SEVERITY_RULE` is stated in the row, so no reader has to guess what `met` meant.
+- **`crates/sure-core/tests/acceptance_report_runner.rs`.** Drives the module over
+  `evaluation/acceptance-manifest.json` and `fixtures/adversarial/`, writes the document to
+  `target/tmp/acceptance-report.json`, and supplies the one case the module cannot observe:
+  `repair-regression` needs the process runner, which `spawn_sites.rs` rule two forbids under
+  `crates/**/src/**`. The row names which of the two observed it.
+- **`schemas/acceptance-report.schema.json`**, validated by `the_report_matches_the_schema_it_ships_with` the
+  way `json_report.rs` validates its own.
+- **Two anti-vacuity controls that are mirrors.** `a_row_that_should_be_unmet_does_not_read_met` builds a
+  one-case corpus requiring *more* than the machinery reaches; `an_escalation_does_not_read_met` builds one
+  requiring *less*. One parameterized `control_corpus(what, fixture, required, expectation)` builds both, so
+  they are the same experiment with one value moved, and each is red under a different mutation.
+
+## Validation of `P14-T011`
+
+The supervisor's own run, at `909f990`, from PowerShell (`gates.ps1 -Label p14t011-sup2`): **all six gates
+exit 0**, `result-lines=78 passed=2600 failed=0 ignored=12 not-ok=0`, 68 case-sensitive headers, bootstrap
+and taskctl OK, store byte-identical before and after
+(`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes, mtime unchanged),
+`worktree: []`.
+
+**Both mutations reproduced by the supervisor, not taken on report.** Restoring the old floor at
+`acceptance_report.rs:793` reddens `an_escalation_does_not_read_met` alone at
+`acceptance_report_runner.rs:828:5` (`11 passed; 1 failed`) with the miss control still `ok`; copying the
+requirement into the observation at `:854` reddens
+`no_observed_row_copies_the_requirement_it_is_graded_against` alone at `:498:5`. The file was restored with
+`git checkout --` after each and the tree verified clean before the gate run.
+
+**One red gate run is recorded rather than hidden.** The run before the green one, at the same commit, was
+`test=101` on `crates/sure-core/tests/runtime_start.rs:1450:5` —
+`a_service_that_outlives_the_window_and_then_ends_is_still_a_failure`, `left: Pass / right: Fail` for a
+service still running when the window closed that answered `GET /health` with `204`. That file is not in this
+task's diff and the test passes **3 of 3 in isolation** (6.32s, 6.31s, 6.22s). It is a **third** distinct
+load-sensitive site in `runtime_start.rs`, beside `:1184:5` on record and `:1332:5` seen on CI, which is
+recorded as worth a task of its own rather than fixed here.
+
+**A contaminated reading, recorded because it is what the artefact invites.** Mid-verification I summarised
+`target/tmp/acceptance-report.json` and measured zero disagreements, which would have meant every row copied
+its requirement. The cause was mine: that file is written by `two_runs_are_byte_identical`, and my own two
+mutation runs had each regenerated it from mutated code. Regenerating from the clean tree reproduced every
+number the hand-back claimed — 39 `"severity":` keys, the nine `null` rows named exactly, and
+`external-unverified` the only row whose observation is heavier than its requirement. The artefact is a build
+output; reading it without regenerating it first measures the last thing that ran.
+
+**CI, read from the API.** Run **35431116517** for `b29dc6c` (the `P14-T010` acceptance) is **SUCCESS on all
+five jobs**, which also answers the question that entry flagged: it is the push immediately after the ubuntu
+browser failure on `08536f3`, and the same job passed with `browser_driver.rs` unchanged, so that reading
+stands as environmental. Run **35431356336** for the dispatch commit `15bef16` is **FAILURE,
+`rust (ubuntu-latest)` only**, on `runtime_start.rs::a_service_that_ends_by_itself_inside_the_window_fails_and_says_why`
+at `:1332:5` with `Text file busy (os error 26)` — the **ETXTBSY** class already on record at
+`service_supervisor.rs:745:10`/`:793:5`, at a new site. The product behaved correctly under that race,
+reporting the service as `Error` rather than inventing a `Fail` for a program that never ran.
+
+**`SHA256SUMS.txt`.** One refresh, no addition: the dry run found `crates/sure-core/src/lib.rs` stale, which
+this task changed by one line, and the new `schemas/acceptance-report.schema.json` is deliberately not added
+because `schemas/` lists seven of its ten files and `report.schema.json` predates this task — the list is
+curated, not exhaustive.
 
 ## What `P14-T010` added
 

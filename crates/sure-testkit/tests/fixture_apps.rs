@@ -190,6 +190,29 @@ const EXECUTION_TRUST_FIXTURES: &[&str] = &["dynamic-not-authorized", "container
 /// one of the others.
 const CHECKER_FAILURE_FIXTURES: &[&str] = &["check-crash"];
 
+/// The `P14-T008` fixtures: the three acts SURE names as dangerous.
+///
+/// A broad delete, a force push and a read of credentials — one directory each,
+/// declared as requests rather than as projects, and graded by
+/// `crates/sure-core/tests/adversarial_fixture_detection.rs` against
+/// `assess_claude_code_tool` / `assess_cursor_tool`, the two functions the
+/// integrations call. They ship no `package.json`, no `pyproject.toml` and no
+/// `Cargo.toml`, and their `scenario.json` declares no `entry_points`, for the
+/// same reason `check-crash` declares none: the case is an answer SURE gives
+/// about a request, not a project with code in it, and
+/// `crates/sure-core/tests/finding_severity_rule.rs` reads that key to decide
+/// which release-blocking cases have a fixture app.
+///
+/// This is a sixth thing a list in this file can mean — not a language, not a
+/// recording, not an execution-trust pair and not an aggregation answer, but the
+/// decision a protection mode reaches about a tool request — so it is a list of
+/// its own rather than another name in one of the others. `dangerous-delete` was
+/// a stub until `P14-T008` filled it, which is why it is named here now rather
+/// than in `TYPESCRIPT_FIXTURES` and its siblings: it was never a Node project,
+/// and a list that meant "runnable with npm" would have been telling a reader it
+/// was one.
+const DANGEROUS_ACTION_FIXTURES: &[&str] = &["dangerous-delete", "force-push", "sensitive-read"];
+
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
 ///
@@ -347,6 +370,7 @@ fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
         .chain(INTENT_FIXTURES)
         .chain(EXECUTION_TRUST_FIXTURES)
         .chain(CHECKER_FAILURE_FIXTURES)
+        .chain(DANGEROUS_ACTION_FIXTURES)
         .copied()
 }
 
@@ -1171,6 +1195,135 @@ fn every_execution_trust_fixture_is_a_directory_this_repository_ships() {
             !INTENT_FIXTURES.contains(id) && !CLAIM_FIXTURES.contains(id),
             "{id} is in EXECUTION_TRUST_FIXTURES and in a list about a different answer, so one of \
              the two is misdescribed"
+        );
+    }
+}
+
+#[test]
+fn every_dangerous_action_fixture_is_a_directory_this_repository_ships() {
+    // The guard every other list in this file has, for the same reason: a
+    // renamed directory would make every assertion about it — here and in
+    // `crates/sure-core/tests/adversarial_fixture_detection.rs`, which names the
+    // same three — about a request nobody ships.
+    for id in DANGEROUS_ACTION_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+        assert!(
+            !scenario_text(id).contains(NOT_IMPLEMENTED),
+            "fixtures/adversarial/{id}/scenario.json is still a stub"
+        );
+
+        // The half of the declaration the grading test reads. Asserted here as
+        // a shape rather than as an answer: a directory whose runs named no
+        // setting would leave the grading test comparing the product against
+        // whatever this machine happens to be configured to do.
+        let document = scenario(id);
+        let block = document
+            .get("dangerous_action")
+            .unwrap_or_else(|| panic!("{id}/scenario.json declares no dangerous_action block"));
+        let runs = block["runs"]
+            .as_object()
+            .cloned()
+            .unwrap_or_else(|| panic!("{id}/scenario.json declares no runs at all"));
+        assert!(
+            runs.len() >= 2,
+            "{id}/scenario.json declares {} runs, and a fixture is worth nothing without a control",
+            runs.len()
+        );
+        for (kind, run) in &runs {
+            for key in ["harness", "tool", "mode", "protection"] {
+                assert!(
+                    run[key].is_string(),
+                    "{id}/scenario.json's `{kind}` run declares no {key}, so the settings it is \
+                     graded under are not the ones it was measured under"
+                );
+            }
+            let path = run.get("path").is_some_and(|value| !value.is_null());
+            let command = run.get("command").is_some_and(|value| !value.is_null());
+            assert!(
+                run.get("path").is_some() || run.get("command").is_some(),
+                "{id}/scenario.json's `{kind}` run declares neither `path` nor `command`, so \
+                 nothing says which kind of request it is; a run about a shell event that carries \
+                 no command line declares `\"command\": null` for exactly that reason"
+            );
+            assert!(
+                !(path && command),
+                "{id}/scenario.json's `{kind}` run declares both a path and a command, and no \
+                 harness vocabulary has a tool that carries both"
+            );
+            assert!(
+                block["settings"]["modes"]
+                    .get(run["mode"].as_str().expect("a mode name"))
+                    .is_some(),
+                "{id}/scenario.json's `{kind}` run names a mode the fixture does not declare"
+            );
+        }
+
+        // The control, and the field-list it declares. This is the artefact half
+        // of the acceptance: which run is the control, and what moved. That the
+        // control actually *reaches* `Allowed` is the grading test's, because it
+        // is a fact about the product rather than about the document.
+        let of = block["control"]["of"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}/scenario.json declares a control for no run"));
+        let control = runs.get(of).unwrap_or_else(|| {
+            panic!("{id}/scenario.json's control names `{of}`, which is no run")
+        });
+        assert_eq!(
+            runs.get("control")
+                .and_then(|run| run["expect"]["decision"].as_str()),
+            Some("allow"),
+            "{id}/scenario.json declares no `control` run that reaches `allow`, and a fixture for \
+             a held request whose control does not reach `Allowed` measures nothing"
+        );
+        let moved: Vec<String> = block["control"]["moved"]["fields"]
+            .as_array()
+            .cloned()
+            .unwrap_or_else(|| panic!("{id}/scenario.json's control says nothing about what moved"))
+            .into_iter()
+            .map(|field| {
+                field
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{id}/scenario.json names a moved field that is not a \
+                     string"
+                        )
+                    })
+                    .to_owned()
+            })
+            .collect();
+        let mut differ: Vec<String> = ["harness", "tool", "path", "command", "mode", "protection"]
+            .into_iter()
+            .filter(|field| control.get(*field) != runs["control"].get(*field))
+            .map(str::to_owned)
+            .collect();
+        differ.sort();
+        let mut moved = moved;
+        moved.sort();
+        assert_eq!(
+            moved, differ,
+            "{id}/scenario.json declares a control that moved {moved:?} and the two runs differ in \
+             {differ:?}: a control whose difference is not the one declared is not a control"
+        );
+
+        // The tripwire, and it is asserted in both files on purpose: this case is
+        // `release_blocking` and it is a request rather than a project, so the
+        // key that decides `fixture_has_an_app` in `finding_severity_rule.rs`
+        // must not appear anywhere in the document — including inside a `why`.
+        assert!(
+            !scenario_text(id).contains("\"entry_points\""),
+            "{id}/scenario.json declares entry points, and the case is a request rather than a \
+             project: adding them would pull a release-blocking case into a list in \
+             finding_severity_rule.rs that it does not belong on"
         );
     }
 }

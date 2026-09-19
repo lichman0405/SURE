@@ -21,7 +21,7 @@
       "anchor": "src/auth.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "must_fix",
       "required_severity": "must_fix",
       "why": "login() returns `status: 200` on the success branch, and the success branch is reached for every password."
     },
@@ -35,7 +35,7 @@
       "anchor": "src/auth.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "must_fix",
       "required_severity": "must_fix",
       "why": "the accounts people sign in as are placeholder addresses at an example domain, so the whole account table is a stand-in."
     },
@@ -49,8 +49,12 @@
       "anchor": "src/auth.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "can_fix_later",
       "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `TODO` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what the marker is on — so `sure_core::finding_gravity` grades it `can_fix_later` while this outcome requires `must_fix`.",
+        "would_require": "a scanner that read what the TODO is on, so that one category could be graded two ways. `fixtures/adversarial/demo-analytics/scenario.json` requires `should_fix_first` for `CandidateCategory::Todo` at `src/analytics.js` and this fixture requires `must_fix` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `must_fix` this fixture requires is reached by `noop_heuristics`, which read the login branch that returns success for every password."
+      },
       "why": "the author left a TODO on the exact line that would have compared the password, and shipped anyway."
     },
     {
@@ -63,8 +67,12 @@
       "anchor": "src/auth.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "can_fix_later",
       "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads `mock` as `GapKind::UnfinishedMarker` — the word and the place it stands in — so `sure_core::finding_gravity` grades it `can_fix_later` while this outcome requires `must_fix`. What this fixture is about is the mock account table standing in for a real user store, and that is what the scanner does not read.",
+        "would_require": "a reading of what the mock stands in for — a store of real accounts, a password comparison — which would make `GapKind::SubstitutedAction` reachable for this outcome rather than `UnfinishedMarker`. The `must_fix` this fixture requires is reached by `noop_heuristics`, which read the login branch that returns success for every password."
+      },
       "why": "the production account table is named mock_users."
     },
     {
@@ -77,8 +85,12 @@
       "anchor": "src/auth.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "can_fix_later",
       "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `placeholder` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what it stands in for — so `sure_core::finding_gravity` grades it `can_fix_later` while this outcome requires `must_fix`.",
+        "would_require": "a scanner that read what the marker is on, so that one category could be graded two ways. `fixtures/adversarial/dead-button/scenario.json` requires `must_fix` for `CandidateCategory::Placeholder` at `public/app.js` and `fixtures/adversarial/demo-analytics/scenario.json` requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `must_fix` this fixture requires is reached by `noop_heuristics`, which read the login branch that returns success for every password."
+      },
       "why": "the credentials in the account table are described in the source as placeholders."
     },
     {
@@ -109,5 +121,5 @@
       "description": "The always-true password check, the placeholder accounts and the TODO are not reported at all."
     }
   ],
-  "notes": "Coverage gap, recorded rather than hidden: SURE has no detector that reads an always-true password comparison as such. The scan fires on what surrounds it — a hard-coded success status on the login branch, placeholder accounts, a TODO on the line that would have compared the password, and a production table named mock_users. A grader must not read 'fake-auth fired' as 'SURE understands password verification'. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these five proposals and names the gap in its own test name and comment. Severity gap: the manifest requires must_fix and the detectors emit Note, non-critical, Inference."
+  "notes": "Coverage gap, recorded rather than hidden: SURE still has no detector that reads an always-true password comparison as such. The scan fires on what surrounds it — a hard-coded success status on the login branch, placeholder accounts, a TODO on the line that would have compared the password, and a production table named mock_users. A grader must not read 'fake-auth fired' as 'SURE understands password verification'. Severity, recorded rather than measured here: evaluation/acceptance-manifest.json requires must_fix for this case, and must_fix is what noop_heuristics reaches for the two rows it fires on — the hard-coded success on the login branch and the placeholder accounts, both MustFix, critical = false, EvidenceClass::Inference. The three candidate_scanner outcomes land at can_fix_later, because that scanner reads a `TODO`, a `mock` or a `placeholder` as an unfinished marker and not as a password comparison that was never made; each says so in its own `required_severity_unmet` block, which carries the reason the requirement stands unmet and what would have to change for it to be met. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these five proposals and names the coverage gap in its own test name and comment, and its every_recorded_detector_severity_is_what_the_detector_produces_today reads this file's own detector_severity_today values and runs the detector named beside each one. Before P7-T011 every scanner here emitted Severity::Note, so none of these weights was reachable; that the required and the delivered severity were once different is kept as SEVERITY_BEFORE_P7T011 in that file and in git, and the test that recorded the gap was inverted rather than deleted: it is what_is_detected_now_carries_the_weight_the_manifest_requires now, and it asserts the severity the manifest requires rather than the gap."
 }

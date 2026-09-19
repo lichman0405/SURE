@@ -128,6 +128,10 @@
       "status": "reported",
       "detector_severity_today": "note",
       "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "The weight `check_claim` puts on the evidence it attaches is `Severity::Note`, in every state of every claim check, so no reading of this recording reaches the `must_fix` the case's manifest row asks for. The staleness this fixture is about is decided in the assessment and in the reason, and the claim path has no route into `crates/sure-core/src/false_completion_aggregator.rs`, which is what decides hand-off.",
+        "would_require": "a verdict-layer rule that reads a claim assessment — `pipeline::is_confirmed` is the predicate that would decide it, and it has no caller outside its own unit test. This is the same verdict-layer gap `tests-not-run` records, and it is not closed by editing a fixture: the change would be to the product, so the requirement stands unmet and is recorded here rather than quietly restated as `note`."
+      },
       "why": "The trap this fixture exists to hold open, recorded as a value rather than as a warning. `Evidence.fingerprint` is the current project fingerprint, so `sure_domain::evidence::freshness(&evidence, &fingerprint)` answers `Fresh` on the very evidence the checker has just refused to use; the staleness that decides the assessment lives in the assessment and in the reason, and nowhere in that call. A reader who reached for `freshness` as the way to find stale evidence would find none here, so the fixture asserts the class, the count and the anchor of the evidence, the sentence in the reason, and the freshness call — all four, together, so that a change to any one of them is a failing test rather than a quietly different product. The severity the attached evidence carries is `Note`, while the manifest asks `must_fix` for this case; the same verdict-layer gap `tests-not-run` records, and not closed here."
     },
     {

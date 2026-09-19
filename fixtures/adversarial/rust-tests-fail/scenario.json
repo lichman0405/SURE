@@ -33,9 +33,9 @@
       "detector": "build_verdict + render_summary; AggregateSeverity::NotReady",
       "status": "reported",
       "assessment": "confirmed",
-      "detector_severity_today": "must_fix",
+      "detector_severity_measured_by": "crates/sure-core/tests/rust_fixture_apps.rs::the_failing_half_fails_only_the_test_check_and_is_not_ready",
       "required_severity": "must_fix",
-      "why": "One critical check failed, so the frozen rule in crates/sure-domain/src/status.rs aggregates the run to NotReady and the headline is `This is not ready to hand off yet.` crates/sure-core/tests/rust_fixture_apps.rs asserts that severity, that headline and the rendered summary for this fixture by running it, not by reading this file."
+      "why": "One critical check failed, so the frozen rule in crates/sure-domain/src/status.rs aggregates the run to NotReady and the headline is `This is not ready to hand off yet.` This row carries no `detector_severity_today`: the weight it records is what a *run* of this fixture produces, and reaching it means the four cargo commands the run is, which only crates/sure-core/tests/rust_fixture_apps.rs can pay for. That test is named above and is where the value is measured, by running it rather than by reading this file; adversarial_fixture_detection.rs's every_recorded_detector_severity_is_what_the_detector_produces_today checks that the file and the test it names are both still there, which is the half of the statement a test can check without running cargo."
     },
     {
       "kind": "control",

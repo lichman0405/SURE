@@ -21,7 +21,7 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "should_fix_first",
       "required_severity": "should_fix_first",
       "why": "demo_data is assigned a literal and is the only source the dashboard reads."
     },
@@ -35,7 +35,7 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "should_fix_first",
       "required_severity": "should_fix_first",
       "why": "a literal tracking id is configured and no analytics service is loaded, so nothing on the page is measured."
     },
@@ -49,7 +49,7 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "should_fix_first",
       "required_severity": "should_fix_first",
       "why": "the chart series is a literal array that is identical on every read."
     },
@@ -63,7 +63,7 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "should_fix_first",
       "required_severity": "should_fix_first",
       "why": "signups are attributed to a placeholder user id in a production path."
     },
@@ -77,8 +77,12 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "can_fix_later",
       "required_severity": "should_fix_first",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `TODO` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what the marker is on — so `sure_core::finding_gravity` grades it `can_fix_later`, one rank below the `should_fix_first` this outcome requires.",
+        "would_require": "a scanner that read what the TODO is on, so that one category could be graded two ways. `fixtures/adversarial/fake-auth/scenario.json` requires `must_fix` for `CandidateCategory::Todo` at `src/auth.js` while this fixture requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `should_fix_first` this fixture requires is reached by `demo_data_heuristics`, which read the constants the dashboard presents as measurements."
+      },
       "why": "the unfinished analytics wiring is marked with a TODO."
     },
     {
@@ -91,8 +95,12 @@
       "anchor": "src/metrics.js",
       "status": "not_checked",
       "evidence_class": "inference",
-      "detector_severity_today": "note",
+      "detector_severity_today": "can_fix_later",
       "required_severity": "should_fix_first",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `placeholder` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what it stands in for — so `sure_core::finding_gravity` grades it `can_fix_later`, one rank below the `should_fix_first` this outcome requires.",
+        "would_require": "a scanner that read what the marker is on, so that one category could be graded two ways. `fixtures/adversarial/dead-button/scenario.json` and `fixtures/adversarial/fake-auth/scenario.json` require `must_fix` for `CandidateCategory::Placeholder` while this fixture requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `should_fix_first` this fixture requires is reached by `demo_data_heuristics`, whose `DemoDataCategory::PlaceholderUserId` row read the placeholder user id in the production path."
+      },
       "why": "the signup record is described in the source as a placeholder."
     },
     {
@@ -123,5 +131,5 @@
       "description": "The Live label, the constant figures and the discarded analytics events are not reported at all."
     }
   ],
-  "notes": "Severity gap, recorded rather than hidden: evaluation/acceptance-manifest.json requires should_fix_first; demo_data_heuristics emits Severity::Note, critical = false, EvidenceClass::Inference, which false_completion_aggregator::aggregate classifies as style_noise rather than material. P6-T004's acceptance names exactly this fixture, so a grader should read the four demo-data detectors firing as the intended evidence. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these six proposals."
+  "notes": "Severity, recorded rather than measured here: evaluation/acceptance-manifest.json requires should_fix_first for this case, and should_fix_first is what demo_data_heuristics reaches for all four constants — Severity::ShouldFixFirst, critical = false, EvidenceClass::Inference. P6-T004's acceptance names exactly this fixture, so a grader should read the four demo-data detectors firing as the intended evidence. The two candidate_scanner outcomes land at can_fix_later, because that scanner reads a `TODO` or a `placeholder` as an unfinished marker and not as a constant presented as a measurement; each says so in its own `required_severity_unmet` block, which carries the reason the requirement stands unmet and what would have to change for it to be met. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these six proposals, and its every_recorded_detector_severity_is_what_the_detector_produces_today reads this file's own detector_severity_today values and runs the detector named beside each one. Before P7-T011 every scanner here emitted Severity::Note, so none of these weights was reachable; that the required and the delivered severity were once different is kept as SEVERITY_BEFORE_P7T011 in that file and in git, and the test that recorded the gap was inverted rather than deleted: it is what_is_detected_now_carries_the_weight_the_manifest_requires now, and it asserts the severity the manifest requires rather than the gap."
 }

@@ -680,11 +680,17 @@ fn limitations() -> Vec<String> {
              configuration root places it under `target/tmp`.",
         ),
         String::from(
-            "The corpus's own records of what the detectors produce are stale and were not trusted. \
-             Six fixtures carry a `detector_severity_today` and a `notes` sentence saying every \
-             detector emits `Severity::Note`, which is P14-T013's subject. This report read neither \
-             that field nor the manifest's `expected_severity` for any observed value: every measure \
-             in a row came from the module named in its `surfaces`.",
+            "The corpus's own records of what the detectors produce are not a source for any value \
+             here. When this report was written they were stale: fixtures carried a \
+             `detector_severity_today` saying every detector emits `Severity::Note`, which `P7-T011` \
+             had already made false, and no `.rs` file read the field, so nothing contradicted it. \
+             `P14-T013` re-measured every value by running the detector named beside it, and \
+             `crates/sure-core/tests/adversarial_fixture_detection.rs`'s \
+             `every_recorded_detector_severity_is_what_the_detector_produces_today` reads each \
+             fixture's own text and re-runs that detector, so the field cannot go stale again \
+             unnoticed. This report read neither that field nor the manifest's `expected_severity` \
+             for any observed value: every measure in a row came from the module named in its \
+             `surfaces`.",
         ),
         String::from(
             "Deterministic. Two runs produce byte-identical output: no wall-clock timestamp, no \

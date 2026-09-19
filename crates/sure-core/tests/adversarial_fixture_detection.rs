@@ -149,6 +149,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde_json::{Value, json};
 use sure_core::aggregation::{NOTHING_CAME_BACK, RunReport, aggregate_run};
 use sure_core::candidate_scanner::CandidateScanner;
+use sure_core::checks::rust::RustChecks;
 use sure_core::claim_capture::{ClaimCaptureOutcome, capture_agent_claim};
 use sure_core::claim_checker::{
     CheckedClaim, ClaimDocument, check_claims_against_events, check_claims_in_store,
@@ -158,7 +159,7 @@ use sure_core::config::{Authority, Config, ExecutionSettings, ProtectionMode};
 use sure_core::container::{Availability, OVERCLAIMS, Runtime, isolation_claim, overclaims};
 use sure_core::db_migrations::{MigrationsReport, Record};
 use sure_core::demo_data_heuristics::DemoDataHeuristics;
-use sure_core::discover::{DiscoverOptions, Discovery, discover};
+use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, RustProject, discover};
 use sure_core::env_completeness::CompletenessReport;
 use sure_core::evidence::{
     AnchorSubject, ClaimAssessment, EvidenceClass, Freshness, StalenessReason,
@@ -5746,5 +5747,515 @@ fn a_dangerous_action_that_is_held_names_its_danger_before_its_decision_and_the_
         graded,
         DANGEROUS_ACTION_FIXTURES.len(),
         "every fixture named in DANGEROUS_ACTION_FIXTURES must be graded by this test"
+    );
+}
+
+// --- P14-T013: the corpus's record of what the detectors produce -------------
+//
+// Two fields in a `scenario.json` look alike and are not. `required_severity` is
+// **the requirement**, it belongs to `evaluation/acceptance-manifest.json`, and
+// no task that measures the product may move it — a corpus edited to agree with
+// the code is the false green this repository exists to catch, one level up.
+// `detector_severity_today` is **the corpus's record of the detectors**, and
+// `P7-T011` moved the detectors out from under it: every false-completion
+// scanner in this file used to write `Severity::Note` into its own category
+// table and now asks [`sure_core::finding_gravity`], so twenty-five of the
+// thirty-seven rows that carry the field recorded a severity no detector
+// produces any more.
+//
+// Nothing noticed for two days, and the reason is the one worth keeping in
+// mind: `grep -rn detector_severity_today crates/` returned one prose line in
+// `sure-core/src/acceptance_report.rs` and nothing else. A field no `.rs` file
+// reads cannot be contradicted by one, which is exactly why it could go stale.
+// After `P14-T013` it is read by the test below, and the two lists this header
+// used to imply — what the corpus says the detectors do, and what they do — are
+// compared rather than assumed equal.
+//
+// # What the test below does, and the two arms it has
+//
+// It walks `fixtures/adversarial/*/scenario.json` — discovered, not named, so a
+// fixture that grows a `detector_severity_today` is checked without this file
+// being edited — reads each document's own text, runs the detector that
+// document's `surface` and `detector` name over the fixture the document lives
+// in, and compares. There is no list of expected severities here: such a list
+// would be a *second* place to keep the same fact, and this file is the first
+// place that would then have to be kept in step with two others.
+//
+// A row either carries `detector_severity_today`, which the test checks, or
+// `detector_severity_measured_by`, which names the test that measures the value
+// instead — the acceptance's own alternative wording, for a value no in-process
+// detector call can reach. Exactly one row uses the second arm, and the test
+// asserts that it is exactly one, so the weaker arm cannot quietly spread:
+// `rust-tests-fail`'s `project_verdict` outcome is about what a *run* of that
+// fixture aggregates to, and running it means the four `cargo` invocations
+// `crates/sure-core/tests/rust_fixture_apps.rs` already pays for in its own
+// test. The second arm is checked rather than trusted: the file the statement
+// names must be there and must contain the test it names, so renaming or
+// deleting the test that owns the measurement reddens this one.
+//
+// # The mutation this test is built to catch
+//
+// The way this test could pass while measuring nothing is not a missing
+// assertion but a comparison that agrees by construction. So the mutation is
+// written down to be run, in the pattern
+// `crates/sure-core/tests/acceptance_report_runner.rs` uses for its own
+// anti-vacuity halves. **Reproducible mutation, and the one this test is for:**
+// in `fixtures/adversarial/dead-button/scenario.json`, put
+//
+//     "detector_severity_today": "note",
+//
+// back on the first `required_outcomes` entry — the `ui_action_bridge` one,
+// whose detector reaches `must_fix` — and then run
+//
+//     cargo test -p sure-core --test adversarial_fixture_detection
+//
+// This test goes red and its failure message names the fixture, the surface and
+// both severities. It was run, not predicted: the run's own output is at
+// `target/tmp/p14t013-mutation.txt`. The second mutation, which measures the
+// comparison rather than the corpus, is to replace
+//
+//     produced.iter().all(|severity| *severity == recorded)
+//
+// with `!produced.is_empty()` below; the whole point of the equality is that a
+// detector that produced *something* would satisfy the weaker form.
+
+/// The severity every detector call for one fixture is measured through.
+///
+/// `P14-T013`'s `detector_severity_measured_by` statement names a test that owns
+/// a measurement this file cannot make. The statement is `path::test_name` and
+/// both halves are checked against the tree, because a statement naming a test
+/// nobody ships is a claim about where a value is measured with nothing behind
+/// it — the same defect as a stale severity, one level down.
+fn assert_the_named_test_exists(id: &str, statement: &str) {
+    let (path, test) = statement.split_once("::").unwrap_or_else(|| {
+        panic!(
+            "{id}: `detector_severity_measured_by` is `{statement}`, which does not name a \
+             `path::test` pair"
+        )
+    });
+    let full = sure_testkit::repository_root().join(path);
+    let text = std::fs::read_to_string(&full).unwrap_or_else(|error| {
+        panic!(
+            "{id}: `detector_severity_measured_by` names `{path}`, which cannot be read: {error}"
+        )
+    });
+    assert!(
+        text.contains(&format!("fn {test}(")),
+        "{id}: `detector_severity_measured_by` names `{test}` in `{path}`, and no such test is \
+         there. The value this row records is measured by that test and by nothing this file can \
+         call, so a statement pointing at a test that does not exist is a value nobody measures."
+    );
+}
+
+/// Every fixture whose `scenario.json` records a detector severity, discovered.
+///
+/// Read out of the directory rather than listed here. A list would be a second
+/// place to keep the same fact, and the fixture that grows a
+/// `detector_severity_today` tomorrow is the one this test has to reach without
+/// being edited.
+fn every_fixture_that_records_a_detector_severity() -> Vec<(String, Value)> {
+    let root = sure_testkit::repository_root()
+        .join("fixtures")
+        .join("adversarial");
+    let entries = std::fs::read_dir(&root)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", root.display()));
+
+    let mut found: Vec<(String, Value)> = Vec::new();
+    for entry in entries {
+        let path = entry
+            .unwrap_or_else(|error| panic!("cannot read an entry of {}: {error}", root.display()))
+            .path();
+        let scenario = path.join("scenario.json");
+        if !scenario.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&scenario)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", scenario.display()));
+        let document: Value = serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("{} is not valid JSON: {error}", scenario.display()));
+        let records_one = document["required_outcomes"]
+            .as_array()
+            .is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.get("detector_severity_today").is_some()
+                        || row.get("detector_severity_measured_by").is_some()
+                })
+            });
+        if !records_one {
+            continue;
+        }
+        let id = path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or_else(|| panic!("{} is not a fixture name", path.display()))
+            .to_owned();
+        found.push((id, document));
+    }
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+    assert!(
+        !found.is_empty(),
+        "no fixture under {} records a detector severity, so this test measures nothing",
+        root.display()
+    );
+    found
+}
+
+/// The severity of the one proposal a row names, found by the fixture's own title.
+///
+/// **The title is the fixture's, not this file's.** A row says which outcome it
+/// is about and the detector says what it produced for it; the two are matched
+/// on the only name they share. Zero matches is a red test and so is more than
+/// one, because a row that names an outcome the detector no longer produces has
+/// stopped being a record of anything.
+fn the_one_proposal_the_fixture_names(
+    id: &str,
+    surface: &str,
+    row: &Value,
+    proposals: &[CheckProposal],
+) -> Vec<Severity> {
+    let title = row["title"].as_str().unwrap_or_else(|| {
+        panic!(
+            "{id}: a `{surface}` outcome records a detector severity and declares no `title`, so \
+             the detector's answer cannot be found by the name the fixture gave it"
+        )
+    });
+    let found: Vec<Severity> = proposals
+        .iter()
+        .filter(|proposal| proposal.title() == title)
+        .map(CheckProposal::severity)
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "{id}: the fixture records a severity for the `{surface}` outcome `{title}` and the \
+         detector produced {} finding(s) under that title. It said: {:?}",
+        found.len(),
+        proposals
+            .iter()
+            .map(CheckProposal::title)
+            .collect::<Vec<_>>()
+    );
+    found
+}
+
+/// Every severity the detector produced, for a row about the fixture as a whole.
+///
+/// Some rows name a detector rather than one finding — `ExternalServiceChecks::not_checked`,
+/// `AssessedGap::severity`, the weight a claim check attaches — and what they
+/// record is what that call answers. Empty is refused here rather than below:
+/// a detector that produced nothing has not agreed with the corpus, it has
+/// stopped being a detector this row is about.
+fn every_severity_the_detector_produced(
+    id: &str,
+    surface: &str,
+    produced: Vec<Severity>,
+) -> Vec<Severity> {
+    assert!(
+        !produced.is_empty(),
+        "{id}: `{surface}` produced nothing for this fixture, and the severity the corpus records \
+         for it is a record of something. Either the detector stopped firing or this row names a \
+         call that is no longer made."
+    );
+    produced
+}
+
+/// The Rust project SURE read, for the one fixture whose detector is a `CHECKS` row.
+fn rust_project_of(id: &str) -> RustProject {
+    let found = discovery(id);
+    let report = found.report(Ecosystem::Rust).unwrap_or_else(|| {
+        panic!("{id} is a Rust project and SURE reported no Rust ecosystem for it")
+    });
+    match &report.findings {
+        Findings::Rust(project) => (**project).clone(),
+        other => panic!("{id} records a `rust_checks` severity and SURE read it as {other:?}"),
+    }
+}
+
+/// Every severity the claim checker attached to one fixture's recordings.
+///
+/// The recording and its control are both read, because the row this answers is
+/// about the weight `check_claim` puts on the evidence it attaches and one of
+/// the three fixtures — `tests-not-run` — attaches none in the declared
+/// recording: the weight is only visible in a state where something was
+/// attached, and the control is that state. Both readings go through
+/// [`read_recording`], which is where the store path and the direct path are
+/// held equal.
+fn severities_the_claim_checker_attached(id: &str) -> Vec<Severity> {
+    let block = claim_block(id);
+    let claim = &block["claim"];
+    let mut attached: Vec<Severity> = Vec::new();
+    for (what, source) in [
+        ("the declared recording", &block),
+        ("the control", &block["control"]),
+    ] {
+        let events = declared_events(id, source, "events");
+        let recorded = read_recording(
+            &format!("{id}: {what}"),
+            &format!("P14-T013 {id} {what}"),
+            claim,
+            &events,
+        );
+        attached.extend(
+            recorded
+                .checked
+                .evidence
+                .iter()
+                .map(|evidence| evidence.severity),
+        );
+    }
+    attached
+}
+
+/// What the detector one `required_outcome` names produced for its own fixture.
+///
+/// The dispatch is on the fixture's own `surface`, and where a surface holds two
+/// calls the fixture's own `detector` string picks between them. A surface this
+/// table does not know is a red test rather than a skipped row: the alternative
+/// is a fixture that records a detector severity and is quietly never asked
+/// about it, which is the shape the whole task is about.
+fn severities_the_detector_produced(id: &str, row: &Value) -> Vec<Severity> {
+    let surface = row["surface"].as_str().unwrap_or_else(|| {
+        panic!("{id}: an outcome records a detector severity and names no `surface`: {row}")
+    });
+    let detector = row["detector"].as_str().unwrap_or_default();
+    match surface {
+        "candidate_scanner" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            CandidateScanner::of(&discovery(id)).proposed(),
+        ),
+        "noop_heuristics" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            NoOpHeuristics::of(&discovery(id)).proposed(),
+        ),
+        "demo_data_heuristics" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            DemoDataHeuristics::of(&discovery(id)).proposed(),
+        ),
+        "route_consistency" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            RouteConsistency::of(&discovery(id)).proposed(),
+        ),
+        "ui_action_bridge" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            UiActionBridge::of(&discovery(id)).proposals().as_slice(),
+        ),
+        "rust_checks" => the_one_proposal_the_fixture_names(
+            id,
+            surface,
+            row,
+            RustChecks::of(&rust_project_of(id)).proposed(),
+        ),
+        "external_service" => {
+            let checks = ExternalServiceChecks::of(&discovery(id));
+            if detector.starts_with("ExternalServiceChecks::not_checked") {
+                every_severity_the_detector_produced(
+                    id,
+                    surface,
+                    checks
+                        .not_checked(&FingerprintId::generate())
+                        .iter()
+                        .map(|result| result.severity)
+                        .collect(),
+                )
+            } else {
+                the_one_proposal_the_fixture_names(id, surface, row, checks.proposed())
+            }
+        }
+        "env_completeness" => every_severity_the_detector_produced(
+            id,
+            surface,
+            CompletenessReport::of(&discovery(id), &FingerprintId::generate())
+                .claims()
+                .iter()
+                .map(|claim| claim.severity())
+                .collect(),
+        ),
+        "db_migrations" => every_severity_the_detector_produced(
+            id,
+            surface,
+            MigrationsReport::of(&discovery(id), &FingerprintId::generate())
+                .claims()
+                .iter()
+                .map(|gap| gap.severity())
+                .collect(),
+        ),
+        "claim_checker" => every_severity_the_detector_produced(
+            id,
+            surface,
+            severities_the_claim_checker_attached(id),
+        ),
+        _ => panic!(
+            "{id}: an outcome records a detector severity on the surface `{surface}`, which this \
+             test cannot run. Either wire the detector into the table above, or replace the field \
+             with `detector_severity_measured_by` naming the test that measures it — a row this \
+             test cannot check must say so rather than look checked."
+        ),
+    }
+}
+
+#[test]
+fn every_recorded_detector_severity_is_what_the_detector_produces_today() {
+    let mut checked = 0usize;
+    let mut measured_elsewhere: Vec<String> = Vec::new();
+    let mut unmet: Vec<String> = Vec::new();
+
+    for (id, document) in every_fixture_that_records_a_detector_severity() {
+        let rows = document["required_outcomes"].as_array().unwrap_or_else(|| {
+            panic!("fixtures/adversarial/{id}/scenario.json has no `required_outcomes` array")
+        });
+        for (index, row) in rows.iter().enumerate() {
+            let recorded = row.get("detector_severity_today");
+            let elsewhere = row.get("detector_severity_measured_by");
+            assert!(
+                !(recorded.is_some() && elsewhere.is_some()),
+                "{id}: required_outcomes[{index}] carries both `detector_severity_today` and \
+                 `detector_severity_measured_by`, so a reader cannot tell which one is the record"
+            );
+            if let Some(statement) = elsewhere {
+                let statement = statement.as_str().unwrap_or_else(|| {
+                    panic!("{id}: required_outcomes[{index}] has a `detector_severity_measured_by` that is not a string")
+                });
+                assert_the_named_test_exists(&id, statement);
+                measured_elsewhere.push(id.clone());
+                continue;
+            }
+            let Some(recorded) = recorded else {
+                continue;
+            };
+            let recorded: Severity = serde_json::from_value(recorded.clone()).unwrap_or_else(|error| {
+                panic!("{id}: required_outcomes[{index}] records a severity SURE has no level for: {error}")
+            });
+
+            let produced = severities_the_detector_produced(&id, row);
+            assert!(
+                produced.iter().all(|severity| *severity == recorded),
+                "{id}: the corpus records `{}` for this outcome and the detector produces `{}`.\n  \
+                 fixture:   fixtures/adversarial/{id}/scenario.json (required_outcomes[{index}])\n  \
+                 surface:   {}\n  detector:  {}\n  \
+                 the detector's own answers: {produced:?}\n  \
+                 `required_severity` is the requirement and this test does not touch it; \
+                 `detector_severity_today` is the corpus's record of what the detector does, and \
+                 this is where the two are compared.",
+                recorded.as_str(),
+                produced
+                    .iter()
+                    .map(|severity| severity.as_str())
+                    .collect::<Vec<_>>()
+                    .join("`, `"),
+                row["surface"].as_str().unwrap_or("(none)"),
+                row["detector"].as_str().unwrap_or("(none)"),
+            );
+
+            // Criterion 4's second half, and the half that cannot be left to a
+            // reader: where the detector that owns an outcome cannot reach the
+            // `required_severity` beside it, the corpus has to say so — the
+            // reason the requirement stands unmet and what would have to change
+            // for it to be met — rather than leaving a requirement that reads as
+            // agreed. `Severity::rank` puts the more serious level higher, so
+            // "met" is the weakest severity the detector produced being at or
+            // above the requirement.
+            let requirement: Severity = serde_json::from_value(row["required_severity"].clone())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{id}: required_outcomes[{index}] records a detector severity and its \
+                         `required_severity` is missing or is not a level SURE has: {error}"
+                    )
+                });
+            let meets_the_requirement = produced
+                .iter()
+                .all(|severity| severity.rank() >= requirement.rank());
+            match (meets_the_requirement, row.get("required_severity_unmet")) {
+                (true, None) => {}
+                (true, Some(block)) => panic!(
+                    "{id}: required_outcomes[{index}] carries a `required_severity_unmet` block \
+                     and the detector meets the requirement it records — it produces {produced:?} \
+                     against `required_severity` `{}`. An unmet requirement that has been met is \
+                     the same stale claim as a stale severity, one level up.\n  the block: {block}",
+                    requirement.as_str()
+                ),
+                (false, None) => panic!(
+                    "{id}: the detector produces {produced:?} for this outcome, which is below the \
+                     `{}` its `required_severity` asks for, and required_outcomes[{index}] carries \
+                     no `required_severity_unmet` block. P14-T013 requires each such outcome either \
+                     to restate its requirement in terms its detector can meet, or to carry the \
+                     reason it stands unmet and what would have to change for it to be met; a \
+                     silent row here reads as an agreement no detector makes.\n  surface:  {}\n  \
+                     detector: {}",
+                    requirement.as_str(),
+                    row["surface"].as_str().unwrap_or("(none)"),
+                    row["detector"].as_str().unwrap_or("(none)"),
+                ),
+                (false, Some(block)) => {
+                    for (field, what) in [
+                        ("why", "why the requirement stands unmet"),
+                        (
+                            "would_require",
+                            "what would have to change for it to be met",
+                        ),
+                    ] {
+                        let sentence = block[field].as_str().unwrap_or_else(|| {
+                            panic!(
+                                "{id}: required_outcomes[{index}].required_severity_unmet has no \
+                                 `{field}` string, so it does not say {what}. The block is there \
+                                 because the requirement stands unmet, and a block that does not \
+                                 say why, or does not say what would have to change, is a \
+                                 placeholder.\n  the block: {block}"
+                            )
+                        });
+                        assert!(
+                            sentence.trim().len() >= 40,
+                            "{id}: required_outcomes[{index}].required_severity_unmet.{field} is \
+                             `{sentence}`, too short to be the sentence it claims to be. It is read \
+                             as {what}, and the field exists so that a reader is told rather than \
+                             left to guess."
+                        );
+                    }
+                    unmet.push(format!("{id}:required_outcomes[{index}]"));
+                }
+            }
+            checked += 1;
+        }
+    }
+
+    assert_eq!(
+        checked, 36,
+        "the number of rows this test checked changed. Every row in \
+         `fixtures/adversarial/*/scenario.json` that carries a `detector_severity_today` is one of \
+         them, so a row that lost the field, or a fixture that left the corpus, moves this number \
+         and has to be a decision rather than a detail. An empty corpus proves nothing, which is \
+         what this replaced."
+    );
+    // The weaker arm is checked rather than trusted, and it is pinned here so it
+    // cannot spread: a row moved onto it stops being measured by anything in
+    // this file, and that has to be a decision rather than a convenience. See
+    // the section header for why this one row is the exception.
+    assert_eq!(
+        measured_elsewhere,
+        vec![String::from("rust-tests-fail")],
+        "the rows whose detector severity is measured by another test changed. Each of these is a \
+         row this test does not check, so the list is asserted rather than summed."
+    );
+    // The requirements that stand unmet are counted rather than estimated, and
+    // the count is asserted rather than left to be re-derived. Eleven of them are
+    // the `candidate_scanner` rows the task's own criterion 4 names — one category
+    // required at two different weights across the corpus, reachable from neither
+    // of the detectors that saw it — and two are the weight a claim check
+    // attaches, which no rule in the verdict layer reads. A detector that moved
+    // one of these rows changes this number, and a change to this number is a
+    // decision about the corpus rather than a detail to be absorbed.
+    assert_eq!(
+        unmet.len(),
+        13,
+        "the number of rows whose requirement their detector does not meet changed. Rows: {unmet:?}"
     );
 }

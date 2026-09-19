@@ -62,10 +62,13 @@ is the name that was written.
 
 The one call that does read this computer's own `PATH` is
 `Availability::on_this_machine()`, and the test asserts its **shape** only — that
-it is one of the two variants, that the sentence it produces is non-empty and
-carries no overclaim, and, when it reports having found nothing, that the
-sentence is this fixture's sentence word for word. Nothing else about it is
-asserted, because nothing else about it is a fact about SURE.
+it is one of the two variants, that any runtime it reports is one the search
+would have looked for, that the sentence it produces is non-empty and carries no
+overclaim, and, when it reports having found nothing, that the sentence is this
+fixture's sentence word for word. Nothing else about it is asserted, because
+nothing else about it is a fact about SURE — in particular the words of the
+sentence a machine *with* a runtime gets are not asserted anywhere, since on such
+a machine that would be a test of the machine.
 
 ## What the mode is allowed to say about itself
 

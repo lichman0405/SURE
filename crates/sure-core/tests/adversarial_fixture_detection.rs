@@ -3102,6 +3102,26 @@ fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_f
 /// is what says the two files are talking about the same directories.
 const EXECUTION_TRUST_FIXTURES: &[&str] = &["dynamic-not-authorized", "container-unavailable"];
 
+/// Whichever of the two answer blocks a fixture's scenario carries.
+///
+/// The guard test reads one block out of every fixture in its list, and which
+/// one it is is looked up rather than declared by the list: a list that had to
+/// say which block each of its members has would be a second place to keep in
+/// step with the fixtures, and the first thing a third execution-trust fixture
+/// would fall out of.
+fn answer_block(id: &str) -> Value {
+    let document = scenario_of(id);
+    for key in ["execution_refusal", "container_absence"] {
+        if let Some(block) = document.get(key) {
+            return block.clone();
+        }
+    }
+    panic!(
+        "fixtures/adversarial/{id}/scenario.json declares neither an execution_refusal nor a \
+         container_absence block, so there is no declaration of what the case answers"
+    )
+}
+
 /// The `execution_refusal` block of one fixture's scenario.
 fn execution_block(id: &str) -> Value {
     scenario_of(id)
@@ -3340,18 +3360,12 @@ fn a_missing_container_runtime_is_a_value_and_the_control_moves_the_search_path(
         declared,
     );
 
-    // The sentence has to do three things at once, and the fixture declares the
-    // whole of it: what was not found, what happens instead, and what was looked
-    // for. The third of those is asserted against the list the search itself
-    // uses rather than against a copy, so a module that started looking for a
-    // third runtime would have to change the sentence as well.
-    for runtime in Runtime::ALL {
-        assert!(
-            nothing_to_find.explain().contains(runtime.as_str()),
-            "{id}: the sentence does not name {} as something SURE looked for",
-            runtime.as_str()
-        );
-    }
+    // The sentence is compared whole, and its third job — naming what was looked
+    // for — is a measurement rather than a phrase somebody wrote once: the
+    // declared `runtimes_looked_for` above is held to `Runtime::ALL` by equality,
+    // so a module that started looking for a third runtime would fail the list
+    // comparison and have to come back to this fixture, where the sentence and
+    // the list sit next to each other.
     for phrase in OVERCLAIMS {
         assert!(
             !overclaims(&nothing_to_find.explain(), phrase),
@@ -3539,14 +3553,15 @@ fn a_missing_container_runtime_is_a_value_and_the_control_moves_the_search_path(
     }
     match on_this_machine {
         Availability::Found { runtime, .. } => {
+            // The one thing about this arm that is a fact about SURE rather than
+            // about the machine: the runtimes a search can report are the two
+            // the search looks for. The words this arm's sentence is made of are
+            // not asserted, because on a machine that has a runtime this test
+            // would then be measuring the machine — and on one that has none,
+            // this arm does not run at all.
             assert!(
                 Runtime::ALL.contains(&runtime),
                 "{id}: a probe of this machine reported a runtime no search would have looked for"
-            );
-            assert!(
-                sentence.starts_with("Checks can run in a container: "),
-                "{id}: a runtime that was found was described in words the fixture does not declare: \
-                 {sentence}"
             );
         }
         Availability::Absent => {
@@ -3595,13 +3610,12 @@ fn every_execution_trust_fixture_these_assertions_name_is_a_fixture_this_reposit
             dir.join("README.md").is_file(),
             "{id} has no README.md, so nothing says in words what it traps"
         );
-        // The two shapes this one list mixes, asserted rather than described: a
-        // reader who took it for a language list would expect both members to
-        // be runnable, and one of them is deliberately not.
-        let block = match *id {
-            "dynamic-not-authorized" => execution_block(id),
-            _ => container_block(id),
-        };
+        // The block this fixture answers with, found by looking for it rather
+        // than by the list saying which member has which. The two shapes the one
+        // list mixes are asserted below rather than described: a reader who took
+        // it for a language list would expect both members to be runnable, and
+        // one of them is deliberately not.
+        let block = answer_block(id);
         assert!(
             block.get("control").is_some(),
             "{id}/scenario.json declares no control, and a fixture whose answer is a permission or \

@@ -893,8 +893,8 @@ fn row_for(
                 ),
                 None => String::from(
                     " The machinery that grades this case answers with a decision, an assessment or a \
-                     run aggregate rather than a severity in the manifest's vocabulary, so the row \
-                     carries no observed severity: there is nothing here for a build to escalate.",
+                     run aggregate rather than a severity in the manifest's vocabulary, so the row's \
+                     observed severity is empty: there is nothing here for a build to escalate.",
                 ),
             };
             let comparison = format!(

@@ -56,8 +56,12 @@ an answer no other run requires.
 
 ## Which route produced each of `Error`, `Skipped` and `Unknown`
 
-This is stated plainly because two of the three are the product's own answer and
-one is not.
+This is stated plainly because the three are not alike **in this directory's
+runs**: two of them are values the test reads out of a run the product performed,
+and one is a value the test builds, because this directory ships no project and
+so there is no run here that could produce it. That last part is a limit of the
+fixture and **not** a claim that the status is unreachable in the product — it
+is, and the `Error` bullet below names where.
 
 - **`Unknown` — a product-computed value, through the product's real route.**
   `aggregate_run`'s `(None, None)` arm builds it for a scheduled check the plan
@@ -74,19 +78,49 @@ one is not.
   the same reason as above. This is the exact route
   `crates/sure-core/src/pipeline.rs` takes for every check the default mode
   refuses.
-- **`Error` — a hand-built `CheckResult`, and this is a limit.** No route in
-  shipping code produces a `CheckResult::errored` today, so the test builds one
-  with `CheckResult::errored` and hands it to `aggregate_run`. What is
-  **measured** is everything downstream of the status: `CheckStatus::Error` →
-  `CriticalState::CheckerError` → `critical_errored` → `not_enough_checked`, and
-  an evidence class that `CheckResult::errored` does not take as a parameter and
-  so cannot be written wrongly. What is **not** measured is the detail sentence:
-  the product has no sentence for a checker error, because the text is whatever
-  the checker said, so the test supplies this fixture's string and reads it back.
-  That comparison is a copy agreeing with itself and is a limit, not a route. The
-  same is true, in a smaller way, of the `scope_limit` runs: a scope-limited skip
-  is a hand-built result too, because `ScheduledCheck::not_run` only ever
-  produces `ExecutionNotAuthorized`.
+- **`Error` — a route that real runs take, and a result this directory has to
+  build.** These are two different statements and the distinction is the point.
+
+  **The route is shipping code, and a reader can go and look.** `CheckStatus::Error`
+  → `CriticalState::CheckerError` → `critical_errored` → `not_enough_checked` is
+  reachable from a real run, by at least three paths:
+
+  - `crates/sure-core/src/probe.rs` — `ProbeOutcome::Unreachable` maps to
+    `CheckStatus::Error` (`status()`, line 880), and `ProbeOutcome::verdict`
+    (line 791) passes the caller's own `severity` and `critical` straight through
+    to `CheckResult::errored` (line 823). A **critical** probe that could not be
+    made is therefore a critical errored result, and `critical_errored` is
+    non-empty for it.
+  - `crates/sure-core/src/pipeline.rs` — `check_claims` (line 994) returns a
+    `CheckResult::errored` (line 1051) when the claim-checking stage cannot read
+    what it recorded, and that result is `extend`ed into `results` (line 763) and
+    handed to `aggregate_run` (line 767) on the main run path. That one is
+    `Severity::Note` and `critical: false`, so it lands in `counts.error` and
+    `not_checked()` rather than in `critical_errored` — the coverage loop skips
+    non-critical results (`crates/sure-domain/src/status.rs`, line 631). The
+    status is still produced by a real run.
+  - `crates/sure-core/src/browser.rs` (line 708) and
+    `crates/sure-core/src/runtime_start.rs` (line 434) map a status they do not
+    expect to `errored` rather than let it through as a pass, again passing the
+    check's own `severity` and `critical` through.
+
+  **What is a limit is narrower than "the product cannot produce one".** This
+  directory ships no project, and this build has no runner for a planned check
+  (`scenario.json`, `checker_failure.why_not_the_pipeline`), so the test cannot
+  provoke any of those routes: it builds the declared result with
+  `CheckResult::errored` and hands it to `aggregate_run`. And the **detail
+  sentence** is a copy agreeing with itself — the product has no sentence for a
+  checker error, because the text is whatever the checker said, so the test
+  supplies this fixture's string and reads it back. Those two are the limits, and
+  they are limits of *this fixture's reach*, not of the product.
+
+  What is **measured** is everything downstream of the status:
+  `CheckStatus::Error` → `CriticalState::CheckerError` → `critical_errored` →
+  `not_enough_checked`, and an evidence class that `CheckResult::errored` does not
+  take as a parameter and so cannot be written wrongly. The same is true, in a
+  smaller way, of the `scope_limit` runs: a scope-limited skip is a hand-built
+  result too, because `ScheduledCheck::not_run` only ever produces
+  `ExecutionNotAuthorized`.
 
 The control's `pass` is a hand-built result for the same reason, from the other
 end: this build **plans every check and runs none of them**, so a check that
@@ -164,5 +198,7 @@ here would pull this case into a list it does not belong on and stop
 If a later build stops walking the schedule, or starts answering
 `not_enough_checked` because a stage could not run rather than because a check
 did not, the assertion that disagrees will be one of two: the row-presence
-assertion, which compares `report.unreported()` against the ids this directory
-declares, or the control's severity.
+assertion, which reads the rows out of `report.critical()` and asserts that a
+check this directory declares is a row in the report at all, or the control's
+severity. The `unreported()` list is held against the declared ids by the
+exhaustive comparison at the end of the test, not by that assertion.

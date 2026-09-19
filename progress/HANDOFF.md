@@ -3,6 +3,45 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** nothing, as of this paragraph. `P14-T004` — *"Implement
+claim-evidence fixtures"* — is **accepted as `9329e63`**, on the hand-back's
+first submission and with **no send-back**. "What `P14-T004` added" and
+"Validation of `P14-T004`" below carry the detail. The three recordings are in
+the corpus and the corpus contract reaches them: `CLAIM_FIXTURES` is chained into
+the lists `every_fixture_this_task_implemented()` walks in
+`crates/sure-testkit/tests/fixture_apps.rs`, so the three are iterated rather
+than merely present, and a new contract test forbids a name in that list from
+being a directory the repository does not ship. All three answer `Cannot confirm`
+and all three say so by **equality** against the product's own answer, on the
+three distinct routes the brief tabulated: no event of the claim's family
+(`tests-not-run`), a matching event superseded by a later-or-equal code change
+(`stale-test-evidence`), and a matching event whose timestamp cannot be parsed
+(`unknown-evidence`). **The trap — a checker that answers `cannot_confirm` to
+everything — is what the acceptance was won on**, and it was won by measurement
+rather than by reading: four mutation probes, each restoring the file from a
+`target/tmp` backup and verifying the restore by SHA256, and the decisive one
+moves **both copies** of `unknown-evidence`'s declared outcome — the fixture's
+and the corpus entry's — so that only the assertion comparing SURE's real answer
+with the fixture's declaration can catch it. It does: `adversarial_fixture_detection.rs:1410`,
+`left: CannotConfirm` against `right: Confirmed`, exit 101. Six gates green at
+the tip from native PowerShell, **2554 parents** against 2564 raw, 0 failed, 12
+ignored, **+6 across the task** and the six are its own two test files. **The
+dispatch's own run is red and stays red in the record** — `35418199233` failed
+`rust (ubuntu-latest)` alone on `a_service_that_ends_by_itself_inside_the_window_fails_and_says_why`
+with `Text file busy (os error 26)`, `P15-T019`'s race and the eighth distinct
+test it has now been seen in; the commit is progress-only and cannot have caused
+it, and `gh run rerun --failed` would have minted no second run id and erased the
+row, so the reading is written down instead. **The tip's own run `35419217024` is
+green on all five jobs at attempt 1**, including the ubuntu job that had just
+failed and the commit that actually carries the tests — which is what turns the
+dispatch run's redness into a measurement rather than an assumption. Two defects
+of the supervisor's own gate script are corrected here rather than quietly fixed:
+its header count was case-insensitive and its ignored total was the last suite's
+own count. **The manifest had drifted for three commits** — the three fixtures'
+digests were stale from `813ce77` and nothing in the repository consumes
+`SHA256SUMS.txt`, so no gate could have caught it; the acceptance regenerates it
+and the drift is recorded rather than smoothed over.
+
 **In flight:** `P14-T004` — *"Implement claim-evidence fixtures"* — dispatched
 from base commit `b3b83c9` (the `P13-T011` acceptance) with its brief at
 `target/tmp/brief-p14t004.md`, and it is the first task of this build whose
@@ -1916,6 +1955,192 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T004` added
+
+**Three recordings in the adversarial corpus in which there is no defective code
+at all, and the whole defect is the gap between a claim and the evidence behind
+it.** `tests-not-run`, `stale-test-evidence` and `unknown-evidence` are
+`fixtures/adversarial/` directories whose `scenario.json` **declares an event
+stream rather than pointing at a program**, and whose product under test is
+`check_claim` in `crates/sure-core/src/claim_checker.rs`. Each declares a claim, a
+short stream of events, the answer SURE must give, the evidence it must attach,
+and the sentence a person is shown — and each carries a **control**: the same
+fixture with exactly one field of one event moved, which must reach a *different*
+answer.
+
+### The three routes, and why three fixtures rather than one
+
+`check_claim` has exactly three ways to reach `CannotConfirm`, and this task is
+worth three fixtures because the three are different code paths that happen to
+print the same label:
+
+| fixture | route | evidence attached |
+|---|---|---|
+| `tests-not-run` | no event of the claim's family, so nothing is a candidate | none; `evidence` is empty |
+| `stale-test-evidence` | a matching event superseded by a later-or-equal code change | one, `SupersededByLaterChange` |
+| `unknown-evidence` | a matching event whose timestamp `Timestamp::parse_rfc3339` cannot read | one, `UnknownProvenance` |
+
+**`check_claim` never returns `Contradicted`**, and no fixture declares it: the
+honest answer when the evidence is absent or unusable is that SURE cannot say,
+and a fixture asserting `contradicted` would be asserting a verdict the checker
+cannot produce — which the brief sent back by name.
+
+### The trap, and the control that is the only defence against it
+
+The task's own criterion is *"Tests-not-run/stale evidence/cannot-confirm
+outcomes exact"*, and all three answers are the same word. **A claim checker that
+returned `cannot_confirm` unconditionally would satisfy every positive assertion
+this task could make**, which is what makes it the first task of this build whose
+acceptance cannot be won by its own headline result. The defence is structural
+rather than rhetorical: each fixture's `control` block is the fixture's own event
+array with one named field moved — `mytest.finished` renamed to `test.finished`
+for `tests-not-run`, an event made to precede the code change it must be
+superseded by for `stale-test-evidence` — and the control's expected answer is a
+*different* one. `assert_the_control_is_one_thing_moved` compares the control's
+event objects against the fixture's own **key by key** before reading either
+outcome, so a control that drifted into being a second fixture fails before its
+answer is read.
+
+### The judgement call, recorded rather than smoothed
+
+`unknown-evidence` rides on a real parser disagreement: a `23:59:60Z` leap-second
+timestamp that the wire schema **accepts** and `Timestamp::parse_rfc3339`
+**refuses**, which is the only route to the `UnknownProvenance` arm. The
+alternative considered — a near-miss timestamp that parses but does not match the
+event — was rejected because it answers exactly what `tests-not-run` answers and
+would have made two of the three fixtures the same fixture under two names. The
+fragility is written into the scenario's own `notes`, the worker flagged it as
+their largest call, and because the assertion is by equality a parser change
+fails the fixture loudly instead of letting it agree quietly.
+
+### What the recordings say that the build does not yet act on
+
+Each fixture carries a `status` outcome that records the **severity gap** rather
+than closing it. The claim path attaches `Severity::Note` to the one evidence
+item it can attach and nothing at all when it attaches none, while
+`evaluation/acceptance-manifest.json` calls two of these three cases
+release-blocking with `must_fix`. Nothing in this build turns a claim verdict
+into a project finding: `crates/sure-core/src/false_completion_aggregator.rs`
+never sees a claim, and `pipeline::is_confirmed` — the only predicate that reads
+a claim assessment — **has no caller outside its own unit test**. The fixtures
+assert the half that is SURE's own (the evidence class is `ObservedFact`, the
+severity is `Note`) and record the gap in prose. Closing it is a verdict-layer
+change, and minting one here would have been a product change dressed as a
+fixture.
+
+### The contract, so the fixtures cannot be added without being reached
+
+`CLAIM_FIXTURES` (`crates/sure-core/tests/adversarial_fixture_detection.rs:197`)
+is chained into the language lists `every_fixture_this_task_implemented()` walks,
+so the contract tests that already cover every other fixture language now cover
+these three: the schema check, the false-green check
+(`fixture_apps.rs:327`, which requires a release-blocking fixture to carry ≥2
+forbidden outcomes including one `kind: false_green`), the manifest-agreement
+check (`fixture_apps.rs:855`, which asserts id, severity and blocking against
+`evaluation/acceptance-manifest.json`) and the directory check. A new test,
+`every_claim_fixture_is_a_directory_this_repository_ships`, closes the obvious
+hole on the other side. The three carried the bootstrap-era
+`"fixture_status": "to_be_implemented_by_task_graph"` stub marker and **the marker
+is gone**: a surviving one would now fail the contract, because the fixtures are
+in the lists it walks.
+
+## Validation of `P14-T004`
+
+**Six gates green on `9329e63` from native PowerShell**
+(`target/tmp/sup-p14t004b-gate-*.txt`): `fmt=0 clippy=0 test=0 bootstrap=0
+taskctl=0 nonwindows=0`. Gate 3 measured with `measure-run.mjs`: **65 headers
+(60 `Running` + 5 `Doc-tests`), 75 result lines, 2554 parents, 2564 raw, 0
+failed, 12 ignored**, both instruments agreeing on 2554. The base `b3b83c9` was
+measured rather than inherited at dispatch, all six gates green
+(`target/tmp/sup-p14t004-gates.txt`), so the task is **+6 parents and nothing
+lost**: `adversarial_fixture_detection.rs` 17 → 22 and `fixture_apps.rs` 22 → 23,
+both read out of the tip's own full-suite capture rather than a separate run.
+Gates 4 and 5 read `SURE bootstrap validation OK: 17 phases, 187 tasks.` and
+`state OK: 187 tasks`. The machine's own store — `%LOCALAPPDATA%\SURE\sure.db` —
+is **byte-identical before and after** at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, which is the
+reading the fixtures must produce: they seed scratch stores under `target/tmp`.
+
+**The four probes, because the headline result is not evidence here.** Probe 1
+deleted each scenario's top-level `required_outcomes` in turn: **all three exit
+101**, restored from a backup and the restore verified by SHA256, tree clean. It
+proves the corpus entry is load-bearing. Probe 2 changed a declared *value* in
+three places: `stale-test-evidence`'s reason → *"The suite passed."* (fails at
+`adversarial_fixture_detection.rs:1417`, *the sentence a reader is shown
+changed*), `tests-not-run`'s control assessment → `cannot_confirm` (fails at
+line 1672, *the control reaches cannot_confirm too*), `unknown-evidence`'s
+declared assessment → `confirmed` (fails at line 1703, *the required outcome and
+the declared stream disagree about the assessment*). **Probe 3 is the one that
+matters**, because probe 2's third mutation was caught by the corpus-agreement
+assertion *before* it reached the product comparison: it flips **both copies** —
+the fixture's `claim_check.expect.assessment` and its
+`required_outcomes[].assessment` — and fails at **line 1410 with
+`left: CannotConfirm` against `right: Confirmed`**. The left is what SURE
+actually answers. Without that probe, "the fixture agrees with the test" would
+have been the one thing this acceptance could not have distinguished from "the
+test agrees with itself".
+
+**The three fixtures against the manifest**, read directly rather than through a
+test: `tests-not-run` `must_fix` / release-blocking **true**,
+`stale-test-evidence` `must_fix` / **true**, `unknown-evidence` `note` /
+**false**. The brief's send-back list forbids `unknown-evidence` marked
+release-blocking, and it is not.
+
+**CI.** The hand-back tip's own run, `35419217024` for `9329e63`: **all five jobs
+success at attempt 1** — `bootstrap-validate-windows`, `rust (windows-latest)`,
+`rust (macos-latest)`, `rust (ubuntu-latest)` and `shellcheck-secondary`.
+**Ubuntu green here is the reading that matters**, since the run immediately
+before it failed on ubuntu alone: red on the progress-only commit, green at the
+first attempt on the commit carrying the tests, which is what rules the redness
+out as this task's by measurement rather than by reading the file list. **The dispatch run
+`35418199233` for `4697bbf` is red and is recorded rather than rerun away**:
+`rust (ubuntu-latest)` failed `a_service_that_ends_by_itself_inside_the_window_fails_and_says_why`
+at `crates/sure-core/tests/runtime_start.rs:1332`, `left: Error` against
+`right: Fail`, with `The operating system said: Text file busy (os error 26)` in
+SURE's own sentence — 11 passed, 1 failed, 1 ignored, and no other job affected.
+It **cannot be this task's**: `4697bbf` changes three files under `progress/`,
+which `cargo test` does not read; `runtime_start.rs` is untouched by all four
+hand-back commits and its last change is `a6dbf98` (`P5-T007`); and the same test
+passed on windows and macOS in that run and on ubuntu in `35417840090` the run
+before. It is the Linux-only `ETXTBSY` race **`P15-T019` owns by name** — a test
+writing a program and executing it while something still holds the file open for
+writing — and it is the **eighth** distinct test this errno has now been seen in
+on this branch. `gh run rerun --failed` re-runs a job inside the same run and
+mints **no second run id**, so a green re-run would replace the row's own state
+and the failure would stop being readable; the row stays red and the reading is
+in `target/tmp/p14t004-dispatch-run.txt`.
+
+**The run owed under the chain rule**, discharged here: `35417840090` for
+`b3b83c9`, `P13-T011`'s acceptance commit, is **all five jobs success at attempt
+1** — parents windows 2548 / macOS 2539 / ubuntu 2540 against raw sums 2558 /
+2549 / 2550, **0 failed** on each, ignored sum 12 (8+1+2+1) on each, and
+identical to `35417125856` in every figure, which is what a progress-only commit
+has to read as. Reading in `target/tmp/p13t011-owed-run.txt`.
+
+**The manifest had drifted, and the acceptance is what caught it.** Regenerating
+`SHA256SUMS.txt` after staging found **five stale entries rather than the two
+this commit changes**: the three `fixtures/adversarial/*/scenario.json` digests
+had been wrong since `813ce77`, and three commits were made on top of that drift.
+**This is the supervisor's step and not the worker's** — nothing consumes the
+manifest (`grep -r SHA256SUMS` finds no script, no CI job and no test), the
+regenerating script is the supervisor's own tool under `target/tmp`, and the
+brief never asked for it, so no gate could have caught it. It is recorded because
+a manifest nothing verifies will keep drifting, and because a reader comparing
+the manifest to the tree between `813ce77` and this commit would have found three
+files whose recorded digest was wrong.
+
+**Two defects of the supervisor's own instrument, corrected rather than
+quietly fixed.** The dispatch-time gate script counted result headers with
+PowerShell's `Select-String`, which is **case-insensitive by default**, so it
+counted the 75 `running N tests` lines as headers and printed `headers: 140`; the
+true figure is **65** (60 `Running` + 5 `Doc-tests`), which `-CaseSensitive` and
+`measure-run.mjs` both give, and the tip's script uses that form. The same script
+printed `ignored max 8` from `measure-run.mjs`, which is the **last suite's own**
+count and not the total; the true total is the sum over the result lines, **12**.
+Neither changed an exit code or a passed/failed figure, both numbers were wrong
+in the record, and the corrections are in `target/tmp/sup-p14t004b-gates.ps1`
+rather than in a note.
 
 ## What `P13-T011` added
 
@@ -17125,6 +17350,38 @@ what changes here is that the number now says which of the two readings it is.
   rule, and the reading this acceptance discharged — `35414475973`, `P13-T010`'s
   acceptance commit — is in the section above, with `35413661243` beside it for
   the comparison that makes it mean something.
+
+- `9329e63` **`P14-T004`** (accepted by the progress-only commit that carries this
+  entry) — *"Implement claim-evidence fixtures"*. **The task's own detail is the
+  section above**; what belongs here is the shape. **One hand-back and no
+  send-back**, over four worker commits: `813ce77` (the three `scenario.json`
+  files and their three READMEs), `24810fd` (the assertions, +962 −3), `682ad73`
+  (the corpus contract, +82 −2) and `9329e63` (rustfmt only, +79 −26). It is the
+  first task of this build whose fixtures contain **no defective code at all**:
+  the three are recordings that declare an event stream, not projects that run,
+  and what they grade is `check_claim`'s answer plus the sentence a reader is
+  shown. **The acceptance could not be won by the headline result**, because all
+  three expected answers are the word `Cannot confirm` and a checker that returned
+  that unconditionally would satisfy every positive assertion the task could
+  make — so the fixtures carry **controls** that are the fixture with one field of
+  one event moved and that must reach a *different* answer, and the acceptance was
+  won on **four mutation probes**, the decisive one moving both the fixture's and
+  the corpus entry's declared outcome at once and failing at
+  `adversarial_fixture_detection.rs:1410` on `left: CannotConfirm / right:
+  Confirmed`. What it delivered is that the three routes to `CannotConfirm` —
+  no matching event, a superseded event, an unparseable timestamp — are each
+  pinned by a fixture asserted **by equality** on the assessment, the reason, the
+  evidence list and the evidence class, with `CLAIM_FIXTURES` chained into the
+  lists `every_fixture_this_task_implemented()` walks so the schema, false-green
+  and manifest-agreement checks reach them. It **minted nothing**: the severity
+  gap it recorded — the claim path's `Note` against the manifest's `must_fix`, and
+  `pipeline::is_confirmed` having no caller outside its own test — is written into
+  each fixture's `status` outcome as a limit of the verdict layer and is the
+  supervisor's to own, not a worker's to close inside a fixture. **No run of its
+  own commit is in this entry**: it is owed to the next acceptance under the chain
+  rule, and the reading this acceptance discharged is `35417840090`, `P13-T011`'s
+  acceptance commit, green on all five jobs at attempt 1 with 2548 / 2539 / 2540
+  parents.
 
 **The check was run again at this acceptance, and the two counts that moved are
 the two that should have.** For the tree this commit creates: **141 accepted**,

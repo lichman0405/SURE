@@ -21,9 +21,12 @@
 // the panic *is* the report, and it names the value that was wrong.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sure_core::config::AnalysisProvider;
+use sure_core::container::{Availability, Runtime};
 use sure_core::doctor::{self, Places, Presence, StoreState};
 use sure_core::paths::{Origin, Paths};
 
@@ -151,6 +154,55 @@ fn a_store_the_caller_named_is_reported_as_theirs_rather_than_as_the_platforms()
     // reported as if the caller had said nothing.
     let platform = Paths::discover().expect("this machine reports per-user locations");
     assert_ne!(locations.store_file.path, platform.store_file());
+
+    // The install path is the *platform's per-user location*, and the store the
+    // caller named did not move it. `P15-T001`: "reports per-user data/install
+    // paths clearly" is about a machine, and a diagnostic that let `--store-dir`
+    // move the installation would tell a user their installation is in a
+    // directory they named for a redirect.
+    //
+    // Mutation, run rather than described: in `locations()` of
+    // `crates/sure-core/src/doctor.rs`, replace
+    //
+    //   install_file: per_user_install(),
+    //
+    // with the install path derived from the store the caller named:
+    //
+    //   install_file: Some(Place {
+    //       path: paths.data_dir().join("bin").join("sure.exe"),
+    //       presence: Presence::Absent,
+    //   }),
+    //
+    // The two assertions below then fail on the named path, and the run is
+    // reported in this task's hand-back with what else it reddened.
+    #[cfg(windows)]
+    {
+        let install = locations
+            .install_file
+            .as_ref()
+            .expect("a Windows build has a per-user install location");
+        assert!(
+            install
+                .path
+                .ends_with(Path::new("SURE").join("bin").join("sure.exe")),
+            "the per-user install path is not the one the launchers look for: {}",
+            install.path.display()
+        );
+        assert!(
+            !install.path.starts_with(&named),
+            "the store the caller named moved the installation to {}: a redirect was reported \
+             as an installation",
+            install.path.display()
+        );
+    }
+    // No such convention where the platform has none, and `None` is an answer
+    // rather than a path this build guessed at.
+    #[cfg(not(windows))]
+    assert!(
+        locations.install_file.is_none(),
+        "a per-user install path was invented for a platform that has no such convention: {:?}",
+        locations.install_file
+    );
 }
 
 #[test]
@@ -224,6 +276,242 @@ fn the_report_names_this_build_by_its_number_alone() {
     assert_eq!(report.build.protocol_version, sure_core::PROTOCOL_VERSION);
     assert_eq!(report.build.os, std::env::consts::OS);
     assert_eq!(report.build.arch, std::env::consts::ARCH);
+}
+
+/// One directory holding a runnable file named after each program, as a search
+/// path of exactly that directory.
+///
+/// `OsString` rather than `PathBuf`, because a search path is the value
+/// `examine_in` takes and a directory is not.
+fn search_path_holding(directory: &Path, names: &[&str]) -> OsString {
+    fs::create_dir_all(directory).expect("a directory");
+    for name in names {
+        let path = directory.join(format!("{name}{EXECUTABLE_SUFFIX}"));
+        fs::write(&path, b"#!/bin/sh\n").expect("a file");
+        // On a Unix-like platform a file with no execute bit is not a program
+        // the search will accept, so the bit is part of writing it there.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("an execute bit");
+        }
+    }
+    std::env::join_paths([directory]).expect("a search path with one entry in it")
+}
+
+/// The suffix a program is stored under on this platform — the same rule
+/// `crate::doctor` searches with, restated here because this test writes the
+/// file the search is supposed to find.
+#[cfg(windows)]
+const EXECUTABLE_SUFFIX: &str = ".exe";
+/// See above: on a Unix-like platform the name is the file name.
+#[cfg(not(windows))]
+const EXECUTABLE_SUFFIX: &str = "";
+
+#[test]
+fn every_program_the_report_names_is_looked_for_on_the_search_path_it_was_given() {
+    // Two runs on this machine in this process, the search path the only thing
+    // that differs — the shape `fixtures/adversarial/container-unavailable`'s
+    // control uses for the same reason. A test that only ever searched this
+    // machine's own `PATH` would be a test of the machine: it could pass on a
+    // developer's laptop and fail in a container, and neither result would be
+    // about this code.
+    //
+    // The names are read **out of the report** rather than written here, so a
+    // program added to any of the four lists is exercised without this test
+    // being edited. A list that stopped being searched shows up as a `found_at`
+    // that is null in the second half, where a directory holding that program
+    // was handed in.
+    //
+    // Mutation, run rather than described: in `examine_in` of
+    // `crates/sure-core/src/doctor.rs`, replace the two searches that read the
+    // argument —
+    //
+    //   found_at: find_in(search_path, name),
+    //
+    // in the `TOOLS` and `TOOLCHAIN` loops, and
+    //
+    //   container: Availability::in_path(search_path),
+    //
+    // — with `find_in(OsStr::new(""), name)` and
+    // `Availability::in_path(OsStr::new(""))`. The function's argument stops
+    // being used and every `found_at` below stays null in the populated half.
+    // The run is reported in this task's hand-back with what else it reddened.
+    let root = scratch("search_path");
+    let paths = places_for(&root);
+    let nothing_to_find = OsStr::new("");
+
+    let none = doctor::examine_in(Ok(paths.clone()), nothing_to_find);
+
+    assert!(!none.tools.is_empty(), "the report names no tools at all");
+    assert!(
+        !none.toolchain.is_empty(),
+        "the report names no toolchain programs at all"
+    );
+    assert!(
+        !none.providers.is_empty(),
+        "the report offers no analysis providers at all"
+    );
+    assert!(
+        none.providers.iter().any(|it| it.program.is_some()),
+        "no provider in the list names a program, so the half of this check that is about a \
+         provider's program cannot fail: {:#?}",
+        none.providers
+    );
+    for tool in &none.tools {
+        assert_eq!(
+            tool.found_at, None,
+            "{} was found at {:?} on a search path with no entries in it",
+            tool.name, tool.found_at
+        );
+    }
+    for compiler in &none.toolchain {
+        assert_eq!(
+            compiler.found_at, None,
+            "{} was found at {:?} on a search path with no entries in it",
+            compiler.name, compiler.found_at
+        );
+    }
+    for provider in &none.providers {
+        assert_eq!(
+            provider.found_at, None,
+            "the program for {} was found at {:?} on a search path with no entries in it",
+            provider.name, provider.found_at
+        );
+    }
+    assert_eq!(
+        none.container,
+        Availability::Absent,
+        "a search path with no entries in it found a container runtime"
+    );
+
+    // Every program any list names, in one directory, so one call produces the
+    // found answer for all of them.
+    let where_ = root.join("bin");
+    let mut names: Vec<&str> = none.tools.iter().map(|tool| tool.name).collect();
+    names.extend(none.toolchain.iter().map(|compiler| compiler.name));
+    names.extend(
+        none.providers
+            .iter()
+            .filter_map(|provider| provider.program),
+    );
+    names.extend(Runtime::ALL.iter().map(|runtime| runtime.program()));
+    let populated = search_path_holding(&where_, &names);
+
+    let found = doctor::examine_in(Ok(paths), &populated);
+
+    // Only the program answers moved: the same locations, the same build, on
+    // the same machine, in the same process. This is what makes the difference
+    // between the two halves the search path rather than a second variable.
+    assert_eq!(none.places, found.places, "{:#?}", found.places);
+    assert_eq!(none.build, found.build, "{:#?}", found.build);
+    assert_eq!(none.store, found.store, "{:#?}", found.store);
+
+    for tool in &found.tools {
+        let expected = where_.join(format!("{}{EXECUTABLE_SUFFIX}", tool.name));
+        assert_eq!(
+            tool.found_at.as_deref(),
+            Some(expected.as_path()),
+            "{} was not found where it was written, so the answer is not read off the search path \
+             it was given",
+            tool.name
+        );
+    }
+    for compiler in &found.toolchain {
+        let expected = where_.join(format!("{}{EXECUTABLE_SUFFIX}", compiler.name));
+        assert_eq!(
+            compiler.found_at.as_deref(),
+            Some(expected.as_path()),
+            "{} was not found where it was written",
+            compiler.name
+        );
+    }
+    for provider in &found.providers {
+        match provider.program {
+            Some(program) => {
+                let expected = where_.join(format!("{program}{EXECUTABLE_SUFFIX}"));
+                assert_eq!(
+                    provider.found_at.as_deref(),
+                    Some(expected.as_path()),
+                    "the program for {} was not found where it was written",
+                    provider.name
+                );
+            }
+            None => assert_eq!(
+                provider.found_at, None,
+                "{} runs no program, and a path was reported for it anyway",
+                provider.name
+            ),
+        }
+    }
+    let first = Runtime::ALL[0];
+    assert_eq!(
+        found.container,
+        Availability::Found {
+            runtime: first,
+            program: where_.join(format!("{}{EXECUTABLE_SUFFIX}", first.program())),
+        },
+        "the container answer is not the runtime that was written into the search path"
+    );
+    // The other half of the same claim: with only the second runtime present,
+    // the reported one is that runtime. Without this, an answer that always
+    // named the first of `Runtime::ALL` would pass everything above.
+    let only_second = Runtime::ALL[1];
+    let just_it = search_path_holding(&root.join("only it"), &[only_second.program()]);
+    assert_eq!(
+        doctor::examine_in(Ok(places_for(&root)), &just_it).container,
+        Availability::Found {
+            runtime: only_second,
+            program: root
+                .join("only it")
+                .join(format!("{}{EXECUTABLE_SUFFIX}", only_second.program())),
+        }
+    );
+}
+
+#[test]
+fn the_providers_this_build_offers_are_the_ones_a_settings_file_takes() {
+    // The names are written as strings in `crates/sure-core/src/doctor.rs`
+    // because that module may not name the configuration module at all — the
+    // scan in this file fails the build if it does — and a copy that can drift
+    // from the vocabulary it claims to spell is exactly what a check like this
+    // is for. This test may import the type, so the two lists are held to each
+    // other here rather than by care.
+    //
+    // Mutation, run rather than described: in `PROVIDERS` of
+    // `crates/sure-core/src/doctor.rs`, rename `"claude_cli"` to `"claude-cli"`.
+    // The list comparison below fails with the two lists printed. The run is
+    // reported in this task's hand-back with what else it reddened.
+    let report = doctor::examine_in(
+        Ok(places_for(&scratch("providers"))),
+        OsStr::new("nothing on this search path"),
+    );
+
+    let offered: Vec<&str> = report.providers.iter().map(|it| it.name).collect();
+    let spelled: Vec<&str> = AnalysisProvider::ALL.iter().map(|it| it.as_str()).collect();
+    assert_eq!(
+        offered, spelled,
+        "the providers this build lists and the providers a settings file may name are not the \
+         same list, and a user told about a provider they cannot configure has been told \
+         something false"
+    );
+
+    assert!(!report.providers.is_empty());
+    for provider in &report.providers {
+        assert!(
+            !provider.needs.is_empty(),
+            "{} is offered with no statement of what it needs",
+            provider.name
+        );
+        assert!(
+            provider.found_at.is_none() || provider.program.is_some(),
+            "{} was reported at {:?} and runs no program, so a path came from nowhere",
+            provider.name,
+            provider.found_at
+        );
+    }
 }
 
 #[test]

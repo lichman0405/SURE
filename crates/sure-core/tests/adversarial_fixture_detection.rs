@@ -3223,25 +3223,43 @@ fn disagreeing_keys(left: &Value, right: &Value) -> Vec<String> {
 /// The file that defines the container module, which therefore names it.
 const THE_CONTAINER_MODULE: &str = "sure-core/src/container.rs";
 
-/// Every line of *shipped* code that calls into the container module.
+/// What reaches the container module from *shipped* code, measured over one
+/// walk of the tree.
 ///
-/// This is the second half of criterion 2, measured rather than described:
-/// `crates/sure-core/src/container.rs` is declared in `crates/sure-core/src/lib.rs`
-/// and nothing else in the tree reaches it, so no run of SURE's pipeline and no
-/// command line can ask whether a container runtime is there. The walk uses the
-/// product's own scanner, so "a file in this crate" means here what it means
-/// everywhere else in the suite, and it is asserted complete — a source check
-/// over an unknown subset of the sources is the false green this file exists to
-/// prevent.
+/// This is the second half of criterion 2, and since `P15-T001` it answers two
+/// questions rather than one. `crates/sure-core/src/container.rs` is read by the
+/// diagnostic now — `crate::doctor` looks for a runtime and reports what it
+/// found, which is SURE answering a question about *this computer* — so "no
+/// shipped line names the module" stopped being true, and a fixture that went on
+/// saying it would be recording a limit this build does not have. What is still
+/// true, and what the fixture's `container_limit` entry is about, is that
+/// nothing *runs* a container: no line of shipped code names the type a
+/// container command is built from.
+///
+/// So one walk answers both. [`module`](ContainerReach::module) is every line of
+/// shipped code that names something in the container module — an observation, a
+/// report, nothing more. [`execution`](ContainerReach::execution) is every line
+/// that names `ContainerPlan` or `PlanError`, which is the type and the error of
+/// the one thing that could put a check inside a container. The two are counted
+/// over the same files in the same walk rather than by two scans that could
+/// drift apart, and neither is a subset rule: each is counted by its own
+/// predicate.
+///
+/// The walk uses the product's own scanner, so "a file in this crate" means here
+/// what it means everywhere else in the suite, and it is asserted complete — a
+/// source check over an unknown subset of the sources is the false green this
+/// file exists to prevent.
 ///
 /// The filter is `src` and not `tests`, because the rule is about what ships and
 /// because this file itself names the module; it is tested without a separator,
 /// because the separator is the platform's. The file that defines the module is
 /// skipped for the same reason: it has to name what it defines. Line comments
 /// are stripped before the search, so a doc comment pointing at the module —
-/// there is one, and a later phase will write more — is not mistaken for a
-/// caller.
-fn container_call_sites() -> Vec<String> {
+/// there is more than one now — is not mistaken for a caller. A `#[cfg(test)]`
+/// module inside a shipped file is counted, because the filter is the file's
+/// path and not the item's attributes; that is a property of this measurement,
+/// and the fixture's numbers are the numbers it produces.
+fn container_reach() -> ContainerReach {
     let crates = sure_testkit::repository_root().join("crates");
     let walked = scan(&crates, ScanOptions::default()).expect("crates/ is a directory");
     assert!(
@@ -3249,7 +3267,8 @@ fn container_call_sites() -> Vec<String> {
         "the source tree could not be read completely, so the limit this test records would be \
          checked against an unknown subset of it"
     );
-    let mut found = Vec::new();
+    let mut module = Vec::new();
+    let mut execution = Vec::new();
     let mut scanned = 0;
     for entry in walked.files() {
         if !entry
@@ -3269,8 +3288,12 @@ fn container_call_sites() -> Vec<String> {
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", full.display()));
         for (number, line) in text.lines().enumerate() {
             let code = line.split("//").next().unwrap_or_default();
+            let here = format!("{path}:{}: {}", number + 1, line.trim());
             if code.contains("container::") || code.contains("Availability::") {
-                found.push(format!("{path}:{}: {}", number + 1, line.trim()));
+                module.push(here.clone());
+            }
+            if code.contains("ContainerPlan") || code.contains("PlanError") {
+                execution.push(here);
             }
         }
     }
@@ -3279,7 +3302,23 @@ fn container_call_sites() -> Vec<String> {
         "the source walk found {scanned} shipped files, which is not this repository — the filter \
          is matching the wrong thing"
     );
-    found
+    ContainerReach { module, execution }
+}
+
+/// The two lists [`container_reach`] produces, named so a caller cannot confuse
+/// one for the other.
+///
+/// `module` is the wider question — anything at all that reaches into the
+/// container module — and `execution` is the narrow one the fixture's limit is
+/// about. They were the same question in `P14` only because both answers were
+/// zero; they are kept apart here so that the phase which changed one of them
+/// could not silently change the meaning of the other.
+struct ContainerReach {
+    /// Lines of shipped code naming something in the container module.
+    module: Vec<String>,
+    /// Lines of shipped code naming the type a container command is built from,
+    /// or the error that building it can fail with.
+    execution: Vec<String>,
 }
 
 /// The suffix a program is stored under on this platform.
@@ -3401,18 +3440,41 @@ fn a_missing_container_runtime_is_a_value_and_the_control_moves_the_search_path(
         declared,
     );
 
-    // The limit, measured rather than described: nothing that ships reaches the
-    // container module, so no run of the pipeline and no command line can ask
-    // this question today. A test that fails here has found a caller.
-    let call_sites = container_call_sites();
+    // The limit, measured rather than described: the diagnostic reads the
+    // container module to report what it found on this computer, and nothing
+    // that ships can ask for a check to be run in one. `P15-T001` is where the
+    // first half of that became true — and the numbers below are the two halves:
+    // `module_call_sites` counts the reporting, which is what changed, and
+    // `unwired_call_sites` counts the execution, which did not. A test that
+    // fails on the first has found the report changing shape; a test that fails
+    // on the second has found the caller this fixture records not existing.
+    //
+    // Mutation, run rather than described: add one line of code to the `mod
+    // tests` at the end of `crates/sure-core/src/doctor.rs` —
+    //
+    //   #[allow(dead_code)]
+    //   fn a_plan_becomes_reachable(_: Option<crate::container::ContainerPlan>) {}
+    //
+    // — and this test fails on the assertion below, printing that line and its
+    // number. Both numbers move, and it was measured rather than assumed: the
+    // same scan under the same mutation answers `module_call_sites` = 12 (11 + 1)
+    // and `unwired_call_sites` = 1. Reverting the two lines puts both back. The
+    // run is reported in this task's hand-back with what else it reddened.
+    let reach = container_reach();
     assert!(
-        call_sites.is_empty(),
-        "{id}: the container module is reached from shipped code, so the limit this fixture records \
-         is no longer true and the declaration has to be re-made deliberately rather than \
-         discovered by a reader:\n  {}",
-        call_sites.join("\n  ")
+        reach.execution.is_empty(),
+        "{id}: a container can be planned from shipped code, so the limit this fixture records is \
+         no longer true and the declaration has to be re-made deliberately rather than discovered \
+         by a reader:\n  {}",
+        reach.execution.join("\n  ")
     );
-    assert_declared_answer(id, "unwired_call_sites", json!(call_sites.len()), declared);
+    assert_declared_answer(id, "module_call_sites", json!(reach.module.len()), declared);
+    assert_declared_answer(
+        id,
+        "unwired_call_sites",
+        json!(reach.execution.len()),
+        declared,
+    );
 
     // And what a run of this fixture produces, which is nothing: the absence is
     // refused by no rule, because nothing in this build asks whether a runtime

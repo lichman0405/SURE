@@ -1152,6 +1152,7 @@ mod tests {
                 protocol_version: 1,
                 os: "test",
                 arch: "test",
+                target_env: "test",
                 running_from: None,
             },
             places: Places::Unknown {
@@ -1160,6 +1161,15 @@ mod tests {
             },
             store: StoreState::NotLookedFor,
             tools: Vec::new(),
+            // Empty for the same reason the locations above are unknown: this
+            // fixture exists to drive the frame, the status and the stream, and
+            // what a machine happens to have installed is not this test's
+            // subject. The shape of a filled-in report is `doctor.rs`'s own
+            // tests and `tests/cli_contract.rs`'s.
+            toolchain: Vec::new(),
+            container: sure_core::container::Availability::Absent,
+            providers: Vec::new(),
+            integrations: Vec::new(),
             problems,
             not_checked: Vec::new(),
         }))

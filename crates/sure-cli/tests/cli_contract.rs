@@ -3252,6 +3252,112 @@ fn a_doctor_report_says_which_store_location_the_run_is_using() {
     assert_untouched(&machine, "by a doctor run that named no store");
 }
 
+#[test]
+fn every_harness_the_doctor_report_offers_is_one_sure_will_take_an_event_from() {
+    // `P15-T001` put a list of harnesses in the report. A list of names in a
+    // document is a claim, and this is the measurement under it: each name the
+    // report prints is handed to the command it is a claim about, in this
+    // process, and the command has to take it. The other half is the one that
+    // makes the first half a measurement rather than a hope — a name that is
+    // *not* on the report's list is refused by the same command, so a build that
+    // accepted everything would fail here.
+    //
+    // The list is read out of the report rather than restated, so a harness
+    // added to or removed from `crates/sure-core/src/doctor.rs` is exercised by
+    // this test without this test being edited.
+    //
+    // Mutation, run rather than described: in `INTEGRATIONS` of
+    // `crates/sure-core/src/doctor.rs`, change the name `"codex"` to `"codexx"`.
+    // The first loop hands `codexx` to `sure hook ingest --source` and the
+    // refusal is printed. The run is reported in this task's hand-back with what
+    // else it reddened.
+    let store = a_store_of_our_own();
+    let machine = the_store_on_this_machine();
+
+    let doctor = run_in_a_store(&store, &["--format", "json", "doctor"]);
+    assert!(
+        matches!(doctor.status, 0 | 1),
+        "`sure doctor` exited {}:\n{}",
+        doctor.status,
+        doctor.stderr
+    );
+    let frame: serde_json::Value = serde_json::from_str(doctor.stdout.trim())
+        .unwrap_or_else(|error| panic!("`sure doctor` is not JSON: {error}\n{}", doctor.stdout));
+    let offered: Vec<String> = frame["details"]["integrations"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the report carries no harness list: {frame}"))
+        .iter()
+        .map(|entry| {
+            entry["name"]
+                .as_str()
+                .unwrap_or_else(|| panic!("a harness in the report has no name: {entry}"))
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        !offered.is_empty(),
+        "the report offers no harness at all, so this test measures nothing: {frame}"
+    );
+
+    // A payload rather than an empty pipe, and that matters: an empty standard
+    // input is refused before the source is looked at (`hook.rs`'s "No event was
+    // read from standard input"), so a test that piped nothing would pass for an
+    // unknown source too and would be measuring nothing at all. This payload is
+    // not an event any of the three harnesses sends, so what each run answers is
+    // the normaliser's refusal — which is the answer that says the *source* was
+    // taken and read.
+    let payload = serde_json::json!({
+        "event": "an event SURE has never seen",
+        "harness_session_id": "p15t001-harness-list",
+        "tool": "Shell",
+        "args": {"command": "echo hello"},
+    })
+    .to_string();
+    for name in &offered {
+        let run = ingest_argv(&store, &["hook", "ingest", "--source", name], &payload);
+        assert!(
+            !run.stderr.contains("not one SURE knows how to ingest"),
+            "the report offers `{name}` as a harness SURE can be told about, and \
+             `sure hook ingest --source {name}` refuses it:\n{}",
+            run.stderr
+        );
+        assert!(
+            matches!(run.status, 0 | 1 | 5),
+            "`sure hook ingest --source {name}` exited {}, which is not one of the three \
+             answers this command has: 0 or 1 for a decision, 5 for an event it could not \
+             read:\nstdout:\n{}\nstderr:\n{}",
+            run.status,
+            run.stdout,
+            run.stderr
+        );
+    }
+
+    // The other side. `copilot` is not a name this test made up: SURE ships a
+    // package for Copilot, and its launcher passes `--source copilot`, which
+    // this build refuses. That is why the report does not offer it, and the
+    // refusal is asserted here rather than asserted in prose.
+    for name in ["copilot", "nope"] {
+        assert!(
+            !offered.iter().any(|listed| listed == name),
+            "the report offers `{name}` and this test is about the names it does not offer: \
+             {offered:?}"
+        );
+        // The same non-empty payload as the loop above, for the same reason:
+        // the refusal asserted here is the *source* refusal, and an empty pipe
+        // is refused earlier, before the source is looked at.
+        let run = ingest_argv(&store, &["hook", "ingest", "--source", name], &payload);
+        assert!(
+            run.stderr.contains("not one SURE knows how to ingest"),
+            "`sure hook ingest --source {name}` did not refuse a source the report does not \
+             offer, so the loop above proves nothing:\n{}",
+            run.stderr
+        );
+        assert_eq!(run.status, 5, "{}", run.stderr);
+    }
+
+    assert_untouched(&machine, "by a doctor run and the hook sources it offered");
+}
+
 // --- hook failure semantics (P13-T007) ----------------------------------
 
 /// One `sure hook ingest` started the way a launcher starts it, or the way a

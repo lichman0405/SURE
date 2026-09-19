@@ -30,9 +30,12 @@
 //! database behind would do exactly that.
 //!
 //! **It does not run a program.** Finding a program on `PATH` is an observed
-//! fact about the filesystem; running it is a different claim, and SURE has no
-//! process runner until P3-T001. Everything a tool check here establishes is
-//! repeated in [`NotChecked`], so a reader cannot mistake the one for the other.
+//! fact about the filesystem; running it is a different claim. SURE does have a
+//! process runner — `P3-T001`'s, in `crate::process` — and this module
+//! deliberately does not reach it: a command whose output a user pastes into a
+//! bug report should not be a command that starts something. Everything a
+//! program check here establishes is repeated in [`NotChecked`], so a reader
+//! cannot mistake the one for the other.
 //!
 //! # It does not become evidence
 //!
@@ -45,21 +48,155 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::paths::{Origin, PathError, Paths};
+use crate::container::Availability;
+use crate::paths::{APP_DIR, Origin, PathError, Paths};
 use crate::store::{HistoryFilter, LATEST_SCHEMA_VERSION, Store, StoreError};
 
-/// The external program this build calls, and what for.
+/// The external programs this build calls, and what for.
 ///
-/// One entry, and that is the honest count: SQLite is compiled in
+/// One entry, and that is still the honest count: SQLite is compiled in
 /// (`docs/architecture/STORAGE_AND_DATA_PATHS.md` §The store), and everything
-/// else SURE will invoke — a project's `npm test`, a container runtime — is
-/// discovered per project by the execution layer rather than being a dependency
-/// of SURE itself. `P15-T001` is where the integration, execution and container
-/// picture arrives; this list is where it will be added.
+/// else SURE will invoke — a project's `npm test`, a container runtime, a
+/// model-backed analysis — is asked for by a *setting or a project* rather than
+/// being a dependency of SURE itself.
+///
+/// `P15-T001` is where that picture arrived, and it widened the **report**
+/// rather than this list: the container runtime is
+/// [`DoctorReport::container`], the analysis providers are
+/// [`DoctorReport::providers`], the compilers are [`DoctorReport::toolchain`]
+/// and the harnesses are [`DoctorReport::integrations`]. Each is a filesystem
+/// search for a program this build *would* run if something asked it to, and
+/// this build asks none of them — which is why they are not here.
 const TOOLS: &[(&str, &str)] = &[(
     "git",
     "identifying which state of a project a result belongs to",
 )];
+
+/// The programs a native build on this platform uses, and what each is for.
+///
+/// Separate from [`TOOLS`] because none of these is something SURE calls: they
+/// are the compilers and build tools a *project* would need, and the ones this
+/// build was itself made with. **Nothing here is run**, so a name that is not
+/// found is a fact about `PATH` and not a statement that the tool is missing —
+/// each entry's own sentence says where the program usually lives, because a
+/// Microsoft C compiler is normally installed and still not on `PATH`.
+///
+/// The list is per platform rather than one list with the Windows entries
+/// filtered out at runtime: a report that named `vswhere` on Linux would be
+/// naming a program no machine running it has.
+#[cfg(windows)]
+const TOOLCHAIN: &[(&str, &str)] = &[
+    (
+        "rustc",
+        "compiling Rust code, which this build is made of and a checked project may be",
+    ),
+    (
+        "cargo",
+        "building a Rust project, which is how this one is built",
+    ),
+    (
+        "cl",
+        "the Microsoft C compiler a native msvc build links through. A Visual Studio \
+         install keeps it off PATH until you are in a Developer Command Prompt, so \
+         *not found here* is not evidence that it is missing",
+    ),
+    (
+        "vswhere",
+        "finding a Visual Studio installation. It normally lives at a fixed path under \
+         Program Files rather than on PATH, for the same reason as `cl`",
+    ),
+];
+
+/// The same, where there is no Microsoft C toolchain to look for.
+#[cfg(not(windows))]
+const TOOLCHAIN: &[(&str, &str)] = &[
+    (
+        "rustc",
+        "compiling Rust code, which this build is made of and a checked project may be",
+    ),
+    (
+        "cargo",
+        "building a Rust project, which is how this one is built",
+    ),
+];
+
+/// The C library this build links against, as the compiler named it.
+///
+/// A compile-time fact rather than a probe, because it is a fact about *this
+/// binary*: a program cannot discover which C library it was linked against by
+/// looking at the machine, and `cfg!` is the only honest source for it. It is
+/// what `scripts/Test-SureEnvironment.ps1` calls the *MSVC host* from the other
+/// side — it reads `rustc -vV`, which is a program, and this is the same fact
+/// without running one.
+const TARGET_ENV: &str = if cfg!(target_env = "msvc") {
+    "msvc"
+} else if cfg!(target_env = "gnu") {
+    "gnu"
+} else if cfg!(target_env = "musl") {
+    "musl"
+} else {
+    "none"
+};
+
+/// The analysis providers this build can be configured with.
+///
+/// `(name, what it needs from this machine, the program it would run if it runs
+/// one)`. **The names are the settings file's own names and the list is held to
+/// it by a test rather than by a copy that can drift** — this module must not
+/// name the configuration module at all (`tests/doctor.rs` fails the build if it
+/// does), so the names are strings here and `tests/doctor.rs` reads the type
+/// that defines them and fails if the two disagree.
+///
+/// **A provider is where a credential lives, and nothing here can hold one.**
+/// The only question asked of each entry is a filesystem one: is the program it
+/// would run on `PATH`. `openai_compatible`'s needs a key, which is exactly why
+/// there is no field a key could be read into.
+const PROVIDERS: &[(&str, &str, Option<&str>)] = &[
+    (
+        "disabled",
+        "nothing: the deterministic checks run and no model is consulted",
+        None,
+    ),
+    (
+        "local_command",
+        "a command your settings name, run on this machine",
+        None,
+    ),
+    (
+        "claude_cli",
+        "the Claude CLI already installed on this machine",
+        Some("claude"),
+    ),
+    (
+        "openai_compatible",
+        "an endpoint and a key your settings name. This report never reads either",
+        None,
+    ),
+];
+
+/// The harnesses this build can be told about by a hook.
+///
+/// `(source name, what SURE's package for that harness adds)`. These are the
+/// names `sure hook ingest --source` accepts, and the list is held to that
+/// command rather than to this comment: `crates/sure-cli/tests/cli_contract.rs`
+/// runs every one of them through the real binary and asserts it is taken, and
+/// runs a name that is not on the list and asserts it is refused.
+///
+/// **A harness SURE ships a package for but cannot ingest from is deliberately
+/// not here.** The Copilot package's launcher passes `--source copilot`, which
+/// this build refuses, so naming it would be claiming a route that does not
+/// work; what is on the list is what the command takes.
+const INTEGRATIONS: &[(&str, &str)] = &[
+    (
+        "claude-code",
+        "hooks that record what an agent did, and SURE's tools over MCP",
+    ),
+    ("cursor", "the same hooks and the same tools, for Cursor"),
+    (
+        "codex",
+        "hooks, skills and SURE's tools, added to the harness's own config",
+    ),
+];
 
 /// The questions this report does not answer, and why not.
 ///
@@ -70,7 +207,9 @@ const TOOLS: &[(&str, &str)] = &[(
 const NOT_CHECKED: &[(&str, &str)] = &[
     (
         "whether a program found on PATH runs",
-        "SURE has no process runner yet, and finding a file is not running it.",
+        "SURE does not run a program to find out. Finding a file is not running it, \
+         and a diagnostic whose output is pasted into a bug report is the last \
+         command that should start something.",
     ),
     (
         "what is in your settings files",
@@ -78,13 +217,23 @@ const NOT_CHECKED: &[(&str, &str)] = &[
          secret to handle. This report says where the file is and nothing more.",
     ),
     (
+        "which analysis provider your settings choose",
+        "that is a value in the settings file, and the same rule keeps this report \
+         out of it. What is reported below is which providers this build offers and \
+         whether the program one of them would run is on PATH — never an endpoint, \
+         never a key.",
+    ),
+    (
         "whether SURE can write to its own directories",
         "finding out means creating a file, and a diagnostic that changes what it \
          is diagnosing is worse than one that says it did not look.",
     ),
     (
-        "whether a harness is installed",
-        "that is P15-T001's, and nothing in this build talks to a harness yet.",
+        "whether a harness is installed on this machine, and whether it is wired up",
+        "SURE ships a package for each harness it can be told about, and this report \
+         lists the ones it can ingest from. It does not look for a harness's own \
+         files, so a harness that is present and unwired looks from here exactly \
+         like one that is not installed.",
     ),
 ];
 
@@ -135,6 +284,19 @@ pub struct Locations {
     /// like one that worked until the location is asked for. See
     /// [`sure_core::paths::Origin`].
     pub store_origin: Origin,
+    /// Where a per-user installation of SURE puts its executable.
+    ///
+    /// `None` on a platform where SURE has no per-user install convention. This
+    /// is **the platform's location for this user, not where this build is**:
+    /// that is [`Build::running_from`], and the two are different answers —
+    /// a machine can run a build out of a checkout, a cargo cache or a package
+    /// manager while a per-user installation sits where the launchers expect it.
+    ///
+    /// Deliberately **not** derived from [`Locations::data_dir`]: `--store-dir`
+    /// moves the data directory, and reporting the redirected store's directory
+    /// as the installation would tell a user their installation moved when only
+    /// their history did.
+    pub install_file: Option<Place>,
 }
 
 /// Where SURE keeps things, or why it cannot say.
@@ -217,6 +379,57 @@ pub struct Tool {
     pub found_at: Option<PathBuf>,
 }
 
+/// One program a build on this machine uses, and whether it is reachable.
+///
+/// Deliberately not [`Tool`]: that one is a program *SURE calls*, and its
+/// wording says so. Reusing it here would make `sure doctor` say it calls a C
+/// compiler, which it does not and must not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Compiler {
+    /// The program's name, as it would be invoked.
+    pub name: &'static str,
+    /// What it is used for, in the words a user would use.
+    pub used_for: &'static str,
+    /// Where a program of that name was found on the search path.
+    ///
+    /// `None` means no directory on the search path holds one. **Not** a
+    /// statement that the program is missing from the machine: see
+    /// [`Compiler::used_for`], where the two entries that are normally installed
+    /// and still off `PATH` say so in their own sentence.
+    pub found_at: Option<PathBuf>,
+}
+
+/// One analysis provider this build offers, and what it needs from here.
+///
+/// The list is the *build's* offering rather than the user's choice: which one
+/// is in effect is a value in the settings file, which this module does not read
+/// (see the module documentation, and the test that holds it to that).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provider {
+    /// The provider's name, spelled exactly as a settings file spells it.
+    pub name: &'static str,
+    /// What it needs from this machine, in the words a user would use.
+    pub needs: &'static str,
+    /// The program it would run, if it runs one.
+    ///
+    /// `None` for a provider that runs none, which is not the same as a program
+    /// that was looked for and not found — [`Provider::found_at`] is the answer
+    /// to that question, and a report that carried only one field could not tell
+    /// the two apart.
+    pub program: Option<&'static str>,
+    /// Where that program is on the search path, if one was looked for.
+    pub found_at: Option<PathBuf>,
+}
+
+/// One harness this build can be told about by a hook.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Integration {
+    /// The source name, spelled exactly as `sure hook ingest --source` spells it.
+    pub name: &'static str,
+    /// What SURE's package for that harness puts there.
+    pub adds: &'static str,
+}
+
 /// Something that is wrong with this installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem {
@@ -253,6 +466,14 @@ pub struct Build {
     pub os: &'static str,
     /// The processor it was built for.
     pub arch: &'static str,
+    /// The C library this binary was linked against, as its compiler names it.
+    ///
+    /// "msvc" on a native Windows build, which is the second half of the target
+    /// triple and the one a Windows user is usually asking about: a binary built
+    /// for the same processor and linked against a different C library is not
+    /// the same build, and a toolchain problem looks different depending on
+    /// which it is. See [`TARGET_ENV`].
+    pub target_env: &'static str,
     /// Where the running executable is.
     ///
     /// `None` only if the platform will not say. Reported because the first
@@ -272,6 +493,26 @@ pub struct DoctorReport {
     pub store: StoreState,
     /// The external programs SURE calls.
     pub tools: Vec<Tool>,
+    /// The programs a build on this machine uses, and where they are.
+    ///
+    /// Found and not run. A program that is absent from this list's `found_at`
+    /// is absent from the search path, which on Windows is a different statement
+    /// from "not installed" — see [`Compiler`].
+    pub toolchain: Vec<Compiler>,
+    /// Whether a container runtime is here, and which.
+    ///
+    /// [`Availability::Absent`] is an answer rather than a failure: the checks
+    /// run on this machine instead. **Nothing is run and no container is
+    /// started** — this is the same filesystem search as [`DoctorReport::tools`],
+    /// and planning or running a container is elsewhere, deliberately.
+    pub container: Availability,
+    /// The analysis providers this build offers, and what each needs from here.
+    ///
+    /// Never which one is configured: that is in the settings file. See
+    /// [`Provider`].
+    pub providers: Vec<Provider>,
+    /// The harnesses this build can be told about by a hook.
+    pub integrations: Vec<Integration>,
     /// Everything found wrong. Empty means SURE found nothing wrong.
     pub problems: Vec<Problem>,
     /// What was not looked at.
@@ -315,8 +556,31 @@ pub fn examine_this_machine(store: Option<&Path>) -> DoctorReport {
 /// separable from "what is there". A [`PathError`] is a result rather than an
 /// early return because it is the most important thing this command can report:
 /// without a location, SURE cannot store anything.
+///
+/// The programs are looked for on this process's `PATH`. [`examine_in`] is the
+/// same with the search path given, which is how a test reaches both answers —
+/// found and not found — on one machine in one run.
 #[must_use]
 pub fn examine(places: Result<Paths, PathError>) -> DoctorReport {
+    let search_path = std::env::var_os("PATH").unwrap_or_default();
+    examine_in(places, &search_path)
+}
+
+/// The same, against a given search path.
+///
+/// **One argument carries every program answer in the report** — the tools, the
+/// toolchain, the container runtime and the providers' programs — so that the
+/// two-sided test this repository asks for is possible at all: an empty search
+/// path and a populated one differ in this argument and in nothing else, on the
+/// machine running the suite. A check that could only ever find what this
+/// machine happens to have cannot fail, and a check that cannot fail is the
+/// defect.
+///
+/// A search path with no entries is not an error state. It is a machine on which
+/// nothing is on `PATH`, and every program answer is then "not found" — which is
+/// a thing a report has to be able to say.
+#[must_use]
+pub fn examine_in(places: Result<Paths, PathError>, search_path: &OsStr) -> DoctorReport {
     let mut problems = Vec::new();
 
     let places = match places {
@@ -358,17 +622,42 @@ pub fn examine(places: Result<Paths, PathError>) -> DoctorReport {
             protocol_version: crate::PROTOCOL_VERSION,
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
+            target_env: TARGET_ENV,
             running_from: std::env::current_exe().ok(),
         },
         places,
         store,
         tools: TOOLS
             .iter()
-            .map(|(name, needed_for)| Tool {
+            .map(|&(name, needed_for)| Tool {
                 name,
                 needed_for,
-                found_at: find_on_path(name),
+                found_at: find_in(search_path, name),
             })
+            .collect(),
+        toolchain: TOOLCHAIN
+            .iter()
+            .map(|&(name, used_for)| Compiler {
+                name,
+                used_for,
+                found_at: find_in(search_path, name),
+            })
+            .collect(),
+        container: Availability::in_path(search_path),
+        providers: PROVIDERS
+            .iter()
+            .map(|&(name, needs, program)| Provider {
+                name,
+                needs,
+                program,
+                // Only the program is looked for. What a provider also needs —
+                // an endpoint, a key — is in the settings file and is not read.
+                found_at: program.and_then(|program| find_in(search_path, program)),
+            })
+            .collect(),
+        integrations: INTEGRATIONS
+            .iter()
+            .map(|&(name, adds)| Integration { name, adds })
             .collect(),
         problems,
         not_checked: NOT_CHECKED
@@ -390,7 +679,54 @@ fn locations(paths: &Paths) -> Locations {
         settings_file: place(paths.user_config_file()),
         store_file: place(paths.store_file()),
         store_origin: paths.origin(),
+        install_file: per_user_install(),
     }
+}
+
+/// Where a per-user installation puts its executable, if this platform has such
+/// a convention for SURE.
+///
+/// **Read from the platform's own per-user local data directory, not from
+/// [`Paths`]** — and that is the point of the function rather than an
+/// implementation detail. `Paths::data_dir` moves when a caller passes
+/// `--store-dir`, so deriving this from it would make a redirected store report
+/// the redirect as the installation. `sure doctor --store-dir X` would then tell
+/// a user their installation is at `X`, which is a false statement about a
+/// machine, made by the command that exists to catch those.
+///
+/// On Windows that directory is what `dirs::data_local_dir` returns —
+/// `SHGetKnownFolderPath(FOLDERID_LocalAppData)`, which is `%LOCALAPPDATA%` and
+/// is deliberately not read from the environment variable of that name: a
+/// process can be started with `LOCALAPPDATA` pointing anywhere, and an
+/// installation path read from the environment is one a user can be told they
+/// have.
+///
+/// The **location** is `%LOCALAPPDATA%\SURE\bin\sure.exe`, which is not invented
+/// here: it is the path `docs/architecture/MCP_BRIDGE.md` documents as the
+/// per-user install location, and the last resort of every launcher under
+/// `integrations/`. Whether an installer should use it is `P15-T003`'s question;
+/// this reports the path the launchers already agree on.
+///
+/// `None` where there is no such convention. On Unix-like platforms the
+/// launchers look in a cargo bin directory, Homebrew's prefix and `/usr/local`
+/// by turns — three system-wide-and-per-user places with no single SURE path
+/// among them — so naming one of them would be inventing a location rather than
+/// reporting one, and nothing is reported.
+#[cfg(windows)]
+fn per_user_install() -> Option<Place> {
+    let path = dirs::data_local_dir()?
+        .join(APP_DIR)
+        .join("bin")
+        .join("sure.exe");
+    let presence = presence(&path);
+    Some(Place { path, presence })
+}
+
+/// No per-user installation path is reported where SURE has no convention for
+/// one. See the Windows function above.
+#[cfg(not(windows))]
+fn per_user_install() -> Option<Place> {
+    None
 }
 
 /// What is at a path, distinguishing "nothing" from "could not look".
@@ -445,22 +781,22 @@ fn facts(store: &Store) -> Result<StoreFacts, StoreError> {
     })
 }
 
-/// Where a program of this name is, if it is anywhere on `PATH`.
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    let search_path = std::env::var_os("PATH")?;
-    find_in(&search_path, name)
-}
-
-/// The same, against a given search path.
+/// Where a program of this name is, if it is anywhere on the search path.
 ///
-/// Split out so it can be tested — and now for a second caller, which is
-/// [`crate::container`] looking for a container runtime. Visibility is
-/// `pub(crate)` rather than `pub` because the rule this function implements is
-/// *what SURE would execute*, and a crate that found a program by a different
-/// rule would be able to disagree with `sure doctor` about what is installed.
-/// **A third caller is the point at which this moves into a module of its own**;
-/// two is a shared helper and the same move [`crate::consent::runs_project_code`]
-/// got when it reached its second.
+/// Split out so it can be tested, and shared with [`crate::container`], which
+/// looks for a runtime by exactly this rule. Visibility is `pub(crate)` rather
+/// than `pub` because the rule this function implements is *what SURE would
+/// execute*, and a crate that found a program by a different rule would be able
+/// to disagree with `sure doctor` about what is installed.
+///
+/// `P15-T001` gave this function several callers inside this module — the tools,
+/// the toolchain, each provider's program and, by way of
+/// [`Availability::in_path`], the container runtime — which is past the point
+/// the earlier note here said would move it into a module of its own. It has not
+/// moved: a move is a change to every caller and to nothing a user can see, and
+/// this task's job was the report. **The move is still owed**, and the reason to
+/// make it is the one that has not changed: four questions about what is
+/// installed should not be answered from a module about diagnostics.
 ///
 /// Setting `PATH` for a test would need
 /// `std::env::set_var`, which is `unsafe` in edition 2024 and therefore

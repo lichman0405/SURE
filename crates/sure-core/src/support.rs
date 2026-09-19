@@ -53,8 +53,10 @@
 //! a `StartSmoke`, `tests/browser_probe.rs` holds the rule that nothing outside
 //! the adapter may name it, and `sure check` still records a goal and says that
 //! nothing was checked.
-//! [`crate::doctor`] searches for and probes toolchains, which is SURE talking
-//! about its own prerequisites.
+//! [`crate::doctor`] searches for the programs a build on this machine uses and
+//! reports where each one is, which is SURE talking about its own prerequisites
+//! without running any of them — *probes* would be a claim this build cannot
+//! make, and it does not make it.
 //!
 //! So the honest answer for every project in this build is level C, and
 //! [`CEILING`] is what says so in one place. It is a constant rather than a

@@ -605,9 +605,18 @@ fn an_unmet_case_blocks_the_release_and_moves_the_false_green_rate() {
     //     let why = match row.agreement {
     //         Agreement::Met => continue,
     //
-    // with a `continue` for every arm — i.e. `blocked` is never pushed — and the
-    // first assertion below goes red alone while every metric value in the
-    // document stays what it is.
+    // with a `continue` for every arm — i.e. `blocked` is never pushed. Measured
+    // under it, `cargo test -p sure-core --test release_gate_runner` reads `12
+    // passed; 4 failed`, and the four are every test that asserts this gate's
+    // decision on a corpus the mutation empties: this one, and
+    // `a_release_blocking_case_nothing_observed_blocks`,
+    // `the_false_green_rate_is_not_the_reports_unmet_total` and
+    // `every_metric_says_what_it_does_with_the_unmeasured_rows`. Four redden
+    // rather than one because the mutation empties `blocked_by` for every arm,
+    // and each of those asserts the decision unconditionally. No metric value
+    // moves: `blocked_by` and the metrics are computed from the report
+    // independently (`release_gate.rs:237-238`), and every metric assertion the
+    // mutation reaches still holds.
     let (report, gate) = the_gate_over(&control_corpus(
         CONTROL_MISS,
         BENIGN_MOCK,

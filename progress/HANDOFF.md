@@ -4,11 +4,46 @@ Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
 **In flight:** nothing, as of this paragraph. `P15-T001` — *"Finalize `sure doctor` for
-Windows developer/user environment"* — is **accepted as `7720202`**, over two worker
-commits (`c65604b`, `7720202`) from base `03f48f1`, and its four named gaps are
+Windows developer/user environment"* — is **accepted as `7720202` and repaired at `072ac9ee`**, over
+two worker commits (`c65604b`, `7720202`) from base `03f48f1`, and its four named gaps are
 recorded below rather than covered. The report now answers the four questions the module had been
 saying this task would bring: the container runtime, the analysis providers, the programs a build on
 this machine uses, and the harnesses SURE will take an event from.
+
+**The acceptance above was a false green, and CI found it the same day.** Run **35438699664** on
+`e1be7ba`: `rust (macos-latest)` (job `105885671293`) and `rust (ubuntu-latest)` (job
+`105885671296`) both fail at `cargo clippy --workspace --all-targets -- -D warnings` with
+`error: unused import: APP_DIR` at `crates/sure-core/src/doctor.rs:52:20`, so **`sure-core` did not
+compile on Linux or macOS at the accepted sha.** `APP_DIR` has exactly one use in that file and it is
+inside `#[cfg(windows)] fn per_user_install()`; the non-Windows arm at `:727` names nothing, so on
+Unix the import is unused and `-D warnings` makes it fatal. This is not environmental and not the
+ubuntu-only pattern on record — two platforms, one deterministic error, no race.
+
+**The error is the supervisor's, and it is the one this file already warns about in the other
+direction.** The acceptance had read run **35436798102** — the *dispatch* commit `f3d803a` — as green
+on all five jobs, which it was, and treated that as evidence about the work. **A dispatch commit
+carries no worker code**, so it said nothing whatever about `c65604b` and `7720202`. The correct
+statement about that run is that the dispatch was green and the work was unmeasured. The code's first
+real reading is this run, and it is red.
+
+**The gate built for this exact class named the crates it cannot reach, and the break went there.**
+`scripts/check-non-windows.mjs` records in its own header that this class *"left `ci` red for 75
+consecutive runs"*, and its output on this machine discloses that **`sure-core` and `sure-cli` were
+NOT checked** — `rusqlite` is `bundled` and `ureq` brings `ring`, so both need a cross C compiler
+that is not installed here. The disclosure is accurate, and every local gate stayed green on a crate
+no local gate compiles. Measured consequence: across `crates/` there are **56** arms gated
+`cfg(unix)` or `cfg(not(windows))` at HEAD and **50 of them are in `sure-core`**; this task added
+five of the 56 (`51` at `03f48f1`), and the other 45 pre-existed. Nothing was weakened to work
+around the gap and nothing was installed. **Until a cross C compiler exists on this machine, CI is
+the only non-Windows gate `sure-core` and `sure-cli` have.**
+
+**The repair is `072ac9ee`** — `crates/sure-core/src/doctor.rs` alone, 9 insertions and 2 deletions:
+`APP_DIR` is spelled `crate::paths::APP_DIR` at its one use site rather than imported, and the import
+carries a comment naming the break, the run that found it, why no Windows gate can, and the
+instruction that keeps it fixed — *"Do not add it back to this list."* CI run **35439272232** on it is
+**SUCCESS on all five jobs**, and it is the first run in which this task's code compiled *and its
+tests ran* on either Unix platform: the earlier job died at clippy, so every Unix test behind it was
+unrun rather than failing.
 
 **The secret guard did not move, and that is the first thing that was checked.**
 `crates/sure-core/tests/doctor.rs` shows **288 insertions and 0 deletions** over the base, so
@@ -2544,11 +2579,15 @@ The supervisor's own run, at `7720202`, from PowerShell (`gates.ps1 -Label sup-p
 case-sensitive headers, bootstrap `17 phases, 187 tasks`, taskctl `187 tasks`, store
 byte-identical before and after
 (`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`), worktree clean at start
-and at end. These reproduce the worker's own gate numbers exactly. The acceptance push is the first
-carrying the two worker commits, neither of which has a CI run of its own; the dispatch run
-**35436798102** for `f3d803a` was green on all five jobs, including `rust (ubuntu-latest)` —
-the shape that has carried a red ubuntu job twice for environmental reasons, read and named rather
-than waved through.
+and at end. These reproduce the worker's own gate numbers exactly — **and they are Windows-only
+evidence.** Gate 2 compiles the Windows `cfg` set and gate 6 excludes `sure-core` and `sure-cli`
+outright, so this run could not have caught the break recorded in the opening paragraphs. The
+acceptance push's own run, **35438699664**, is red on both Unix jobs. The dispatch run
+**35436798102** for `f3d803a` was green on all five jobs, including `rust (ubuntu-latest)` — but a
+dispatch carries no worker code, so that green is evidence about the dispatch and about nothing else.
+Reading it as evidence about the work is the error this entry corrects, and the shape that has
+carried a red ubuntu job twice for environmental reasons is what made it easy to read it that way
+without asking what the run contained.
 
 **The decisive check was a mutation none of the worker's seven attempted.** Theirs all moved the
 *measurement*; this one moved the *declaration*, which is the direction that would have exposed a
@@ -2574,6 +2613,38 @@ load-sensitive cluster failed twice in the worker's six full-suite runs and not 
 and the `sure cli contract` scratch-directory pool had reached 7701 directories and killed
 `a_directory_of_our_own` *before* any of this task's changes, which the worker proved by running an
 untouched test rather than by asserting it.
+
+**Validation of the repair, `072ac9ee`.** One file, `crates/sure-core/src/doctor.rs`, 9 insertions
+and 2 deletions, confirmed by `git show --stat` rather than read from the hand-back. The six gates
+re-run from PowerShell (`gates.ps1 -Label sup-p15t001-repair`): **all six exit 0**,
+`result-lines=79 passed=2623 failed=0 ignored=12 not-ok=0`, 69 case-sensitive headers, bootstrap
+`17 phases, 187 tasks`, taskctl `187 tasks`, store byte-identical
+(`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`), worktree clean at start and
+at end — reproducing the worker's numbers exactly. CI run **35439272232** on it: `headSha` read back
+as `072ac9eef053fa236e7ea8c83df30a7aa99b6dfb`, `conclusion success`, all five jobs. So the arms this
+task added are now measured rather than read, and `every_program_the_report_names_is_looked_for_on_the_search_path_it_was_given`
+passing on both Unix platforms is the empirical answer to whether `EXECUTABLE_SUFFIXES = &[""]` and
+`search_path_holding`'s `set_mode(0o755)` agree — two halves that live in different files and had
+never been compiled together.
+
+**The repair's brief carried an unchecked count, and it is corrected in the open rather than
+quietly.** It listed five Unix-only arms as added and named `crates/sure-core/src/doctor.rs:843`
+(`EXECUTABLE_SUFFIXES`) among them; `git show 03f48f1:` puts that pair at `:504`/`:508` and
+`can_be_run` at `:528`/`:536`, and `git diff 03f48f1..7720202` over that file mentions
+`EXECUTABLE_SUFFIXES` and `can_be_run` **zero times** — they pre-existed and merely renumbered. It
+also omitted `crates/sure-core/tests/doctor.rs:200`,
+`#[cfg(not(windows))] assert!(locations.install_file.is_none(), …)`, which *was* added. Counted
+mechanically instead of by eye, `crates/` carries **51** Unix-only arms at `03f48f1` and **56** at
+`7720202`, so the diff added five, four of which the brief named correctly. The count was right and
+the list was not, which is the same unchecked-count defect this repository treats as a defect.
+
+**What an acceptance record rests on, recorded because this one was wrong.** `scripts/taskctl.mjs:21`
+checks two things in full: that every key in `state.tasks` is a known task id, and that every task in
+`tasks/tasks.json` has a record. It does not read `head_sha`, `evidence`, `notes`, `status` or
+`finished_at`, and `grep head_sha schemas/*.json` finds nothing. **No gate would notice a stale,
+wrong or invented acceptance record** — so `P15-T001`'s `head_sha` now points at the repair on the
+supervisor's word alone. The gate suite is not what stands behind these entries; the evidence lists
+are, and they are only as good as the reading that produced them.
 
 ## What `P14-T013` added
 

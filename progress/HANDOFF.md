@@ -3,6 +3,43 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P13-T011` — *"Decide what a change to the project's files is,
+because no setting can allow one"* — dispatched from base commit `7c3e4c2` (the
+`P13-T010` acceptance and its one-field `head_sha` commit) with its brief at
+`target/tmp/brief-p13t011.md`. **It is a decision task first and a code task
+second, and its brief says so in its first paragraph**, because the tree is
+consistent with two different products and only one of them is the intended one.
+The measurement: `Permission::WriteProject` is granted by nothing in this build —
+`required_permission` sends `WriteProjectFile` and `DeleteProjectFile` to it,
+`decide` denies on a missing permission **before** it consults the mode,
+`ProjectRequest`'s seven variants include no arm that returns it,
+`Authority::permissions()` starts from `inspect_only()`, and the two literal
+`write_project` assignments in the tree are both inside `#[cfg(test)]` — so every
+file change is refused in every mode, and a Claude Code `PreToolUse Edit` under
+the user's own `host_confirmed` settings is answered Block. **An ordinary edit, in
+the most permissive configuration this build has.** Meanwhile
+`docs/security/PROTECTION_MODE.md:38-42` says `strict` *"differs from `standard`
+on the categories named above and on nothing else"* and then lists where a change
+is held, which read plainly is a promise that an ordinary change is **not** held
+under `standard`. The paragraph describes what a protection mode adds on top of a
+baseline, and there is no baseline. The worker may conclude either that refusing
+every change is the posture — SURE is a checking layer and not a coding-agent
+orchestrator, which is an argument *for* it — or that a change must be grantable
+from the user's own settings file and never from a project's `sure.yaml`, the way
+`P13-T009` and `P15-T022` settled `execution.mode` and `full_recording`. Either
+answer is acceptable; **a hand-back that changes code without first saying which
+one it found and what measurement decided it will be sent back.** The brief names
+the four things already in the tree that will fail if the permission is made
+grantable — `P13-T010`'s partition over all six permissions, and its `Edit` test,
+which asserts both that the refusal says *"No setting in this build grants it"*
+and that it names none of three settings — and says they are to be updated to the
+new truth rather than deleted, because noticing exactly this is what they were
+written for. **The base was measured rather than inherited**: 65 headers, 75
+result lines, **2547 parents**, 2557 raw, 0 failed, 12 ignored, agreeing with the
+`P13-T010` acceptance's own run to the test, which is what a commit touching only
+`progress/` should produce. The graph is at **187 tasks and 187 state entries,
+140 accepted**, and the READY list after this dispatch begins at `P14-T004`.
+
 **In flight:** nothing, as of this paragraph. `P13-T010` — *"Tell a person when a
 recorded allowance cannot be spent"* — is **accepted as `a1fe4f6`**, the third
 hand-back, after **two send-backs**; "What `P13-T010` added" and "Validation of

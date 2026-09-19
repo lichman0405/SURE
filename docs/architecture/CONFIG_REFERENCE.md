@@ -146,14 +146,18 @@ action SURE cannot classify.
 
 All three booleans are **requests for a permission**, never a grant. Setting
 `mode: host_confirmed` is a request to run project code; it does not grant it.
-The same is true of `allow_project_write`, with one more restriction on top: the
-permission it asks for is one a project's own file cannot be given. Only the
-user's own configuration grants it, so this key in a project's `sure.yaml` is
-refused and recorded as a refusal, and a change to the project's files is then
-blocked with *the current execution mode does not permit this action*. Nor does
-the mode stand in the way of a change: `write_project` is what a change needs,
-and a change is allowed in `inspect_only` once the user grants it, because
-writing the project's files does not run the project's code.
+The same is true of `allow_project_write`, and by the same rule rather than a
+stricter one. A project's own file cannot grant **any** request — see
+[CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md#requests-every-ask-is-on-the-record),
+the rule `P13-T009` settled for `execution.mode` and the one
+`privacy.full_recording` is held to as well — so this key in a project's
+`sure.yaml` is refused and recorded as a refusal, exactly like every other
+request a project makes. A change to the project's files is then blocked with
+*the current execution mode does not permit this action*. Nor is the mode what
+decides a change: none of the three booleans is in any execution mode's baseline
+permissions, so a request is the only route to each of them, and `write_project`
+is what a change needs — a change is allowed in `inspect_only` once the user
+grants it, because writing the project's files does not run the project's code.
 
 ### `analysis`
 

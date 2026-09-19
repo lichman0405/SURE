@@ -29,11 +29,21 @@
 //! # What is not claimed
 //!
 //! **Coverage of the whole corpus.** Six release-blocking cases have a fixture
-//! app, and all six are measured here. The other release-blocking cases cannot be
-//! measured by running anything: `check-crash`, `dangerous-delete`,
-//! `stale-test-evidence`, `tests-not-run` and `repair-regression` are directories
-//! holding a descriptor and no project, and `force-push` and `sensitive-read`
-//! have no fixture directory at all. Of the cases that do have an app,
+//! app, and all six are measured here. The other seven release-blocking cases
+//! have no fixture app and are not measured here: `check-crash`,
+//! `repair-regression`, `stale-test-evidence` and `tests-not-run` hold a
+//! declaration or a recording and no project, and `dangerous-delete`,
+//! `force-push` and `sensitive-read` are now the same shape — a declaration of
+//! requests and no project. That sentence was not true when this file was
+//! written: `dangerous-delete` was then a stub directory and `force-push` and
+//! `sensitive-read` had no directory at all, and what stopped being true is the
+//! shape rather than the conclusion, because all three answer `false` to
+//! `fixture_has_an_app` now as they did then. `P14-T008` wrote those three
+//! declarations and the test that grades them in-process —
+//! `adversarial_fixture_detection.rs`, driving `hook_protection` over each
+//! declared run — so the seven are graded somewhere, by other files, and what is
+//! claimed here has not moved: a release-blocking case with a fixture app is
+//! measured, and one without is not. Of the cases that do have an app,
 //! `missing-migration` is measured by `db_migrations` rather than by a candidate
 //! detector. This file measures what exists and names what does not, rather than
 //! asserting over a set it quietly shrank.
@@ -318,23 +328,32 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 
 /// Whether a corpus id has a fixture app rather than a stub or nothing at all.
 ///
-/// Two shapes are counted the same way here, because neither can be run: a
-/// corpus id with no fixture directory at all (`force-push`, `sensitive-read`,
-/// `benign-test-mocks`) and one whose directory holds no fixture app — no
-/// `entry_points` in its `scenario.json` (`check-crash`, `dangerous-delete`,
-/// `lying-readme`, `missing-user-intent`, `repair-regression`,
-/// `stale-test-evidence`, `tests-not-run`, `unknown-evidence`). The reading is
-/// taken from the fixture rather than from a list in this file, which would be a
-/// second place to keep it.
+/// Two shapes are counted the same way here, because neither has a project a
+/// scanner can discover: a corpus id with no fixture directory at all
+/// (`benign-test-mocks`) and one whose directory holds no fixture app — no
+/// `entry_points` in its `scenario.json`. The second set is read off the disk by
+/// the line below rather than enumerated here, which is what keeps this comment
+/// from being a second place to maintain it; at `P14-T008` it holds `check-crash`,
+/// `container-unavailable`, `dangerous-delete`, `dynamic-not-authorized`,
+/// `force-push`, `intent-mismatch`, `lying-readme`, `missing-user-intent`,
+/// `repair-regression`, `sensitive-read`, `stale-test-evidence`, `tests-not-run`
+/// and `unknown-evidence`, and it moves whenever a fixture gains or loses a
+/// project.
 ///
-/// **The second list is read off the disk rather than inherited**, and one name
-/// in it moved. `missing-user-intent` used to be listed with the ids that have
-/// no directory, which was true when this comment was written and stopped being
-/// true at `P14-T005`, which created the directory: it holds a `scenario.json`
-/// and a project under `src/`, and what it does not hold is an `entry_points`
-/// key. Nothing depended on the grouping — this function answers `false` either
-/// way, which is why no test went red — so `P14-T007` corrected the sentence
-/// rather than leave a claim in the tree that `ls` contradicts.
+/// **The lists are read off the disk rather than inherited**, and names in them
+/// moved. `missing-user-intent` used to be listed with the ids that have no
+/// directory, which was true when this comment was written and stopped being true
+/// at `P14-T005`, which created the directory: it holds a `scenario.json` and a
+/// project under `src/`, and what it does not hold is an `entry_points` key.
+/// Nothing depended on the grouping — this function answers `false` either way,
+/// which is why no test went red — so `P14-T007` corrected the sentence rather
+/// than leave a claim in the tree that `ls` contradicts. The other correction is
+/// `P14-T008`'s: this comment said `dangerous-delete` was a stub directory and
+/// listed `force-push` and `sensitive-read` with the ids that have no directory
+/// at all, and both were true when it was written and stopped being true when
+/// that task wrote the three declarations. They still answer `false` here — none
+/// of the three holds a project — so the reading was correct while the sentence
+/// describing it was not.
 fn fixture_has_an_app(id: &str) -> bool {
     let path = fixture(id).join("scenario.json");
     std::fs::read_to_string(&path).is_ok_and(|scenario| scenario.contains("\"entry_points\""))
@@ -411,12 +430,19 @@ fn every_release_blocking_case_with_a_fixture_app_meets_the_manifest() {
 
     // The set, named. A release-blocking case that gained a fixture app, or one
     // of these that lost one, stops this test rather than silently shrinking what
-    // the assertion above covers. `force-push` and `sensitive-read` are
-    // release-blocking and have no fixture directory at all; `check-crash`,
-    // `dangerous-delete`, `repair-regression`, `stale-test-evidence` and
-    // `tests-not-run` are stub directories holding a descriptor and nothing to
-    // run. None of them can be measured by running anything, and this test does
-    // not pretend otherwise.
+    // the assertion above covers. The other seven release-blocking cases have no
+    // fixture app and are not measured here: `check-crash`, `repair-regression`,
+    // `stale-test-evidence` and `tests-not-run` hold a declaration or a recording
+    // and no project, and `dangerous-delete`, `force-push` and `sensitive-read`
+    // are the same shape since `P14-T008`. This comment used to say `force-push`
+    // and `sensitive-read` had no directory at all and that `dangerous-delete` was
+    // a stub holding a descriptor and nothing to run: that was true when it was
+    // written and stopped being true at `P14-T008`, which wrote the three
+    // declarations and the test that grades them in-process
+    // (`adversarial_fixture_detection.rs`, driving `hook_protection` over each
+    // declared run). What has not changed is why none of the seven is in the list
+    // below: not one of them is a project the candidate detectors here can
+    // discover, so none of them can be measured by this test.
     let ids: Vec<&str> = measured.iter().map(|(id, _)| id.as_str()).collect();
     assert_eq!(
         ids,

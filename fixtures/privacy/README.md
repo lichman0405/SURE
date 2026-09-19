@@ -65,12 +65,18 @@ Two of these deserve a note.
   own driven case here: a behaviour nothing is named after disappears in a rename.
 - `the-three-acts-an-allowance-reaches-are-holds-and-only-those` — the broad
   change, the force push and the read of credentials are held by a rule that is
-  tested, but the *scenarios* for those three acts belong to `P14-T008`
+  tested here, but the *scenarios* for those three acts belong to `P14-T008`
   ("Delete/force-push/sensitive-read expected protection behavior tested"). As this
-  tree stands, `fixtures/adversarial/dangerous-delete/` holds a stub carrying
-  `fixture_status: to_be_implemented_by_task_graph`, and the other two have no
-  directory at all. See `not_confirmed[the-dangerous-action-scenarios-are-p14-t008s]`,
-  whose `what` measures the same three.
+  tree stands, `fixtures/adversarial/dangerous-delete/`, `force-push/` and
+  `sensitive-read/` each hold a `scenario.json` declaring the runs and a
+  `README.md`, and they are graded in-process by
+  `crates/sure-core/tests/adversarial_fixture_detection.rs`, which drives the
+  protection rule over every declared run. This paragraph used to say
+  `dangerous-delete` held a stub carrying
+  `fixture_status: to_be_implemented_by_task_graph` and that the other two had no
+  directory at all, which was true when it was written and stopped being true at
+  `P14-T008`. See `not_confirmed[the-dangerous-action-scenarios-are-p14-t008s]`,
+  whose `what` says the same three.
 
 ## What "no false green" means in this file
 

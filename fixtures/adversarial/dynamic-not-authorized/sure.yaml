@@ -1,0 +1,8 @@
+# This project's own file asks for its checks to be run on this computer.
+#
+# It is a request and not a grant: only the user's own configuration file can
+# authorise execution, and this one is inside the project. The fixture ships it
+# so that a build which read execution authority out of the project would be a
+# red test rather than an undetected escalation.
+execution:
+  mode: host_confirmed

@@ -3,46 +3,63 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T013` — *"Bring the corpus's record of detector severity back in line with the
-detectors"* — is **dispatched**, not accepted, from base `5229806` (the `P14-T012` acceptance), with
-its brief at `target/tmp/brief-p14t013.md` and the tree clean at dispatch. Its five acceptance
-criteria are in `tasks/tasks.json`; the short form is that the fixtures must say what the detectors
-actually do, a test must keep them saying it, and the requirement they are measured against must not
-move to make that easier.
+**In flight:** nothing, as of this paragraph. `P14-T013` — *"Bring the corpus's record of detector
+severity back in line with the detectors"* — is **accepted as `861198f`**, over two worker commits
+from base `5229806` (the `P14-T012` acceptance), with its brief at `target/tmp/brief-p14t013.md` and
+the tree clean at dispatch and at acceptance. It was not sent back. The next ready work is the P15
+packaging set.
 
-**Why it exists.** P7-T011 gave detector findings the severity the corpus required, and in doing so
-made the corpus's own record of what the detectors do false: six fixtures still carry
-`detector_severity_today: "note"` and `notes` sentences saying every detector emits `Severity::Note`
-and that `adversarial_fixture_detection.rs` "pins the gap". No `.rs` file reads the field — the only
-Rust occurrences of the string are prose in `acceptance_report.rs` — which is exactly why it could go
-stale unnoticed. P7-T011 deliberately did not edit any of it, because a task that measures against a
-requirement should not be the task that rewrites it afterwards.
+**The corpus now says what the detectors do, and a test keeps it saying so.** Twenty-five of the
+thirty-seven rows carrying `detector_severity_today` had recorded a severity that `P7-T011` made
+false, and nothing noticed for two days for a reason worth keeping in mind: `grep -rn
+detector_severity_today crates/` found one prose line and no reader at all, and a field no `.rs` file
+reads cannot be contradicted by one. Nine fixtures are corrected; one row is handled by criterion 1's
+other arm, `detector_severity_measured_by`, which names the test that measures it; and
+`every_recorded_detector_severity_is_what_the_detector_produces_today` now reads each fixture's own
+text, runs the detector named beside it, and compares — so the field cannot go stale unnoticed again.
+It keeps no list of expected severities, because that would be a second place to keep the same fact,
+and its dispatch table ends in a `panic!` rather than a skip, so a surface it cannot run is a red test
+rather than a row quietly never asked about.
 
-**The scope is wider than the notes say, and that was measured rather than assumed.** The notes name
-six fixtures. `detector_severity_today` actually occurs 37 times across **thirteen**, and four of them
-carry a non-`note` value: `external-unverified` and `missing-config` say `should_fix_first`,
-`missing-migration` and `rust-tests-fail` say `must_fix`. The six are the ones that carry both the
-field and a severity-gap sentence; `unknown-evidence`, `tests-not-run` and `stale-test-evidence` carry
-`note` and are not among them, so whether those three are accurate is an open question the task has to
-close by running the detectors. The working is at `target/tmp/p14t013-facts.md`.
+**Thirteen rows record a requirement their detector cannot reach, and say so.** `fake-auth` requires
+`must_fix` for `CandidateCategory::Todo` at `src/auth.js` while `demo-analytics` requires
+`should_fix_first` for the same category in the same context with the same evidence class, so no
+function of a proposal's own fields satisfies both. Those rows carry a `required_severity_unmet` block
+with the reason and what would have to change, and the test refuses such a block on a row that *does*
+meet its requirement — so the record cannot rot in that direction either. The line the task had to
+hold is between `required_severity`, which is the requirement and belongs to the manifest, and the two
+fields that are the corpus's record of the detectors. Nothing the manifest owns moved: the diff
+contains no added, changed or removed `required_severity` line, and
+`evaluation/acceptance-manifest.json` was not opened.
 
-**The tension is between criterion 2 and criterion 5, and it is the whole task.** Criterion 2 wants a
-test that reads a fixture's own text and runs the detector, and forbids a hand-kept list of expected
-values as "a second place to keep the same fact". Criterion 5 forbids lowering `required_severity` for
-release-blocking cases and forbids touching `evaluation/acceptance-manifest.json` at all — *"A corpus
-edited to agree with the code is the false green this repository exists to catch, one level up."* The
-line between them: `required_severity` is the requirement and is not the task's to move, while
-`detector_severity_today` and the `notes` sentences are the corpus's record of what the detectors do,
-which is what went stale, and are. The test for whether the line was crossed is whether a number the
-manifest owns changed.
+**The check that mattered was on the fixtures the task did *not* edit.** The worker's mutation hit
+`dead-button`, which the task rewrites; a test that silently skipped the four fixtures left alone would
+still look right on that. So the supervisor's own mutation went at `unknown-evidence` — one of the four
+untouched, and one of the three whose `note` value the task notes had called an open question — and it
+reddens the test naming the fixture, the row, the surface and the detector. Under that mutation the
+whole workspace reads exactly one failing test, which is also the measurement that no other test in the
+tree reads the field. The three fixtures the notes flagged as open questions all turned out to record
+`note` correctly: they are the three `claim_checker` rows, and `note` is what the claim checker attaches.
 
-**Also in scope, and easy to miss:** the sentence at `acceptance_report.rs:682-688` that P14-T011 ships
-in its report — *"Six fixtures carry a `detector_severity_today` and a `notes` sentence saying every
-detector emits `Severity::Note`"* — is accurate today, checked field by field, and criterion 3 makes it
-the task's to keep true. And criterion 1 protects `SEVERITY_BEFORE_P7T011`
-(`adversarial_fixture_detection.rs:1047`) and the inverted test that carries it: that is the only
-statement in the tree that the required and the delivered severity were ever different, and it is not
-to be tidied away.
+**A supervisor error, recorded because it is the kind this repository keeps.** The workspace run was
+first made from the **Bash** tool, which the standing rule forbids, and it came back with four red
+targets where there is one. Three were `.ps1` launchers refused by the execution policy in the
+environment the Bash tool hands down — `UnauthorizedAccess`, `about_Execution_Policies` — and not
+defects in the tree. Nothing was weakened to make them pass; the run was discarded and retaken from the
+PowerShell tool, where the three pass and the blast radius reads one. The rule earned its place again:
+a gate run outside the PowerShell tool measures a different environment and reports the difference as
+the tree's fault.
+
+**The honest limits, none smoothed over.** Criterion 4 reaches the rows that carry a record of a
+detector severity, and eleven rows carry a `required_severity` with no record of either kind, so those
+are not checked for it — a narrower reach than the criterion's wording, which is the safe direction.
+The `required_severity_unmet` shape is new to the corpus and the test's 40-character floor on each
+sentence is a proxy the criterion does not state, and the unsatisfiability of the `Todo` conflict is
+argued rather than machine-checked. `intent-mismatch` was deliberately left out of the new test, being
+outside the field the task owns. And `crates/sure-cli/src/mcp.rs:1049-1064` leaks scratch store
+directories until it fails deterministically rather than flakily — it had reached 1033 when the worker
+deleted them to unblock its gates, and it refilled to 88 in one run of the supervisor's. That is filed
+rather than fixed, being another crate's test.
 
 **In flight:** nothing, as of this paragraph. `P14-T012` — *"Meet mandatory false-green release
 metrics"* — is **accepted as `697db64`**, over three worker commits from base `2063b19` (the
@@ -2443,6 +2460,63 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T013` added
+
+The corpus's record of what the detectors produce, brought back in line with the detectors and held there.
+
+- **Nine `fixtures/adversarial/*/scenario.json` files**, whose `detector_severity_today` values now state
+  what the detector named beside them produces: 25 values changed, 11 to `can_fix_later`, 10 to
+  `must_fix`, 4 to `should_fix_first`, leaving `note` on the three `claim_checker` rows where `note` is
+  what the claim checker attaches. Their `notes` sentences are rewritten to say what the tree now does.
+- **`every_recorded_detector_severity_is_what_the_detector_produces_today`** in
+  `crates/sure-core/tests/adversarial_fixture_detection.rs`, the test that keeps it true. It discovers
+  fixtures from the directory, reads each one's own text, runs the detector that document's `surface`
+  and `detector` name, and compares. It asserts three counted numbers — `checked == 36`,
+  `unmet.len() == 13`, `measured_elsewhere == ["rust-tests-fail"]` — so a row cannot escape by losing
+  its field.
+- **`detector_severity_measured_by`**, criterion 1's own alternative wording, used exactly once: for
+  `rust-tests-fail`'s `project_verdict` row, whose value is what a whole run of that fixture aggregates
+  to. The statement is `path::test_name`, both halves are checked against the tree, and the test asserts
+  the list is exactly one row long so the weaker arm cannot spread.
+- **`required_severity_unmet`** on thirteen rows, with `why` and `would_require` — the eleven
+  `candidate_scanner` rows whose category the corpus requires at two different weights, plus the two
+  claim rows. No fixture used the key before, and the schema needed no change because
+  `schemas/fixture-expectation.schema.json`'s `required_outcomes` items carry no
+  `additionalProperties` restriction.
+- **The `limitations` sentence in `crates/sure-core/src/acceptance_report.rs`**, the one file change
+  outside the fixtures and the test. It now records that the corpus's records were stale when the report
+  was written, that no `.rs` file read the field, and that `P14-T013` re-measured every value and left a
+  test that re-runs each detector.
+
+## Validation of `P14-T013`
+
+The supervisor's own run, at `861198f`, from PowerShell (`gates.ps1 -Label p14t013-sup`): **all six
+gates exit 0**, `result-lines=79 passed=2618 failed=0 ignored=12 not-ok=0`, 69 case-sensitive headers,
+bootstrap `17 phases, 187 tasks`, taskctl `187 tasks`, store byte-identical before and after
+(`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`), worktree clean at start and at
+end. The pass count is one above the P14-T012 acceptance's 2617 because the task adds exactly one test.
+
+Verified independently rather than read from the hand-back: the footprint is eleven files with
+`evaluation`, `progress`, `tasks` and `SHA256SUMS.txt` all absent from the changed-file list; the diff
+of `acceptance_report.rs` is the one sentence and nothing else; the diff of
+`adversarial_fixture_detection.rs` has exactly one deletion and it is the widened import, with
+`SEVERITY_BEFORE_P7T011` and the inverted test appearing nowhere in the diff at all. The corpus was
+counted with an independent script — 36 rows, 13 fixtures, 13 unmet blocks, 1 `measured_by` row — and
+matched the hand-back exactly. Criterion 1 was read in `tasks/tasks.json` to confirm the
+`detector_severity_measured_by` arm is the criterion's own wording rather than an escape hatch the
+worker invented.
+
+**The two anti-vacuity measurements, both made rather than asserted.** The supervisor's mutation on the
+untouched `unknown-evidence` reddens the test naming the fixture, row, surface and detector; with it
+applied, the whole workspace reads one failing test. And that first workspace run was made from the
+wrong tool and read four — three of them `.ps1` launchers refused by the Bash tool's execution policy,
+which is the failure mode the "gates from PowerShell" rule exists to prevent. Nothing was weakened to
+make them pass; the run was discarded and retaken.
+
+The follow-up filed rather than fixed: `crates/sure-cli/src/mcp.rs:1049-1064` scans `store-0`..
+`store-999` from a per-process counter and never cleans up, so it becomes deterministically red rather
+than flaky after enough runs.
 
 ## What `P14-T012` added
 

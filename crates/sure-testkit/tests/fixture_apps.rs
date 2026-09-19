@@ -125,6 +125,22 @@ use serde_json::Value;
 /// that grades it — lives one crate closer, in
 /// `crates/sure-core/tests/repair_regression_guard.rs`, because only there is
 /// the module the scenario names reachable.
+///
+/// `benign-test-mocks` joined it in `P14-T010`, and for the rule above rather
+/// than for a language: the corpus was the last stub on this list, and the task
+/// that filled it gave it a checkout service to be about, so it ships a
+/// `package.json` and the four artefact checks apply to it from here on. The
+/// name says nothing about who grades it. Nothing in this file runs it, and its
+/// answer comes out of `crates/sure-core/tests/benign_fixture_e2e.rs`, which
+/// drives discovery and the five candidate detectors over a copy of this
+/// directory in process and asserts the severity of every proposal they make
+/// about it. That is the right home for this one rather than this file: the
+/// case is a claim about a severity, and a severity is decided by
+/// `sure_core::finding_gravity`, which is reachable from there and not from
+/// here. What this file can say about the fixture — that it runs with nothing
+/// installed but Node, that its scenario parses and agrees with the release
+/// manifest about `note` and about not blocking a release — is checked above
+/// like every other Node fixture's.
 const TYPESCRIPT_FIXTURES: &[&str] = &[
     "fake-payment",
     "fake-auth",
@@ -134,6 +150,7 @@ const TYPESCRIPT_FIXTURES: &[&str] = &[
     "route-mismatch",
     "dynamic-not-authorized",
     "repair-regression",
+    "benign-test-mocks",
 ];
 
 /// The `P14-T002` fixtures, named for the same reason as the list above.

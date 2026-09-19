@@ -3,6 +3,58 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T009` — *"Implement repair E2E/regression fixture"* — is **dispatched**, not
+accepted, from base `a39e769` (the `P14-T008` acceptance), with its brief at
+`target/tmp/brief-p14t009.md` and the tree clean at dispatch. Its criterion is *"Repair can close only
+with new passing evidence; regression variant blocked."* and it is the task `P10-T008`'s read-back
+handed the real end-to-end claim to — item 78 below — on the ground that the round trip carrying that
+name never invokes `sure check`, `sure repair` or `sure recheck`.
+
+**What exists, measured at the base.** The rule is one function — `recheck_passed`
+(`crates/sure-core/src/recheck_lifecycle.rs:185-200`): no list, or an empty list, or any selected check
+that is not `CheckStatus::Pass`, and the finding stays open — deciding at `:158-171` between
+`Resolved` and `Open`. Selection is `repair_impact::select_impacted_checks` (`repair_impact.rs:32`),
+and it has **no caller outside tests**. The fixture itself is **one 186-byte `scenario.json` in a
+directory that holds nothing else**, named at `finding_severity_rule.rs:34` and `:434` among the
+release-blocking cases that "have no fixture app and are not measured here", and in no list in
+`fixture_apps.rs` at all.
+
+**The fact that decides the task, and the reason the brief spends its length on the level.** The live
+path **cannot close anything**: `pipeline.rs:1109-1117` calls `reconcile` with `rechecks: &[]`, and
+`:1102-1108` gives the reason in as many words — *"rather than inventing a re-check list that would let
+it close findings on evidence nobody gathered."* Stage 11 is `NotRun` whenever there is a finding
+(`:1133-1171`). So *"the regression variant is blocked"* is satisfied in this build by a product that
+closes nothing at all, and the **positive half** — a finding that does resolve on new passing evidence
+— is what makes the negative half mean anything. The brief therefore has the worker drive SURE's real
+modules over a real fixture project, the way `rust_fixture_apps.rs` drives the Rust pair, and forbids
+the one change that would make closure reachable through the binary — wiring `select_impacted_checks`
+into the pipeline — as a different task with a different acceptance.
+
+**The fixture's own claim is already a claim.** `scenario.json` says `"fixture_status": "implemented"`
+and a test asserts it by grepping for the word (`repair_regression_guard.rs:272-278`), so "implemented"
+currently means "a test greps for the string", which is the species of green this task exists to
+replace.
+
+**Sentences the work makes false**, named in the brief so they are reconciled rather than left:
+`finding_severity_rule.rs:34` and `:434`; the comment above `the_fixture_status_is_implemented`; the
+fixture's own `scenario.json`; and whatever `fixture_apps.rs` should now say — which the worker decides
+by measurement, because that file documents why a list in it is a claim rather than a register.
+
+**The base is stated rather than assumed.** `a39e769` is the `P14-T008` acceptance: four files, 308
+insertions, 73 deletions, and `git diff --stat a39e769 -- crates/` is empty — three supervisor files
+plus one `tasks/tasks.json` reconciliation, none of which anything in `crates/` reads.
+
+**The CI reading owed to this entry is discharged, and it is red for a flake.** Run `35427975530` for
+`a39e769` is **failure** — `rust (ubuntu-latest)` only; bootstrap, shellcheck, macOS and Windows are
+green. The failure is `a_service_that_is_dropped_is_stopped_anyway`, panicking at
+`crates/sure-core/tests/service_supervisor.rs:745:10` inside `.expect("a service that starts")` with
+`message: "Text file busy (os error 26)"` on the test's own `working/python`. That is the ETXTBSY errno
+already on record in this tree from `analysis_provider/mod.rs:591`, at a **second site** and an
+**earlier assertion** than the `:793:5` sighting recorded for this same test name; what the message
+shows is that this one executes a script in the test's **own** scratch directory, where the recorded
+sighting was a shared path under `target/tmp`. It is test-side, it is on Linux, and it is not repaired
+here.
+
 **In flight:** nothing, as of this paragraph. `P14-T008` — *"Implement dangerous-action fixtures"* —
 is **accepted as `22363b3`**, on the **second submission**, over five worker commits from base
 `83e3e58` (the `P14-T007` acceptance), with its brief at `target/tmp/brief-p14t008.md`, its send-back

@@ -291,15 +291,18 @@ pub struct HookAllowance {
     pub grant: i64,
     /// When it stops being usable, in milliseconds since the epoch.
     pub not_after_ms: i64,
-    /// Which of the three acts a request could be held for under the settings in
-    /// force when this was recorded.
+    /// Which of the three acts a request **naming this tool** could be held for
+    /// under the settings in force when this was recorded.
     ///
     /// Carried because the sentence a user reads must not name an act those
-    /// settings make unreachable: an allowance covers a request SURE holds, and
-    /// which holds exist is a fact about the settings — the mode, the
-    /// permissions and the protection mode — that
-    /// [`sure_core::hook_protection::acts_a_request_could_be_held_for`] answers
-    /// from the rule itself. `sure hook allow-once` refuses to record at all
+    /// settings make unreachable — and "unreachable" is about the tool as well
+    /// as about the settings: a grant is spent by a request that matches the
+    /// tool and the words, so an act strict holds a *read* for is one a grant
+    /// recorded for `Shell` can never be spent on. The facts behind the list are
+    /// the mode, the permissions, the protection mode and the action kind the
+    /// tool maps to, and
+    /// [`sure_core::hook_protection::acts_a_tool_could_be_held_for`] answers
+    /// them from the rule itself. `sure hook allow-once` refuses to record at all
     /// when the answer is empty, so this is non-empty in every report that
     /// carries it.
     pub acts: Vec<sure_core::hook_protection::Danger>,

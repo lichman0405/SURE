@@ -40,7 +40,7 @@ use sure_core::full_recording::{
 };
 use sure_core::harness_event::ingest_event_str;
 use sure_core::hook_protection::{
-    Assessment, Danger, ProtectionDecision, ToolRequest, acts_a_request_could_be_held_for,
+    Assessment, Danger, ProtectionDecision, ToolRequest, acts_a_tool_could_be_held_for,
     allowance_could_not_be_spent_reason, allowance_reason, allowance_unreadable_reason,
     assess_claude_code_tool, assess_cursor_tool,
 };
@@ -104,32 +104,38 @@ pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
 /// ([`sure_core::hook_protection`]), because that is the only moment at which
 /// there is a request to read, and a command line this function refused to
 /// record would be a second rule about what is dangerous. What this function
-/// *does* refuse is a window SURE will not record, a project whose settings
-/// leave nothing an allowance could ever spend, and a request with no words in
-/// it: the first two are [`run_allow_once_with_paths`]'s, the third the grammar's
-/// as well.
+/// *does* refuse is a window SURE will not record, a project and a tool whose
+/// settings leave nothing an allowance for that tool could ever spend, and a
+/// request with no words in it: the first two are
+/// [`run_allow_once_with_paths`]'s, the third the grammar's as well.
 ///
-/// The settings are read while the subject is not, and the difference is what is
-/// knowable now rather than what would be convenient: `--project` names the
-/// directory every future request from that project is answered against, so the
-/// execution mode, the permissions and the protection mode in force are all
-/// available at this moment, and they decide whether *any* request can be held
-/// for one of the three acts an allowance covers. A grant written where none can
-/// be is a grant spent by nothing, and `P13-T010` is the task that made the
-/// writer say so instead of promising that the first matching request would
-/// spend it. Reading the settings here describes them and grants nothing: what
-/// may run is still the arbitrated answer of `Authority`, and a project file
-/// cannot raise it (`P13-T009`).
+/// The settings and the tool are read while the subject is not, and the
+/// difference is what is knowable now rather than what would be convenient:
+/// `--project` names the directory every future request from that project is
+/// answered against and `--tool` names the harness tool it has to carry, so the
+/// execution mode, the permissions and the protection mode in force, and the
+/// action kind the tool maps to, are all available at this moment — and together
+/// they decide whether a request matching both can be held for one of the three
+/// acts an allowance covers. A grant written where none can be is a grant spent
+/// by nothing, and `P13-T010` is the task that made the writer say so instead of
+/// promising that the first matching request would spend it. Reading the
+/// settings here describes them and grants nothing: what may run is still the
+/// arbitrated answer of `Authority`, and a project file cannot raise it
+/// (`P13-T009`).
 ///
-/// There is no validation of the *subject* against the tools SURE knows, and no
-/// requirement that the tool be one of them. The tool name is the harness's
-/// vocabulary and this is the user's claim about which harness tool they are
-/// covering; an allowance that names a tool no request ever carries is spent by
-/// nothing and expires, which is a wasted minute and not a wrong answer. The
-/// same is true of a subject SURE would never name as dangerous: it is recorded,
-/// it is never spent, and what the user reads says which of the three acts the
-/// settings in force leave for an allowance to cover — which is what tells them
-/// a grant they cannot spend is one they should not expect anything from.
+/// The *tool* is read, and it is not the subject: the two are separate halves of
+/// what a grant matches. A tool name is the harness's own vocabulary, and SURE
+/// answers it through both harnesses' tables; a name neither knows is
+/// `ArbitraryCommand`, so a user may still cover a tool SURE has never heard of,
+/// and that is the one arm where a grant can be recorded for words no request
+/// carries — the wasted minute rather than the wrong answer. The **subject**
+/// stays unread: whether `rm -rf build/` or `.env` is dangerous is decided when
+/// a request arrives, and a command line this function refused to record would
+/// be a second rule about what is dangerous. So what the user reads is what the
+/// settings in force leave for *their tool*, and a grant recorded for words
+/// SURE would never name as dangerous is one it is never spent on — which is the
+/// residual `docs/security/PROTECTION_MODE.md` states and this command cannot
+/// close.
 ///
 /// The project is the one caller-side fact this command takes as given, because
 /// nothing else can supply it: [`run_allow_once_with_paths`] stores the grant
@@ -209,19 +215,27 @@ fn run_allow_once_with_paths(
     }
 
     // The settings in force, read before anything is written, because they decide
-    // whether a grant written now can ever be spent: a danger is named only for a
-    // request SURE holds, and whether any request from this project is held is a
-    // question about the mode, the permissions and the protection mode rather
-    // than about the words. Refusing is the direction that fails closed and the
-    // one that keeps the store honest — a row nothing can spend looks like a
-    // grant in `sure history` while being a promise SURE cannot keep — and the
-    // sentence names the setting to change rather than the refusal alone.
+    // whether a grant written now can be spent at all: a danger is named only for
+    // a request SURE holds, and whether a request is held is a question about the
+    // mode, the permissions and the protection mode rather than about the words.
+    // Refusing is the direction that fails closed, and the sentence names the
+    // setting to change rather than the refusal alone.
+    //
+    // The question is asked of the **tool the user named**, which is the other
+    // half of the same rule and the half that was missing: a grant is spent by a
+    // request that matches the tool and the words, so a project in which a read
+    // of credentials is within reach of an allowance is still one where a grant
+    // for `Shell` is spent by nothing (`P13-T010`, second dispatch). Only the
+    // tool is narrowed. The subject is still unread, because there is no request
+    // to read it against; the tool is not the subject, it is the name the
+    // harness will send back.
     //
     // The window is checked first so that a duration SURE does not record is
     // answered as that, whatever the project says: it is the one refusal a user
     // can fix without looking at anything but the command line they typed.
     let (mode, permissions, protection) = load_execution_config(project_root, paths);
-    if let Some(reason) = allowance_could_not_be_spent_reason(mode, &permissions, protection) {
+    if let Some(reason) = allowance_could_not_be_spent_reason(tool, mode, &permissions, protection)
+    {
         return failed(
             "SURE will not record an allowance that no request could spend.",
             reason,
@@ -263,11 +277,12 @@ fn run_allow_once_with_paths(
             minutes,
             grant,
             not_after_ms: now_ms.saturating_add(i64::from(minutes) * 60_000),
-            // The acts reachable under the settings just read, carried into the
-            // sentence so that a confirmation cannot name an act those settings
-            // make unreachable. Non-empty, because the refusal above returned on
-            // the empty answer.
-            acts: acts_a_request_could_be_held_for(mode, &permissions, protection),
+            // The acts reachable under the settings just read **by a request
+            // naming this tool**, carried into the sentence so that a
+            // confirmation cannot name an act those settings make unreachable —
+            // for the tool it is about. Non-empty, because the refusal above
+            // returned on the empty answer.
+            acts: acts_a_tool_could_be_held_for(tool, mode, &permissions, protection),
         })),
         Err(error) => failed("SURE could not record the allowance.", error.to_string()),
     }
@@ -2030,11 +2045,13 @@ mod tests {
         // inverted rather than deleted. Until this task the writer recorded the
         // grant and this test asserted it was still there afterwards
         // (`outstanding_grants(..).len() == 1`): a row nothing could ever spend,
-        // which `sure history` shows as a live allowance and no request can use.
-        // The property the assertion was there for is unchanged and is now
-        // asserted against the store directly — nothing was spent on a request
-        // the mode had already refused — and it is the stronger form, because a
-        // grant that was never written cannot be spent by anything.
+        // and — measured, second dispatch — a row no command in this build
+        // would even show a user, because `sure history` lists sessions and has
+        // no allowance surface at all (`crate::cli`'s `HistoryAction`). The
+        // property the assertion was there for is unchanged and is now asserted
+        // against the store directly — nothing was spent on a request the mode
+        // had already refused — and it is the stronger form, because a grant
+        // that was never written cannot be spent by anything.
         let refused = run_allow_once_with_paths(
             "Shell",
             "rm -rf build/",
@@ -2644,15 +2661,27 @@ mod tests {
     #[test]
     fn a_grant_carries_the_acts_the_settings_in_force_leave_for_it() {
         // Acceptance line 3's first half, at the value the sentence is built
-        // from: a shell request under a mode that does not run project code is
-        // refused before its danger would be read, so this project leaves
-        // exactly one act — the read strict holds — and a confirmation that
-        // offered a broad delete or a force push would be offering an outcome
-        // these settings make unreachable.
+        // from.
+        //
+        // **Changed by `P13-T010`'s second dispatch, and the change is the
+        // point.** This test used to build the project below — strict
+        // protection, nothing else — and record a grant for **`Shell`,
+        // `rm -rf build/`**, asserting `acts == vec![Danger::SensitiveRead]`.
+        // That grant was written and could never be spent: under
+        // `inspect_only` a shell request is refused by the mode before its
+        // danger is read, and the only act these settings leave belongs to a
+        // read. The assertion was true of the *project* and false of the
+        // *grant*. Now the same command is refused rather than recorded, and
+        // the acts idea is under test on a tool that can reach an act.
         let (project, paths) = a_project_with("p13t010-acts", "protection:\n  mode: strict\n");
+
+        // The tool that can reach the act these settings leave: strict holds a
+        // read of a file credentials live in, and every run may read. A
+        // confirmation that offered a broad delete or a force push here would be
+        // offering an outcome these settings make unreachable.
         let recorded = run_allow_once_with_paths(
-            "Shell",
-            "rm -rf build/",
+            "Read",
+            ".env",
             &project.to_string_lossy(),
             allowance::DEFAULT_MINUTES,
             &paths,
@@ -2663,8 +2692,39 @@ mod tests {
                 vec![Danger::SensitiveRead],
                 "the confirmation would offer an act these settings cannot hold"
             ),
-            other => panic!("a project that can spend a grant answered with {other:?}"),
+            other => panic!("a tool that can reach this project's act answered with {other:?}"),
         }
+
+        // And the tool that cannot reach one is refused, on the same settings:
+        // the sentence and the list are the same question, so a grant for a
+        // tool with no act is one the writer will not write.
+        let refused = run_allow_once_with_paths(
+            "Shell",
+            "rm -rf build/",
+            &project.to_string_lossy(),
+            allowance::DEFAULT_MINUTES,
+            &paths,
+        );
+        match refused {
+            Report::Failed(failure) => {
+                assert!(
+                    failure.detail.contains("Shell"),
+                    "the refusal does not name the tool the grant was for: {}",
+                    failure.detail
+                );
+                assert!(
+                    !failure.detail.contains("Set `protection.mode: strict`"),
+                    "the refusal offers a change that would leave this grant unspendable: {}",
+                    failure.detail
+                );
+            }
+            other => panic!("a grant nothing could spend was answered with {other:?}"),
+        }
+        assert_eq!(
+            outstanding_grants(&paths, &project).len(),
+            1,
+            "the read's grant is the only row this project should hold"
+        );
 
         // And the other project leaves two: with the user's own mode in force a
         // command reaches the consent hold, and a read of a file of credentials
@@ -2687,5 +2747,33 @@ mod tests {
             ),
             other => panic!("a project that can spend a grant answered with {other:?}"),
         }
+
+        // And the whole cycle, because a grant is only worth what a request can
+        // spend: the row is in the store, the request it names takes it, and the
+        // same words a second time are held again. This is the case the fix must
+        // not narrow — a project where the named tool reaches an act — and it is
+        // the one the writer's narrowing had to leave alone.
+        assert_eq!(
+            outstanding_grants(&paths, &project).len(),
+            1,
+            "the recorded grant is not in the store"
+        );
+        let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Allow,
+            "the grant was not spent by the request it names"
+        );
+        assert_eq!(reason, allowance_reason(Danger::BroadDelete));
+        assert!(
+            outstanding_grants(&paths, &project).is_empty(),
+            "the request it named did not spend the grant"
+        );
+        let (action, _) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");
+        assert_eq!(
+            action,
+            ProtectionDecisionKind::Block,
+            "one allowance covered two requests"
+        );
     }
 }

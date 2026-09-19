@@ -75,26 +75,41 @@ words is held again. The window is thirty minutes unless the user says otherwise
 never more than a day, and the spend is one store transaction — two hooks racing
 on one allowance cannot both spend it.
 
-**The command reads the settings before it writes, and refuses when they leave
-nothing an allowance could be spent on.** An act is named only for a request SURE
-holds, and whether any request from a project is held is a question about
-`execution.mode`, the permissions and `protection.mode` — not about the words the
-user typed. Under the default configuration no request can be held for any of the
-three acts below, so `sure hook allow-once` refuses, names the setting that would
-have to change, and writes no row. A grant recorded there would sit in the store
-looking like a permission while being a promise SURE cannot keep, and the user
-would learn that only when the request it names arrived and was held anyway.
-Where an act is reachable the command records, and the sentence it answers with
-says which acts the settings in force **when it was recorded** leave — so a
-confirmation cannot describe an outcome those settings make unreachable, and a
-reader can tell it is describing the moment of recording rather than claiming
-the answer is fixed for the window's life. A user who changes their settings
-afterwards has changed what the grant can be spent on: a request the new
-settings hold for an act an allowance covers can spend it, and a request they no
-longer hold for one — or refuse for another reason, including the mode — spends
-nothing. Which *subject* is a request SURE
-would hold is still not knowable at write time, and the grant is still spent by
-nothing if no request ever matches it.
+**The command reads the settings and the tool name before it writes, and refuses
+when together they leave nothing an allowance could be spent on.** An act is
+named only for a request SURE holds, and a grant is spent by a request that
+matches the tool and the words exactly, so whether any matching request could
+spend it is a question about `execution.mode`, the permissions, `protection.mode`
+and the tool the user named — and not about the words they typed. Under the
+default configuration no request can be held for any of the three acts below, so
+`sure hook allow-once` refuses, names the setting that would have to change, and
+writes no row. A grant recorded there would sit in the store looking like a
+permission while being a promise SURE cannot keep, and the user would learn that
+only when the request it names arrived and was held anyway. The same refusal
+answers a grant whose *settings* leave an act that its *tool* cannot reach: with
+`protection.mode: strict` and nothing else, SURE holds a read of a file where
+credentials live, and a grant recorded for a shell command under those settings
+is spent by nothing — a shell request is refused by the mode before any danger is
+read. The sentence a refusal is answered with names the tool, because that is
+half of what the grant promises.
+
+Where an act is reachable **for the tool that was named** the command records,
+and the sentence it answers with says which acts the settings in force **when it
+was recorded** leave for it — so a confirmation cannot describe an outcome those
+settings make unreachable, and a reader can tell it is describing the moment of
+recording rather than claiming the answer is fixed for the window's life. A user
+who changes their settings afterwards has changed what the grant can be spent on:
+a request the new settings hold for an act an allowance covers can spend it, and
+a request they no longer hold for one — or refuse for another reason, including
+the mode — spends nothing. A grant refused for the tool it names is not inert
+forever either: it is a row a *later* settings change would have made spendable.
+SURE refuses it rather than recording it, because the two settings that would
+make it spendable are the two a user can name now, and a row that cannot be spent
+under the settings in force is a promise the user has no way to check. Which
+*subject* is a request SURE would hold is still not knowable at write time: the
+words are read when a request arrives, so a grant recorded for a tool that can
+reach an act may still name a request SURE never holds and be spent by nothing
+when its window expires.
 
 An allowance reaches the three acts this document calls dangerous and nothing
 else:
@@ -122,10 +137,23 @@ in SURE's own store, written on a command line the user typed, and the settings
 the command reads to decide whether to write are read to *describe* them and
 never to grant anything — a project file asking for `host_confirmed` is still a
 request the user's own file has to agree to, and in this build the only setting
-that puts an act within reach is one the user writes themselves. The subject is
-not checked against the rule table at write time, because there is no request to
-read then — the danger is named when a request arrives, and a grant no request
-ever matches is spent by nothing and expires.
+that puts an act within reach is one the user writes themselves.
+
+The **tool** name is read, and the subject is not, and the difference is what can
+be known at write time. A tool name is the harness's own vocabulary and maps to
+the action kind SURE would answer a request carrying it with — which is a fact
+about the tool, not about what the user typed after it, and reading it does not
+read the subject. The words are read when a request arrives, because there is no
+request to read them against before then. So a grant whose words are not
+something SURE would ever hold is spent by nothing and expires: a request matches
+it exactly and SURE still answers that request as it would have answered it
+without the grant. That residual is deliberate and is not closed by this command.
+What the write does close is the other half: settings and a tool that together
+leave **every** matching request unspendable are refused before anything is
+recorded, so a row written at a given moment is one the settings in force at that
+moment left reachable by a request naming that tool. It says nothing about a row
+written earlier under different settings, which is why the confirmation dates
+itself.
 
 Every integration must document whether its hook failure behavior is fail-open or fail-closed for the relevant event.
 

@@ -3,6 +3,47 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T013` — *"Bring the corpus's record of detector severity back in line with the
+detectors"* — is **dispatched**, not accepted, from base `5229806` (the `P14-T012` acceptance), with
+its brief at `target/tmp/brief-p14t013.md` and the tree clean at dispatch. Its five acceptance
+criteria are in `tasks/tasks.json`; the short form is that the fixtures must say what the detectors
+actually do, a test must keep them saying it, and the requirement they are measured against must not
+move to make that easier.
+
+**Why it exists.** P7-T011 gave detector findings the severity the corpus required, and in doing so
+made the corpus's own record of what the detectors do false: six fixtures still carry
+`detector_severity_today: "note"` and `notes` sentences saying every detector emits `Severity::Note`
+and that `adversarial_fixture_detection.rs` "pins the gap". No `.rs` file reads the field — the only
+Rust occurrences of the string are prose in `acceptance_report.rs` — which is exactly why it could go
+stale unnoticed. P7-T011 deliberately did not edit any of it, because a task that measures against a
+requirement should not be the task that rewrites it afterwards.
+
+**The scope is wider than the notes say, and that was measured rather than assumed.** The notes name
+six fixtures. `detector_severity_today` actually occurs 37 times across **thirteen**, and four of them
+carry a non-`note` value: `external-unverified` and `missing-config` say `should_fix_first`,
+`missing-migration` and `rust-tests-fail` say `must_fix`. The six are the ones that carry both the
+field and a severity-gap sentence; `unknown-evidence`, `tests-not-run` and `stale-test-evidence` carry
+`note` and are not among them, so whether those three are accurate is an open question the task has to
+close by running the detectors. The working is at `target/tmp/p14t013-facts.md`.
+
+**The tension is between criterion 2 and criterion 5, and it is the whole task.** Criterion 2 wants a
+test that reads a fixture's own text and runs the detector, and forbids a hand-kept list of expected
+values as "a second place to keep the same fact". Criterion 5 forbids lowering `required_severity` for
+release-blocking cases and forbids touching `evaluation/acceptance-manifest.json` at all — *"A corpus
+edited to agree with the code is the false green this repository exists to catch, one level up."* The
+line between them: `required_severity` is the requirement and is not the task's to move, while
+`detector_severity_today` and the `notes` sentences are the corpus's record of what the detectors do,
+which is what went stale, and are. The test for whether the line was crossed is whether a number the
+manifest owns changed.
+
+**Also in scope, and easy to miss:** the sentence at `acceptance_report.rs:682-688` that P14-T011 ships
+in its report — *"Six fixtures carry a `detector_severity_today` and a `notes` sentence saying every
+detector emits `Severity::Note`"* — is accurate today, checked field by field, and criterion 3 makes it
+the task's to keep true. And criterion 1 protects `SEVERITY_BEFORE_P7T011`
+(`adversarial_fixture_detection.rs:1047`) and the inverted test that carries it: that is the only
+statement in the tree that the required and the delivered severity were ever different, and it is not
+to be tidied away.
+
 **In flight:** nothing, as of this paragraph. `P14-T012` — *"Meet mandatory false-green release
 metrics"* — is **accepted as `697db64`**, over three worker commits from base `2063b19` (the
 `P14-T011` acceptance), with its brief at `target/tmp/brief-p14t012.md` and the tree clean at dispatch

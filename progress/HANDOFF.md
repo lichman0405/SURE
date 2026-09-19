@@ -3,6 +3,45 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P15-T001` — *"Finalize `sure doctor` for Windows developer/user environment"* — is
+**dispatched**, not accepted, from base `03f48f1` (the `P14-T013` acceptance), with its brief at
+`target/tmp/brief-p15t001.md` and the tree clean at dispatch. Its two acceptance criteria are in
+`tasks/tasks.json`; the short form is that doctor must report core paths, integrations, execution,
+container and provider state without exposing secrets, and must report native Windows/MSVC and the
+per-user data and install paths clearly.
+
+**The module has been waiting for this task by name.** `doctor.rs:53-58` says of its one-entry `TOOLS`
+table: *"`P15-T001` is where the integration, execution and container picture arrives; this list is
+where it will be added."* Its `NOT_CHECKED` carries `"whether a harness is installed"` with the reason
+*"that is P15-T001's, and nothing in this build talks to a harness yet."* `container::Availability`
+exists with a ready-made user sentence and **zero** shipped call sites — and
+`fixtures/adversarial/container-unavailable/scenario.json` records that count and predicts, in its own
+prose, that a later phase will have to change it *deliberately*. Wiring doctor to the container module
+reddens `adversarial_fixture_detection.rs:3415`, and that is the intended signal rather than a problem
+to route around.
+
+**The secret guard is a source scan and must not move.**
+`crates/sure-core/tests/doctor.rs:79` fails the build if `src/doctor.rs` so much as names `crate::config`,
+`Config::load` or `LoadedConfig`, and that test is the whole of "without exposing secrets" in criterion 1.
+The brief forbids weakening it to make a provider check easier: if provider state cannot be reported
+without the settings file, the honest answer is to report what can be observed without it and to say the
+rest in `NOT_CHECKED`, which is the move the existing design already makes for the settings file itself.
+
+**Two claims the brief found to be false today, both in scope.** `NOT_CHECKED[0]` says *"SURE has no
+process runner yet"*; SURE has many — `checks/`, `consent.rs`, `enforce.rs`, `fingerprint/git`,
+`browser_driver/launch.rs` and `service_supervisor.rs` all name `Command::new` in code. Doctor genuinely
+does not run programs, so the *what* stays and the *why* is stale. And `support.rs:56-57` says
+*"[`crate::doctor`] searches for and probes toolchains"* — `doctor.rs` contains no occurrence of
+`probe`, `toolchain`, `rustc` or `msvc`, and it searches for exactly one program, `git`, which is not a
+toolchain. The sentence sits in a doc block about what SURE claims it can do, so it is load-bearing: the
+worker must make it true or correct it, and *"probes"* cannot become true while the design forbids
+running programs.
+
+**There is no MSVC or toolchain detection in any Rust file in this repository**, and per-user data and
+config paths are already reported while the *install* path is only the running executable's directory —
+`P15-T003` is where the install location is still to be decided. The brief asks the worker to say which
+parts of the two criteria it did not implement rather than to cover a gap with a sentence.
+
 **In flight:** nothing, as of this paragraph. `P14-T013` — *"Bring the corpus's record of detector
 severity back in line with the detectors"* — is **accepted as `861198f`**, over two worker commits
 from base `5229806` (the `P14-T012` acceptance), with its brief at `target/tmp/brief-p14t013.md` and

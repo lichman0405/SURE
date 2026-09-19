@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-19T10:07:40.348Z",
+  "last_updated": "2026-09-19T10:13:00.775Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2088,10 +2088,10 @@
       "notes": "P14-T012 turns the false-green clause into a mechanism, and its honest boundaries are worth recording so the next task does not re-derive them wrongly. First, the gate's clause-2 reading is the strict one: a release-blocking case that nothing observed blocks the release, because a case nobody measured is not a case that passed. On today's corpus that has no instance — all thirteen release-blocking cases are observed — so the blocking path over the shipped corpus is exercised by control corpora under `target/tmp`, and the module's own narrower report is the one that reads `blocked`, over `repair-regression`. Second, the nine outcome-axis rows P14-T011 left with a `null` severity are read as unmeasured on the severity axis rather than as severities that happen to agree, which is what the P14-T011 note asked for: they are outside the false-green denominator, and the metrics that could have swept them into a passing rate name them instead. Third, two of the seven metrics are unmeasured on this corpus, and that is the designed outcome rather than a shortfall — `PRODUCT_EVALS.md:15`'s constraint is not to trade an honest unknown for a score. Fourth, the gate is a value for P15's packaging tasks to consume and it is not yet consumed by anything: no packaging machinery exists in this tree, so \"any unmet case blocks P15 release packaging\" is a real and demonstrated block on the gate's own document rather than a block wired into a release pipeline, and the task that wires it is P15's. Recorded for the phase and not touched by this task: the two unbound `DANGEROUS_ACTION_FIXTURES` lists, `hook_protection.rs:1078-1079`, the three load-sensitive `runtime_start.rs` sites plus the ETXTBSY and browser-driver flakes, the `one-proposal-per-category-per-project` limit in the three text detectors, and `lying-readme`'s severity still being shape-asserted."
     },
     "P15-T001": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-19T10:13:00.775Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "03f48f16de8404c89b39d9814ae2a99b6f9105c8",
       "head_sha": null,
       "evidence": [],
       "notes": ""

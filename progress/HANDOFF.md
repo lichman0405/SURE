@@ -3,6 +3,55 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** nothing, as of this paragraph. `P13-T010` — *"Tell a person when a
+recorded allowance cannot be spent"* — is **accepted as `a1fe4f6`**, the third
+hand-back, after **two send-backs**; "What `P13-T010` added" and "Validation of
+`P13-T010`" below carry the detail, and `target/tmp/p13t010-sendback.md` and
+`target/tmp/p13t010-sendback-2.md` carry the measurement behind each. Its subject
+is the sentence the hook wrote to every user of this build: `sure hook allow-once`
+had no configuration in hand at all, so under the settings a user starts in —
+`ExecutionConfig::default()` is `inspect_only`, a destructive command under a mode
+that runs no project code is answered `Denied` rather than `NeedsConsent`, and
+`assess_request` reads a danger only for `NeedsConsent` — it recorded a grant,
+told the user *"SURE would then let that one request through"*, and nothing in the
+build writes the user's own `sure.yaml`, so the promise was unreachable by
+construction and stayed unreachable however the request was sent. **The three
+hand-backs are three different failures of the same sentence, and each was found
+by driving the binary rather than by reading the diff**: the first keyed the
+refusal on the union over all five danger witnesses for every tool, so a
+strict-only project recorded a `Shell` grant whose one matching request came back
+`allowance: null`; the second fixed that and shipped two new sentences that were
+wrong for three tool names, one of them (`Edit`) offering a remedy that was
+measured not to work because `Edit` is in `CLAUDE_CODE_TOOLS` and not in
+`CURSOR_TOOLS`, so the union read it in a vocabulary that cannot send it — **and
+that brief was mine, not the worker's**: it asserted the union "is a real rule and
+not a hedge" because "for every name either map knows the two maps agree", which
+is true of `Bash` and false of `Edit`. The delivered rule is that a tool name is
+read in the vocabulary that claims it and a name no vocabulary claims falls to
+`ArbitraryCommand`, and that a grant whose permission **no setting in this build
+can grant** is refused with the build's own limit named instead of a setting that
+is not the cause — `Permission::WriteProject` is the only such permission, and a
+partition over all six asserts it rather than a spot check. Proof is the store
+read-back the acceptance asks for: default `Write`/`Edit`/`Delete` exit 5 and
+write no store directory; strict + `Read --path .env` records `sensitive_read`,
+is spent by the matching request and blocks the second; and under the user's own
+`host_confirmed` settings a `Shell` grant of `rm -rf build/` carries
+`[BroadDelete, ForcePush]`, is spent, and the second is blocked, while `Edit`
+refuses. Six gates green on the tip from native PowerShell, **2547 parents**
+against 2557 raw, 0 failed, +13 across the task and none lost; CI `35413661243`
+is green on all five jobs at **attempt 1** with windows 2547 / macOS 2538 /
+ubuntu 2539 parents; the machine's real store is byte-identical throughout. **Two
+runs this task made are recorded rather than glossed** — `35411189848` and
+`35411785409` are attempt-2 successes whose first attempt was red, one on
+`Text file busy` (`P15-T019`'s race) and one on a dropped-service assertion this
+file now carries by quotation rather than as a task. It **minted `P13-T011`**,
+*"Decide what a change to the project's files is, because no setting can allow
+one"*, from the gap it measured and correctly did not fix: no setting grants
+`WriteProject`, so `decide` denies every file change in every mode, and a Claude
+Code `PreToolUse Edit` under `host_confirmed` is answered Block. **The next
+dispatch is `P13-T011`**, now the lowest-numbered READY task, whose brief is not
+written yet.
+
 **In flight:** `P13-T010` — *"Tell a person when a recorded allowance cannot be
 spent"* — dispatched from base commit `4b190e6` (the `P13-T008` acceptance) with
 its brief at `target/tmp/brief-p13t010.md`. **The defect is that `sure hook
@@ -1764,6 +1813,242 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T010` added
+
+**A tool name is read in the vocabulary that claims it, and an allowance whose
+permission no setting in this build can grant is refused with the build's own
+limit named instead of a setting that is not the cause.** Those are the two
+halves, and they are one change rather than two because fixing the first lands
+the third tool name on the second's case.
+
+### The union was the defect, and it was put there by the brief
+
+The first brief told the worker to answer a tool name with the **union** of its
+readings in `CLAUDE_CODE_TOOLS` and `CURSOR_TOOLS`, and asserted the union "is a
+real rule and not a hedge" because "for every name either map knows the two maps
+agree". **That sentence is false and it was the supervisor's.** `Edit` is in
+`CLAUDE_CODE_TOOLS` as `WriteProjectFile` and not in `CURSOR_TOOLS`, so the union
+is `{WriteProjectFile, ArbitraryCommand}` and the code took the more permissive
+one. `Bash` has the same shape and is harmless, both readings being
+`ArbitraryCommand`, which is exactly how the claim survived being written down:
+it was checked against the name that could not falsify it. Measured at the
+process boundary, under the user's own `host_confirmed` settings,
+`allow-once --tool Edit --path src/lib.rs` **recorded** `acts=[BroadDelete,
+ForcePush]` and then **neither** a Claude Code `Edit` nor a Cursor `Edit` spent
+it — the grant was still outstanding after both — which is acceptance line 3
+falsified by the store read-back line 3 prescribes.
+
+The replacement is `kind_the_vocabulary_claims(vocabulary, tool) -> Option<ActionKind>`
+(`hook_protection.rs:333`), `Some` **only** for a name that is in the table. The
+classifiers need a total answer rather than an `Option`, and they get one from
+`action_kind_in`, which is the same function with
+`unwrap_or(ActionKind::ArbitraryCommand)` — so a name no vocabulary claims still
+falls to the most cautious reading rather than to an error or to a guess. The
+rule is now one sentence in the tree: a name is read in the vocabulary that
+claims it, and a name nothing claims is an arbitrary command.
+
+**The tests could not have caught this and were not meant to.**
+`every_kind_a_tool_name_can_reach_has_a_witness` compares the two tables over
+`CURSOR_TOOLS`' names — that is, only where they overlap — and the exhaustive
+sweep's `union == acts` assertion is true on both sides of the change. The
+defect was in what the union *meant*, not in whether it was computed correctly.
+
+### `a_setting_grants`, and the one permission nothing grants
+
+The refusal is keyed on `a_setting_grants(permission)`, which is true iff some
+`ExecutionMode::ALL` baseline allows it **or** some `ProjectRequest::ALL` yields
+it. The second half is not redundant: `Config::requested_privileges()`
+(`config/mod.rs:377-398`) pushes `ProjectRequest::RunProjectCode` whenever
+`execution.mode != InspectOnly`, so **naming a running mode is the grant of
+`run_project_code`** — which is why the mode baselines and the request vocabulary
+together are the right two to ask, even though `Authority` never calls
+`baseline_permissions()`.
+
+Against those two, `Permission::WriteProject` is the only permission out of
+reach: `ProjectRequest` has seven variants and no arm of `permission()` returns
+it, `Authority::permissions()` starts from `ExecutionPermissions::inspect_only()`
+and sets a permission only from a *granted* privilege's `request.permission()`,
+and the two literal `write_project` assignments in the tree
+(`core_flow.rs:987`, `hook_protection.rs:1732`) are both inside a `#[cfg(test)]`
+module. So `decide` returns `Denied` for a file change in **every** mode under
+**every** configuration, and a grant for a tool whose action would change the
+project's files is one nothing could ever spend.
+
+**The guard is a partition rather than a spot check.**
+`no_setting_grants_the_permission_a_change_to_the_project_needs` asserts both
+kinds require `WriteProject`, that `!a_setting_grants(WriteProject)`, and then
+filters **all six** permissions and asserts the out-of-reach set is exactly
+`[Permission::WriteProject]`. A test that only asserted the two kinds would pass
+on a build where nothing was grantable, which is the direction that would make
+the refusal useless.
+
+### The sentence, and why it had to be a second sentence
+
+`an_action_no_setting_can_grant_reason` builds the refusal for that case, and it
+says what a reader needs rather than what the code does: that the request would
+change this project's files, that the permissions in force do not grant SURE
+that, that **no** setting in this build grants it — not in the user's own
+settings file and not in a project's `sure.yaml` — and that nothing was written.
+It does **not** name `execution.mode` or `protection.mode`, because neither is
+the cause; naming one would be advice to change the wrong thing. That is the
+acceptance's second line, and it is why the fix is a branch rather than a caveat
+appended to the existing sentence — the old sentence's whole shape was "here is
+the setting standing in your way", and for these tools there is no such setting.
+
+The branch sits **before** the `custom` arm of the refusal and returns early, so
+it is reached by every protection mode rather than by the modes that fall through
+to a default. The one place it is suppressed is `ProtectionMode::Custom`, where
+the user has written their own rules and SURE does not know what they leave.
+
+`docs/security/PROTECTION_MODE.md` carries the counterpart paragraph, and it
+makes the claim falsifiable rather than decorative: which of the two sentences a
+tool gets *"is read off the vocabularies rather than written down beside them, so
+a later release that makes that permission grantable answers with the first
+sentence and a test fails until it does."* The document's old justification —
+that a refused grant is one "a later settings change would have made spendable"
+— was true of `Shell` and `Read` and false of a tool whose only reachable kind is
+a change, and it is corrected rather than deleted, because the paragraph still
+has to be true of the first two.
+
+### Three names in the configuration every user starts in
+
+`Write`, `Edit` and `Delete` under default settings now exit 5, create no store
+directory, and answer with a sentence whose only mention of a setting is that
+none of them is the cause. Before this task they were two failures of two kinds:
+`Write` and `Delete` named `protection.mode: standard` — a setting that was
+provably not standing in the way, since setting it to `strict` makes the same
+command refuse again with "already `strict` … nothing firmer to set" — and
+`Edit`, read through the union, was offered the `host_confirmed` remedy and then
+recorded a grant that nothing spent. The three now get one sentence, which is the
+evidence that the framing is right rather than two patches meeting.
+
+### What `P13-T010` did not do
+
+- **It did not make `WriteProject` grantable.** That is the gap it measured and
+  correctly left alone; it is `P13-T011`, minted by this acceptance, and the
+  document above says out loud that a later release which makes the permission
+  grantable will answer these tools with the other sentence.
+- **It did not read the subject at write time.** `--tool Foo --path .env` is
+  still recorded and spent by nothing, which is the pre-existing documented
+  limit: the words are read when a request arrives, because there is no request
+  to read them against before then. The tool name is knowable at write time and
+  the subject is not, and the difference is stated in the document rather than
+  left for a reader to infer.
+
+## Validation of `P13-T010`
+
+**Six gates green on `a1fe4f6` from native PowerShell**
+(`target/tmp/sup-p13t010c-gates.txt`): `fmt=0 clippy=0 test=0 bootstrap=0
+taskctl=0 nonwindows=0`. Gate 3 measured with `measure-run.mjs`: **65 headers
+(60 `Running` + 5 `Doc-tests`), 75 result lines, 2547 parents, 2557 raw, 0
+failed, 12 ignored**, both instruments agreeing on 2547. Against the base
+`4b190e6`'s 2534 parents that is **+13 across the task**, and +4 against the
+second hand-back's 2543, with none lost. Gates 4 and 5 were re-run **after** the
+three queued splices, because they are the gates over the files the splices
+write: `17 phases, 187 tasks` and `state OK: 187 tasks`.
+
+**The ignored figure in the hand-back is 8 and the measured figure is 12.** The
+sum over the four suites that ignore anything is 8 + 1 + 2 + 1 = 12; the 8 is a
+single suite's own count, and `measure-run.mjs` prints it as *"ignored max 8 (the
+last suite's own count)"* — the phrasing invites the misreading and the worker
+took it. No verdict moves, `0 failed` being `0 failed` under either reading.
+
+**Every probe in the brief was re-driven by the supervisor, and the two that
+need a settings file the CLI cannot name yet were driven in-process** from
+`hook.rs`'s test module with a temporary probe that was reverted afterwards —
+`git status --porcelain` empty, HEAD `a1fe4f6`, the same method the second
+send-back used, and the reason it is needed is that this build has no
+settings-file flag until `P15-T025`.
+
+| case | measured |
+| --- | --- |
+| default, `--tool Write` / `Edit` / `Delete` | exit 5, **no store directory**, and **zero** occurrences of `protection.mode`, `execution.mode` or the old escape hatch in the sentence |
+| `protection.mode: strict`, `--tool Write` | exit 5, no store directory |
+| `protection.mode: strict`, `--tool Read --path .env` | records `acts=[sensitive_read]`, the matching Cursor request is **Allow** and spends it, the second is **Block** |
+| `execution.mode: host_confirmed`, `--tool Edit --path src/lib.rs` | **refused** (it recorded before the fix), same reasoning as `Write`/`Delete`, `outstanding_grants` empty |
+| `execution.mode: host_confirmed`, `--tool Shell --command "rm -rf build/"` | records `acts=[BroadDelete, ForcePush]`, matching request **Allow** and spends it, `outstanding_grants` empty afterwards, second request **Block** |
+
+**The last row is acceptance line 4, driven end to end rather than argued**, and
+the sentence that spends it is the confirmation's own: *"You recorded a one-time
+allowance for this exact request, and this use spends it, so SURE would let this
+one through."* The permanent test the worker left,
+`edit_is_read_in_the_vocabulary_that_claims_it_and_a_grant_for_it_is_refused`,
+asserts the **absences** as well as the behaviour — it fails if the refusal
+contains `host_confirmed`, `` `execution.mode` `` or `` `protection.mode` `` — so
+the defect `Edit` was sent back over cannot come back silently.
+
+**CI `35413661243` is green on all five jobs at attempt 1**, with no re-run:
+
+| platform | headers | result lines | parents | raw | failed |
+| --- | --- | --- | --- | --- | --- |
+| Windows | 65 | 75 | **2547** | 2557 | 0 |
+| macOS | 65 | 75 | **2538** | 2548 | 0 |
+| Ubuntu | 65 | 75 | **2539** | 2549 | 0 |
+
+**Windows equals the local run to the test — 2547 parents over 75 result lines —
+which is the reading that matters on a Windows-primary machine**, and the two
+figures the hand-back quoted (windows 2547, ubuntu 2539) are confirmed exactly.
+The three logs were counted from the raw endpoint
+(`gh api repos/.../actions/jobs/<id>/logs`), not from `gh run view --job --log`,
+which prefixes every line and defeats the counter.
+
+**Two earlier runs of this task are recorded rather than glossed, because the
+worker re-ran them and `gh run list` shows only the latest attempt.**
+`35411189848` (`2ec2f38`) and `35411785409` (`e270fe8`) are both **attempt 2**
+successes whose first attempt was **red**: Ubuntu on
+`a_mode_that_runs_nothing_admits_nothing_that_a_service_could_be_started_from`
+with `Text file busy (os error 26)` — the race `P15-T019` owns by name — and
+Windows on `a_service_that_is_dropped_is_stopped_anyway` at
+`service_supervisor.rs:793:5`. Both were read from
+`.../runs/<id>/attempts/1/jobs`, and both are outside this task's diff. **The
+Windows one is recorded and not minted**: its assertion is a claim about
+substance — the two lines above it write the release file only after
+`wait_until_quiet` has seen the heartbeat stop changing — so if it is not a test
+race it is a defect of the process-tree cancellation `CLAUDE.md` calls a
+first-class requirement, and one occurrence is not enough to act on. The
+assertion is quoted in `target/tmp/p13t010b-ci.md` so the next occurrence is
+recognisable. `35409117170` (`66c641f`) and `35409522717` (`e268777`) are green
+at attempt 1.
+
+**The machine's real store is byte-identical throughout**: 348160 bytes, mtime
+`2026-09-18T15:12:15Z`, sha256 `D1717556…D67853`, unchanged before the probes,
+after the in-process drives and after the full workspace suite, and identical to
+the reading taken at the previous acceptance. Every probe named an absolute
+`--store-dir` under `target/tmp/`. The contract tests' scratch pool held **302**
+directories and was cleared before the gate run so the run is reproducible; that
+accumulation is item 91's and its durable fix is `P15-T015`.
+
+**The manifest carried one stale line, and this acceptance is what corrected
+it.** `git show HEAD:SHA256SUMS.txt` records `5958f5e9…` for
+`docs/security/PROTECTION_MODE.md`, and the file hashes to `25608d3f…` — because
+the worker's `a1fe4f6` changed that document (31 insertions, 18 deletions) and no
+manifest regeneration follows a worker commit. The regeneration this acceptance
+ran rewrote it along with `progress/HANDOFF.md`, `progress/state.json` and
+`tasks/tasks.json`; **182 of the 184 listed paths were already correct and none
+was listed-but-absent**. This is the same defect the previous acceptance recorded
+from the other side — a manifest regenerated at the wrong moment ships a digest
+for a file that no longer exists — and its cost is borne by a reader rather than
+by a check, because nothing in the repository reads the manifest, which is
+`P15-T020`'s question.
+
+**What this acceptance minted is a question this task could not answer.**
+`Permission::WriteProject` unreachable means the hook can deny a file change and
+cannot do anything else with one, while
+`docs/security/PROTECTION_MODE.md` describes a change as held only in a
+migration, CI/CD config or secret area, or when it names a whole location — the
+document and the decision path disagree about what a file change *is*, and the
+measurement that shows it is a Claude Code `PreToolUse Edit` under
+`host_confirmed` answered **Block**, *"The current execution mode does not permit
+this action."* That is **`P13-T011`**, *"Decide what a change to the project's
+files is, because no setting can allow one"*, spliced in by this acceptance and
+now the lowest-numbered READY task. Three things are deliberately **not** minted:
+the unread subject at write time, `tasks/SUMMARY.md`'s stale "Tasks: 166"
+(`P15-T026`'s, extended here to name the file), and the
+`PROTECTION_MODE.md` justification paragraph (corrected inside this task).
+
+**This acceptance owes the run of its own commit**, which a commit cannot
+contain; it is read in this session and reported in the next entry.
 
 ## What `P13-T008` added
 
@@ -10983,6 +11268,85 @@ column, fifteen stating the right figures in the narrative form the shape patter
 does not cover, and sixteen stating no figures, which is where the two out-of-order
 rows land and where they were confirmed by hand.
 
+### Reading run `35413661243`, `P13-T010`'s — and two red first attempts the run list does not show
+
+**All five jobs green at `attempt 1`**: `bootstrap-validate-windows`, `rust
+(windows-latest)`, `rust (macos-latest)`, `rust (ubuntu-latest)`,
+`shellcheck-secondary`. No job was re-run, so nothing on this run is hidden
+behind a later attempt.
+
+| platform | headers | result lines | parents | raw | failed |
+| --- | --- | --- | --- | --- | --- |
+| Windows | 65 | 75 | **2547** | 2557 | 0 |
+| macOS | 65 | 75 | **2538** | 2548 | 0 |
+| Ubuntu | 65 | 75 | **2539** | 2549 | 0 |
+
+**The baseline is the second hand-back's own run, `35411785409`, at 2543 parents
+on Windows** — this entry's own measurement, taken from the same three logs by
+the same counter — so the delta is **+4**, and the whole task is **+13** against
+`4b190e6`'s 2534. **Windows equals the local Windows run exactly — 2547 parents
+over 75 result lines** — which is the reading a commit whose Windows-relevant
+tests all execute here should give.
+
+**The three logs were counted from the raw endpoint**:
+`gh api repos/lichman0405/SURE/actions/jobs/<id>/logs`, into
+`target/tmp/sup-p13t010c-ci-{windows,macos,ubuntu}.log`. **`gh run view --job
+<job> --log` prefixes every line and defeats the counter**, which is a trap this
+file has recorded three times and which is why the raw endpoint is the form used
+here rather than the convenient one.
+
+**`ignored` is 12 and not 8, and the way to get 8 is to read one suite's line as
+the total.** Four suites ignore anything — 8 + 1 + 2 + 1 — and `measure-run.mjs`
+prints the largest as *"ignored max 8 (the last suite's own count)"*. The
+hand-back quoted 8. The four sums are the same four suites under either reading,
+so no verdict moves; the figure in the record is 12.
+
+**Two earlier runs of this task are attempt-2 successes whose first attempt was
+red, and the run list cannot show it.** `35411189848` (`2ec2f38`) and
+`35411785409` (`e270fe8`) both read `attempt 2` because the worker re-ran them
+after a failure, and `gh run list` reports only the latest attempt's conclusion —
+so the failures exist only in `.../runs/<id>/attempts/1/jobs`. Read there, and
+then from `.../actions/jobs/<job>/logs`:
+
+- **`35411189848`, `2ec2f38`, attempt 1 — `rust (ubuntu-latest)`, job
+  `105811014738`.** Red on
+  `a_mode_that_runs_nothing_admits_nothing_that_a_service_could_be_started_from`
+  at `crates/sure-core/tests/service_supervisor.rs:859:10` with
+  `Runner(NotStarted { program: "/tmp/sure-service-inspect-only-10625/working/python",
+  message: "Text file busy (os error 26)" })`. **This is the race `P15-T019` owns
+  by name**, and the same Ubuntu first-attempt failure `P15-T016` recorded.
+- **`35411785409`, `e270fe8`, attempt 1 — `rust (windows-latest)`, job
+  `105812700331`.** Red on `a_service_that_is_dropped_is_stopped_anyway` at
+  `service_supervisor.rs:793:5`, which is this assertion:
+
+  ```rust
+  assert!(
+      !report_path(&directory).exists(),
+      "the service was dropped and then answered the release, so it was still \
+       running"
+  );
+  ```
+
+  **It is a claim about substance and not about timing**: the two lines above it
+  write the release file only after `wait_until_quiet` has seen the heartbeat stop
+  changing and has been asserted non-empty, so a child that answered the release
+  was a child that was still alive after its service was dropped. **It is recorded
+  and not minted** — the only tasks naming that file are `P3-T002` (accepted) and
+  `P15-T019` (the `Text file busy` race, which is the Ubuntu one) — because one
+  occurrence is not enough to mint on, and if it is not a test race it is a defect
+  of the process-tree cancellation `CLAUDE.md` calls a first-class requirement.
+  The assertion is quoted above so the next occurrence is recognisable.
+
+**Neither red is in this task's diff**, which touches six files across the whole
+task (`hook.rs`, `report.rs`, `cli_contract.rs`, `hook_protection.rs`, `CLI.md`,
+`PROTECTION_MODE.md`) and none of them `sure-core`'s test tree. Logs:
+`target/tmp/sup-attempt1-e270fe8-windows.log`,
+`target/tmp/sup-attempt1-2ec2f38-ubuntu.log`. **The two attempt-1 logs were
+fetched and read, not re-run by the supervisor**: the worker's `gh run rerun
+--failed` is what produced attempt 2, and the reasoning recorded at the previous
+acceptance applies — a re-run somebody else did is still a failure that the run
+list would otherwise have made invisible.
+
 ### Reading run `34974577185`, `P4-T003`'s
 
 **All five jobs green**: `bootstrap-validate-windows`, `rust (windows-latest)`,
@@ -16323,6 +16687,42 @@ what changes here is that the number now says which of the two readings it is.
   owed to the next acceptance under the chain rule, and the two runs it discharged
   — `35405022369` and `35405545871` — are recorded in the validation section above.
 
+- `a1fe4f6` **`P13-T010`** (accepted by the progress-only commit that carries this
+  entry) — *"Tell a person when a recorded allowance cannot be spent"*. **The
+  task's own detail is the section above**; what belongs here is the shape.
+  **Three hand-backs and two send-backs**, which is the first thing about it:
+  `66c641f` + `e268777`, then `2ec2f38` + `e270fe8`, then the accepted `a1fe4f6`,
+  five commits that fix one sentence three times over. **Each send-back was a
+  measurement and not a preference**, and each is recorded with the run that
+  caused it (`target/tmp/p13t010-sendback.md`,
+  `target/tmp/p13t010-sendback-2.md`): the first because a `Shell` grant recorded
+  under `inspect_only` plus `strict` came back `allowance: null` from the one
+  request that matched it; the second because `Write` and `Delete` named
+  `protection.mode: standard` — a setting that was not the cause, and which
+  refuses again when set to `strict` — and because `Edit`, read through the union
+  of two harness vocabularies, recorded a grant that neither a Claude Code nor a
+  Cursor `Edit` could spend. **The second was the supervisor's error before it was
+  the worker's**, and it is written down that way in the brief, in the send-back
+  record and in the dispatch prompt, because the brief asserted the union "is a
+  real rule and not a hedge" on the strength of a claim that held for `Bash` and
+  not for `Edit`. What it delivered is that **a tool name is read in the
+  vocabulary that claims it** — a name no vocabulary claims still falling to
+  `ArbitraryCommand` rather than to a guess — and that a grant whose permission
+  **no setting in this build can grant** is refused with the build's own limit
+  named instead of a setting that is not standing in the way, `WriteProject`
+  being the only such permission and a partition over all six asserting it rather
+  than a spot check. It **minted `P13-T011`**, *"Decide what a change to the
+  project's files is, because no setting can allow one"*, from the gap it
+  measured and correctly declined to fix: no setting grants `WriteProject`, so
+  `decide` denies every file change in every mode, and a Claude Code
+  `PreToolUse Edit` under the user's own `host_confirmed` settings is answered
+  Block while the security document describes a change as held only in a
+  migration, CI/CD config or secret area, or when it names a whole location.
+  **No run of its own commit is in this entry**: it is owed to the next
+  acceptance under the chain rule, and the two red first attempts this task made
+  (`35411189848` and `35411785409`, both attempt-2 successes) are recorded in the
+  section above rather than replaced by their green re-runs.
+
 **The check was run again at this acceptance, and the two counts that moved are
 the two that should have.** For the tree this commit creates: **139 accepted**,
 **79 of them absent from the list**, **48 absent from everything below the
@@ -16464,6 +16864,32 @@ entries above, the same command returns **`accepted: 55 missing: none`**, and th
 the reading the next acceptance has to reproduce rather than assume — **the count was
 never the test and the command is the test**, which is why the command is what is
 written down here and not the number it printed.
+
+**Run again by `P13-T010`'s acceptance, and `55` is the last reading recorded in
+this series seventy-odd acceptances ago.** The command is now
+`target/tmp/accepted-list-check.mjs`, and it prints three readings plus the ids.
+Taken **before** the entry above was added, in this session: **`accepted: 139`,
+strict `79 missing`, loose `48 missing`**. Taken **after** it, which is the order
+these paragraphs insist on: **`accepted: 140`, strict `79 missing`, loose `48
+missing`**. **The count moved by exactly one and the two missing counts did not
+move at all**, which is the honest reading rather than a good one: this acceptance
+added its own entry, so it neither worsened the deficit nor closed any of it —
+**and the `79` and the `48` are identical to the numbers `P13-T008`'s paragraph
+recorded two acceptances ago**, because each acceptance since has carried its own
+entry and none of them has touched the backlog.
+
+**The backlog is now 85 acceptances old and it is named rather than implied.** The
+last reading in this series before this one was `accepted: 55 missing: none`, at
+`P5-T002`'s acceptance; `140 − 55 = 85` tasks have been accepted since, and
+**the command was not run once in that window** — so the paragraph above, which
+says the standing cost is one command per acceptance, was written and then not
+paid 85 times. The 79 are the `P5`-through-`P15` tasks whose detail lives in the
+sections above and whose entries were never written, and the 48 are those absent
+from everything below the heading. **The list is still not rebuilt, for the reason
+given above**: an entry is a statement about what a later session should do, and
+79 of them written now from the summary tables rather than from the work would be
+a reconstruction rather than a record. What this paragraph adds to the two before
+it is only the size of the gap in time.
 
 ## Next concrete action
 1. **`P4-T009` is implemented, pushed, read, and accepted by the commit carrying

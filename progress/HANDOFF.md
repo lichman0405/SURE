@@ -3,6 +3,33 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T004` — *"Implement claim-evidence fixtures"* — dispatched
+from base commit `b3b83c9` (the `P13-T011` acceptance) with its brief at
+`target/tmp/brief-p14t004.md`, and it is the first task of this build whose
+fixtures contain **no defective code at all**. The three cases —
+`tests-not-run`, `stale-test-evidence`, `unknown-evidence` — are about a claim
+and the recording behind it, and the outcome that must come out of the gap is
+`Cannot confirm` in all three, which is the trap: a claim checker that answered
+`cannot_confirm` to everything would satisfy every positive assertion the task
+could make. So the acceptance — *"Tests-not-run/stale evidence/cannot-confirm
+outcomes exact."* — is read in the brief as the **assessment, the reason a reader
+is shown, and the evidence list**, on a stream the scenario document declares,
+with a control that fails the moment the instrument gets stuck. The three
+`scenario.json` files are bootstrap-era stubs (200-209 bytes each, each carrying
+`"fixture_status": "to_be_implemented_by_task_graph"`) that **no test iterates
+today**: they are in none of `TYPESCRIPT_FIXTURES`, `PYTHON_FIXTURES`,
+`RUST_FIXTURES` or `FIXTURES_WITHOUT_A_MANIFEST_CASE`, so
+`every_fixture_this_task_implemented()` skips them and the schema, stub,
+false-green and manifest-agreement checks never see them. Two of the three routes
+to `CannotConfirm` are settled by the manifest; the third is the worker's to
+choose and to defend in writing. **The base was measured rather than inherited**,
+from native PowerShell, all six gates green with **2548 parents** against 2558
+raw, 0 failed, 12 ignored, and the machine's store byte-identical throughout.
+The supervisor's own gate script is recorded as having a defect rather than
+quietly corrected: its `headers: 140` line is PowerShell's case-insensitive
+`Select-String` counting the 75 `running N tests` lines as well as the 65
+headers, which `-CaseSensitive` and `measure-run.mjs` both give as 65.
+
 **In flight:** nothing, as of this paragraph. `P13-T011` — *"Decide what a change
 to the project's files is, because no setting can allow one"* — is **accepted as
 `9ee733d`**, after **one send-back**; "What `P13-T011` added" and "Validation of

@@ -348,16 +348,20 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 
 /// Whether a corpus id has a fixture app rather than a stub or nothing at all.
 ///
-/// Two shapes are counted the same way here, because neither is a project a
-/// scanner is handed an entry point into: a corpus id with no fixture directory
-/// at all (`benign-test-mocks`) and one whose directory ships no `entry_points`
-/// in its `scenario.json`. The second set is read off the disk by the line below
-/// rather than enumerated here, which is what keeps this comment from being a
-/// second place to maintain it; at `P14-T008` it holds `check-crash`,
-/// `container-unavailable`, `dangerous-delete`, `dynamic-not-authorized`,
-/// `force-push`, `intent-mismatch`, `lying-readme`, `missing-user-intent`,
-/// `repair-regression`, `sensitive-read`, `stale-test-evidence`, `tests-not-run`
-/// and `unknown-evidence`, and it moves whenever a fixture gains or loses an
+/// What this reads is one key: a case counts as having an app when its directory
+/// ships an `entry_points` block in its `scenario.json`, and it answers `false`
+/// when that file is missing, when the file holds no such key, and when the case
+/// is only a name. The ids that answer `false` are read off the disk by the line
+/// below rather than enumerated here, which is what keeps this comment from being
+/// a second place to maintain it; measured at `P14-T010` over the twenty-five
+/// directories under `fixtures/adversarial/`, the set holds `benign-test-mocks`,
+/// `check-crash`, `container-unavailable`, `dangerous-delete`,
+/// `dynamic-not-authorized`, `force-push`, `intent-mismatch`, `lying-readme`,
+/// `missing-user-intent`, `repair-regression`, `sensitive-read`,
+/// `stale-test-evidence`, `tests-not-run` and `unknown-evidence` — of which
+/// `container-unavailable` and `intent-mismatch` are directories no case in
+/// `evaluation/acceptance-manifest.json` names, because the set is over the disk
+/// and not over the manifest. It moves whenever a fixture gains or loses an
 /// `entry_points` key.
 ///
 /// **The lists are read off the disk rather than inherited**, and names in them
@@ -386,6 +390,26 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 /// moving: it said the list "moves whenever a fixture gains or loses a project",
 /// and by that reading `P14-T009` should have moved it and did not, because the
 /// key this function reads is `entry_points` rather than a directory listing.
+///
+/// `P14-T010`'s correction is the fourth, and it is the second of the kind
+/// `P14-T009`'s was: a name that moved because a directory gained a project, not
+/// because the answer changed. The paragraph above used to describe two shapes
+/// that answer `false` here, "a corpus id with no fixture directory at all
+/// (`benign-test-mocks`)" and one "whose directory ships no `entry_points` in its
+/// `scenario.json`", and the first of those is now empty. `P14-T010` gave
+/// `benign-test-mocks` a directory and a whole runnable project — a checkout
+/// service that keeps its test double, its worked example, its documentation
+/// snippet and its stand-in for a payment provider beside the code they describe
+/// — so it moved into the remaining group, where it answers `false` for the same
+/// reason `repair-regression` does rather than for the reason it used to. The key
+/// is left out on purpose, and the reason is recorded in that fixture's own
+/// `project.why_no_entry_point_block`: the case is not release-blocking, so
+/// `every_release_blocking_case_with_a_fixture_app_meets_the_manifest` above skips
+/// it whether or not the key is there, and the only thing in this file that reads
+/// this function's answer for that id is the tripwire in
+/// `the_benign_cases_did_not_escalate` below. What does measure the case is its
+/// own grader, `crates/sure-core/tests/benign_fixture_e2e.rs`, which reads every
+/// file of it rather than one verdict about it.
 fn fixture_has_an_app(id: &str) -> bool {
     let path = fixture(id).join("scenario.json");
     std::fs::read_to_string(&path).is_ok_and(|scenario| scenario.contains("\"entry_points\""))
@@ -597,10 +621,18 @@ fn the_benign_cases_did_not_escalate() {
             .all(|class| *class == EvidenceClass::Inference)
     );
 
-    // `benign-test-mocks` is the case that names a test-only mock. Its fixture is
-    // a stub, so its `note` cannot be measured by running anything — and that is
-    // asserted here rather than left as a sentence, because a test that quietly
-    // covered it with `demo-analytics` would look like a measurement.
+    // `benign-test-mocks` is the case that names a test-only mock. It has a
+    // fixture and a project now — `P14-T010` wrote both — so its level is no
+    // longer one nothing can run, and the tripwire below no longer passes because
+    // there is nothing to measure. It passes because the fixture declares no
+    // `entry_points` key, which is the whole of what `fixture_has_an_app` reads
+    // and all the words "its fixture is a stub" were ever true about. What grades
+    // the case is `crates/sure-core/tests/benign_fixture_e2e.rs`, which drives the
+    // same five detectors over the directory per file and over three controls;
+    // what stays here is the narrower claim this file can make — that the case is
+    // not one of the ones this file measures — and it is asserted rather than left
+    // as a sentence, because a test that quietly covered it with `demo-analytics`
+    // would look like a measurement.
     let benign = manifest_cases()
         .into_iter()
         .find(|case| case.id == "benign-test-mocks")

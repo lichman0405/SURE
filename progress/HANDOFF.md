@@ -3,6 +3,90 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T006` — *"Implement execution-trust fixtures"* — is **dispatched**, not
+accepted, from base `c984275` (the `P14-T005` acceptance), with its brief at
+`target/tmp/brief-p14t006.md` and the tree clean at dispatch. Its two acceptance criteria —
+*"Dynamic-not-authorized stays visible."* and *"Container unavailable path is honest."* — are
+**both satisfiable without measuring SURE at all**, and each in a different way, which is what the
+brief names as this task's trap and is the sharpest of the three `P14` fixture traps so far.
+Criterion 1's trap is a reporter hard-wired to deny: if the product answered `Skipped` +
+`ExecutionNotAuthorized` for every dynamic check in every mode forever, every assertion anyone
+could write about the not-authorized case would still pass, so the criterion requires a
+**control** — the same project and the same check, planned with execution authorised, which must
+**not** produce that state, with the difference asserted rather than the existence of two runs.
+Criterion 2's trap is a **test of the machine**: `container::Availability::Absent` is a fact about
+the computer the test runs on, GitHub's `ubuntu-latest` ships Docker and would answer `Found`, so a
+fixture asserting `Absent` asserts something about the runner and will one day go red on a
+developer laptop for no reason — the honest instrument is to **construct the answer as a value**
+and assert its sentence by equality, using the machine probe only to assert the shape that must
+hold whichever answer comes back.
+
+**The reconnaissance finding the brief is built on, and it is the reason criterion 2 is read as a
+permission rather than as a demand.** `crates/sure-core/src/container.rs` — `P3-T008`'s module — is
+**not wired into the pipeline or the CLI at all**: nothing under `crates/sure-core/src/` outside
+the module refers to it, and it is reached only by its own unit tests and
+`crates/sure-core/tests/container_isolation_claim.rs`. `Availability` (`:139-153`) has no error
+variant, a missing runtime is a value rather than a failure, the plan is pure data
+(`arguments() -> Vec<String>` `:504` builds no `Command`), and `isolation_claim()` (`:539-545`) ends
+*"This is limited isolation: it narrows what a check can touch, and it is not a sandbox."* So "the
+container unavailable path is honest" is a true and checkable statement about **a module nothing
+runs**, and the brief requires the fixture to pin that sentence *and* to record the limit — in its
+README and in a test — rather than let a reader infer that SURE can execute a check inside a
+container. The strict reading, that the criterion demands a wired container path, would mean
+building container execution, which belongs to `P3-T008` and later phases and is not in this task's
+acceptance; the brief says so and requires the worker to overturn it only by measurement, first
+line of the hand-back.
+
+Fixed ground, read from the tree rather than recalled. There is **no "not authorized" status**:
+denial is a *reason* carried by a skip — `CheckStatus::Skipped` (`crates/sure-domain/src/status.rs:32`)
+plus `NotCheckedReason::ExecutionNotAuthorized` (`:145`), whose frozen whole sentence is at
+`:207-209`, *"Checking this would have meant running your project's code, and you have not allowed
+that."*, with the consent-refusal sibling at `:210-212`. `CheckResult::not_run` (`:365-386`) is the
+only producer of that state, `is_scope_limit()` (`:190-195`) deliberately excludes it — which is
+what makes it block green — and `aggregate` (`:620-688`, arms `:634-649`, ladder `:652-670`) sends
+a critical denied check to `NotEnoughChecked`. Three gates decide it: `consent::decide_for`
+(`crates/sure-core/src/consent.rs:474-508`) with `reason_for` (`:556-565`),
+`ScheduledCheck::not_run` (`crates/sure-core/src/schedule.rs:715-727`), and `Enforcement::of`
+(`crates/sure-core/src/enforce.rs:130-205`). **The only opt-in is the user's own file** —
+`Authority::execution_mode()` (`crates/sure-core/src/config/authority.rs:548-559`), whose module
+doc at `:501-503` reads *"A project file cannot move it in either direction."* — and **there is no
+CLI flag for authorising execution at all**, so the control is driven by passing
+`ExecutionSettings` at the API level in a test. The brief forbids moving the mode by writing a
+config file and forbids writing to `%LOCALAPPDATA%\SURE\` in any case.
+
+**One soft spot is named in the brief so the fixture does not rest on it.**
+`crates/sure-core/src/coverage_summary.rs` `summarize` (`:55-123`) iterates `schedule.checks()` and
+does `None => continue`, so a result not present in the schedule is invisible to the coverage
+summary, and `is_complete()` (`:169-171`) is `self.not_checked.is_empty()`. "Stays visible" must
+therefore be asserted against the schedule-and-report path that actually carries it; a fixture
+whose visibility claim rests on `summarize` is a send-back named in advance.
+
+The corpus plan. `fixtures/adversarial/dynamic-not-authorized/` fills another of the four ids that
+have a manifest row and no directory — its row is at `evaluation/acceptance-manifest.json:118-123`,
+`release_blocking: false`, `expected_severity: "note"`, *"unexecuted dynamic checks stay visible as
+not checked/skipped"* — and because that id **has** a row it must **not** appear in
+`FIXTURES_WITHOUT_A_MANIFEST_CASE` (`crates/sure-testkit/tests/fixture_apps.rs:151-179`), which
+`every_fixture_without_a_manifest_case_is_one_named_here` (`:868`) enforces in both directions.
+`fixtures/adversarial/container-unavailable/` has no row and therefore **must** carry an exemption
+entry with a written reason, exactly as `intent-mismatch` does. A new list is chained into
+`every_fixture_this_task_implemented()` at `:280-286` — the single chokepoint — alongside its
+declaration in `adversarial_fixture_detection.rs` beside `INTENT_FIXTURES` (`:2077`), whose
+`pipelined()` helper (`:2166`) hard-codes `ExecutionSettings::inspect_only()` and is therefore the
+place the host-confirmed control will need a parameter. **The base was measured rather than
+inherited**: `c984275`, six gates from native PowerShell all exit 0, **2568 passed**, 0 failed, 12
+ignored, 65 case-sensitive headers, bootstrap reading 17 phases / 187 tasks, taskctl 187 tasks, and
+the machine's store byte-identical throughout at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853` (348160 bytes, worktree clean).
+The two targets the brief names were measured too: `adversarial_fixture_detection` reads **25
+passed** and `fixture_apps` **24 passed** at that base.
+
+**The CI reading owed to this entry is discharged.** Run `35421237088` for `c984275`, the
+`P14-T005` acceptance commit, is **success at attempt 1 on all five jobs** — `bootstrap-validate-windows`,
+`rust (ubuntu-latest)`, `rust (windows-latest)`, `rust (macos-latest)` and `shellcheck-secondary` —
+which closes the chain-rule debt that entry recorded. This dispatch commit's own run is owed to the
+next entry, and no run is ever re-run: `gh run rerun --failed` mints no second run id, so a green
+re-run would erase the row's own state.
+
 **In flight:** nothing, as of this paragraph. `P14-T005` — *"Implement
 intent/requirement fixtures"* — is **accepted as `2102dc8`**, after **one
 send-back** and four worker commits from base `8df2bbf` (the `P14-T004`

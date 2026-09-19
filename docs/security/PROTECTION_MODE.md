@@ -131,10 +131,10 @@ asserts the other direction, *nothing is out of reach*. The sentence about the
 build's own limit is kept and still computed, so a build in which some permission
 is once again out of reach answers with it rather than with advice that would not
 help: a promise that a test fails is only worth making if the sentence outlives
-the fact it was read from. Which *subject* is a request SURE would hold is still not knowable at write
-time: the words are read when a request arrives, so a grant recorded for a tool
-that can reach an act may still name a request SURE never holds and be spent by
-nothing when its window expires.
+the fact it was read from. Which *subject* is a request SURE would hold is still
+not knowable at write time: the words are read when a request arrives, so a grant
+recorded for a tool that can reach an act may still name a request SURE never
+holds and be spent by nothing when its window expires.
 
 An allowance reaches the three acts this document calls dangerous and nothing
 else:

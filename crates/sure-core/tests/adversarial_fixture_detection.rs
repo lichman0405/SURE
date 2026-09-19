@@ -4800,13 +4800,11 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
             "{id}: the `{kind}` run declares no checks, and a run with nothing scheduled is a run \
              this fixture cannot say anything about"
         );
-        assert_eq!(
-            planned.len(),
-            declared.len(),
-            "{id}: the `{kind}` run planned {} checks and declares {}",
-            planned.len(),
-            declared.len()
-        );
+        // The named half first, and this is the order that matters: a plan that
+        // lost a declared check must fail on the sentence that names the check,
+        // not on two integers that differ, so the count comparison below is the
+        // one left to catch the other direction — a plan that grew a check the
+        // fixture does not declare, where every declared id is still present.
         for wanted in &declared {
             assert!(
                 planned
@@ -4823,6 +4821,13 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
                  the check the case is about is absent from the verdict rather than reported in it"
             );
         }
+        assert_eq!(
+            planned.len(),
+            declared.len(),
+            "{id}: the `{kind}` run planned {} checks and declares {}",
+            planned.len(),
+            declared.len()
+        );
     }
 
     // The anti-vacuity assertion, and it comes before the per-run severities

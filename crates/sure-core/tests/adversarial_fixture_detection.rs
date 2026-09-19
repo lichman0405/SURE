@@ -5810,9 +5810,12 @@ fn a_dangerous_action_that_is_held_names_its_danger_before_its_decision_and_the_
 //     cargo test -p sure-core --test adversarial_fixture_detection
 //
 // This test goes red and its failure message names the fixture, the surface and
-// both severities. It was run, not predicted: the run's own output is at
-// `target/tmp/p14t013-mutation.txt`. The second mutation, which measures the
-// comparison rather than the corpus, is to replace
+// both severities. It was run, not predicted, and run again over the whole
+// workspace: `cargo test --workspace --all-features --no-fail-fast` reported 78
+// passing targets and this one, so no other test in the tree reads the field —
+// which is the same silence that let it go stale, measured rather than assumed.
+// The run's own output is at `target/tmp/p14t013-mutation.txt`. The second
+// mutation, which measures the comparison rather than the corpus, is to replace
 //
 //     produced.iter().all(|severity| *severity == recorded)
 //

@@ -3,6 +3,71 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T005` — *"Implement intent/requirement fixtures"* — dispatched
+from base commit `8df2bbf` (the `P14-T004` acceptance) with its brief at
+`target/tmp/brief-p14t005.md`. Its two acceptance criteria — *"Missing intent
+never yields full requirement fulfillment."* and *"Explicit intent mismatch can
+yield grounded finding."* — are the mirror image of `P14-T004`'s trap, and the
+brief names it that way: there is **no defective project to catch here**, only
+questions about what SURE *may say*, so **a reporter that always answered "I
+cannot confirm this matches your request" would satisfy criterion 1, and one that
+always answered "requirement not met" would satisfy criterion 2.** The defence is
+the same as last time and is mandatory in the brief: criterion 1 is **swept over
+the whole evidence-count space** rather than spot-checked, and criterion 2 carries
+a **control** — the same explicit goal against the same project with one thing
+moved, which must reach the opposite answer.
+
+What the reconnaissance measured, and what decides the shape. The comparison is
+`compare_intent_to_project` (`crates/sure-core/src/intent_implementation.rs:126`),
+and it has **exactly one production caller** — `pipeline.rs:1262`, inside
+`completeness_proposals` — which consumes **only `.findings`**: `matched`,
+`unmatched`, `user_requirements_checked` and `limitation` are computed and
+dropped, so anything the fixture wants to assert about `unmatched` must call the
+function directly. An unmatched requirement produces one `CheckProposal` from one
+function, `declared_intent_proposal` (`:482`), which hard-wires
+`Severity::Note` / `EvidenceClass::Inference` / `critical == false` through
+`gravity_of(…, GapKind::DeclaredIntent)`, and `finding_gravity`'s arm
+`(GapKind::DeclaredIntent, _) => INFORMATIONAL` makes that true on **any** reach.
+`false_completion_aggregator` then classifies it as **style noise, never
+material** — so **it is not a `Finding` at all and `Finding::is_grounded()` is
+never reached on it**, while the decisive predicate `supports_severity`
+(`crates/sure-domain/src/finding.rs:122-138`) returns true for every source at a
+non-blocking severity and admits only `ObservedFact`, `DeterministicCheck` and
+`ClaimAssessment(Contradicted)` at `must_fix`.
+
+**The supervisor's pre-dispatch decision, written into the brief so the worker
+meets it before it meets the code:** criterion 2 is read as a **permission to
+report at the level the rule allows**, not as the strict
+`is_grounded() == true` reading, because the strict reading would mean promoting a
+keyword-search miss to a hand-off blocker — contradicting the manifest's
+`missing-user-intent` row (`note`, `release_blocking: false`), contradicting the
+gravity rule and its own unit test, and turning every requirement SURE fails to
+keyword-match into a false must-fix. The brief requires the fixture to pin the
+measured level **by equality** *and* to pin the ceiling as a ceiling, and it
+requires the worker to say in the hand-back which reading their measurement
+supports and what measurement decided it — so a measurement contradicting this one
+is surfaced first rather than diverging silently. Changing any file under
+`crates/*/src/`, raising the gravity, or touching that manifest row are named in
+advance as send-backs.
+
+The corpus plan: `fixtures/adversarial/missing-user-intent/` (the manifest row
+that exists with **no directory**) plus `fixtures/adversarial/intent-mismatch/`,
+which has no manifest case and therefore needs an entry in
+`FIXTURES_WITHOUT_A_MANIFEST_CASE` written in the voice of the three there now.
+A new `INTENT_FIXTURES` list follows `CLAIM_FIXTURES`'s precedent — graded
+in-process, chained into `every_fixture_this_task_implemented()`, with a
+membership test of its own — and `required_outcomes[].module` must live under
+`crates/sure-core/src/`, which is why the domain-side files are named in a
+separate `reading_module` key exactly as `P14-T004` did. **The base was measured
+rather than inherited**: `8df2bbf`, six gates from native PowerShell all exit 0,
+**2554 parents** against 2564 raw, 0 failed, 12 ignored, 65 case-sensitive
+headers, bootstrap reading 17 phases / 187 tasks, taskctl 187 tasks, and the
+machine's store byte-identical throughout at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853` (348160 bytes,
+worktree clean). The two targets the brief names were measured too rather than
+assumed: `adversarial_fixture_detection` reads **22 passed** and `fixture_apps`
+**23 passed** at that base.
+
 **In flight:** nothing, as of this paragraph. `P14-T004` — *"Implement
 claim-evidence fixtures"* — is **accepted as `9329e63`**, on the hand-back's
 first submission and with **no send-back**. "What `P14-T004` added" and

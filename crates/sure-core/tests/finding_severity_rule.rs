@@ -318,14 +318,23 @@ fn json_bool_field(line: &str, name: &str) -> Option<bool> {
 
 /// Whether a corpus id has a fixture app rather than a stub or nothing at all.
 ///
-/// Three shapes are counted the same way here, because none of them can be run:
-/// a corpus id with no fixture directory (`force-push`, `sensitive-read`,
-/// `benign-test-mocks`, `missing-user-intent`), one whose directory holds only a
-/// descriptor (`check-crash`, `dangerous-delete`, `lying-readme`,
-/// `repair-regression`, `stale-test-evidence`, `tests-not-run`,
-/// `unknown-evidence`), and one that declares an app. The reading is taken from
-/// the fixture rather than from a list in this file, which would be a second
-/// place to keep it.
+/// Two shapes are counted the same way here, because neither can be run: a
+/// corpus id with no fixture directory at all (`force-push`, `sensitive-read`,
+/// `benign-test-mocks`) and one whose directory holds no fixture app — no
+/// `entry_points` in its `scenario.json` (`check-crash`, `dangerous-delete`,
+/// `lying-readme`, `missing-user-intent`, `repair-regression`,
+/// `stale-test-evidence`, `tests-not-run`, `unknown-evidence`). The reading is
+/// taken from the fixture rather than from a list in this file, which would be a
+/// second place to keep it.
+///
+/// **The second list is read off the disk rather than inherited**, and one name
+/// in it moved. `missing-user-intent` used to be listed with the ids that have
+/// no directory, which was true when this comment was written and stopped being
+/// true at `P14-T005`, which created the directory: it holds a `scenario.json`
+/// and a project under `src/`, and what it does not hold is an `entry_points`
+/// key. Nothing depended on the grouping — this function answers `false` either
+/// way, which is why no test went red — so `P14-T007` corrected the sentence
+/// rather than leave a claim in the tree that `ls` contradicts.
 fn fixture_has_an_app(id: &str) -> bool {
     let path = fixture(id).join("scenario.json");
     std::fs::read_to_string(&path).is_ok_and(|scenario| scenario.contains("\"entry_points\""))

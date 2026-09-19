@@ -175,8 +175,12 @@ fn severity_of(name: &str) -> Severity {
 }
 
 fn evidence_class_of(entry: &Value) -> EvidenceClass {
-    serde_json::from_value(entry["evidence_class"].clone())
-        .unwrap_or_else(|error| panic!("`{}` is not an evidence class: {error}", entry["evidence_class"]))
+    serde_json::from_value(entry["evidence_class"].clone()).unwrap_or_else(|error| {
+        panic!(
+            "`{}` is not an evidence class: {error}",
+            entry["evidence_class"]
+        )
+    })
 }
 
 // --- what the five detectors say about a project --------------------------
@@ -208,10 +212,26 @@ fn discovery_at(root: &Path) -> Discovery {
 fn readings(root: &Path) -> Vec<Reading> {
     let discovery = discovery_at(root);
     let mut found = Vec::new();
-    collect("candidate_scanner", CandidateScanner::of(&discovery).proposed(), &mut found);
-    collect("noop_heuristics", NoOpHeuristics::of(&discovery).proposed(), &mut found);
-    collect("demo_data_heuristics", DemoDataHeuristics::of(&discovery).proposed(), &mut found);
-    collect("route_consistency", RouteConsistency::of(&discovery).proposed(), &mut found);
+    collect(
+        "candidate_scanner",
+        CandidateScanner::of(&discovery).proposed(),
+        &mut found,
+    );
+    collect(
+        "noop_heuristics",
+        NoOpHeuristics::of(&discovery).proposed(),
+        &mut found,
+    );
+    collect(
+        "demo_data_heuristics",
+        DemoDataHeuristics::of(&discovery).proposed(),
+        &mut found,
+    );
+    collect(
+        "route_consistency",
+        RouteConsistency::of(&discovery).proposed(),
+        &mut found,
+    );
     let ui = UiActionBridge::of(&discovery).proposals();
     collect("ui_action_bridge", &ui, &mut found);
     found.sort_by(|left, right| {
@@ -365,7 +385,10 @@ fn copy_tree(from: &Path, to: &Path) {
 }
 
 /// How two directory trees differ, in the same words a change is declared with.
-fn differences(before: &BTreeMap<String, Vec<u8>>, after: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
+fn differences(
+    before: &BTreeMap<String, Vec<u8>>,
+    after: &BTreeMap<String, Vec<u8>>,
+) -> Vec<String> {
     let mut found = Vec::new();
     for (path, bytes) in before {
         match after.get(path) {
@@ -387,9 +410,8 @@ fn differences(before: &BTreeMap<String, Vec<u8>>, after: &BTreeMap<String, Vec<
 /// were supposed to make.
 fn apply(project: &Path, changes: &[Value]) -> Vec<String> {
     let read = |path: &str| {
-        std::fs::read(project.join(path)).unwrap_or_else(|error| {
-            panic!("a control reads {path}, which does not read: {error}")
-        })
+        std::fs::read(project.join(path))
+            .unwrap_or_else(|error| panic!("a control reads {path}, which does not read: {error}"))
     };
     let write = |path: &str, bytes: &[u8]| {
         let full = project.join(path);
@@ -512,7 +534,10 @@ fn expected_after_control(name: &str) -> Vec<Signature> {
         })
         .collect();
     declared.sort();
-    let mut derived: Vec<String> = shipped.iter().map(|signature| signature.anchor.clone()).collect();
+    let mut derived: Vec<String> = shipped
+        .iter()
+        .map(|signature| signature.anchor.clone())
+        .collect();
     derived.retain(|anchor| Some(anchor.as_str()) != block["control"]["replaces"].as_str());
     derived.sort();
     assert_eq!(
@@ -620,7 +645,11 @@ fn every_benign_file_the_corpus_names_is_read_and_answers_note() {
         // set by any of the five detectors today, and both are asserted rather
         // than assumed because either one alone would make the finding reach a
         // reader as a stop.
-        assert!(!reading.critical, "{}: a candidate decided a verdict", reading.anchor);
+        assert!(
+            !reading.critical,
+            "{}: a candidate decided a verdict",
+            reading.anchor
+        );
         assert_eq!(
             reading.evidence_class,
             evidence_class_of(outcome),
@@ -685,10 +714,18 @@ fn the_aggregate_over_the_project_has_nothing_material_in_it() {
     let mut proposals: Vec<CheckProposal> = Vec::new();
     proposals.extend(CandidateScanner::of(&discovery).proposed().iter().cloned());
     proposals.extend(NoOpHeuristics::of(&discovery).proposed().iter().cloned());
-    proposals.extend(DemoDataHeuristics::of(&discovery).proposed().iter().cloned());
+    proposals.extend(
+        DemoDataHeuristics::of(&discovery)
+            .proposed()
+            .iter()
+            .cloned(),
+    );
     proposals.extend(RouteConsistency::of(&discovery).proposed().iter().cloned());
     proposals.extend(UiActionBridge::of(&discovery).proposals());
-    assert!(!proposals.is_empty(), "the project produced nothing to aggregate");
+    assert!(
+        !proposals.is_empty(),
+        "the project produced nothing to aggregate"
+    );
 
     let aggregated = aggregate(proposals);
     assert!(
@@ -799,7 +836,9 @@ fn the_control_that_takes_the_file_name_convention_away_reaches_must_fix() {
     // it cannot have removed one.
     let shipped = readings(&fixture());
     assert!(
-        !shipped.iter().any(|reading| reading.anchor == "src/gateway.js"),
+        !shipped
+            .iter()
+            .any(|reading| reading.anchor == "src/gateway.js"),
         "the shipped fixture now has a reading anchored at the real client, so this control \
          displaces one reading with another and measures two things: {shipped:#?}"
     );
@@ -813,7 +852,10 @@ fn the_control_that_takes_the_file_name_convention_away_reaches_must_fix() {
         .iter()
         .find(|reading| reading.anchor == "src/gateway.js")
         .unwrap_or_else(|| panic!("the renamed double was not read at all: {found:#?}"));
-    assert_eq!(double.title, "project contains fake email addresses or domains in production code");
+    assert_eq!(
+        double.title,
+        "project contains fake email addresses or domains in production code"
+    );
     assert_eq!(
         double.severity,
         Severity::MustFix,

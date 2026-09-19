@@ -3,68 +3,69 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T008` — *"Implement dangerous-action fixtures"* — is **dispatched**, not accepted,
-from base `83e3e58` (the `P14-T007` acceptance), with its brief at `target/tmp/brief-p14t008.md` and
-the tree clean at dispatch. Its criterion is *"Delete/force-push/sensitive-read expected protection
-behavior tested."* and it is the first `P14` fixture whose subject is **the product's own decision
-about one request** rather than a check result over a project.
+**In flight:** nothing, as of this paragraph. `P14-T008` — *"Implement dangerous-action fixtures"* —
+is **accepted as `22363b3`**, on the **second submission**, over five worker commits from base
+`83e3e58` (the `P14-T007` acceptance), with its brief at `target/tmp/brief-p14t008.md`, its send-back
+at `target/tmp/sendback-p14t008.md`, and the tree clean. "What `P14-T008` added" and "Validation of
+`P14-T008`" below carry the detail. The criterion — *"Delete/force-push/sensitive-read expected
+protection behavior tested."* — is met by three fixtures that **declare** their runs, are graded
+in-process against the product's own answers, and carry controls that must reach `Allowed`.
 
-**What exists, measured at the base.** All three cases are `release_blocking: true` and `must_fix` in
-`evaluation/acceptance-manifest.json` (`:94`, `:100`, `:106`). `fixtures/adversarial/dangerous-delete/`
-is a **209-byte stub** — five lines, no `README.md`, no `release_blocking` field, and still carrying
-the anti-stub marker `to_be_implemented_by_task_graph` that `fixture_apps.rs:244` exists to catch.
-`fixtures/adversarial/force-push/` and `fixtures/adversarial/sensitive-read/` **do not exist**. So the
-deliverable is one directory filled in and two created, each named in a const list in both corpus
-files — because a fixture directory that no list names is a fixture nothing grades, which is the
-defect the last three tasks were about.
+**What it was, and what it is.** `fixtures/adversarial/dangerous-delete/` was a **209-byte, five-line
+stub** from the bootstrap commit `0c85181`, still carrying the anti-stub marker
+`to_be_implemented_by_task_graph` and no `release_blocking` field; `force-push/` and `sensitive-read/`
+**did not exist**. All three are now directories holding a `scenario.json` declaring runs and settings
+and a `README.md` stating the limits, named in a const list in **both** corpus files, and graded by
+driving `assess_claude_code_tool` / `assess_cursor_tool` over every declared run: **22 runs** — 8, 7
+and 7 — of which **10** must block *and name their danger*, **4** must reach `allow`, and **8** must be
+held **with no danger named at all**.
 
-**The trap, and it is a sharper one than `P14-T007`'s.** *"Cannot aggregate green"* was satisfiable by
-three different broken products; *"the dangerous action is blocked"* is satisfiable by **`Danger`
-deleted entirely**, because `base_decision` (`hook_protection.rs:1468`) blocks `NeedsConsent` with a
-sentence that names no danger. A fixture asserting only `kind == Block` passes on a build with no
-detector in it. So the brief fixes the assertion order before the work starts: the **danger by wire
-name** first, then the reason **by equality with `danger_reason`**, and only then the decision kind —
-and every fixture carries a **control**, the same request with exactly one thing moved, that must
-reach `Allowed`, because *"a broad delete is held"* is equally satisfied by a product that holds
-everything forever.
+**The trap, and why the no-danger runs are the point.** *"The dangerous action is blocked"* is
+satisfied by a build with `Danger` deleted entirely, because `base_decision` (`hook_protection.rs:1468`)
+blocks `NeedsConsent` with a sentence that names no danger. A fixture made only of held runs cannot
+tell those two builds apart, so each fixture carries both halves: runs held for a named danger, and
+runs held with none — an unforced push, a stacked line, a read of a key file in a directory the
+classifier cannot see whole. **Probe A** forced the danger a held request carries to `None` and the
+grading test failed on its **first** assertion, quoting the fixture's own declaration; a fixture
+asserting only `block` would have stayed green.
 
-**The product is reachable in-process, so the fixture grades behaviour rather than restating a test.**
-`P13-T005` built `hook_protection` and `lib.rs:43` makes it public: `assess_claude_code_tool` (`:449`),
-`assess_cursor_tool` (`:367`), `Danger` (`:587`), `danger_reason` (`:709`) and the allowance rule
-`acts_a_tool_could_be_held_for` (`:998`) can all be driven from `crates/sure-core/tests/` with no
-store and no binary. The store-backed half — grant, one allow, held again — is already graded in
-`sure-cli` by three named tests (`hook.rs:2223`, `:2303`, `:2334`), and the fixture **names them**
-rather than restating them, which is what `fixtures/privacy/manifest.json:526-548` already says about
-which half is whose.
+**The controls, and the product they exclude.** Each fixture's control is the same settings with
+exactly one thing moved and must reach `Allowed`, and the grading test computes the fields that differ
+between a run and its control and requires that set to equal the fixture's own `moved.fields`.
+**Probe C** — standard protection made to block everything it would have allowed — reddens on the
+control's own sentence, so *"a broad delete is held"* cannot be satisfied by a product that holds
+everything.
 
-**The tripwire is a substring, which is worth knowing before it bites.** `fixture_has_an_app`
-(`finding_severity_rule.rs:340`) is `scenario.contains("\"entry_points\"")` — a raw text test for the
-double-quoted token. Two words of prose in a new `scenario.json` would move a fixture into the
-release-blocking-with-an-app set and redden the pinned list at `:421-432`. `check-crash` escapes this
-only because it writes the word in backticks (a count of the double-quoted token in that file is
-zero), and the brief says a red pinned list is never fixed by editing the list.
+**Sent back once, and the send-back corrected me twice.** Two prose items: a doc claim that a reworded
+sentence reddens the fixture *"even if the fixture is reworded to match"* — false, measured (**probe
+G**: rewording the product's constant and all six declared copies together leaves the test green,
+because both checks are equalities) — and the missing record of a measured limit (**probe E**: dropping
+`"sensitive-read"` from the sure-core list leaves both test files green, since `fixture_apps.rs:214`
+keeps its own copy and nothing binds the two). The worker re-measured both and then pushed back on two
+of my premises, correctly: the const **did** carry a doc comment — its closing claim, that the guard
+below binds the two files, is exactly what the measurement disproves — and the false clause was
+**false when it was written** rather than something that stopped being true, which `git log -S` settles
+by putting the clause, the function and the equality that falsifies it in the same commit, `6d0ccb1`.
+I verified both, and the corrected sentence in all three directions: product reworded alone RED,
+fixture alone RED, both together GREEN, unmutated control GREEN.
 
-**Four sentences become false the moment these directories exist**, and the brief names them so they
-are reconciled rather than left: `finding_severity_rule.rs:31-39`; `:319-328`, where `force-push` and
-`sensitive-read` move from the list about directories to the list about keys, as `missing-user-intent`
-did at `P14-T005`; `:412-419`, where `dangerous-delete` stops being a stub directory; and
-`fixtures/privacy/manifest.json:667-674` with its human half at `fixtures/privacy/README.md:69-70` —
-the `seam` entry whose own evidence says the two directories *"are absent, which is a measurement of
-this tree rather than an inference from a brief"* and whose `would_settle_it` is *"P14-T008's
-fixtures."*
+**The flake, seen again and identical in shape.** My gate run at `22363b3` failed the test gate — exit
+101, 2576 passed, 1 failed — on
+`runtime_start.rs::a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named` at
+`:1184:5`, the same test `P14-T006` recorded failing **2 of 5** suite runs and `P14-T007` recorded
+failing once under the suite and passing 6 of 6 alone. In isolation at `22363b3` it passed **6 of 6**,
+3.66–3.71s each, exit 0. The whole bundle was then re-run at the same commit and came back **green,
+2577 passed**, and **both runs are recorded**: the red one is not withdrawn and the green one is not a
+re-run of it.
 
-**The base is stated rather than assumed.** `83e3e58` differs from `f1a6764`, the last commit measured
-by the whole six-gate bundle, by exactly three supervisor files — `git diff --stat f1a6764 83e3e58`
-is `SHA256SUMS.txt`, `progress/HANDOFF.md`, `progress/state.json` — and nothing in `crates/` reads any
-of them: six grep hits, every one of them a comment. The three gates that do read the tree's text were
-run at `83e3e58` and are green: bootstrap 17 phases / 187 tasks, taskctl 187 tasks, and the non-Windows
-check reporting what it always reports on a machine with no cross C compiler.
-
-**The CI reading owed to this entry is discharged.** Run `35425807272` for `f1a6764` is **success at
-attempt 1** — the `P14-T007` head is CI-green. Run `35426079336` for the base commit `83e3e58` was in
-flight when this was written and is owed to the next entry. The dispatch commit `9512989` stays red on
-the recorded `service_supervisor.rs:793:5` flake, and the three superseded worker commits still have
-no run of their own; nothing is ever re-run, because `gh run rerun --failed` mints no second run id.
+**CI, chained rather than summarised.** `f1a6764` — the head the last entry accepted — is run
+`35425807272`, **success** at attempt 1 on all five jobs, which discharges the reading that entry left
+owed. The dispatch commit `3e984f4` is **red**: run `35426296617`, `rust (ubuntu-latest)` only, an
+**ETXTBSY** in `analysis_provider/mod.rs:591` — test-side and pre-existing since `P12-T004`, where a
+shared scratch path under `target/tmp` is written while another test executes it. The five worker
+commits — `c039987`, `6d0ccb1`, `1bf959f`, `7cdfc4e`, `22363b3` — have **no run of their own**, because
+`origin` is still `3e984f4`; this acceptance commit is the first push carrying them. That is stated
+rather than glossed, and it is the one thing here not individually CI-verified.
 
 **In flight:** nothing, as of this paragraph. `P14-T007` — *"Implement checker-error/unknown
 fixtures"* — is **accepted as `f1a6764`**, on the **second submission**, over eight worker commits
@@ -2233,6 +2234,214 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T008` added
+
+Three adversarial fixture directories — one filled in from a stub, two created — plus the grading that
+drives them, the manifest wiring, and six sentences about them reconciled. Twelve files `+2286/-40` in
+the worker's five commits; fifteen files `+2355/-46` from the base counting the dispatch commit.
+
+| file | |
+|---|---|
+| `fixtures/adversarial/dangerous-delete/scenario.json` | 349 lines, `+346/-3`, from a 209-byte five-line stub |
+| `fixtures/adversarial/dangerous-delete/README.md` | 150 lines, new |
+| `fixtures/adversarial/force-push/scenario.json` | 282 lines, new |
+| `fixtures/adversarial/force-push/README.md` | 137 lines, new |
+| `fixtures/adversarial/sensitive-read/scenario.json` | 318 lines, new |
+| `fixtures/adversarial/sensitive-read/README.md` | 129 lines, new |
+| `crates/sure-core/tests/adversarial_fixture_detection.rs` | 5750 lines, `+703/-1` |
+| `crates/sure-testkit/tests/fixture_apps.rs` | 1682 lines, `+153/-0` |
+| `crates/sure-core/tests/finding_severity_rule.rs` | 639 lines, `+53/-27` |
+| `fixtures/privacy/manifest.json` | `+3/-3` |
+| `fixtures/privacy/README.md` | `+11/-5` |
+| `fixtures/adversarial/intent-mismatch/scenario.json` | `+1/-1` |
+
+### The twenty-two runs, and what each fixture pins
+
+| fixture | held, danger named | reaches `allow` | held, no danger named |
+|---|---|---|---|
+| `dangerous-delete` | `broad_delete_named_by_the_command`, `the_same_command_under_standard`, `broad_delete_named_by_the_path`, `the_same_path_route_in_cursor_s_vocabulary` | `control` | `a_command_that_names_no_whole_location`, `a_line_sure_cannot_read`, `a_mode_without_the_permission_refuses_first` |
+| `force-push` | `force_push_named_by_the_command`, `the_same_line_in_cursor_s_vocabulary`, `the_short_flag_is_the_same_act` | `control` | `an_unforced_push_is_held_for_consent`, `a_stacked_line_is_not_read`, `a_shell_event_with_no_command_line` |
+| `sensitive-read` | `credential_area_read_under_strict`, `a_key_file_in_a_named_directory`, `the_same_read_in_cursor_s_vocabulary` | `control`, `an_ordinary_source_read_is_allowed_under_strict` | `a_command_line_hides_the_path`, `a_change_to_the_secret_area_is_held_without_a_danger` |
+
+The third column is why the second one means anything, and the fourth is why the **first** does: a
+product that named a danger on every held request would fail the fourth column exactly as loudly as a
+product with no detector fails the first. Each run also declares its own `expect.reason` and, where it
+is held, which `reason_named_by` route produced it — the two routes being `danger_reason` (the danger's
+own consequence) and the strict route, whose sentence must *begin* with the consequence and be none of
+the `danger_reason` sentences.
+
+### The assertion order, which the dispatch commit fixed before the work started
+
+The danger by wire name **first**, then the sentence by equality with the product's own text, and only
+then the decision kind — because `block` alone is the assertion a build with no detector passes. The
+control is asserted beside it, and the grading test also **self-checks its own instruments**: it runs
+a named-danger run, a held-unnamed run and a consent-sentence run through the same helpers and requires
+each comparison to come out the way that run's shape demands, so a helper that silently stopped
+comparing could not report a green.
+
+### The limits, written into the fixtures rather than dressed up
+
+`force-push` has **no path route at all** — `command_danger` reads a command only for
+`ActionKind::ArbitraryCommand` — and its README records that no command-bearing request can reach
+`Allowed` under any settings in this build, which is why its control moves the request to a file read.
+`sensitive-read` is **strict-only**: under `standard`, reading `.env` is `Allowed` with no danger, and
+that is a declared run rather than an omission. Lines carrying shell syntax are not read at all, so a
+quoted path or a stacked command is held for consent with no danger named — declared as such, not
+asserted as a danger the product does not name.
+
+### Two measured limits that are now in the tree rather than in a report
+
+**The two lists are not bound to each other.** `DANGEROUS_ACTION_FIXTURES` is declared in both
+`adversarial_fixture_detection.rs` and `fixture_apps.rs:214`, and nothing compares them: dropping
+`"sensitive-read"` from the first leaves both files green at 32 and 26, because the other file's copy
+still artefact-checks the directory. That is written into the const's doc comment, and **no test was
+added to bind them** — whether they should always agree is a design question, since they grade
+different things, and the supervisor is recording it as a follow-up rather than forcing an invariant
+into the tree.
+
+**A reworded sentence is caught only against a stationary copy.** The reason check compares the
+declaration to the product's answer, and `danger_reason`'s return to the declaration — two equalities,
+neither of which sees both sides move together. The doc comment said the opposite and now says this,
+with the old clause kept on record and the measurement beside it.
+
+### Six sentences these fixtures made false, five reconciled by the worker and one by the supervisor
+
+`finding_severity_rule.rs:31-39`, `:319-328` and `:412-419` — `force-push` and `sensitive-read` moving
+from the list of ids with no directory to the list of ids whose directory holds no app, and
+`dangerous-delete` ceasing to be a stub — each rewritten in house style with the old text kept on
+record; `fixtures/privacy/manifest.json:667-674` and `fixtures/privacy/README.md:60-81`, the `seam`
+entry whose `would_settle_it` was *"`P14-T008`'s fixtures"*; and one line of
+`fixtures/adversarial/intent-mismatch/scenario.json`, whose list of manifest ids with no directory is
+now measured rather than predicted. The sixth is the supervisor's: `tasks/tasks.json`'s `P15-T026`
+note told a future worker that this task *"owns building those, so the honest answer for that line may
+be that its corpus does not exist yet"*. The corpus exists now, and the note says so.
+
+## Validation of `P14-T008`
+
+**Verified, not re-read.** Tree clean at `22363b3`; the worker's five commits and their diffstat
+matching the report; `origin` untouched by the worker at `3e984f4`; the send-back diff **prose only** —
+one file, `+31/-6`, every changed line a doc line, no code line, no fixture, no behaviour, no test
+added; and the three supervisor files the dispatch commit wrote (`SHA256SUMS.txt`, `progress/HANDOFF.md`,
+`progress/state.json`) untouched by every worker commit — `git diff --stat 3e984f4..22363b3` does not
+name one of them.
+
+| | base `83e3e58` | `22363b3` run A | `22363b3` run B |
+|---|---|---|---|
+| fmt / clippy / bootstrap / taskctl / nonwindows | exit 0 (the three text gates, re-run at dispatch) | exit 0 | exit 0 |
+| test | not run as a bundle at the base | **exit 101** | exit 0 |
+| passed | — | 2576 | **2577** |
+| failed | — | **1** | 0 |
+| ignored | — | 12 | 12 |
+| result lines | — | 75 | 75 |
+| case-sensitive headers | — | 65 | 65 |
+| `adversarial_fixture_detection` | 30 `#[test]` | 32 passed | 32 passed |
+| `fixture_apps` | 25 `#[test]` | 26 passed | 26 passed |
+| store identical | — | True | True |
+| worktree | — | `[]` | `[]` |
+
+The base's own code is `f1a6764`'s, which the last entry gated in full at 2574 passed; `83e3e58` differs
+from it by exactly three supervisor files, and nothing in `crates/` reads any of them. Run A's single
+failure is the `runtime_start` budget test at `:1184:5`, and the same test run **six times in isolation
+at `22363b3` passed 6 of 6**, 3.66–3.71s, tree clean after. That is the whole characterisation: the
+sample bounds no rate, and both runs stand in the record.
+
+### Nine supervisor probes, of which the worker attempted none
+
+Each was applied to the tree with a single-site guard, the test run, and the file restored through
+`git` with the tree asserted clean afterwards. The first seven ran at `7cdfc4e`; the send-back moved
+the file's later lines by `+25`, which is why the last two quote `:5246` for the equality the earlier
+ones quote as `:5221`.
+
+| probe | mutation | where it fires |
+|---|---|---|
+| A | the danger a held request carries forced to `None` | `:5577`, the danger asserted before the decision |
+| C | standard protection blocks everything it would have allowed | `:5221`, the control's own sentence |
+| D | `"entry_points"` added to a fixture `scenario.json` | `:5532` and `finding_severity_rule.rs:405` |
+| E | `"sensitive-read"` dropped from the sure-core list | **nowhere** — 32 and 26, both green |
+| F | `command_danger`'s `ForcePush` arm returning nothing | `:5449`, the allowance rows |
+| G | the consequence reworded in the product *and* all six fixture copies | **nowhere** — green |
+| H | *(none)* the build-limit sentence test alone | green — the harness is not what reddens things |
+| I | the product reworded alone, after the send-back | `:5246`, the first equality |
+| J | the fixture reworded alone, after the send-back | `:5246`, the same equality, mirrored |
+
+**E and G are the two the tree now records as limits** rather than as successes, and both are written
+into the doc comments the send-back produced. **F is the one that shows the classifier is load-bearing**:
+with the `ForcePush` arm returning nothing, the fixture fails on its allowance rows, so those rows are
+read off the product rather than invented.
+
+### The send-back, and the two premises it corrected
+
+Two prose items in one test file: a claim that a reworded sentence reddens the fixture *"even if the
+fixture is reworded to match"*, and the absence of any record of the two lists' limit. The brief asked
+for the first to be re-measured before it was edited and told the worker to **stop and report** if its
+measurement disagreed. It agreed, and the worker then reported two disagreements with the brief itself,
+both of which I verified:
+
+- **The const already had a doc comment**, ending *"the guard below is what says the two files are
+talking about the same directories"* — a claim its own guard does not support, visible as a removed
+line in the commit's own diff. Appending a second paragraph would have left the false clause standing,
+so the worker corrected it in place. My brief's premise was wrong; the outcome is what §2 asked for.
+- **The clause was never true.** The brief suggested this tree's usual reconciliation register — *"true
+when it was written and stopped being true at `P14-T008`"*, which is what the five other sentences in
+this task needed. `git log -S` shows the clause, the function and the `assert_eq!` that falsifies it
+all arriving in `6d0ccb1`, so the worker wrote that it was false when written instead. Had it taken my
+wording, the record would have gained a second false sentence about its own history.
+
+### CI, one row per commit, including the ones with no row
+
+| commit | run | result |
+|---|---|---|
+| `f1a6764` (`P14-T007` head) | `35425807272` | success, attempt 1, all five jobs |
+| `83e3e58` (base, `P14-T007` acceptance) | `35426079336` | success, attempt 1 |
+| `3e984f4` (dispatch) | `35426296617` | **FAILURE**, attempt 1, `rust (ubuntu-latest)` — ETXTBSY, `analysis_provider/mod.rs:591` |
+| `c039987`, `6d0ccb1`, `1bf959f`, `7cdfc4e`, `22363b3` | — | **no run of their own**; never pushed |
+
+The ETXTBSY failure is test-side and pre-existing since `P12-T004`: `echoing_program` writes a shared
+scratch path under `target/tmp` while a concurrently running test executes it, and only the Linux job
+sees it. The five worker commits are **not individually CI-verified** — `origin` never moved during
+this task — and the honest statement is that the tree they produce is the one this acceptance gated
+locally and the one the push will put in front of CI, not that they each passed it.
+
+### The store, and one correction to a sentence the earlier entries wrote
+
+`C:\Users\lishi\AppData\Local\SURE\sure.db` is byte-identical at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes, mtime
+`2026-09-18T15:12:15.0354647Z`, before and after every probe and both gate runs — the bundle records
+the same pair of digests itself — and all scratch went under `target/tmp`.
+
+**The directory around it moves, and that is now measured rather than asserted away.** Its mtime moved
+twice during this task: to `2026-09-19T14:37:27.18+08:00` in the worker's post-commit window and to
+`14:52:16.86+08:00` during my first gate run. A directory mtime moves only when a file is created,
+renamed or removed inside it, and I localised it rather than leaving it as an anecdote: the full
+workspace suite does it; the privacy suite, `sure-cli --lib`, `sure-core --lib` and the `doctor`,
+`store_concurrency` and `project_intent_ingest` targets each leave it unmoved; and
+`cargo test -p sure-cli --test cli_contract` reproduces it alone (`14:52:16` → `14:54:19`). The test is
+`cli_contract.rs:3178`, `a_doctor_report_says_which_store_location_the_run_is_using`, which at
+`:3223-3248` **deliberately** spawns the binary with no `--store-dir` so that the default is what runs
+— *"One test uses this, the one that checks a caller who names nothing still gets the platform's own
+location"* (`:161-162`). `sure doctor` opens the store to report on it, SQLite creates and removes a
+journal or WAL beside the database, and the directory's mtime moves while the database's bytes do
+not — which that test asserts for itself by taking the bytes before and after (`:207-221`). So the
+sentence the previous acceptances wrote, that **nothing** under `%LOCALAPPDATA%\SURE\` was written,
+is too strong as stated: no byte of the store changes, and a file is transiently created beside it by a
+pre-existing test whose purpose is to prove a caller who names no store gets the platform's own. The
+localisation is bounded and said to be: six targets were run in isolation, one reproduces the touch and
+five do not, and no claim is made that no other test in the suite could also touch it.
+
+### What is not claimed
+
+That the fixtures drive a harness process — they drive the product's own public entry points
+in-process, and the store-backed half (grant, one allow, held again) is graded elsewhere in `sure-cli`
+by three tests the fixture **names** rather than restates. That the two fixture lists are bound to each
+other: they are not, and that is probe E. That a reworded sentence is caught when the fixture is
+reworded with it: it is not, and that is probe G. That the `runtime_start` flake has a bounded rate:
+six isolated passes and one suite failure is a measurement, not a rate. That the five worker commits are
+individually CI-verified. And that the sentence at `hook_protection.rs:1078-1079` — which says the tool
+names the build-limit sentence is reached by are *"`Write`, `Edit` and `Delete` … those names today"*,
+and which the test at `:3330-3393` and the paragraph at `:1368-1375` both contradict — has been fixed:
+it was falsified by `P13-T011`, it is outside this task's brief, and the worker **reported** it rather
+than editing it, which is recorded here as a follow-up.
 
 ## What `P14-T007` added
 

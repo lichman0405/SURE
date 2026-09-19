@@ -4770,41 +4770,24 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         schedules.insert(kind.clone(), schedule);
     }
 
-    // Every declared answer is the product's answer, key for key and in both
-    // directions. The reverse direction is `answer_keys` /
-    // `assert_answers_account_for` above; this is the forward one.
-    for (kind, run) in &runs {
-        let declared = run["expect"]
-            .as_object()
-            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
-        let reported = answers[kind]
-            .as_object()
-            .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
-        let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
-        let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
-        assert_eq!(
-            reported_keys, declared_keys,
-            "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
-             things, so one of them has stopped being graded"
-        );
-        for (key, expected) in declared {
-            assert_eq!(
-                reported[key], *expected,
-                "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the case \
-                 is not being graded as written"
-            );
-        }
-    }
-
-    // The row must be present. A run whose plan lost its check is not a run whose
-    // answer nobody needed: with nothing scheduled there is nothing to report, so
-    // every answer below would be vacuously non-green and the fixture would still
-    // pass a criterion it had stopped measuring. This is the assertion that
-    // removing the check from the declared schedule reddens, and the reason the
-    // declared ids are read from `expect` rather than from the run's own
-    // `schedule` list, which the same edit would empty.
+    // The row must be present, and it is asserted **before** the comparison of
+    // the answers, so that the mutation this fixture exists to catch fails on
+    // the sentence that says what went wrong rather than on a difference between
+    // two JSON objects.
+    //
+    // A run whose plan lost its check is not a run whose answer nobody needed:
+    // with nothing scheduled there is nothing to report, so every answer below
+    // would be vacuously non-green and the fixture would still pass a criterion
+    // it had stopped measuring. This is the assertion that removing the check
+    // from the declared schedule reddens, and the reason the declared ids are
+    // read from `expect` rather than from the run's own `schedule` list, which
+    // the same edit would empty.
     for (kind, run) in &runs {
         let planned = answers[kind]["check_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let rows = answers[kind]["rows"]
             .as_array()
             .cloned()
             .unwrap_or_default();
@@ -4832,6 +4815,38 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
                 "{id}: the `{kind}` run's plan holds {planned:?} and not `{wanted}`, so the check \
                  the case is about is not a row in the report and nothing below is a measurement \
                  of it"
+            );
+            assert!(
+                rows.iter()
+                    .any(|row| row["id"].as_str() == Some(wanted.as_str())),
+                "{id}: the `{kind}` run planned `{wanted}` and the report shows no row for it, so \
+                 the check the case is about is absent from the verdict rather than reported in it"
+            );
+        }
+    }
+
+    // Every declared answer is the product's answer, key for key and in both
+    // directions. The reverse direction is `answer_keys` /
+    // `assert_answers_account_for` above; this is the forward one.
+    for (kind, run) in &runs {
+        let declared = run["expect"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
+        let reported = answers[kind]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
+        let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
+        let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
+        assert_eq!(
+            reported_keys, declared_keys,
+            "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
+             things, so one of them has stopped being graded"
+        );
+        for (key, expected) in declared {
+            assert_eq!(
+                reported[key], *expected,
+                "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the case \
+                 is not being graded as written"
             );
         }
     }

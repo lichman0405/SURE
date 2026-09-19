@@ -3,6 +3,56 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T010` — *"Implement benign false-positive corpus"* — is **dispatched**, not
+accepted, from base `44406d2` (the `P14-T009` acceptance), with its brief at
+`target/tmp/brief-p14t010.md` and the tree clean at dispatch. Its criterion is *"Test mocks/examples/docs
+TODOs do not become indiscriminate must-fix findings."* and it is the task `P14-T011` — the product eval
+runner — waits behind.
+
+**What exists, measured at the base.** The case is already in the contract:
+`evaluation/acceptance-manifest.json:89-93` names `benign-test-mocks`, `release_blocking: false`,
+`expected_severity: "note"` — and `fixtures/adversarial/` holds **no directory for it**. It is the only
+id the manifest names with neither a directory nor a measured answer. The filter the criterion is about
+is `candidate_context.rs`'s `CandidateContext`/`classify_path`, whose five call sites are the detectors
+(`candidate_scanner.rs:338`, `noop_heuristics.rs:384`, `demo_data_heuristics.rs:414`,
+`route_consistency.rs:152`, `ui_action_bridge.rs:190`), and the gate that makes the note is
+`finding_gravity.rs:282` — `(_, Reach::NotProduction) => INFORMATIONAL`, beside the single `must_fix`
+lift at `:285`.
+
+**The fact that decides this task, and the reason the brief spends its length on the level.** The
+sentence is currently **asserted by shape rather than measured**: `finding_severity_rule.rs:600-618`
+reads the manifest case and asserts `!fixture_has_an_app("benign-test-mocks")`, with the comment *"Its
+fixture is a stub, so its `note` cannot be measured by running anything."* Once a fixture exists and is
+driven, that premise is dead. And the negative half is **free unless the detectors actually fire** — the
+same shape as `P14-T008`'s deleted danger and `P14-T009`'s product that closes nothing — so the corpus
+must show its benign files are **detected** and land below `must_fix`, with a control proving the
+detectors are not silent on its own vocabulary.
+
+**Two traps in the vocabulary, measured rather than guessed.** Markdown is never a scan candidate:
+`is_source_candidate` (`references.rs:725-733`) accepts only js/jsx/mjs/cjs/ts/tsx/mts/cts, py/pyi and
+rs, and the three text detectors each filter on it (`candidate_scanner.rs:305`,
+`noop_heuristics.rs:351`, `demo_data_heuristics.rs:381`) — so a docs TODO that lives in markdown
+reaches no detector at all and would prove nothing. And `mock` is matched only as a dot-separated
+file-name segment or a `mocks`/`stubs`/`fixtures` directory, so `src/mockServer.js` classifies as
+`Product` rather than `MockFixture`.
+
+**Sentences the work makes false**, all measured at the base and named in the brief: the
+`fixture_has_an_app` doc comment at `finding_severity_rule.rs:349-388`, which names
+`benign-test-mocks` as the id *"with no fixture directory at all"* — the fourth correction in a history
+that already records three, and the second where a name moves between its two groups rather than a
+wording being fixed; the comment at `:600-603`; and `fixtures/adversarial/intent-mismatch/scenario.json:190`,
+whose *"the only id that contract names with no directory under `fixtures/adversarial/` is
+`benign-test-mocks`"* stops being true the moment the directory is created.
+
+**The base is stated rather than assumed.** `44406d2` is the `P14-T009` acceptance: three files, all
+supervisor-owned — `progress/HANDOFF.md`, `progress/state.json`, `SHA256SUMS.txt` — and nothing in
+`crates/` reads any of them; all 194 digests in `SHA256SUMS.txt` verify against the files. Its CI run
+`35429750260` is green on four of its five jobs at dispatch — `rust (ubuntu-latest)`,
+`rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary` — with
+`rust (windows-latest)` still running; the full reading is owed to the next entry. The ubuntu and
+macOS jobs are the two that first exercised `P14-T009`'s `node`-spawning test under CI, and both
+passed, which is the answer to the risk that acceptance recorded.
+
 **In flight:** nothing, as of this paragraph. `P14-T009` — *"Implement repair E2E/regression
 fixture"* — is **accepted as `6f5cc0e`**, over three worker commits from base `a39e769` (the `P14-T008`
 acceptance), with its brief at `target/tmp/brief-p14t009.md` and the tree clean at dispatch and at

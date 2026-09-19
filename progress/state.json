@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-19T07:33:40.034Z",
+  "last_updated": "2026-09-19T07:40:59.458Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2018,10 +2018,10 @@
       "notes": " Handed here on 2026-09-18 by the supervisor, reading P10-T008 back. That task is titled \"Claude synthetic E2E check-repair-recheck\" and its commit `bfc51fc` adds one test, `claude_code_check_repair_recheck_round_trip`, in `crates/sure-cli/src/hook.rs` — which asserts that eight synthetic hook events persist with the right types. It never invokes `sure check`, `sure repair` or `sure recheck`; the check/repair/recheck in its name are the *names of tool calls inside the payloads*. This task's acceptance, \"repair can close only with new passing evidence; regression variant blocked\", is the real end-to-end claim and the only thing that can honestly carry it: drive the three commands over a fixture project, show a repair closing on a fresh passing check, and show the regression variant refused. A test that asserts an event round trip must not be the evidence for it. Accepted 2026-09-19 at 6f5cc0e. One sentence above is corrected here rather than left standing: \"the real end-to-end claim\" overstates what this task reached. The acceptance is carried at the in-process level -- discovery, the checks layer, the runner, selection and the lifecycle driven over a real two-member project whose two checks really run and really disagree -- because the binary itself cannot close a finding: crates/sure-core/src/pipeline.rs:1114 passes `rechecks: &[]`, with the reason at :1102-1108, and `select_impacted_checks` has no caller outside tests. A process-level round trip through `sure check`, `sure repair` and `sure recheck` that closes a finding is not reachable in this build and is not claimed; `sure check` on the fixture under the default mode plans three checks and reports all three as not checked."
     },
     "P14-T010": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-19T07:40:59.458Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "44406d282c9f0fd98db9693a6587277a4b38a624",
       "head_sha": null,
       "evidence": [],
       "notes": ""

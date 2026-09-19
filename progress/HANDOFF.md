@@ -3,6 +3,45 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** nothing, as of this paragraph. `P13-T011` — *"Decide what a change
+to the project's files is, because no setting can allow one"* — is **accepted as
+`9ee733d`**, after **one send-back**; "What `P13-T011` added" and "Validation of
+`P13-T011`" below carry the detail, and `target/tmp/p13t011-sendback.md` carries
+the measurement behind the send-back. The decision it was dispatched to make is
+made and is in the tree: a change to the project's files is **a permission the
+user's own settings file can grant and a project's `sure.yaml` cannot**, settled
+by `Layer::can_grant` (`User => true, Project => false`) applied once,
+generically, where a privilege is turned into a permission — so
+`Permission::WriteProject` is now in reach of `execution.allow_project_write` and
+remains out of reach of every file a project ships. The two products the tree was
+consistent with are therefore one product: `PROTECTION_MODE.md`'s promise that
+the build's-own-limit refusal lasts *until* a later release makes the permission
+grantable is **honoured rather than deleted** — the document already named the
+test that would fail when it did — and the sentence is still computed and still
+reached by no tool, which a new test holds by sweeping 3 × 4 × 64 × 7
+combinations rather than by spot check. **The security direction is the one that
+was measured rather than argued**: a project's `sure.yaml` naming the key is
+parsed and refused, and with the user silent a Claude Code `PreToolUse Edit` of
+`src/lib.rs` is answered Block. **What was sent back is the only thing that was
+wrong, and it was a document**: `CONFIG_REFERENCE.md` said the permission is one
+a project cannot be given "with one more restriction on top", and one instrument
+run three times — only the layer moving, the user's file against the project's,
+the new key against `execution.mode` — shows one rule for both keys and the same
+rule `P13-T009` settled for `execution.mode` and `privacy.full_recording`. A
+document claiming a restriction the code does not implement errs in the
+permissive direction, and the correction is docs-only. Six gates green on the
+accepted tip from native PowerShell, **2548 parents** against 2558 raw, 0 failed,
+12 ignored, **+1 across the task**; CI `35417125856` is green on all five jobs at
+**attempt 1** with windows 2548 / macOS 2539 / ubuntu 2540 parents; the machine's
+real store is byte-identical throughout. **The dispatch's own run is red and is
+recorded rather than glossed** — `35414618313` failed `rust (ubuntu-latest)` alone
+on `Text file busy (os error 26)` in `service_supervisor.rs`, which is
+`P15-T019`'s race and not this task's diff. It **minted nothing**: its worker's
+four out-of-scope findings are already owned (`P15-T025` the settings-file flag,
+`P15-T015` the scratch pool), are the codified PowerShell rule, or were the
+supervisor's own error. **The next dispatch is `P14-T004`**, now the
+lowest-numbered READY task.
+
 **In flight:** `P13-T011` — *"Decide what a change to the project's files is,
 because no setting can allow one"* — dispatched from base commit `7c3e4c2` (the
 `P13-T010` acceptance and its one-field `head_sha` commit) with its brief at
@@ -1850,6 +1889,238 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P13-T011` added
+
+**A change to the project's files is a permission the user's own settings file
+can grant, and one that no project's `sure.yaml` can.** `Permission::WriteProject`
+was granted by nothing in this build, so `decide` denied every file change in
+every execution mode under every configuration; it is now reachable from
+`execution.allow_project_write` in the user's own file and from nothing a project
+ships. That is the whole change, and it moved one thing in the product's posture:
+an ordinary edit under a mode that runs project code is an ordinary action again,
+while a project cannot talk its way into write access to the machine it was
+opened on.
+
+### The decision, and the pair that decided it
+
+The dispatch framed the task as a decision first, because the tree was consistent
+with two different products and only one of them was intended. **The measurement
+that decided it is a controlled pair at the process boundary, the same payload
+twice with one thing moved**, which is why it settles a question that reading
+either half alone does not:
+
+- With `execution.mode: host_confirmed` in the **user's own** settings file — a
+  configuration that explicitly permits project code to run — a Claude Code
+  `PreToolUse` event naming `Edit` for `src/lib.rs` was answered **Block**,
+  *"The current execution mode does not permit this action."* The mode was not
+  the cause and could not be made to be: `ActionKind::WriteProjectFile` does not
+  execute project code, so `executes_project_code()`
+  (`crates/sure-domain/src/execution.rs:80`) is false of it, and with the
+  permission granted `decide` reaches `Allowed` in **every** mode. The refusal
+  named the permission because the permission was the only thing missing.
+- Meanwhile `docs/security/PROTECTION_MODE.md` promised the build's-own-limit
+  refusal only *until* a later release made the permission grantable, and named
+  the test that would fail when it did; `FROZEN_SEMANTICS.md` already listed
+  `write_project` among six independent permissions; and two `P10-T006` tests
+  (`claude_code_write_is_allowed_with_write_permission`,
+  `strict_holds_a_change_in_the_documents_areas_and_nothing_else`) already
+  assumed a change is an ordinary action the settings decide.
+
+The decision is the second reading, and the proof that it is not a loosening is
+the layer rule: **`Layer::can_grant` (`crates/sure-core/src/config/authority.rs:110`)
+is `User => true, Project => false`**, so a request a project makes alone is
+refused whatever key it names. That is `P13-T009`'s rule for `execution.mode` and
+`P15-T022`'s for `privacy.full_recording`, and the new key is held to it rather
+than to something stricter — which is exactly what the send-back below is about.
+
+### What the decision had to change, and the one line the security property cost
+
+`ProjectRequest::ALL` gains a variant for the key, `Authority::permissions()`
+(now `authority.rs:484`) starts from `inspect_only()` and sets a permission only
+when a privilege `is_granted()`, and the grant path is generic over
+`ProjectRequest::ALL` — so **the whole security property is one line** in
+`authority.rs`, plus one fixture line, because nothing else needed to know about
+the new key. `baseline_permissions()`
+(`crates/sure-domain/src/execution.rs:319`) was left alone and is the other half
+of the argument: `InspectOnly`/`Container` get `inspect_only()`, `HostConfirmed`
+gets `run_project_code` and nothing more, so **no mode hands `write_project`
+over** and a request is its only route.
+
+### The sentence that was honoured rather than deleted
+
+`PROTECTION_MODE.md` said the build's own limit would be lifted by a later
+release. The release is this one, and the document says so now. What was *not*
+deleted is the sentence itself: `an_action_no_setting_can_grant_reason`
+(`hook_protection.rs:1377`) is kept, still computed, and reached by no tool —
+which the worker wrote down in a doc comment and then held to a test,
+`the_sentence_about_the_builds_own_limit_is_reached_by_no_tool_now`, that sweeps
+3 modes × 4 protection states × all 64 permission sets × 7 tool names and asserts
+no refusal this build prints is that sentence. **A guard nothing reaches is worth
+keeping only if something notices when it is reached**, and that is what the test
+is for.
+
+### The four things in the tree that had to move, and why that is the point
+
+The brief named four tests that would fail if the permission were made
+grantable; the worker found that **§3(4) of my brief was wrong** — it named two
+tests that do not move, `cli_contract.rs::an_allowance_the_settings_cannot_spend_is_refused_and_the_store_stays_empty`
+and `hook.rs::a_grant_carries_the_acts_the_settings_in_force_leave_for_it`, and
+missed the one in that file that does. That is my error and it is recorded as
+mine. The three that did move were updated to the new truth rather than deleted:
+`no_setting_grants_the_permission_a_change_to_the_project_needs` became
+`every_permission_is_in_reach_of_a_setting_now`, asserting the out-of-reach set is
+**empty** over all six permissions — an alarm in both directions — and
+`hook.rs`'s `Edit` test now asserts the five parts of the remedy *and* the absence
+of the old sentence, `host_confirmed` and `` `execution.mode` ``. The rewritten
+`cli_contract.rs` test resolves `Authority::load(&project, &paths.user_config_file())`
+at run time and asserts **whichever branch this machine is in**, in full, so it is
+true on a machine whose owner has a settings file and on one that does not.
+
+## Validation of `P13-T011`
+
+**Six gates green on `9ee733d` from native PowerShell**
+(`target/tmp/sup-p13t011b-gate-*.txt`): `fmt=0 clippy=0 test=0 bootstrap=0
+taskctl=0 nonwin=0`. Gate 3 measured with `measure-run.mjs`: **65 headers
+(60 `Running` + 5 `Doc-tests`), 75 result lines, 2548 parents, 2558 raw, 0
+failed, 12 ignored**, both instruments agreeing on 2548. The base `7c3e4c2` was
+measured rather than inherited at dispatch and reads **2547 parents / 2557 raw /
+0 failed / 12 ignored** (`target/tmp/sup-p13t011-base-test.txt`), so the task is
+**+1 and nothing lost** — the one new test is the rule-agreement test below, and
+three renames moved nothing. Gates 4 and 5 read `SURE bootstrap validation OK: 17
+phases, 187 tasks.` and `state OK: 187 tasks`.
+
+**Four of the probes were driven by the supervisor at the process boundary with
+fixtures of the supervisor's own**, under `target/tmp/sup-p13t011-probe/`, with
+`sure.exe` rebuilt from this tip and every run naming an absolute scratch
+`--store-dir`. **B is the security-critical direction and it was measured rather
+than argued** — a project cannot grant itself write access to the machine it was
+opened on:
+
+| probe | settings | request | answer | exit |
+| --- | --- | --- | --- | --- |
+| A | user's file grants `execution.allow_project_write` | `Edit src/lib.rs` | **allows**; standard asks nothing further | 0 |
+| B | **project's** `sure.yaml` names it, user silent | `Edit src/lib.rs` | **blocks**: the execution mode does not permit this action | 1 |
+| C | grant + `protection.mode: strict` | `Edit .env` | **blocks**: credentials or keys | 1 |
+| D | grant + strict | `Edit src/lib.rs` | **allows**; strict names what it did not find | 0 |
+| F | default (nobody grants) | `Edit src/lib.rs` | **blocks**: the execution mode does not permit this action | 1 |
+
+**The mechanism was measured because the first redirect contradicted the
+hand-back.** `USERPROFILE` alone moves the settings file — `sure doctor` under a
+scratch home prints `…\homeUser\AppData\Roaming\SURE\sure.yaml` — while `APPDATA`
+alone does **not**, and a `USERPROFILE` whose home has no `AppData\Roaming` makes
+`dirs::config_dir()` return `None`, so the run refuses with `PathError::Unavailable`
+rather than silently reading the real one. The real `%APPDATA%\SURE` does not
+exist. Had the first reading been trusted, a correct hand-back would have been
+sent back over a defect that was the instrument's.
+
+**The three allowance sentences were driven too**, with `hook allow-once --tool
+Edit --path src/lib.rs`: under default settings the refusal names
+`execution.allow_project_write: true` in *your own* settings file, "a project's
+`sure.yaml` cannot grant this one", `sure doctor`, and `protection.mode: strict`
+(exit 5); with the grant under `standard`, the permission clause is **gone** and
+only the mode remains (exit 5), which is the two-part remedy being computed rather
+than written; with the grant and `strict` the allowance is **recorded**, naming
+"delete a whole location" as the act (exit 0). **The stores say which happened**:
+the two refusing runs created no `sure.db` at all and the recording one did, and
+every probe has one, so a blocked event is recorded rather than swallowed.
+
+### The send-back: a document claiming a restriction the code does not have
+
+`target/tmp/p13t011-sendback.md` is the record. `docs/architecture/CONFIG_REFERENCE.md:149`
+said the permission "is one a project's own file cannot be given" **"with one more
+restriction on top"**, which tells a reader that `allow_project_write` is held to
+something stricter than the rule every other request is held to. One instrument,
+three runs, only the layer moving — a `Shell` payload carrying `rm -rf build`:
+
+| which file names it | answer |
+| --- | --- |
+| the **user's** file names `execution.mode: host_confirmed` | `This action needs explicit approval; …` — the permission is in force and `decide` reached `NeedsConsent` |
+| the **project's** file names `execution.mode: host_confirmed` | `The current execution mode does not permit this action.` |
+| the **project's** file names `execution.allow_project_write: true` | `The current execution mode does not permit this action.` |
+
+**Same rule, two keys, one of them old** — and the commit's own comment in
+`crates/sure-core/src/config/values.rs` says a refused escalation is treated "like
+every other request here", so the document and the code comment disagreed and the
+code comment was the one that matched the code. **A claim of a restriction the
+code does not implement errs in the permissive direction**, which is the direction
+this repository treats as the serious one, so the sentence was sent back and the
+correction `9ee733d` is docs-only: `docs/architecture/CONFIG_REFERENCE.md`,
++12 −8, one file, replacing the unique-restriction claim with the rule the
+measurement shows and keeping the true half — that none of the three booleans is
+in any execution mode's baseline permissions. **The same instrument confirmed the
+neighbouring claim rather than weakening it**: a project file naming the new key is
+parsed and refused rather than rejected as unknown — with the user's file granting
+`host_confirmed`, that project still reached `NeedsConsent` — whereas a project
+file carrying an unknown key (`allow_project_write_typo`) fell back and answered
+`The current execution mode does not permit this action.`
+
+### CI: three green runs, one red, and the reading this acceptance owed
+
+The dispatch's own run is red and stays recorded at the top of this file rather
+than rewritten: **`35414618313` (`55c8154`) failed `rust (ubuntu-latest)` alone**,
+on `a_service_that_is_dropped_is_stopped_anyway` at
+`crates/sure-core/tests/service_supervisor.rs:745:10`,
+`Runner(NotStarted { program: "/tmp/sure-service-dropped-10689/working/python", …
+message: "Text file busy (os error 26)" })`, `5 passed; 1 failed; 2 ignored`. A
+commit that adds a paragraph to this file and a `state.json` entry cannot cause
+that; it is `P15-T019`'s race, and the four green jobs are the other four.
+
+**All three of the task's own commits are green at attempt 1**, no job re-run:
+
+| run | commit | windows | macOS | ubuntu | raw (win/mac/ub) | failed | ignored |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 35416297165 | `9159095` — the implementation | 2548 | — | — | 2558 / — / — | 0 | 12 |
+| 35416442854 | `76ffe94` — the rewrap | 2548 | — | — | 2558 / — / — | 0 | 12 |
+| **35417125856** | **`9ee733d` — the accepted tip** | **2548** | **2539** | **2540** | 2558 / 2549 / 2550 | **0** | **12** |
+
+**Windows equals this machine's own run to the test — 2548 parents over 75 result
+lines — which is the reading that matters on a Windows-primary machine**, and the
+ignored figure is the sum over the four suites that ignore anything (8 + 1 + 2 +
+1), not the single suite's 8 that `measure-run.mjs` prints last. The three
+conclusions are read from the raw endpoint
+(`gh api repos/lichman0405/SURE/actions/jobs/<id>/logs`), never from
+`gh run view --job --log`, which prefixes every line and defeats the counter. The
+first two runs were measured on Windows only, which is stated rather than left to
+look like three platforms; the accepted tip was measured on all three.
+
+**The reading this acceptance owed is run `35414475973`, the `P13-T010`
+acceptance commit `246cce4`**, and it is green on all five jobs at **attempt 1**
+with **2547 / 2538 / 2539** parents and 2557 / 2548 / 2549 raw — **identical to
+`P13-T010`'s own implementation run, `35413661243`, to the test on all three
+platforms**, which is exactly what a commit touching only `progress/` should
+produce and is why the two were compared rather than merely counted.
+
+### What was left alone
+
+**The machine's real store is byte-identical throughout**: 348160 bytes, mtime
+`2026-09-18T15:12:15Z`, sha256
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, unchanged
+before the probes, after the drives at the process boundary and after the full
+workspace suite. Every probe named an absolute `--store-dir` under `target/tmp/`.
+The scratch pools were measured rather than cleared, because `Remove-Item` on the
+pool glob is refused in this shell: at the gate run the largest was
+`target/tmp/sure cli contract` at **302** of its 1000 slots, then `sure check` 60,
+`sure mcp protocol` 58, `sure mcp` 44, `sure commands` 28, so nothing was close to
+wrapping — and the durable fix for the allocator is `P15-T015`.
+
+**The worker's four out-of-scope findings were recorded and not minted, and each
+has a reason.** The launcher tests that fail under the Bash tool and pass under
+native PowerShell are the rule this repository already codifies — PowerShell 5.1
+refuses `.ps1` when Git Bash is the parent, so a hand-back measured from Bash
+reports failures that are not there. The absence of any supported way to name the
+settings file is **`P15-T025`**, whose acceptance already covers a documented flag
+or environment variable that cannot escalate. The scratch pool that wraps at 1000
+is **`P15-T015`**'s allocator, and the measured addition is the worker's: the
+`target/tmp/sure mcp` pool reached 1275 subdirectories with all slots `0..999`
+taken, and the failure it produced before compaction was re-identified as pool
+exhaustion rather than a decision — **`Cannot confirm` the failure mode**, which
+is the honest reading and is why nothing was minted from it. The fourth was §3(4)
+of my own brief, which is recorded above as the supervisor's error.
+
+**And this acceptance owes the run of its own commit**, which a commit cannot
+contain; it is read in this session and reported in the next entry under the
+chain rule at the top of the run table.
 
 ## What `P13-T010` added
 
@@ -11305,6 +11576,40 @@ column, fifteen stating the right figures in the narrative form the shape patter
 does not cover, and sixteen stating no figures, which is where the two out-of-order
 rows land and where they were confirmed by hand.
 
+### Reading run `35414475973`, `P13-T010`'s acceptance — the run that acceptance owed, and a commit whose figures are the previous run's to the test
+
+**This is a chain-rule reading, not a new finding.** `P13-T010`'s accepted entry
+says in as many words that it owes the run of its own commit, because a commit
+cannot contain the run of itself; that run is this one, at `246cce4` — the
+progress-only commit that accepted `P13-T010` and filled its one `head_sha`
+field — and it is green on all five jobs at **attempt 1**, with no job re-run:
+
+| platform | headers | result lines | parents | raw | failed | ignored |
+| --- | --- | --- | --- | --- | --- | --- |
+| Windows | 65 | 75 | **2547** | 2557 | 0 | 12 |
+| macOS | 65 | 75 | **2538** | 2548 | 0 | 12 |
+| Ubuntu | 65 | 75 | **2539** | 2549 | 0 | 12 |
+
+**Every column is `35413661243`'s to the test** — the run for `a1fe4f6`,
+`P13-T010`'s own implementation, which read windows 2547 / macos 2538 / ubuntu
+2539 parents over 2557 / 2548 / 2549 raw. `git show --stat 246cce4` lists
+`progress/HANDOFF.md`, `progress/state.json` and `SHA256SUMS.txt` and nothing
+else, so `cargo test` compiled a tree whose test sources are byte-identical to
+the one before it and the identical counts are the commit's own shape rather than
+a coincidence. **That is the reading a progress-only commit is for**, and it is
+the reason this one was measured rather than assumed: the previous two
+progress-only commits on this branch each carried a reading that had to be
+established by comparison — `P3-T009`'s and `P13-T010`'s — and one of them had to
+be read as the run *before* it for the comparison to mean anything. Here the two
+agree outright, so no such argument is needed.
+
+Read from the raw endpoint per job
+(`gh api repos/lichman0405/SURE/actions/jobs/<id>/logs`), split per job and parsed
+by `measure-run.mjs`, which reports both instruments; all three jobs returned
+`parents` with both agreeing. The ignored figure is the sum over the four result
+lines that ignore anything (8 + 1 + 2 + 1 = 12) rather than the single suite's
+`8` that the same tool prints as *"ignored max 8 (the last suite's own count)"*.
+
 ### Reading run `35413661243`, `P13-T010`'s — and two red first attempts the run list does not show
 
 **All five jobs green at `attempt 1`**: `bootstrap-validate-windows`, `rust
@@ -16760,8 +17065,42 @@ what changes here is that the number now says which of the two readings it is.
   (`35411189848` and `35411785409`, both attempt-2 successes) are recorded in the
   section above rather than replaced by their green re-runs.
 
+- `9ee733d` **`P13-T011`** (accepted by the progress-only commit that carries this
+  entry) — *"Decide what a change to the project's files is, because no setting
+  can allow one"*. **The task's own detail is the section above**; what belongs
+  here is the shape. **One hand-back and one send-back**, which is the first thing
+  about it: `9159095` + `76ffe94`, then the correction `9ee733d` on top with both
+  hand-back commits left in place, because a measurement is not edited to match a
+  later tree. It was **dispatched as a decision task first and a code task
+  second**, and that is what it turned out to need: the tree was consistent with
+  two products and the worker was told either answer was acceptable and that a
+  hand-back changing code without first saying which one it found and what
+  measurement decided it would be sent back. What it delivered is that a change
+  to the project's files **is a permission the user's own settings file can grant
+  and no project's `sure.yaml` can**, so `Permission::WriteProject` — granted by
+  nothing in this build, and therefore denying every file change in every mode
+  under every configuration — is now reachable from `execution.allow_project_write`
+  alone. **The security property is one line**, `Layer::can_grant` being
+  `User => true, Project => false` on the generic path where a privilege becomes a
+  permission, and the proof is a probe rather than a reading: with the user
+  silent, a project's `sure.yaml` naming the key leaves a Claude Code
+  `PreToolUse Edit` of `src/lib.rs` answered Block, while the user's own file
+  granting it allows the same event. **The send-back was over a document and not
+  the code** — `CONFIG_REFERENCE.md` claimed the key is held to "one more
+  restriction on top" of the rule every other request is held to, and one
+  instrument run three times, moving only the layer and then only the key, shows
+  one rule for both `allow_project_write` and `execution.mode`; the correction is
+  docs-only, +12 −8 in one file, and it keeps the true half. It **minted nothing**
+  — the four out-of-scope findings are recorded in the validation section with
+  the task that already owns each, and the fourth was §3(4) of the supervisor's
+  own brief, which is written down as the supervisor's error. **No run of its own
+  commit is in this entry**: it is owed to the next acceptance under the chain
+  rule, and the reading this acceptance discharged — `35414475973`, `P13-T010`'s
+  acceptance commit — is in the section above, with `35413661243` beside it for
+  the comparison that makes it mean something.
+
 **The check was run again at this acceptance, and the two counts that moved are
-the two that should have.** For the tree this commit creates: **139 accepted**,
+the two that should have.** For the tree this commit creates: **141 accepted**,
 **79 of them absent from the list**, **48 absent from everything below the
 heading**. The missing counts are unchanged from the reading above, which is the
 honest result rather than a good one: this acceptance added its own entry, so it

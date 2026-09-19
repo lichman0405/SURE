@@ -80,8 +80,20 @@
 //! [`allowance_could_not_be_spent_reason`] is the sentence the writer refuses
 //! with when the answer for the named tool is none. Both are questions put to
 //! [`assess_request`] rather than a second rule beside it, so what a user is told
-//! cannot drift from the rule that would answer their request. The *subject* is
-//! still unread at write time, for the reason `PROTECTION_MODE.md` gives.
+//! cannot drift from the rule that would answer their request.
+//!
+//! Two readings of the settings, both measured rather than argued. A tool name
+//! a harness's vocabulary *claims* is read in that vocabulary and in no other,
+//! which is why `Edit` is a change to a project file rather than an arbitrary
+//! command; a name no vocabulary claims is the arbitrary command it may be. And
+//! a refusal about a tool whose action needs a permission **no** setting in this
+//! build can grant is a refusal that names no setting at all, because naming one
+//! would be naming a change that would not help:
+//! [`an_action_no_setting_can_grant_reason`] asks the vocabularies whether any
+//! mode or any request grants that permission rather than asserting the answer
+//! in prose, so a later release that makes a change grantable changes the
+//! sentence with it. The *subject* is still unread at write time, for the reason
+//! `PROTECTION_MODE.md` gives.
 //!
 //! # Capability tier honesty
 //!
@@ -93,11 +105,14 @@
 
 use serde::{Deserialize, Serialize};
 use sure_domain::execution::{
-    ActionKind, CommandClass, ExecutionDecision, ExecutionMode, ExecutionPermissions, decide,
+    ActionKind, CommandClass, ExecutionDecision, ExecutionMode, ExecutionPermissions, Permission,
+    decide,
 };
 use sure_domain::variants::variants;
 
-use crate::config::{CUSTOM_PROTECTION_EXPLANATION, CUSTOM_PROTECTION_INSTEAD, ProtectionMode};
+use crate::config::{
+    CUSTOM_PROTECTION_EXPLANATION, CUSTOM_PROTECTION_INSTEAD, ProjectRequest, ProtectionMode,
+};
 use crate::safety::{self, Source};
 
 /// What the protection adapter decided about a tool request.
@@ -277,6 +292,11 @@ impl<'a> ToolRequest<'a> {
 /// [`acts_a_tool_could_be_held_for`] to the rule. A name added here with no
 /// witness is a tool whose grant the writer would refuse for a reason the rule
 /// does not have.
+///
+/// The two tables are the two harnesses' vocabularies and not one vocabulary
+/// with two spellings, which is what makes *this table does not have the name*
+/// a different statement from *this table answers the name with the shell*.
+/// [`action_kind_a_tool_name_names`] is the reading that keeps them apart.
 const CURSOR_TOOLS: &[(&str, ActionKind)] = &[
     ("Shell", ActionKind::ArbitraryCommand),
     ("Read", ActionKind::ReadFile),
@@ -298,12 +318,23 @@ fn cursor_tool_to_action_kind(tool: &str) -> ActionKind {
 /// The [`ActionKind`] one name has in one harness's vocabulary.
 ///
 /// The lookup both maps share, so that "what this harness calls a tool" is one
-/// rule with one table rather than two matches that can drift.
+/// rule with one table rather than two matches that can drift. A name the
+/// vocabulary does not have falls to [`ActionKind::ArbitraryCommand`], which is
+/// what that harness does with a tool it does not recognise.
 fn action_kind_in(vocabulary: &[(&str, ActionKind)], tool: &str) -> ActionKind {
+    kind_the_vocabulary_claims(vocabulary, tool).unwrap_or(ActionKind::ArbitraryCommand)
+}
+
+/// The kind `vocabulary` answers `tool` with, when it has the name at all.
+///
+/// The half of [`action_kind_in`] that distinguishes *this harness does not know
+/// the name* from *this harness answers the name with the shell*, which is the
+/// difference [`action_kind_a_tool_name_names`] is built on.
+fn kind_the_vocabulary_claims(vocabulary: &[(&str, ActionKind)], tool: &str) -> Option<ActionKind> {
     vocabulary
         .iter()
         .find(|(name, _)| *name == tool)
-        .map_or(ActionKind::ArbitraryCommand, |(_, kind)| *kind)
+        .map(|(_, kind)| *kind)
 }
 
 /// Decide whether a Cursor `preToolUse` request should be allowed.
@@ -355,13 +386,25 @@ pub fn assess_cursor_tool(
 /// do not appear in Cursor's table — `Bash` for the shell, and `Edit` beside
 /// `Write` — and every name that does appear in both is answered the same way:
 /// `Read` and `Delete` are [`ActionKind::ReadFile`] and
-/// [`ActionKind::DeleteProjectFile`] in both, `Write` is
-/// [`ActionKind::WriteProjectFile`] in both, and an unrecognised name falls to
-/// [`ActionKind::ArbitraryCommand`] in both, which is what makes
-/// [`action_kinds_a_tool_names`]' union a rule rather than a hedge. `Shell` and
-/// `Bash` are the one pair that names the same kind by different words, which is
-/// why a name is read through both tables rather than through one chosen by a
-/// `--source` argument `sure hook allow-once` does not take.
+/// [`ActionKind::DeleteProjectFile`] in both, and `Write` is
+/// [`ActionKind::WriteProjectFile`] in both.
+///
+/// `Shell` and `Bash` are the one pair that names the same kind by different
+/// words, which is why the writer reads a name through both tables rather than
+/// through one chosen by a `--source` argument `sure hook allow-once` does not
+/// take. **A name only one table has is read in that table**, and not also as
+/// the other's unrecognised-name fallback: `Edit` is Claude Code's name for a
+/// change to a project file and a name Cursor's vocabulary does not carry, so
+/// answering it with Cursor's [`ActionKind::ArbitraryCommand`] as well would be
+/// answering it as a shell command by a harness that cannot send it.
+/// [`action_kind_a_tool_name_names`] states that rule and
+/// `every_kind_a_tool_name_can_reach_has_a_witness` is what holds the two tables
+/// to it.
+///
+/// A name that appears in both and is answered differently by them would make
+/// the reading order a choice between two answers rather than a lookup; the
+/// test named above fails on that, so the order below is not a preference
+/// anybody has to know about.
 const CLAUDE_CODE_TOOLS: &[(&str, ActionKind)] = &[
     ("Bash", ActionKind::ArbitraryCommand),
     ("Read", ActionKind::ReadFile),
@@ -858,29 +901,47 @@ const DANGER_WITNESSES: [(ActionKind, ToolRequest<'static>); 7] = [
     (ActionKind::DeleteProjectFile, ToolRequest::of("Delete")),
 ];
 
-/// The action kinds a harness tool name can be, as the union over **both**
-/// harnesses' vocabularies.
+/// The [`ActionKind`] a harness tool name is answered as when the name is read
+/// for itself rather than for one harness's request.
 ///
-/// `sure hook allow-once` takes no `--source`: a tool name is the harness's own
-/// vocabulary and the user is naming the harness tool they are covering, so the
-/// name is read through both tables ([`CURSOR_TOOLS`], [`CLAUDE_CODE_TOOLS`])
-/// rather than through one the command cannot know.
+/// `sure hook allow-once` takes no `--source`: the user is naming the harness
+/// tool they are covering, and a name is the harness's own vocabulary. So the
+/// name is read through both tables ([`CURSOR_TOOLS`],
+/// [`CLAUDE_CODE_TOOLS`]) — but **in the vocabulary that claims it**, which is
+/// not the same rule as the union over both.
 ///
-/// The union is a rule and not a hedge, and the reason is that the two tables
-/// agree wherever they overlap: `Read` is [`ActionKind::ReadFile`] in both,
-/// `Delete` is [`ActionKind::DeleteProjectFile`] in both, `Write` is
-/// [`ActionKind::WriteProjectFile`] in both, `Shell` and `Bash` are the same
-/// kind under two names, and a name neither table knows falls to
-/// [`ActionKind::ArbitraryCommand`] in both. So the union is a second element
-/// only where a reader can say which harness would have produced it.
+/// A union answers a name with every reading either table has for it, and both
+/// tables answer every name they are given: the one that has the name gives its
+/// kind, and the one that does not gives
+/// [`ActionKind::ArbitraryCommand`], which is its fallback for a name it does
+/// not know. For `Edit` — Claude Code's name for a change to a project file, and
+/// a name Cursor's vocabulary does not carry — the union is therefore
+/// `{WriteProjectFile, ArbitraryCommand}`: the harness that sends the name, read
+/// together with a harness that cannot send it. Taking the second of those is
+/// taking the more permissive of two readings, and it was measured: the writer
+/// recorded a grant for `Edit` carrying a shell command's acts, told the user
+/// that `execution.mode: host_confirmed` would put it within reach, and then no
+/// request from either harness spent it (`P13-T010`'s second send-back).
+/// `Bash` has the same shape and is harmless, because Cursor's fallback for it
+/// is the same kind Claude Code's table gives it.
+///
+/// Only a name that **no** vocabulary claims falls to
+/// [`ActionKind::ArbitraryCommand`], and that arm is deliberate: SURE has not
+/// been told what such a tool does, and the kind that permits nothing on the
+/// strength of a name is the one that reads a command line and holds it for
+/// consent. A user may still cover a tool SURE has never heard of, and what they
+/// cover is a shell's acts.
+///
+/// The two lookups below are tried in a fixed order — Cursor's table first —
+/// and that order decides nothing: a name both tables claim is answered the same
+/// way by both, and `every_kind_a_tool_name_can_reach_has_a_witness` fails if
+/// that ever stops being true, so no answer rests on which table was asked
+/// first.
 #[must_use]
-fn action_kinds_a_tool_names(tool: &str) -> Vec<ActionKind> {
-    let mut kinds = vec![cursor_tool_to_action_kind(tool)];
-    let claude_code = claude_code_tool_to_action_kind(tool);
-    if !kinds.contains(&claude_code) {
-        kinds.push(claude_code);
-    }
-    kinds
+fn action_kind_a_tool_name_names(tool: &str) -> ActionKind {
+    kind_the_vocabulary_claims(CURSOR_TOOLS, tool)
+        .or_else(|| kind_the_vocabulary_claims(CLAUDE_CODE_TOOLS, tool))
+        .unwrap_or(ActionKind::ArbitraryCommand)
 }
 
 /// Which of the three acts a request from this project could be held for, under
@@ -899,13 +960,15 @@ pub fn acts_a_request_could_be_held_for(
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
 ) -> Vec<Danger> {
-    let mut kinds: Vec<ActionKind> = Vec::new();
+    let mut acts: Vec<Danger> = Vec::new();
     for (action_kind, _) in DANGER_WITNESSES {
-        if !kinds.contains(&action_kind) {
-            kinds.push(action_kind);
+        for danger in acts_for_kind(action_kind, mode, permissions, protection) {
+            if !acts.contains(&danger) {
+                acts.push(danger);
+            }
         }
     }
-    acts_for_kinds(&kinds, mode, permissions, protection)
+    acts
 }
 
 /// Which of the three acts a request **naming one tool** could be held for, under
@@ -928,6 +991,9 @@ pub fn acts_a_request_could_be_held_for(
 /// kind rather than computed from the settings by a second rule, which is the
 /// point: a rule stated twice is a rule that can be stated two ways, and this
 /// one decides whether SURE tells a user their grant is worth recording.
+///
+/// One name, one kind: [`action_kind_a_tool_name_names`] reads the name in the
+/// vocabulary that claims it, so there is no set of kinds to union over here.
 #[must_use]
 pub fn acts_a_tool_could_be_held_for(
     tool: &str,
@@ -935,29 +1001,29 @@ pub fn acts_a_tool_could_be_held_for(
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
 ) -> Vec<Danger> {
-    acts_for_kinds(
-        &action_kinds_a_tool_names(tool),
+    acts_for_kind(
+        action_kind_a_tool_name_names(tool),
         mode,
         permissions,
         protection,
     )
 }
 
-/// The acts [`DANGER_WITNESSES`] names for any of `kinds`, in the order the
+/// The acts [`DANGER_WITNESSES`] names for one `kind`, in the order the
 /// vocabulary declares them and once each.
 ///
 /// The one computation both public functions above are, so that "the acts a
 /// tool can reach" and "the acts anything can reach" cannot become two rules
 /// with two answers.
-fn acts_for_kinds(
-    kinds: &[ActionKind],
+fn acts_for_kind(
+    kind: ActionKind,
     mode: ExecutionMode,
     permissions: &ExecutionPermissions,
     protection: ProtectionMode,
 ) -> Vec<Danger> {
     let mut acts: Vec<Danger> = Vec::new();
     for (action_kind, request) in DANGER_WITNESSES {
-        if !kinds.contains(&action_kind) {
+        if action_kind != kind {
             continue;
         }
         let Some(danger) =
@@ -1005,6 +1071,17 @@ fn acts_for_kinds(
 /// here to avoid, and so is one that offers a change which would leave the act
 /// it names out of this tool's reach.
 ///
+/// **One case offers no setting at all, and it is the one where no setting is
+/// the cause.** An action whose permission no configuration in this build can
+/// grant ([`a_setting_grants`]) is [`ExecutionDecision::Denied`] in every mode
+/// under every configuration, so a request naming such a tool is never held for
+/// a danger and no change to a setting would make its grant spendable. `Write`,
+/// `Edit` and `Delete` are those names today. Naming a setting there would be
+/// advice to change the wrong thing, and the opening's own *for as long as these
+/// settings are in force* would be false — which is why that case is answered by
+/// [`an_action_no_setting_can_grant_reason`], whose claim is read off the
+/// vocabulary rather than written into the sentence.
+///
 /// **The subject is still unread, and the limit is deliberate.** Whether the
 /// *words* the user named are a request SURE would hold is not knowable here:
 /// there is no request to read when a grant is written, and reading the words
@@ -1022,6 +1099,8 @@ pub fn allowance_could_not_be_spent_reason(
         return None;
     }
 
+    let action_kind = action_kind_a_tool_name_names(tool);
+
     let opening = format!(
         "A one-time allowance is spent by a request SURE holds because it would {}. Under the \
          settings in force for this project no request naming the tool '{tool}' can be held for \
@@ -1029,6 +1108,22 @@ pub fn allowance_could_not_be_spent_reason(
          these settings are in force.",
         Danger::in_a_sentence(Danger::ALL)
     );
+
+    // The ground no setting can move, and the reason it is a case of its own:
+    // when the permission the tool's action needs is one no configuration can
+    // grant, no change to a setting is a remedy, and the sentence's own *for as
+    // long as these settings are in force* would be false of it. Asked of the
+    // vocabulary rather than written down, so it is this build that answers
+    // whether there is anything a user could change.
+    //
+    // The guard is what keeps the `custom` arm below ahead of this one: a mode
+    // this release cannot apply holds every request whatever tool is named, so
+    // that value is the cause here and is named as itself, while this branch is
+    // about the tool's own action under settings that can be applied at all.
+    if protection != ProtectionMode::Custom && !a_setting_grants(action_kind.required_permission())
+    {
+        return Some(an_action_no_setting_can_grant_reason(tool, action_kind));
+    }
 
     // The mode this release cannot apply is answered on its own, because it is
     // the one value where nothing else about the settings is the cause: the
@@ -1144,6 +1239,81 @@ pub fn allowance_could_not_be_spent_reason(
          could not spend.",
     );
     Some(reason)
+}
+
+/// Whether **any** configuration this build can read hands SURE this permission.
+///
+/// The two vocabularies a permission set is built out of, asked rather than
+/// asserted:
+///
+/// - [`ExecutionMode::baseline_permissions`], which is what a mode hands over
+///   without further consent, and
+/// - [`ProjectRequest::permission`], which is what a file may ask for and the
+///   user's own file agree to — `Authority::permissions` starts from
+///   `ExecutionPermissions::inspect_only` and sets a permission only from a
+///   *granted* privilege's request, so this is the whole of what a file can add.
+///
+/// Iterating the two `ALL` lists rather than naming the values is what keeps a
+/// sentence built on this answer true when either vocabulary changes: `variants!`
+/// puts every variant in its list, so a request or a mode added later is asked
+/// about the moment it exists, and a claim of *no setting grants this* cannot
+/// outlive the fact it was read from. `no_setting_grants_the_permission_a_change
+/// _to_the_project_needs` is what says the answer has changed, rather than
+/// leaving it to a reader of the sentence.
+fn a_setting_grants(permission: Permission) -> bool {
+    ExecutionMode::ALL
+        .iter()
+        .any(|mode| mode.baseline_permissions().allows(permission))
+        || ProjectRequest::ALL
+            .iter()
+            .any(|request| request.permission() == Some(permission))
+}
+
+/// The sentence a grant is refused with when the action its tool names needs a
+/// permission no configuration in this build can grant.
+///
+/// The claim is about the build and not about the user's settings, and it says
+/// so, because the two are different pieces of information and only one of them
+/// is actionable: the user has nothing to change. The permission is named in the
+/// words of [`Permission::consent_prompt`] rather than in this module's, so that
+/// the sentence a refusal gives and the question a consent prompt asks describe
+/// one permission one way.
+///
+/// What is *not* in the sentence is as deliberate as what is: no `execution.mode`
+/// value, no `protection.mode` value and no remedy. Naming any of them would be
+/// naming a setting that is not the cause — the failure
+/// [`allowance_could_not_be_spent_reason`] exists to avoid — and for these tools
+/// no change to one would make the grant spendable.
+#[must_use]
+fn an_action_no_setting_can_grant_reason(tool: &str, action_kind: ActionKind) -> String {
+    format!(
+        "A one-time allowance is spent by a request SURE holds because it would {acts}. Under the \
+         settings in force for this project no request naming the tool '{tool}' can be held for \
+         any of those acts: a request naming it is one that would {permission}, and the \
+         permissions in force do not grant SURE that. No setting in this build grants it — not in \
+         your own settings file, and not in a project's `sure.yaml` — so there is nothing you \
+         could change that would make a grant for '{tool}' spendable. Nothing was written, and \
+         SURE records no allowance that a request naming this tool could not spend.",
+        acts = Danger::in_a_sentence(Danger::ALL),
+        permission = permission_in_a_sentence(action_kind.required_permission()),
+    )
+}
+
+/// One permission, described in the words a user reads, as a clause that can
+/// follow *a request … that would …*.
+///
+/// The words are [`Permission::consent_prompt`]'s, with the capital its
+/// question use gives it taken off: one permission described in one place, so
+/// that the question a user agrees to and the refusal they are given cannot
+/// describe the same permission two ways.
+#[must_use]
+fn permission_in_a_sentence(permission: Permission) -> String {
+    let description = permission.consent_prompt();
+    let mut characters = description.chars();
+    match characters.next() {
+        Some(first) => first.to_lowercase().chain(characters).collect(),
+        None => String::new(),
+    }
 }
 
 /// The sentence SURE answers with when the mode in force is the one this
@@ -2426,9 +2596,22 @@ mod tests {
     /// not have — the direction `P13-T010`'s brief calls a wrong refusal, and
     /// the one the five-witness list would have produced for `Delete`.
     ///
-    /// It also holds the union over both tables to being a rule rather than a
-    /// hedge: the tables must agree wherever they overlap, and a name neither
-    /// knows must fall to the kind that names the shell in both.
+    /// **The second half is the reading of a name, and it is where this test was
+    /// too weak.** It compared the two tables only for names in *both*, so a
+    /// name one vocabulary claims and the other does not was never compared —
+    /// and `Edit` is exactly that name: Claude Code's spelling for a change to a
+    /// project file, and, to Cursor's table, a name it does not have. Reading a
+    /// name as the union over both tables therefore read `Edit` as
+    /// `{WriteProjectFile, ArbitraryCommand}` and answered with the shell's
+    /// acts, which is what `P13-T010`'s second send-back measured. The
+    /// assertions below are the property that was missing: every name is read in
+    /// the vocabulary that claims it, and the other vocabulary's
+    /// unrecognised-name fallback is not a second reading of it.
+    ///
+    /// It also holds the two tables to agreement where they overlap, which is
+    /// what the reading order in [`action_kind_a_tool_name_names`] rests on, and
+    /// it keeps the arm a name neither knows: a user may still cover a tool SURE
+    /// has never heard of.
     #[test]
     fn every_kind_a_tool_name_can_reach_has_a_witness() {
         for (name, kind) in CURSOR_TOOLS.iter().chain(CLAUDE_CODE_TOOLS.iter()) {
@@ -2450,15 +2633,38 @@ mod tests {
             }
         }
 
-        // A name neither table knows is the shell in both, so the union is one
-        // kind rather than two and a user may still cover a tool SURE has never
-        // heard of — the wasted minute, and not a wrong answer. What such a name
-        // reaches is a shell's acts and not a read's, which is the honest
+        // Every name a vocabulary claims is read in that vocabulary, and the
+        // answer is the *one* kind its own table gives it. A name read as the
+        // union over both tables would fail here for `Edit`, and for `Bash`
+        // would pass only because both tables happen to answer
+        // `ArbitraryCommand`.
+        for (name, kind) in CURSOR_TOOLS.iter().chain(CLAUDE_CODE_TOOLS.iter()) {
+            assert_eq!(
+                action_kind_a_tool_name_names(name),
+                *kind,
+                "the tool name {name:?} is not read in the vocabulary that claims it"
+            );
+        }
+        assert_eq!(
+            action_kind_a_tool_name_names("Edit"),
+            ActionKind::WriteProjectFile,
+            "`Edit` is Claude Code's name for a change to a project file; reading it as a shell \
+             command as well is reading it in a vocabulary that cannot send it"
+        );
+        assert_eq!(
+            action_kind_a_tool_name_names("Bash"),
+            ActionKind::ArbitraryCommand
+        );
+
+        // A name neither table knows is the shell, and the arm is deliberate: a
+        // user may still cover a tool SURE has never heard of — the wasted
+        // minute of a grant nothing spends, and not a wrong answer. What such a
+        // name reaches is a shell's acts and not a read's, which is the honest
         // consequence of reading an unknown tool as the action kind that is
         // permitted on no evidence: the words it carries are what decides.
         assert_eq!(
-            action_kinds_a_tool_names("A Tool Neither Harness Sends"),
-            vec![ActionKind::ArbitraryCommand]
+            action_kind_a_tool_name_names("A Tool Neither Harness Sends"),
+            ActionKind::ArbitraryCommand
         );
         assert_eq!(
             acts_a_tool_could_be_held_for(
@@ -2468,6 +2674,53 @@ mod tests {
                 ProtectionMode::Strict,
             ),
             vec![Danger::BroadDelete, Danger::ForcePush]
+        );
+    }
+
+    /// The claim the refusal for `Write`, `Edit` and `Delete` makes is about
+    /// *this build* and not about the vocabulary as it happens to be written
+    /// today, so it is read off the vocabulary rather than written down.
+    ///
+    /// [`a_setting_grants`] iterates both `ALL` lists, so a request added later
+    /// that grants one of the six permissions is asked about the moment it
+    /// exists. What this test adds is the other direction: it says **which**
+    /// permissions are ungrantable now, so that a build in which the answer
+    /// changed fails here rather than silently printing a sentence about a
+    /// limitation that no longer holds. That is the way *no setting grants it*
+    /// survives a vocabulary change: the sentence is computed, and this is the
+    /// alarm when what it computes stops being true.
+    #[test]
+    fn no_setting_grants_the_permission_a_change_to_the_project_needs() {
+        // The two action kinds a change to a project's files is read as, and the
+        // permission both of them need. `DeleteProjectFile` shares it with
+        // `WriteProjectFile` (`ActionKind::required_permission`), which is why
+        // one sentence covers `Write`, `Edit` and `Delete`.
+        for action_kind in [ActionKind::WriteProjectFile, ActionKind::DeleteProjectFile] {
+            assert_eq!(
+                action_kind.required_permission(),
+                Permission::WriteProject,
+                "{action_kind:?} no longer needs the permission this refusal is about"
+            );
+            assert!(
+                !a_setting_grants(action_kind.required_permission()),
+                "{action_kind:?} needs a permission some setting grants, so the refusal that \
+                 says no setting does is false"
+            );
+        }
+
+        // And the whole partition of the six, so that a permission added later
+        // is visited and a permission that becomes grantable is named. Exactly
+        // one is out of reach today, and it is the one above.
+        let out_of_reach: Vec<Permission> = Permission::ALL
+            .iter()
+            .copied()
+            .filter(|permission| !a_setting_grants(*permission))
+            .collect();
+        assert_eq!(
+            out_of_reach,
+            vec![Permission::WriteProject],
+            "the set of permissions no setting grants has changed, so the sentence built on it \
+             has to be revisited"
         );
     }
 
@@ -2581,7 +2834,7 @@ mod tests {
         // says cannot exist — and over both harnesses' whole vocabularies plus a
         // name neither knows.
         //
-        // Three things are held at once, and they are what keeps the narrowed
+        // Four things are held at once, and they are what keeps the narrowed
         // question and the project-wide one from becoming two rules:
         //
         // - a tool's answer is a subset of the project's, because the only thing
@@ -2591,12 +2844,18 @@ mod tests {
         // - the union over the names the vocabularies know *is* the project-wide
         //   answer, because every kind the witnesses name is a kind some name
         //   reaches — so "nothing anywhere" and "nothing for any tool" are the
-        //   same statement.
+        //   same statement;
+        // - **every remedy a refusal offers is one that would work for the tool
+        //   it names**, asked of the same rule the remedy was chosen by. That is
+        //   acceptance line 2 as a statement about the sentence rather than
+        //   about the code that builds it: `P13-T010`'s second send-back found a
+        //   refusal offering `host_confirmed` for a grant whose tool could not
+        //   reach an act under it, and this is what would have caught it.
         //
-        // The sweep is exhaustive rather than representative because the two
-        // claims below it are about sentences a user reads: a sampled sweep
-        // would leave "no configuration can print this false thing" as a
-        // statement about the sample.
+        // The sweep is exhaustive rather than representative because the claims
+        // below it are about sentences a user reads: a sampled sweep would leave
+        // "no configuration can print this false thing" as a statement about the
+        // sample.
         let permission_sets: Vec<ExecutionPermissions> = (0u8..64)
             .map(|bits| ExecutionPermissions {
                 inspect: bits & 1 != 0,
@@ -2655,9 +2914,9 @@ mod tests {
                         // protection mode asks no question of its own. Each is
                         // only printed where it is true.
                         if refusal.contains("a command is refused on that ground") {
-                            assert!(
-                                action_kinds_a_tool_names(tool)
-                                    .contains(&ActionKind::ArbitraryCommand),
+                            assert_eq!(
+                                action_kind_a_tool_name_names(tool),
+                                ActionKind::ArbitraryCommand,
                                 "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
                                  calls this tool a command: {refusal}"
                             );
@@ -2668,6 +2927,67 @@ mod tests {
                                 ProtectionMode::Strict,
                                 "{mode:?} {permissions:?} {tool}: the refusal says strict asks \
                                  no further question, which is false of strict: {refusal}"
+                            );
+                        }
+
+                        // The sentence that offers nothing, and the two claims
+                        // it makes instead: it is printed only where the
+                        // permission the tool's action needs is out of reach of
+                        // every configuration, and it names no setting at all —
+                        // because naming one would be naming something a change
+                        // to which would not help.
+                        if refusal.contains("No setting in this build grants it") {
+                            assert!(
+                                !a_setting_grants(
+                                    action_kind_a_tool_name_names(tool).required_permission()
+                                ),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal says \
+                                 no setting grants the permission, and one does: {refusal}"
+                            );
+                            assert!(
+                                !refusal.contains("`execution.mode`")
+                                    && !refusal.contains("`protection.mode`")
+                                    && !refusal.contains("Name `execution.mode"),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
+                                 offers a setting for a grant no setting can make spendable: \
+                                 {refusal}"
+                            );
+                        }
+
+                        // Every remedy in the sentence, applied to the settings
+                        // it names, must leave an act this tool can reach —
+                        // otherwise the sentence has told the user to change
+                        // something that would not have helped. The two are the
+                        // only remedies this function offers, and each is
+                        // asserted by the change it tells the user to make.
+                        if refusal.contains("Name `execution.mode: host_confirmed`") {
+                            let mut with_project_code = permissions.clone();
+                            with_project_code.run_project_code = true;
+                            assert!(
+                                !acts_a_tool_could_be_held_for(
+                                    tool,
+                                    ExecutionMode::HostConfirmed,
+                                    &with_project_code,
+                                    *protection,
+                                )
+                                .is_empty(),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
+                                 offers `host_confirmed` and it would leave the grant just as \
+                                 unspendable: {refusal}"
+                            );
+                        }
+                        if refusal.contains("Set `protection.mode: strict`") {
+                            assert!(
+                                !acts_a_tool_could_be_held_for(
+                                    tool,
+                                    *mode,
+                                    permissions,
+                                    ProtectionMode::Strict,
+                                )
+                                .is_empty(),
+                                "{mode:?} {protection:?} {permissions:?} {tool}: the refusal \
+                                 offers `strict` and it would leave the grant just as \
+                                 unspendable: {refusal}"
                             );
                         }
                     }
@@ -2797,5 +3117,94 @@ mod tests {
         .expect("a mode this release cannot apply holds every request, so no act is reachable");
         assert!(reason.contains("`protection.mode` is `custom`"), "{reason}");
         assert!(reason.contains(CUSTOM_PROTECTION_INSTEAD), "{reason}");
+    }
+
+    /// The third case, and the one `P13-T010`'s third dispatch adds: a tool
+    /// whose action needs a permission **no configuration in this build can
+    /// grant**, where the sentence must say that rather than name a setting.
+    ///
+    /// Measured on the binary before the fix, under the settings this test uses:
+    /// `--tool Write` and `--tool Delete` printed a sentence whose only clause
+    /// about a setting was the protection mode, and **offered no remedy at
+    /// all**; `--tool Edit` printed one offering `execution.mode:
+    /// host_confirmed`, and a grant recorded after taking that advice was spent
+    /// by no request from either harness. The settings below are the ones each
+    /// measurement was taken under, and every one of them must now read as the
+    /// build's own limit and not as the user's settings.
+    #[test]
+    fn a_tool_whose_permission_no_setting_grants_is_refused_without_naming_a_setting() {
+        let inspect_only = ExecutionPermissions::inspect_only();
+        for (tool, mode, permissions, protection) in [
+            (
+                "Write",
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Standard,
+            ),
+            (
+                "Delete",
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Standard,
+            ),
+            (
+                "Edit",
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Standard,
+            ),
+            // The setting the old sentence named for `Write`, and the one it
+            // offered to `Edit`: neither changes this answer.
+            (
+                "Write",
+                ExecutionMode::InspectOnly,
+                &inspect_only,
+                ProtectionMode::Strict,
+            ),
+            (
+                "Edit",
+                ExecutionMode::HostConfirmed,
+                &inspect_only,
+                ProtectionMode::Standard,
+            ),
+        ] {
+            let reason = allowance_could_not_be_spent_reason(tool, mode, permissions, protection)
+                .unwrap_or_else(|| {
+                    panic!("{tool} needs a permission no setting grants, so it cannot be recorded")
+                });
+
+            // The reason it gives: the request would change this project's
+            // files, the permissions in force do not allow that, and no setting
+            // in this build grants it.
+            assert!(
+                reason.contains("would change files inside your project"),
+                "{tool}: the refusal does not say what the request would do: {reason}"
+            );
+            assert!(
+                reason.contains("No setting in this build grants it"),
+                "{tool}: the refusal does not say the limit is the build's: {reason}"
+            );
+            assert!(
+                reason.contains("Nothing was written"),
+                "{tool}: the refusal does not say nothing was written: {reason}"
+            );
+
+            // And what it must not say: a setting. Not one as the cause, and
+            // not one as a remedy — a user who took either advice would be
+            // refused again, which is the failure this function exists to
+            // avoid.
+            for absent in [
+                "`execution.mode`",
+                "`protection.mode`",
+                "host_confirmed",
+                "strict",
+            ] {
+                assert!(
+                    !reason.contains(absent),
+                    "{tool}: the refusal names {absent}, which is not the cause and would not \
+                     help: {reason}"
+                );
+            }
+        }
     }
 }

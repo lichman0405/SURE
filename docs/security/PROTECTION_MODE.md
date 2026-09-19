@@ -82,8 +82,8 @@ matches the tool and the words exactly, so whether any matching request could
 spend it is a question about `execution.mode`, the permissions, `protection.mode`
 and the tool the user named — and not about the words they typed. Under the
 default configuration no request can be held for any of the three acts below, so
-`sure hook allow-once` refuses, names the setting that would have to change, and
-writes no row. A grant recorded there would sit in the store looking like a
+`sure hook allow-once` refuses, says what would have to change, and writes no
+row. A grant recorded there would sit in the store looking like a
 permission while being a promise SURE cannot keep, and the user would learn that
 only when the request it names arrived and was held anyway. The same refusal
 answers a grant whose *settings* leave an act that its *tool* cannot reach: with
@@ -101,15 +101,26 @@ recording rather than claiming the answer is fixed for the window's life. A user
 who changes their settings afterwards has changed what the grant can be spent on:
 a request the new settings hold for an act an allowance covers can spend it, and
 a request they no longer hold for one — or refuse for another reason, including
-the mode — spends nothing. A grant refused for the tool it names is not inert
-forever either: it is a row a *later* settings change would have made spendable.
-SURE refuses it rather than recording it, because the two settings that would
-make it spendable are the two a user can name now, and a row that cannot be spent
-under the settings in force is a promise the user has no way to check. Which
-*subject* is a request SURE would hold is still not knowable at write time: the
-words are read when a request arrives, so a grant recorded for a tool that can
-reach an act may still name a request SURE never holds and be spent by nothing
-when its window expires.
+the mode — spends nothing. A grant refused for the tool it names is not always inert
+forever either. Where the action that tool names needs a permission a setting can
+grant, the refusal is about the settings in force: it is a row a *later* settings
+change would have made spendable, and SURE refuses it rather than recording it,
+because the two settings that would make it spendable are the two a user can name
+now, and a row that cannot be spent under the settings in force is a promise the
+user has no way to check. That is the sentence `--tool Shell` and `--tool Read`
+are refused with. Where the action needs a permission **no** setting in this
+build grants, no settings change makes such a grant spendable and the refusal
+says that instead: it does not name `execution.mode` or `protection.mode`,
+because neither is the cause and there is nothing the user could change. In this
+build that is a tool whose action would change the project's own files —
+`Write`, `Edit` and `Delete` — because nothing here grants SURE the permission to
+change them. Which of the two sentences a tool gets is read off the vocabularies
+rather than written down beside them, so a later release that makes that
+permission grantable answers with the first sentence and a test fails until it
+does. Which *subject* is a request SURE would hold is still not knowable at write
+time: the words are read when a request arrives, so a grant recorded for a tool
+that can reach an act may still name a request SURE never holds and be spent by
+nothing when its window expires.
 
 An allowance reaches the three acts this document calls dangerous and nothing
 else:
@@ -141,13 +152,15 @@ that puts an act within reach is one the user writes themselves.
 
 The **tool** name is read, and the subject is not, and the difference is what can
 be known at write time. A tool name is the harness's own vocabulary and maps to
-the action kind SURE would answer a request carrying it with — which is a fact
-about the tool, not about what the user typed after it, and reading it does not
-read the subject. The words are read when a request arrives, because there is no
-request to read them against before then. So a grant whose words are not
-something SURE would ever hold is spent by nothing and expires: a request matches
-it exactly and SURE still answers that request as it would have answered it
-without the grant. That residual is deliberate and is not closed by this command.
+the action kind SURE would answer a request carrying it with — in the vocabulary
+that claims the name, so a name only one harness has is not also read as the
+other's unrecognised tool — which is a fact about the tool, not about what the
+user typed after it, and reading it does not read the subject. The words are read
+when a request arrives, because there is no request to read them against before
+then. So a grant whose words are not something SURE would ever hold is spent by
+nothing and expires: a request matches it exactly and SURE still answers that
+request as it would have answered it without the grant. That residual is
+deliberate and is not closed by this command.
 What the write does close is the other half: settings and a tool that together
 leave **every** matching request unspendable are refused before anything is
 recorded, so a row written at a given moment is one the settings in force at that

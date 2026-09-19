@@ -125,17 +125,21 @@ pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
 ///
 /// The *tool* is read, and it is not the subject: the two are separate halves of
 /// what a grant matches. A tool name is the harness's own vocabulary, and SURE
-/// answers it through both harnesses' tables; a name neither knows is
-/// `ArbitraryCommand`, so a user may still cover a tool SURE has never heard of,
-/// and that is the one arm where a grant can be recorded for words no request
-/// carries — the wasted minute rather than the wrong answer. The **subject**
-/// stays unread: whether `rm -rf build/` or `.env` is dangerous is decided when
-/// a request arrives, and a command line this function refused to record would
-/// be a second rule about what is dangerous. So what the user reads is what the
-/// settings in force leave for *their tool*, and a grant recorded for words
-/// SURE would never name as dangerous is one it is never spent on — which is the
-/// residual `docs/security/PROTECTION_MODE.md` states and this command cannot
-/// close.
+/// answers it **in the vocabulary that claims it** — the reading that keeps
+/// Claude Code's `Edit` a change to a project file instead of also reading it
+/// through Cursor's unrecognised-name fallback, which is the shape that let the
+/// writer record a grant for `Edit` and then have no request from either harness
+/// spend it (`P13-T010`'s second send-back). A name neither vocabulary claims
+/// is `ArbitraryCommand`, so a user may still cover a tool SURE has never heard
+/// of, and that is the one arm where a grant can be recorded for words no
+/// request carries — the wasted minute rather than the wrong answer. The
+/// **subject** stays unread: whether `rm -rf build/` or `.env` is dangerous is
+/// decided when a request arrives, and a command line this function refused to
+/// record would be a second rule about what is dangerous. So what the user reads
+/// is what the settings in force leave for *their tool*, and a grant recorded
+/// for words SURE would never name as dangerous is one it is never spent on —
+/// which is the residual `docs/security/PROTECTION_MODE.md` states and this
+/// command cannot close.
 ///
 /// The project is the one caller-side fact this command takes as given, because
 /// nothing else can supply it: [`run_allow_once_with_paths`] stores the grant
@@ -2774,6 +2778,116 @@ mod tests {
             action,
             ProtectionDecisionKind::Block,
             "one allowance covered two requests"
+        );
+    }
+
+    /// The defect `P13-T010`'s second send-back measured, driven the way it was
+    /// measured and left here as the test that will not let it come back.
+    ///
+    /// The tool name is `Edit`, which is Claude Code's word for a change to a
+    /// project file and a word Cursor's vocabulary does not carry. Read as the
+    /// union over both harnesses' tables — what this writer did before the fix —
+    /// `Edit` was also read as Cursor's unrecognised-name fallback, an arbitrary
+    /// command, and taking the more permissive of the two readings is what the
+    /// writer recorded a grant for. Measured on the tip before this change, on
+    /// this exact setup: `allow-once --tool Edit --path src/lib.rs` **recorded**
+    /// `acts = [BroadDelete, ForcePush]`, told the user that
+    /// `execution.mode: host_confirmed` would put it within reach — and then
+    /// neither a Claude Code `Edit`/`src/lib.rs` request nor a Cursor one spent
+    /// it. The grant stayed outstanding. Acceptance line 3, falsified by the
+    /// store read-back it prescribes.
+    ///
+    /// What the test asserts is therefore two things about one store: the
+    /// writer refuses, and the requests that were supposed to spend the grant it
+    /// used to write spend nothing because there is nothing to spend.
+    #[test]
+    fn edit_is_read_in_the_vocabulary_that_claims_it_and_a_grant_for_it_is_refused() {
+        // The settings the defect was measured under: the user's own file
+        // naming `host_confirmed`, so `run_project_code` is granted and the
+        // old sentence's advice has been taken. Nothing about the project file,
+        // which is the default one.
+        let (project, paths) = a_project_with("p13t010-edit", "");
+        a_user_who_allowed_project_code(&paths);
+
+        let refused = run_allow_once_with_paths(
+            "Edit",
+            "src/lib.rs",
+            &project.to_string_lossy(),
+            allowance::DEFAULT_MINUTES,
+            &paths,
+        );
+        match &refused {
+            Report::Failed(failure) => {
+                // The same reason `Write` and `Delete` are refused with: the
+                // act the tool names needs a permission no setting grants, and
+                // the sentence says so rather than naming `execution.mode`.
+                assert!(
+                    failure
+                        .detail
+                        .contains("No setting in this build grants it"),
+                    "the refusal does not say the limit is the build's: {}",
+                    failure.detail
+                );
+                assert!(
+                    failure
+                        .detail
+                        .contains("would change files inside your project"),
+                    "the refusal does not say what an `Edit` would do: {}",
+                    failure.detail
+                );
+                for absent in ["host_confirmed", "`execution.mode`", "`protection.mode`"] {
+                    assert!(
+                        !failure.detail.contains(absent),
+                        "the refusal names {absent}, which is not the cause: {}",
+                        failure.detail
+                    );
+                }
+            }
+            other => panic!("a grant no request could spend was answered with {other:?}"),
+        }
+        assert!(
+            outstanding_grants(&paths, &project).is_empty(),
+            "the writer refused the grant and wrote a row anyway"
+        );
+
+        // And the two requests the old grant was recorded for: a Claude Code
+        // `PreToolUse` naming `Edit`, which is the harness the name belongs to,
+        // and a Cursor one, which is the harness whose fallback the union read
+        // it through. Neither spends anything, because the row the union would
+        // have written is the row this writer refuses to write.
+        let claude_edit = serde_json::json!({
+            "event": "PreToolUse",
+            "harness_session_id": "p13t010-edit",
+            "project_root": project.to_string_lossy(),
+            "tool": "Edit",
+            "path": "src/lib.rs",
+            "timestamp_utc": "2026-09-19T09:00:00Z",
+            "source": "claude-code",
+        })
+        .to_string();
+        let claude = run_ingest_with_paths(
+            Some("claude-code"),
+            Some("pre-tool-use"),
+            &claude_edit,
+            &paths,
+        );
+        match &claude {
+            Report::HookDecision(decision) => assert_ne!(
+                decision.decision,
+                ProtectionDecisionKind::Allow,
+                "a request the settings in force refuse was allowed"
+            ),
+            other => panic!("expected HookDecision, got {other:?}"),
+        }
+        let (cursor_action, _) = run_cursor_request(&project, &paths, "Edit", Some("src/lib.rs"));
+        assert_ne!(
+            cursor_action,
+            ProtectionDecisionKind::Allow,
+            "a request the settings in force refuse was allowed"
+        );
+        assert!(
+            outstanding_grants(&paths, &project).is_empty(),
+            "a request spent an allowance this writer never wrote"
         );
     }
 }

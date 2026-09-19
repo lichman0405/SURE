@@ -2410,6 +2410,104 @@ fn allowance_rows(store: &Path) -> (Vec<i64>, Vec<i64>) {
 }
 
 #[test]
+fn a_tool_no_setting_can_let_change_a_file_is_refused_without_naming_a_setting() {
+    // Acceptance line 1 for the case `P13-T010`'s second send-back measured: a
+    // tool whose action would change the project's files, where the permission
+    // that act needs is one no configuration in this build grants. `Write` and
+    // `Delete` are that case in every mode; `Edit` joined them when the tool
+    // name stopped being read as the union over both harnesses' tables — the
+    // union also read it through Cursor's unrecognised-name fallback and took
+    // the more permissive reading, which is why the writer used to *record* a
+    // grant for it and then have no request from either harness spend it.
+    //
+    // The machine's own settings file cannot change any of this, so unlike the
+    // test above this one is the same on every machine: the permission these
+    // three actions need is granted by no `execution.mode` and by no request a
+    // file may ask for, so `host_confirmed` in somebody's settings is not a
+    // branch this test has to ask about.
+    //
+    // What it asserts is what a user reads and what the store shows: exit 5, a
+    // sentence that names the tool, the act and the build's own limit, no
+    // setting-named-as-a-remedy anywhere in it, and no store directory left
+    // behind — because the refusal returns before anything is opened.
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    // The store this test names does **not** exist, which is the point: a store
+    // SURE has never written is a directory that is not there, and a refusal
+    // that created one would be a refusal that wrote something.
+    let store = a_store_of_our_own().join("not-created");
+    let project_arg = project.to_string_lossy().into_owned();
+
+    for (tool, subject) in [
+        ("Write", "build/out.txt"),
+        ("Edit", "src/lib.rs"),
+        ("Delete", "build/out.txt"),
+    ] {
+        let run = run_in_a_store(
+            &store,
+            &[
+                "hook",
+                "allow-once",
+                "--project",
+                &project_arg,
+                "--tool",
+                tool,
+                "--path",
+                subject,
+            ],
+        );
+        assert_eq!(
+            run.status, 5,
+            "a grant for {tool} that no request could spend was not refused with 5:\n\
+             stdout: {}\nstderr: {}",
+            run.stdout, run.stderr
+        );
+        assert!(
+            run.stdout.is_empty(),
+            "a refusal wrote to the stream a script reads as the answer:\n{}",
+            run.stdout
+        );
+        for needed in [
+            "SURE will not record an allowance that no request could spend.",
+            "would change files inside your project",
+            "No setting in this build grants it",
+            "Nothing was written",
+        ] {
+            assert!(
+                run.stderr.contains(needed),
+                "the refusal for {tool} does not say {needed:?}:\n{}",
+                run.stderr
+            );
+        }
+        // The setting the previous build named here was provably not the cause:
+        // `protection: {mode: strict}` refuses this command again, and
+        // `execution.mode: host_confirmed` was measured changing nothing. So
+        // neither may appear, as a cause or as a remedy.
+        for absent in [
+            "`execution.mode`",
+            "`protection.mode`",
+            "host_confirmed",
+            "inspect_only",
+        ] {
+            assert!(
+                !run.stderr.contains(absent),
+                "the refusal for {tool} names {absent}, which is not the cause and would not \
+                 make the grant spendable:\n{}",
+                run.stderr
+            );
+        }
+        assert!(
+            !store.exists(),
+            "the refusal for {tool} created the store directory {}",
+            store.display()
+        );
+    }
+
+    assert_untouched(&machine, "by runs that named a store");
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
 fn an_allowance_the_settings_cannot_spend_is_refused_and_the_store_stays_empty() {
     // Acceptance line 1 and line 4, in the project the default configuration
     // makes: a `sure.yaml` that declares nothing, and a user who has written no

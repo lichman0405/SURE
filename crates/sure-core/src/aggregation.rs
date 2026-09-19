@@ -131,16 +131,19 @@ use crate::schedule::CheckSchedule;
 /// to run — would both be worse than one sentence in the module that has the
 /// fact.
 ///
-/// **Public because the sentence is a claim SURE makes about a run, and the
-/// fixture that grades this path has to hold what SURE produced against what
-/// SURE says, by equality.** `fixtures/adversarial/check-crash` declares this
-/// sentence and `crates/sure-core/tests/adversarial_fixture_detection.rs`
-/// compares the sentence the report carries against *this* constant rather than
-/// against a copy of it in the test: a second copy would go on agreeing with
-/// itself after the sentence here was rewritten, which is the one change the
-/// fixture exists to notice. `NO_TRUSTED_INTENT_LIMITATION` in
-/// `sure_domain::status` is public for the same reason and is quoted whole by
-/// `missing-user-intent`.
+/// **Public because the fixture that grades this path holds what SURE produced
+/// against what SURE says, by equality, and the sentence is written down in two
+/// places rather than three.** `fixtures/adversarial/check-crash` declares this
+/// sentence in the answer it expects, and
+/// `crates/sure-core/tests/adversarial_fixture_detection.rs` compares the
+/// sentence the report carries against *this* constant as well as against the
+/// fixture's copy — so a rewrite here leaves the fixture's copy as the one thing
+/// that disagrees, and a rewrite there is reported the same way. A copy in the
+/// test would be a third place to keep, and it is the one most easily brought
+/// back into agreement by pasting this line into it, which is what would leave
+/// the test asserting nothing the product says.
+/// `NO_TRUSTED_INTENT_LIMITATION` in `sure_domain::status` is public for the same
+/// reason and is quoted whole by `missing-user-intent`.
 pub const NOTHING_CAME_BACK: &str = "Nothing was reported for this check, so SURE has no basis for \
                                      a verdict on it.";
 

@@ -4825,30 +4825,60 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         }
     }
 
-    // Every declared answer is the product's answer, key for key and in both
-    // directions. The reverse direction is `answer_keys` /
-    // `assert_answers_account_for` above; this is the forward one.
+    // The anti-vacuity assertion, and it comes before the per-run severities
+    // because it is the one that says whether this fixture is a measurement at
+    // all. A fixture whose control declares the same answer as the run it is a
+    // control for measures nothing, whether or not the product agrees with it —
+    // so the difference is asserted twice, once in the product's own answers and
+    // once in the fixture's own declaration, and the second is the one that
+    // catches a control edited into a copy of the run beside it.
+    assert_ne!(
+        reports["control"].aggregate().severity,
+        reports["checker_failure_unknown"].aggregate().severity,
+        "{id}: the same schedule with nothing reported and with a pass reported reached the same \
+         severity, so the two halves of this fixture are the same measurement"
+    );
+    assert_ne!(
+        runs["control"]["expect"]["aggregate_severity"],
+        runs["checker_failure_unknown"]["expect"]["aggregate_severity"],
+        "{id}: the control declares the same severity as the run it is a control for, so the pair \
+         is the same declaration written twice and nothing here is a measurement of the check"
+    );
+    assert_ne!(
+        runs["control"]["expect"]["report_is_green"],
+        runs["checker_failure_unknown"]["expect"]["report_is_green"],
+        "{id}: the control declares the same greenness as the run it is a control for"
+    );
+
+    // The third of the four readings, as its own assertion rather than as a
+    // consequence of comparing two JSON objects: **the exact severity, pinned
+    // per run**, and the exact answer to *is this a green run*. `!is_green()` is
+    // what a test reaches for here and it is not an assertion — it is satisfied
+    // by `NotEnoughChecked`, `NotReady`, `NeedsAttention` and by an empty plan
+    // alike — so the fixture declares the severity each run must reach and this
+    // is where that declaration is held against the product's answer.
     for (kind, run) in &runs {
-        let declared = run["expect"]
-            .as_object()
-            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
-        let reported = answers[kind]
-            .as_object()
-            .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
-        let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
-        let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
+        let declared = run["expect"]["aggregate_severity"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no aggregate severity"));
         assert_eq!(
-            reported_keys, declared_keys,
-            "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
-             things, so one of them has stopped being graded"
+            reports[kind].aggregate().severity.as_str(),
+            declared,
+            "{id}: the `{kind}` run reached `{}` and the fixture declares `{declared}` for it, and \
+             this is the assertion a mutation to `green` reddens: a test asserting only that the \
+             run is not green would still pass it, because the product's answer does not move when \
+             the declaration does",
+            reports[kind].aggregate().severity.as_str()
         );
-        for (key, expected) in declared {
-            assert_eq!(
-                reported[key], *expected,
-                "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the case \
-                 is not being graded as written"
-            );
-        }
+        let declared_green = run["expect"]["report_is_green"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no greenness"));
+        assert_eq!(
+            reports[kind].is_green(),
+            declared_green,
+            "{id}: the `{kind}` run answers `is_green() == {}` and the fixture declares {declared_green}",
+            reports[kind].is_green()
+        );
     }
 
     // The exact severity, and the control. `!severity.is_green()` would be
@@ -4875,27 +4905,6 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         green,
         ["control"],
         "{id}: the runs that reach green are {green:?}, and the only one that may is the control"
-    );
-
-    // The pair that must differ, in the product's own answers and in the
-    // fixture's own declaration. A fixture whose control declares the same answer
-    // as the run it is a control for measures nothing, whether or not the product
-    // agrees with it, so both halves are asserted.
-    assert_ne!(
-        reports["control"].aggregate().severity,
-        reports["checker_failure_unknown"].aggregate().severity,
-        "{id}: the same schedule with nothing reported and with a pass reported reached the same \
-         severity, so the two halves of this fixture are the same measurement"
-    );
-    assert_ne!(
-        runs["control"]["expect"]["aggregate_severity"],
-        runs["checker_failure_unknown"]["expect"]["aggregate_severity"],
-        "{id}: the control declares the same severity as the run it is a control for"
-    );
-    assert_ne!(
-        runs["control"]["expect"]["report_is_green"],
-        runs["checker_failure_unknown"]["expect"]["report_is_green"],
-        "{id}: the control declares the same greenness as the run it is a control for"
     );
 
     // One thing moved. The control's plan is the fixture's own plan — the same
@@ -5001,4 +5010,34 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         "{id}: an empty plan answers what the fixture's own run answers, so the row assertions \
          above are satisfied by a run that planned nothing"
     );
+
+    // The net, and it is last on purpose. Every asserted claim above is named and
+    // says what it is about; this is the exhaustive one, holding **every** key of
+    // every run's answer against the fixture's declaration in both directions, so
+    // that a key nobody thought to name is still graded rather than ignored. The
+    // reverse direction is `answer_keys` / `assert_answers_account_for` above;
+    // this is the forward one, and it is the reason a new key in the fixture is a
+    // red test rather than a line nothing reads.
+    for (kind, run) in &runs {
+        let declared = run["expect"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
+        let reported = answers[kind]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
+        let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
+        let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
+        assert_eq!(
+            reported_keys, declared_keys,
+            "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
+             things, so one of them has stopped being graded"
+        );
+        for (key, expected) in declared {
+            assert_eq!(
+                reported[key], *expected,
+                "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the case \
+                 is not being graded as written"
+            );
+        }
+    }
 }

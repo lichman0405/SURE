@@ -14,6 +14,21 @@
 //! > *At least one Rust real-fail/real-pass project exercises
 //! > discovery/execution/reporting.*
 //!
+//! `P14-T004` added a fifth:
+//!
+//! > *Tests-not-run/stale evidence/cannot-confirm outcomes exact.*
+//!
+//! The three fixtures that sentence names are not project directories at all:
+//! each is a **recording** — a claim an AI made and the harness events behind it
+//! — so "runnable" is not a question this file can ask about them and they are
+//! not in any of the language lists below. [`CLAIM_FIXTURES`] names them, and
+//! every check that is about a scenario rather than about a language applies to
+//! them here exactly as it applies to a project: the schema, the false-green
+//! rule, the module they say grades them, and the directory they ship in. What
+//! their outcomes are is not here — that needs SURE's claim checker, and it
+//! lives in `crates/sure-core/tests/adversarial_fixture_detection.rs`, where the
+//! declared streams are read and the answers are asserted.
+//!
 //! Three words in each sentence are checkable without running SURE at all, and
 //! this file checks them:
 //!
@@ -100,6 +115,16 @@ const PYTHON_FIXTURES: &[&str] = &["missing-migration", "external-unverified", "
 /// `crates/sure-core/tests/rust_fixture_apps.rs`, where SURE's own discovery,
 /// runner, aggregation and verdict are reachable.
 const RUST_FIXTURES: &[&str] = &["rust-tests-fail", "rust-tests-pass"];
+
+/// The `P14-T004` fixtures: an AI's claim and the recording behind it, with no
+/// project in either.
+///
+/// They are named for the same reason as the lists above. They are deliberately
+/// *not* chained into [`TYPESCRIPT_FIXTURES`] or its siblings even though they
+/// are checked by the same scenario-wide tests: a list that meant "this fixture
+/// is runnable with npm" cannot also mean "this fixture is a recording", because
+/// the second would then be read as a claim about the first.
+const CLAIM_FIXTURES: &[&str] = &["tests-not-run", "stale-test-evidence", "unknown-evidence"];
 
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
@@ -224,16 +249,18 @@ fn shipped_fixture_ids() -> Vec<String> {
     ids
 }
 
-/// Every fixture the two tasks named in this file implemented, both halves.
+/// Every fixture the tasks named in this file implemented, both halves.
 ///
 /// One list for the checks that are about a fixture rather than about a
 /// language: the schema, the false-green rule, the check module and the
-/// directory all apply to a Python fixture exactly as they apply to a Node one.
+/// directory all apply to a Python fixture exactly as they apply to a Node one,
+/// and to a recording that ships no project at all.
 fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
     TYPESCRIPT_FIXTURES
         .iter()
         .chain(PYTHON_FIXTURES)
         .chain(RUST_FIXTURES)
+        .chain(CLAIM_FIXTURES)
         .copied()
 }
 
@@ -991,6 +1018,42 @@ fn every_rust_fixture_is_runnable_with_nothing_installed_but_cargo() {
 }
 
 #[test]
+fn every_claim_fixture_is_a_directory_this_repository_ships() {
+    // The `P14-T004` fixtures, and the one thing they must not grow. A
+    // recording has no project to run: a `package.json`, a `pyproject.toml` or a
+    // `Cargo.toml` in one of these directories would put it into a runnability
+    // sweep that runs the fixture, and there is nothing here to run — the
+    // scenario declares a stream and the test that grades it is in `sure-core`.
+    for id in CLAIM_FIXTURES {
+        let dir = fixture_dir(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        assert!(
+            dir.join("scenario.json").is_file(),
+            "{id} has no scenario.json, so there is no stream to grade"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md for a non-programmer to read"
+        );
+        for manifest in ["package.json", "pyproject.toml", "requirements.txt"] {
+            assert!(
+                !dir.join(manifest).is_file(),
+                "{id} ships a {manifest}: these fixtures are recordings, and a runnability \
+                 manifest would claim a project they do not have"
+            );
+        }
+    }
+    for id in CLAIM_FIXTURES {
+        assert!(
+            !TYPESCRIPT_FIXTURES.contains(id)
+                && !PYTHON_FIXTURES.contains(id)
+                && !RUST_FIXTURES.contains(id),
+            "{id} is in a language list as well, so one of the two halves is misdescribed"
+        );
+    }
+}
+
+#[test]
 fn every_rust_fixture_is_a_directory_this_repository_ships() {
     for id in RUST_FIXTURES {
         let dir = fixture_dir(id);
@@ -1044,6 +1107,23 @@ fn every_fixture_names_the_check_it_expects_to_fire() {
             names_a_module,
             "{id}/scenario.json names no check module, so nothing can grade it"
         );
+
+        // And a named module is a file, not a path someone typed. A scenario
+        // whose `module` was renamed out from under it would otherwise go on
+        // reading as though a check with that name exists, and a reader
+        // following it would find nothing.
+        for outcome in outcomes {
+            for key in ["module", "reading_module"] {
+                let Some(named) = outcome.get(key).and_then(Value::as_str) else {
+                    continue;
+                };
+                let path = root().join(named);
+                assert!(
+                    path.is_file(),
+                    "{id}/scenario.json names {named} as its {key}, and there is no such file"
+                );
+            }
+        }
     }
 }
 

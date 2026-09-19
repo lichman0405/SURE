@@ -3,44 +3,50 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P15-T001` — *"Finalize `sure doctor` for Windows developer/user environment"* — is
-**dispatched**, not accepted, from base `03f48f1` (the `P14-T013` acceptance), with its brief at
-`target/tmp/brief-p15t001.md` and the tree clean at dispatch. Its two acceptance criteria are in
-`tasks/tasks.json`; the short form is that doctor must report core paths, integrations, execution,
-container and provider state without exposing secrets, and must report native Windows/MSVC and the
-per-user data and install paths clearly.
+**In flight:** nothing, as of this paragraph. `P15-T001` — *"Finalize `sure doctor` for
+Windows developer/user environment"* — is **accepted as `7720202`**, over two worker
+commits (`c65604b`, `7720202`) from base `03f48f1`, and its four named gaps are
+recorded below rather than covered. The report now answers the four questions the module had been
+saying this task would bring: the container runtime, the analysis providers, the programs a build on
+this machine uses, and the harnesses SURE will take an event from.
 
-**The module has been waiting for this task by name.** `doctor.rs:53-58` says of its one-entry `TOOLS`
-table: *"`P15-T001` is where the integration, execution and container picture arrives; this list is
-where it will be added."* Its `NOT_CHECKED` carries `"whether a harness is installed"` with the reason
-*"that is P15-T001's, and nothing in this build talks to a harness yet."* `container::Availability`
-exists with a ready-made user sentence and **zero** shipped call sites — and
-`fixtures/adversarial/container-unavailable/scenario.json` records that count and predicts, in its own
-prose, that a later phase will have to change it *deliberately*. Wiring doctor to the container module
-reddens `adversarial_fixture_detection.rs:3415`, and that is the intended signal rather than a problem
-to route around.
+**The secret guard did not move, and that is the first thing that was checked.**
+`crates/sure-core/tests/doctor.rs` shows **288 insertions and 0 deletions** over the base, so
+`the_diagnostic_never_reaches_for_the_settings_module` is byte-identical: nothing was weakened and
+nothing was moved. The test that holds the provider names to the settings vocabulary imports
+`sure_core::config::AnalysisProvider` from a *test*, which the source scan does not cover, so a
+module that may not name the settings file is still held to it.
 
-**The secret guard is a source scan and must not move.**
-`crates/sure-core/tests/doctor.rs:79` fails the build if `src/doctor.rs` so much as names `crate::config`,
-`Config::load` or `LoadedConfig`, and that test is the whole of "without exposing secrets" in criterion 1.
-The brief forbids weakening it to make a provider check easier: if provider state cannot be reported
-without the settings file, the honest answer is to report what can be observed without it and to say the
-rest in `NOT_CHECKED`, which is the move the existing design already makes for the settings file itself.
+**Two false claims in the tree were corrected, both of them the class this repository treats as a
+defect.** `NOT_CHECKED[0]`'s *"SURE has no process runner yet"* became *"SURE does not run a
+program to find out"* — the *what* stayed and the *why* moved, and the module doc now points at
+`crate::process`, which exists. And `support.rs`'s *"[crate::doctor] searches for and probes
+toolchains"* is made true rather than deleted, with the *probes* half refused in the sentence itself:
+*"probes would be a claim this build cannot make, and it does not make it."*
 
-**Two claims the brief found to be false today, both in scope.** `NOT_CHECKED[0]` says *"SURE has no
-process runner yet"*; SURE has many — `checks/`, `consent.rs`, `enforce.rs`, `fingerprint/git`,
-`browser_driver/launch.rs` and `service_supervisor.rs` all name `Command::new` in code. Doctor genuinely
-does not run programs, so the *what* stays and the *why* is stale. And `support.rs:56-57` says
-*"[`crate::doctor`] searches for and probes toolchains"* — `doctor.rs` contains no occurrence of
-`probe`, `toolchain`, `rustc` or `msvc`, and it searches for exactly one program, `git`, which is not a
-toolchain. The sentence sits in a doc block about what SURE claims it can do, so it is load-bearing: the
-worker must make it true or correct it, and *"probes"* cannot become true while the design forbids
-running programs.
+**The deliberate fixture change came with a test change that §9 did not name, and the reason was
+checked at the source rather than taken on the worker's word.** Bumping
+`container-unavailable`'s declared count alone could not have worked: the pre-existing
+`assert!(call_sites.is_empty())` was *unconditional*, and the brief's own description of that test
+("asserts the declared count equals the measured call sites") omitted it. The replacement keeps an
+unconditional guard on the predicate that still holds — nothing can plan a container — and turns the
+predicate that stopped holding into a declared, drift-checked count. The old meaning is moved rather
+than deleted: it is the new `module_call_sites`, which is 11 and not 0, and every place the
+number appears names `P15-T001` as what changed it. No `required_severity`,
+`expected_severity` or `release_blocking` moved anywhere in the repository.
 
-**There is no MSVC or toolchain detection in any Rust file in this repository**, and per-user data and
-config paths are already reported while the *install* path is only the running executable's directory —
-`P15-T003` is where the install location is still to be decided. The brief asks the worker to say which
-parts of the two criteria it did not implement rather than to cover a gap with a sentence.
+**A limit that the product had never reached is now stated with a number instead of a sentence.**
+`unwired_call_sites` is still 0 and now counts execution rather than reach, which is the
+distinction the brief asked to keep: doctor *reports* whether a runtime is on the search path it was
+handed, and nothing *runs* a check in one. A reader who knew the old number will find it unchanged and
+must read one line up to learn why, which is why the prose is rewritten rather than appended to.
+
+**The Copilot package is broken and the report now says so by measuring it.**
+`integrations/copilot/scripts/sure-hook.ps1` passes `--source copilot`, which
+`sure-cli/src/hook.rs` refuses, so the report does not offer it — and
+`every_harness_the_doctor_report_offers_is_one_sure_will_take_an_event_from` asserts the refusal
+with a non-empty payload, because an empty standard input is refused before the source is looked at
+and a test that piped nothing would have measured nothing. A defect that was a sentence is now a test.
 
 **In flight:** nothing, as of this paragraph. `P14-T013` — *"Bring the corpus's record of detector
 severity back in line with the detectors"* — is **accepted as `861198f`**, over two worker commits
@@ -2499,6 +2505,75 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T001` added
+
+The diagnostic answers four questions it had been saying this task would bring, without running any program.
+
+- **One argument carries every program answer.** `examine_in(places, search_path: &OsStr)` is the
+  seam, and `examine` reads `PATH` once and delegates. The tools, the toolchain, each
+  provider's program and — through `Availability::in_path(search_path)` — the container runtime all
+  read that one argument, which is what makes a two-sided test possible on one machine in one process.
+  `every_program_the_report_names_is_looked_for_on_the_search_path_it_was_given` runs it twice and
+  asserts `places`, `build` and `store` are identical between the halves, so the
+  search path is the only variable.
+- **`DoctorReport` gains** `toolchain`, `container`, `providers` and
+  `integrations`, plus `Build::target_env` and `Locations::install_file`. The
+  human form gains four sections and the machine form four keys, and
+  `the_two_forms_agree_about_which_sections_there_are` holds the two lists to each other.
+- **MSVC is reported as a compile-time fact, not a probe.** `TARGET_ENV` comes from
+  `cfg!(target_env = ...)`, and `TOOLCHAIN` is per platform — `cl` and
+  `vswhere` exist only on Windows, each with the sentence that it is normally installed and
+  normally off `PATH`, so *not found here* is not evidence of absence.
+- **The per-user install path is the platform's, not the store's.** `per_user_install()` reads
+  `dirs::data_local_dir()` — the known-folder API, deliberately not the environment variable of
+  the same name — and deliberately not `Paths::data_dir()`, so `--store-dir` cannot move
+  the reported installation. Run on the real binary, the redirect moved the store and left the
+  installation where the launchers look for it.
+- **A provider answer cannot hold a secret.** `Provider` has four fields — name, needs, program,
+  where that program is — and a test asserts that count, with the failure message saying why a fifth
+  would be a field this report has no honest source for.
+- **The container answer has a negative control**: with every runtime present it must be
+  `Runtime::ALL[0]`, and with only the second present it must be that one, so an answer that
+  always named the first would fail.
+
+## Validation of `P15-T001`
+
+The supervisor's own run, at `7720202`, from PowerShell (`gates.ps1 -Label sup-p15t001`):
+**all six gates exit 0**, `result-lines=79 passed=2623 failed=0 ignored=12 not-ok=0`, 69
+case-sensitive headers, bootstrap `17 phases, 187 tasks`, taskctl `187 tasks`, store
+byte-identical before and after
+(`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`), worktree clean at start
+and at end. These reproduce the worker's own gate numbers exactly. The acceptance push is the first
+carrying the two worker commits, neither of which has a CI run of its own; the dispatch run
+**35436798102** for `f3d803a` was green on all five jobs, including `rust (ubuntu-latest)` —
+the shape that has carried a red ubuntu job twice for environmental reasons, read and named rather
+than waved through.
+
+**The decisive check was a mutation none of the worker's seven attempted.** Theirs all moved the
+*measurement*; this one moved the *declaration*, which is the direction that would have exposed a
+fixture number carried for show. Bumping the fixture's `module_call_sites` 11 → 12 with the
+measurement untouched reddens the test with
+*`left: Number(11) / right: Number(12)`* and the message *"SURE's answer for
+`module_call_sites` is not the one the fixture declares"*. So the declared number is load-bearing.
+An independent scan (`target/tmp/sup-p15t001-count.mjs`) reads the same 11 and 0 over 145 shipped
+files, and confirms only one `required_outcomes` entry carries either key, which is the
+fixture's own rule and now a measurement rather than a sentence.
+
+**The named gaps, kept rather than smoothed.** "Execution state" is reported only as which programs
+execution would reach, because the consent value is in the settings file this module may not name.
+The harness list is routes SURE will *accept* an event from, not a detection of what is installed, and
+the report says exactly that in `NOT_CHECKED`. The per-user install path is Windows-only, and
+Unix says "this platform has no such location" rather than inventing one of three. `cl` and
+`vswhere` are searched on `PATH` only, stated in their own sentences. And
+`find_in` was not moved to a module of its own — the move its doc had promised to its third
+caller — so the doc now records the debt instead of promising it to a phase that has passed.
+
+**Two pre-existing defects were reported and not fixed, both correctly.** `runtime_start.rs`'s
+load-sensitive cluster failed twice in the worker's six full-suite runs and not in the supervisor's;
+and the `sure cli contract` scratch-directory pool had reached 7701 directories and killed
+`a_directory_of_our_own` *before* any of this task's changes, which the worker proved by running an
+untouched test rather than by asserting it.
 
 ## What `P14-T013` added
 

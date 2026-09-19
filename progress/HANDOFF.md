@@ -3,6 +3,40 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T011` — *"Implement product eval runner/report"* — is **dispatched**, not accepted,
+from base `b29dc6c` (the `P14-T010` acceptance), with its brief at `target/tmp/brief-p14t011.md` and the
+tree clean at dispatch. Its criterion is *"Produces machine-readable acceptance report against
+`evaluation/acceptance-manifest.json`"* and it is the task `P14-T012` — the false-green release metrics —
+and then the P15 packaging work wait behind.
+
+**What exists, measured at the base, and the sentence the task turns on.** There is **no runner**: nothing
+in the tree iterates `evaluation/acceptance-manifest.json` and produces a report, and the closest thing is
+`finding_severity_rule.rs:469`, which iterates the manifest but is a single `#[test]`. The contract is an
+object of `schema_version` plus 20 cases — `id`, `release_blocking`, `expected_severity`, `expectation` —
+and **13 of the 20 block a release**. The sentence the acceptance hangs on is `evaluation/README.md:5`:
+*"The release report must include actual observed outcome for every case."* **Actual observed outcome**,
+which is the whole of the quality bar and the whole of the trap.
+
+**The trap, and the seven fixtures that make it sharp.** A report that reads `expected_severity` out of
+the manifest and prints it as the observation would agree with itself and read green over exactly the cases
+that disagree: seven fixtures record in their own `scenario.json` that the required severity and what the
+detectors produce are not the same thing — `fake-payment`, `fake-auth`, `fake-email`, `dead-button` and
+`route-mismatch`, all of them release-blocking, plus `demo-analytics`, and `external-unverified`, where the
+product is **heavier** than the manifest asks. Six fixtures also still carry a stale
+`detector_severity_today: "note"` that `P14-T013` exists to correct, so the fixtures' own record is not
+evidence either: the runner has to measure. The second trap is driving the wrong machinery — `check-crash`
+ships no project at all and the three dangerous-action fixtures are hand-built tool-call requests, so a
+uniform `Pipeline::run` over the 20 would produce rows that look like observations and are artefacts of
+asking the wrong question.
+
+**The shape, decided rather than left open.** A report builder in `sure-core` plus a runner under
+`crates/sure-core/tests/`, with a `schemas/` document validated the way `json_report.rs` validates its own
+— and **no new `sure` subcommand**, because the corpus is a repository artefact that a shipped binary could
+not locate; the repo already frames the test file as standing in for the runner, and this is what replaces
+it. The report must cover all 20 cases, measure rather than copy, treat `cannot_confirm` as a valid result
+rather than filling rows in, be byte-identical across runs, carry its own limitations, and be falsifiable —
+a row that should read `unmet` must be able to go red alone.
+
 **In flight:** nothing, as of this paragraph. `P14-T010` — *"Implement benign false-positive corpus"* — is
 **accepted as `48356af`**, over four worker commits from base `44406d2` (the `P14-T009` acceptance), with its
 brief at `target/tmp/brief-p14t010.md` and the tree clean at dispatch and at acceptance. "What `P14-T010`

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-19T08:05:00.692Z",
+  "last_updated": "2026-09-19T08:11:08.053Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2042,10 +2042,10 @@
       "notes": " Accepted 2026-09-19 at 48356af. No dispatch note to correct -- this entry had none -- but one boundary is recorded here so it is not re-derived wrongly, because the tempting version of it is false: a produced severity for a non-release-blocking case WAS already compared to the release manifest before this task. `the_benign_cases_did_not_escalate` (crates/sure-core/tests/finding_severity_rule.rs:600-620) drives the real detectors over the demo-analytics fixture -- release_blocking false -- and compares the heaviest severity it produced to the manifest's `expected_severity`, and fixture_apps.rs:1044-1053 holds every scenario.json and the manifest to the same severity and the same release_blocking flag. What is new in P14-T010 is smaller and exact: the corpus's own PER-OUTCOME declarations -- `required_severity`, `path_context` and `anchor`, per file, read out of the fixture's own scenario -- had never been held against what the product produced, and the case named `benign-test-mocks` had no directory behind it at all, so its manifest row was answered by reading the row back. The corpus is graded against per-outcome declarations and three controls now; it is not the first time a produced severity met a declared one."
     },
     "P14-T011": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-19T08:11:08.053Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "b29dc6c149df86e9d4f01a3351950e0cb853552f",
       "head_sha": null,
       "evidence": [],
       "notes": ""

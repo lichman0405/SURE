@@ -372,6 +372,37 @@ fn every_row_carries_what_it_claims_to_carry() {
             }
         }
     }
+
+    // And the field is in the document, not only in the Rust type: a reader of
+    // the JSON — P14-T012 computes a rate over these rows — must be able to tell
+    // "the machinery produced no severity in the manifest's vocabulary" from
+    // "this document has no such field", and an absent key reads as the second.
+    let document: serde_json::Value =
+        serde_json::from_str(&acceptance_report_json(&report).expect("the report serialises"))
+            .expect("the report is JSON");
+    let mut carried = 0_usize;
+    for row in document["cases"].as_array().expect("`cases` is an array") {
+        if row["observed"]["status"] != "observed" {
+            continue;
+        }
+        assert!(
+            row["observed"]
+                .as_object()
+                .expect("`observed` is an object")
+                .contains_key("severity"),
+            "`{}` is an observed row and the document does not carry a `severity` for it, so a \
+             reader cannot tell a case with no severity in the manifest's vocabulary from a \
+             document that never had the field: {}",
+            row["id"],
+            row["observed"]
+        );
+        carried += 1;
+    }
+    assert!(
+        carried == report.totals.observed,
+        "every observed row in the document carries the field: {carried} of {}",
+        report.totals.observed
+    );
 }
 
 #[test]

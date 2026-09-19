@@ -173,9 +173,16 @@ pub enum Observation {
     Observed {
         /// Which rule the case is graded on.
         axis: Axis,
-        /// The severity reached, in the manifest's own vocabulary, when the
-        /// axis is [`Axis::Severity`]. `None` there means nothing fired.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// The severity the machinery that graded the case reached, in the
+        /// manifest's own vocabulary — carried on both axes, so that an
+        /// escalation is never invisible merely because a case is graded on its
+        /// outcome. `None` means there is no such severity to carry: on
+        /// [`Axis::Severity`] nothing fired at all, and on [`Axis::Outcome`] the
+        /// machinery answers with a decision, an assessment or a run aggregate
+        /// and computes no severity in this vocabulary. Serialised on every
+        /// observed row, `null` included, so that a reader can tell "there is no
+        /// severity here" from "this document has no such field".
+        #[serde(default)]
         severity: Option<String>,
         /// The rule the row is graded by, in words.
         rule: String,

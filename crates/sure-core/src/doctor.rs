@@ -49,7 +49,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::container::Availability;
-use crate::paths::{APP_DIR, Origin, PathError, Paths};
+// `APP_DIR` is named at its one use site rather than imported here, and that is
+// deliberate rather than untidy. This module needs it only inside the
+// `#[cfg(windows)]` `per_user_install`, so importing it unconditionally leaves
+// it unused on Unix — where `-D warnings` turns that into an error and the whole
+// crate stops compiling. CI run 35438699664 found exactly that on `e1be7ba`, and
+// no gate on a Windows machine can: the clippy gate here compiles the Windows
+// `cfg` set, where the import *is* used. **Do not add it back to this list.**
+use crate::paths::{Origin, PathError, Paths};
 use crate::store::{HistoryFilter, LATEST_SCHEMA_VERSION, Store, StoreError};
 
 /// The external programs this build calls, and what for.
@@ -715,7 +722,7 @@ fn locations(paths: &Paths) -> Locations {
 #[cfg(windows)]
 fn per_user_install() -> Option<Place> {
     let path = dirs::data_local_dir()?
-        .join(APP_DIR)
+        .join(crate::paths::APP_DIR)
         .join("bin")
         .join("sure.exe");
     let presence = presence(&path);

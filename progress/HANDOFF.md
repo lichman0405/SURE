@@ -3,9 +3,14 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** `P14-T005` — *"Implement intent/requirement fixtures"* — dispatched
-from base commit `8df2bbf` (the `P14-T004` acceptance) with its brief at
-`target/tmp/brief-p14t005.md`. Its two acceptance criteria — *"Missing intent
+**In flight:** nothing, as of this paragraph. `P14-T005` — *"Implement
+intent/requirement fixtures"* — is **accepted as `2102dc8`**, after **one
+send-back** and four worker commits from base `8df2bbf` (the `P14-T004`
+acceptance), with its brief at `target/tmp/brief-p14t005.md`. "What `P14-T005`
+added" and "Validation of `P14-T005`" below carry the detail; the send-back and
+what decided it are the substance of the second. The paragraph that follows was
+written at dispatch and is left as it stood — it is what the worker was sent, not
+a summary of what came back. Its two acceptance criteria — *"Missing intent
 never yields full requirement fulfillment."* and *"Explicit intent mismatch can
 yield grounded finding."* — are the mirror image of `P14-T004`'s trap, and the
 brief names it that way: there is **no defective project to catch here**, only
@@ -67,6 +72,32 @@ machine's store byte-identical throughout at
 worktree clean). The two targets the brief names were measured too rather than
 assumed: `adversarial_fixture_detection` reads **22 passed** and `fixture_apps`
 **23 passed** at that base.
+
+**How it came back, and what the send-back was for.** The first submission passed
+three of four mutation probes but failed the fourth: flipping the control's
+declared `"matched"` from 1 to 0 in `missing-user-intent` changed nothing the test
+read, because **`compare_intent_to_project` was never called in that test at
+all** — the fixture declared product answers in two places and the two were tied
+only to each other. A second probe, `"user_requirements_checked"` 0 → 7 in both
+copies, left all 25 tests green. The identical key *is* graded in the sibling
+fixture at `:2829`, and that asymmetry — not the gap by itself — is what made it
+a defect rather than a recorded limit. It also meant the control did not prove
+what it was built to prove: `requirement_claim()` and the caveat depend on the
+intent, not on matching, so **a matcher that stopped matching routes entirely
+would have left every flip assertion green.** The send-back asked for that one
+thing and named its acceptance. The worker added the missing comparisons plus two
+it flagged rather than slipped in — `control_compared.user_requirements_checked`,
+and `declared_anchor["kind"]`, without which a declared `source_file` could sit
+next to a real `Route` anchor. **All seven probes were then re-run by the
+supervisor and all seven failed as intended**, with every panic line matching the
+worker's report independently: `:2474` left 0 right 7, `:2586` left 1 right 0,
+`:2958` left 1 right 0, `:2214`, `:2489`, `:2629` left `"/bookings"` right
+`"/invoices"`, `:2581` left 1 right 5. The first two passed green before the
+send-back, which is the send-back's own acceptance. Six gates green at the tip,
+**2568 passed** against a base of 2564 with the +4 being this task's own two test
+files, the machine's store byte-identical throughout, and `SHA256SUMS.txt`
+extended by six entries — this task's two fixtures and four pre-existing gaps left
+by `P14-T002` and `P14-T003`, named as inherited rather than quietly closed.
 
 **In flight:** nothing, as of this paragraph. `P14-T004` — *"Implement
 claim-evidence fixtures"* — is **accepted as `9329e63`**, on the hand-back's
@@ -2020,6 +2051,133 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P14-T005` added
+
+Two fixtures, a shared list, and the tests that make the list load-bearing.
+
+| file | what |
+| --- | --- |
+| `fixtures/adversarial/missing-user-intent/` | README, `scenario.json`, `src/bookings.js`, `src/server.js` — the manifest case that had a row and **no directory** |
+| `fixtures/adversarial/intent-mismatch/` | README, `scenario.json`, `src/invoices.js`, `src/server.js` — no manifest case, exempted with a written reason |
+| `crates/sure-testkit/tests/fixture_apps.rs` | `INTENT_FIXTURES` (+64), chained into `every_fixture_this_task_implemented()`, an exemption entry, and a membership test |
+| `crates/sure-core/tests/adversarial_fixture_detection.rs` | +894 then +130/−1: the sweep, the two task tests, the controls |
+
+**The trap is the mirror of `P14-T004`'s.** That task's three routes all answered
+the same word, so a checker answering `cannot_confirm` to everything satisfied
+every positive assertion it could write. Here there are **two different stuck
+reporters**, one per criterion: a reporter that always answers *"I cannot confirm
+this matches your request"* satisfies criterion 1, and one that always answers
+*"requirement not met"* satisfies criterion 2. Neither fixture contains a defective
+project — both projects are correct and tiny, and one of them ships no language
+manifest precisely so it stays out of the runnability sweep. The defence is
+structural: **criterion 1 is swept** over the fixture's declared points, then
+`0..=4096`, then `usize::MAX - 1` and `usize::MAX`, with the declared answer also
+asserted by equality at three of them; and **each fixture carries a control** that
+is the fixture with exactly one thing moved and that must reach the opposite
+answer.
+
+**Criterion 2 is read as a permission, and that was decided before dispatch.**
+`compare_intent_to_project` (`crates/sure-core/src/intent_implementation.rs:126`)
+has exactly one production caller, `pipeline.rs:1262`, which consumes **only
+`.findings`** — `matched`, `unmatched`, `user_requirements_checked` and
+`limitation` are computed and dropped. An unmatched requirement yields one
+`CheckProposal` from `declared_intent_proposal`, which hard-wires `Note` /
+`Inference` / `critical == false` through `gravity_of(…, GapKind::DeclaredIntent)`,
+and `finding_gravity`'s `(GapKind::DeclaredIntent, _) => INFORMATIONAL` holds on
+**every** reach. `false_completion_aggregator` then files it as **style noise,
+never material**, so **it is not a `Finding` at all and `Finding::is_grounded` is
+never reached on it** — while `supports_severity` admits `Inference` only at a
+non-blocking severity. The strict reading of the criterion is false today, and
+making it true would mean promoting a keyword-search miss to a hand-off blocker:
+it contradicts the manifest's `note`/non-blocking row, contradicts the gravity
+rule and its own unit test, and turns every requirement SURE fails to
+keyword-match into a false must-fix. So the fixture pins the measured level **by
+equality** *and* pins the ceiling as a ceiling, asserting
+`AssessmentSource::Inference.supports_severity(Severity::MustFix)` as a fact of
+the source rather than reading it off the proposal.
+
+**Two limits are recorded in the fixtures rather than dressed up.** The
+`intent-mismatch` control's added file is a comment naming the feature plus a
+function returning an empty list, **not an implementation**, because SURE's match
+is a keyword anchor on the first non-blank line of a source file; what the control
+proves is that the mismatch came from the request being anchored nowhere, not that
+SURE can tell whether a file works, and the README says so under "Watch out". And
+the sweep reaches `usize::MAX - 1` and `usize::MAX` in Rust rather than in JSON,
+because `18446744073709551615` written into `scenario.json` would not survive a
+32-bit target and this core must stay portable.
+
+## Validation of `P14-T005`
+
+Accepted at `2102dc8`, **on the second submission**, after one send-back.
+
+**The send-back, and the probe that caused it.** Three of four probes failed as
+intended on the first submission; the fourth did not. Flipping the control's
+declared `"matched"` 1 → 0 in `missing-user-intent` changed nothing the test read.
+`compare_intent_to_project` was never called in that test, so the fixture's
+`comparison_detail` outcome and the control's comparison — six fields — were
+compared only against each other by `assert_answers_account_for`, and a mutation
+applied to both copies left every assertion satisfied. A second probe confirmed
+the scope: `"user_requirements_checked"` 0 → 7 in both copies also left all 25
+tests green. The identical key is graded in `intent-mismatch` at `:2829`, so the
+asymmetry is what made it a defect rather than a recorded limit. It also meant the
+control did not prove what it was built to prove, since `requirement_claim()` and
+the caveat depend on the intent and not on matching.
+
+**All seven probes, re-run by the supervisor after the send-back** from native
+PowerShell, each mutation applied to every copy the fixture declares and each
+restoring through `git` against a tree clean at HEAD:
+
+| probe | sites | result |
+| --- | --- | --- |
+| `mui` `user_requirements_checked` 0 → 7 | 2 | exit 101, `:2474`, left 0 right 7 |
+| `mui` `matched` 1 → 0 | 2 | exit 101, `:2586`, left 1 right 0 |
+| `im` `matched` 1 → 0 | 2 | exit 101, `:2958`, left 1 right 0 |
+| `im` `kind: ceiling` renamed | 1 | exit 101, `:2214` |
+| `mui` frozen caveat rewritten | 7 | exit 101, `:2489` |
+| `mui` control anchor `/bookings` → `/invoices` | 2 | exit 101, `:2629` |
+| `mui` control `user_requirements_checked` 1 → 5 | 2 | exit 101, `:2581` |
+
+The first two passed green before the send-back, which is the send-back's own
+acceptance. Every panic line matches the worker's report independently.
+
+**Gates at `2102dc8`**, native PowerShell, all six exit 0: `fmt`, `clippy`,
+`test`, `bootstrap`, `taskctl`, `nonwindows`. **`result-lines=75`, `passed=2568`,
+`failed=0`, `ignored=12`, `not-ok=0`, `headers (case-sensitive)=65`.** Bootstrap
+reads 17 phases / 187 tasks, taskctl 187 tasks. The base at `1356683` was 2564, so
+the +4 are this task's own two test files: `adversarial_fixture_detection`
+22 → 25 and `fixture_apps` 23 → 24, both measured at base and at tip rather than
+inherited from the previous task. The machine's store is byte-identical
+throughout at `D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`
+(348160 bytes, same mtime) — which is the reading the fixtures must produce, since
+they drive the pipeline with `store: None`. Worktree `[]` after every probe.
+
+**One bookkeeping act, and one inherited gap named.** `SHA256SUMS.txt` went from
+184 listed paths to 190, **+6 lines and 0 removed**, verified additions-only by
+`git diff --numstat`. Two are this task's; four are pre-existing gaps —
+`external-unverified` and `missing-config` from `P14-T002`, `rust-tests-fail` and
+`rust-tests-pass` from `P14-T003`. They were added rather than left because adding
+only this task's two would have left the manifest at 16 of 20 fixtures with no way
+to tell which gaps were inherited and which were made here. Two things about that
+file are recorded rather than quietly fixed: it is a **representative selection**
+and not an exhaustive manifest — 6 `.rs` files for the whole workspace, one
+`scenario.json` per fixture — and **nothing in the repository consumes or
+generates it**, which is the `P14-T004` finding recurring. It also has one
+pre-existing out-of-order pair at line 126
+(`integrations/agent-plugin/scripts/install.ps1` after
+`…/skills/sure-check/SKILL.md`), left alone because re-sorting would have put an
+unrelated reorder in this task's commit; the insertion script **refused to write**
+when it found the file unsorted, and was rewritten to place each new path before
+the first greater one, preserving every existing line's relative order.
+
+**CI.** Run `35419661554` for the `P14-T004` acceptance commit `8df2bbf` is
+**green at attempt 1 on all five jobs** including `rust (ubuntu-latest)`, which
+closes the `P14-T004` dispatch run's redness owed to this entry. Run
+`35419990589` for this task's dispatch commit `1356683` is **green at attempt 1 on
+all five** — progress-only, the same shape as the commit that went red last time,
+so the `ETXTBSY` race attaches to neither progress-only commits nor the dispatch
+act. No run was re-run. **This acceptance commit's own run is owed to the next
+entry** under the chain rule.
 
 ## What `P14-T004` added
 
@@ -17448,6 +17606,42 @@ what changes here is that the number now says which of the two readings it is.
   acceptance commit, green on all five jobs at attempt 1 with 2548 / 2539 / 2540
   parents.
 
+- `2102dc8` **`P14-T005`** (accepted by the progress-only commit that carries this
+  entry) — *"Implement intent/requirement fixtures"*. **The task's own detail is
+  the section above**; what belongs here is the shape. **One hand-back after one
+  send-back**, over four worker commits from base `8df2bbf`: `f14de5c` (the two
+  fixture directories, controls and all), `8982072` (the assertions, +894),
+  `a962455` (the corpus contract, +64) and `2102dc8` (the send-back's fix, +130
+  −1). Its trap is the **mirror of `P14-T004`'s**: that task's three routes all
+  answered the same word, so one stuck reporter could have satisfied it; here
+  **two different stuck reporters** could have, one per criterion — a reporter
+  that always answers *"I cannot confirm this matches your request"* satisfies
+  *"Missing intent never yields full requirement fulfillment"*, and one that always
+  answers *"requirement not met"* satisfies *"Explicit intent mismatch can yield
+  grounded finding"*. Neither fixture contains defective code. The defence is
+  structural: criterion 1 is **swept** from the declared points through `0..=4096`
+  to `usize::MAX`, and each fixture carries a **control** that is the fixture with
+  exactly one thing moved and that must reach the opposite answer. **The
+  send-back was found by a probe, not by reading**: flipping the control's declared
+  `"matched"` 1 → 0 in `missing-user-intent` changed nothing the test read, because
+  `compare_intent_to_project` was never called in that test and the fixture's six
+  declared product answers were tied only to each other — the identical key *is*
+  graded in the sibling fixture, and that asymmetry is what made it a defect rather
+  than a limit. The worker measured the product once told to, found the
+  declarations were right and the grading was missing, and **all seven probes then
+  failed as intended**, the first two being the send-back's own acceptance. What it
+  delivered besides the fixtures is the reading that **criterion 2 is a permission
+  and not the strict `is_grounded()` reading** — decided before dispatch, confirmed
+  by measurement, and pinned as a ceiling by asserting
+  `AssessmentSource::Inference.supports_severity(Severity::MustFix)` as a fact of
+  the source. It **minted nothing**, and the two limits it records — the keyword-
+  anchor control and the portability of the sweep — are written into the fixtures
+  rather than left for a reader to discover. **No run of its own commit is in this
+  entry**; it is owed to the next acceptance under the chain rule, and the readings
+  this acceptance discharged are `35419661554` (`P14-T004`'s acceptance commit,
+  green ×5 at attempt 1) and `35419990589` (this task's own dispatch commit,
+  green ×5 at attempt 1).
+
 **The check was run again at this acceptance, and the two counts that moved are
 the two that should have.** For the tree this commit creates: **141 accepted**,
 **79 of them absent from the list**, **48 absent from everything below the
@@ -17463,6 +17657,27 @@ be a reconstruction rather than a record. **Whoever closes this should close it
 with the command**, which is now `target/tmp/accepted-list-check.mjs` — it prints
 all three readings and the ids, so the next acceptance reproduces a number instead
 of inheriting one.
+
+**Run again at `P14-T005`'s acceptance, and this time the number it printed was
+checked against the tree it was printed for.** The reading is **143 accepted**,
+**79 strict missing**, **48 loose missing** — the two missing counts unchanged
+from `P14-T004`'s reading, and the accepted count up by two, which is `P14-T004`'s
+own entry and this one, both added above. But the paragraph at `P14-T004` records
+**141**, and a reconstruction from `progress/state.json` disagrees with it:
+**142 task records carry a `finished_at` at or before `P14-T004`'s own**
+(`2026-09-19T03:49:35.704Z`), so the check run against that commit's tree would
+have printed **142**, not 141. Both figures are one away from each other and
+neither is in doubt as a measurement — what is in doubt is whether 141 was ever
+printed. The likeliest reading, and it is offered as the likeliest rather than as a
+finding, is that 141 was taken before `accept-p14t004.mjs` wrote the acceptance
+into `state.json`: the paragraph says "this acceptance added its own entry, so it
+neither worsened the deficit nor closed any of it", which is exactly what a count
+taken one acceptance early would look like. **That is the failure this whole
+paragraph exists to prevent, recurring inside it** — a number written into the
+record that the command against that tree would not have reproduced. The counts
+that matter are unaffected (the missing sets are unchanged and were printed, not
+inherited), and from this acceptance on the figure is recorded together with the
+command's own output rather than on its own.
 
 **This list had been missing four entries, and they are added above rather than
 noted as a gap.** `P2-T007`, `P2-T009`, `P2-T010` and `P2-T011` were all

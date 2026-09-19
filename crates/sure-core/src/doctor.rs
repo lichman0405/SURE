@@ -219,9 +219,9 @@ const NOT_CHECKED: &[(&str, &str)] = &[
     (
         "which analysis provider your settings choose",
         "that is a value in the settings file, and the same rule keeps this report \
-         out of it. What is reported below is which providers this build offers and \
-         whether the program one of them would run is on PATH — never an endpoint, \
-         never a key.",
+         out of it. What this report does answer is which providers this build \
+         offers, and whether the program one of them would run is on PATH — never \
+         an endpoint, never a key.",
     ),
     (
         "whether SURE can write to its own directories",

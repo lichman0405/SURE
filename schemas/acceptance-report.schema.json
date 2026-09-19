@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Acceptance Report",
+  "description": "The release contract in evaluation/acceptance-manifest.json, with the outcome actually observed for every case. Produced by sure_core::acceptance_report and driven over the corpus by crates/sure-core/tests/acceptance_report_runner.rs. A row's `observed` is what the machinery that grades that case produced when it was run; it is never a copy of the manifest's own requirement.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "corpus",
+    "cases",
+    "fixtures_without_a_case",
+    "limitations",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this report's shape. Bumped when the shape changes in a way an older reader would get wrong.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "corpus": {
+      "description": "Which contract, and which corpus, this report is against.",
+      "type": "object",
+      "required": [
+        "manifest",
+        "manifest_schema_version",
+        "manifest_digest",
+        "fixtures",
+        "cases",
+        "release_blocking"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "string"
+        },
+        "manifest_schema_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manifest_digest": {
+          "description": "The digest that ties a report to the exact contract it was produced against: `sure_core::fingerprint::digest` under the domain `sure.acceptance-corpus.v1`, with the manifest file's bytes as its single length-prefixed field. An edited contract changes this value, so a report cannot silently remain green against a contract it was not produced from.",
+          "type": "string"
+        },
+        "fixtures": {
+          "type": "string"
+        },
+        "cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "cases": {
+      "description": "One row per manifest case, sorted by id. Every case exactly once: a case with no row, or two, is a failure of this report and not a warning.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "release_blocking",
+          "required",
+          "observed",
+          "agreement",
+          "comparison"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "release_blocking": {
+            "type": "boolean"
+          },
+          "required": {
+            "description": "What the manifest asks for. Read from the manifest and labelled as the requirement, never as an outcome.",
+            "type": "object",
+            "required": [
+              "severity",
+              "expectation"
+            ],
+            "properties": {
+              "severity": {
+                "enum": [
+                  "must_fix",
+                  "should_fix_first",
+                  "can_fix_later",
+                  "note"
+                ]
+              },
+              "expectation": {
+                "type": "string"
+              }
+            }
+          },
+          "observed": {
+            "description": "What was measured, or why nothing callable could measure it. `status` is the discriminator: `observed` carries severity and statements, `cannot_confirm` carries what is missing and what would have to change.",
+            "type": "object",
+            "required": [
+              "status",
+              "axis",
+              "statements",
+              "surfaces"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "observed",
+                  "cannot_confirm"
+                ]
+              },
+              "axis": {
+                "description": "Which rule the case is graded on. `severity`: the manifest states a required severity and the case is met when the grading machinery reaches that level or a heavier one. `outcome`: the manifest names an outcome and the case is met when the machinery produces it.",
+                "enum": [
+                  "severity",
+                  "outcome"
+                ]
+              },
+              "severity": {
+                "description": "The severity the grading machinery reached, in the manifest's own vocabulary. `null` on an observed severity-axis row means nothing fired at all, which is a measurement and cannot meet a requirement.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rule": {
+                "type": "string"
+              },
+              "statements": {
+                "description": "The measured facts the row rests on. Every value in one was produced by the surface named in `surfaces`, or read out of the fixture file named in an anchor.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "surfaces": {
+                "description": "The functions and modules that observed this case. Empty only where the case could not be observed, and then `statements` says what was read instead.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "anchors": {
+                "description": "Where a reader who disagrees can go and look.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "subject",
+                    "location",
+                    "locator"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "enum": [
+                        "file",
+                        "directory",
+                        "line_range",
+                        "command",
+                        "output",
+                        "check",
+                        "event",
+                        "config",
+                        "database",
+                        "documentation",
+                        "git",
+                        "runtime",
+                        "intent",
+                        "claim",
+                        "model"
+                      ]
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "locator": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "missing": {
+                "type": "string"
+              },
+              "would_require": {
+                "type": "string"
+              }
+            }
+          },
+          "agreement": {
+            "enum": [
+              "met",
+              "unmet",
+              "cannot_confirm"
+            ]
+          },
+          "comparison": {
+            "description": "The requirement and the observation side by side, with the measured value in it.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "fixtures_without_a_case": {
+      "description": "Directories in the corpus that correspond to no manifest case, named rather than skipped into invisibility, with the reason each one does not have to.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "limitations": {
+      "description": "What this report does not know, said in the report rather than only in a commit message.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "cases",
+        "release_blocking",
+        "observed",
+        "cannot_confirm",
+        "met",
+        "unmet",
+        "release_blocking_observed",
+        "release_blocking_met",
+        "release_blocking_unmet",
+        "release_blocking_cannot_confirm"
+      ],
+      "properties": {
+        "cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cannot_confirm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "met": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unmet": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_met": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_unmet": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_cannot_confirm": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

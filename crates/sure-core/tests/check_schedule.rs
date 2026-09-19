@@ -348,6 +348,30 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          a proposer word above `#[cfg(test)]` would be a proposer arriving in the \
          CLI, and this entry is not cover for it**",
     ),
+    (
+        "src/acceptance_report.rs",
+        "`P14-T011`, and the third entry here that decides nothing: it proposes \
+         for no project, and no product path reaches it — its only caller is \
+         `crates/sure-core/tests/acceptance_report_runner.rs`, because the corpus \
+         it reads (`evaluation/` and `fixtures/adversarial/`) is a repository \
+         artefact that exists in a checkout and not in a user's installation. Two \
+         things in it name these words, and neither is a check arriving in the \
+         product. The first is reading the scanners in the entries above: \
+         `CandidateScanner::proposed`, `NoOpHeuristics::proposed`, \
+         `DemoDataHeuristics::proposed`, `RouteConsistency::proposed` and \
+         `UiActionBridge::proposals` all return `Vec<CheckProposal>`, and this \
+         file measures their severities, evidence classes and anchors rather than \
+         adding a candidate of its own. The second is the `check-crash` case, \
+         whose fixture declares its checks and its runs in `scenario.json`: the \
+         file rebuilds **the fixture's own declaration** into the proposals the \
+         product's `PlanBuilder` is handed, so that what runs, what the mode \
+         refuses and what the aggregator makes of the results are the product's \
+         computation and not this file's. **The corpus decides which checks exist \
+         here, and the file reads no project's manifest to make one** — a \
+         proposal built from anything but that fixture would be the proposer this \
+         rule exists to prevent, in a module whose reason for existing is to \
+         report what other modules did",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

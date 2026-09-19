@@ -337,14 +337,20 @@ impl fmt::Display for CorpusError {
                 write!(formatter, "cannot read {path}: {message}")
             }
             Self::Malformed { path, message } => {
-                write!(formatter, "{path} is not the shape this report needs: {message}")
+                write!(
+                    formatter,
+                    "{path} is not the shape this report needs: {message}"
+                )
             }
             Self::UnsupportedSchemaVersion { path, found } => write!(
                 formatter,
                 "{path} declares schema_version {found} and this build knows {MANIFEST_SCHEMA_VERSION}"
             ),
             Self::DuplicateCase { id } => {
-                write!(formatter, "the manifest declares more than one case with the id `{id}`")
+                write!(
+                    formatter,
+                    "the manifest declares more than one case with the id `{id}`"
+                )
             }
         }
     }
@@ -551,12 +557,11 @@ pub fn acceptance_report_with(
 ) -> Result<AcceptanceReport, CorpusError> {
     let manifest_file = repository_root.join(MANIFEST_PATH);
     let manifest_text = read_to_string(&manifest_file)?;
-    let document: Value = serde_json::from_str(&manifest_text).map_err(|error| {
-        CorpusError::Malformed {
+    let document: Value =
+        serde_json::from_str(&manifest_text).map_err(|error| CorpusError::Malformed {
             path: MANIFEST_PATH.to_owned(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
 
     let schema_version = document
         .get("schema_version")
@@ -612,10 +617,11 @@ pub fn acceptance_report_with(
 /// Returns [`CorpusError::Malformed`] when the report cannot be serialised,
 /// which is a defect in this module rather than in a corpus.
 pub fn acceptance_report_json(report: &AcceptanceReport) -> Result<String, CorpusError> {
-    let mut text = serde_json::to_string_pretty(report).map_err(|error| CorpusError::Malformed {
-        path: MANIFEST_PATH.to_owned(),
-        message: format!("the report does not serialise: {error}"),
-    })?;
+    let mut text =
+        serde_json::to_string_pretty(report).map_err(|error| CorpusError::Malformed {
+            path: MANIFEST_PATH.to_owned(),
+            message: format!("the report does not serialise: {error}"),
+        })?;
     text.push('\n');
     Ok(text)
 }
@@ -703,13 +709,14 @@ fn manifest_cases(document: &Value) -> Result<Vec<DeclaredCase>, CorpusError> {
                 path: MANIFEST_PATH.to_owned(),
                 message: format!("the case `{id}` declares no boolean `release_blocking`"),
             })?;
-        let severity = entry
-            .get("expected_severity")
-            .cloned()
-            .ok_or_else(|| CorpusError::Malformed {
-                path: MANIFEST_PATH.to_owned(),
-                message: format!("the case `{id}` declares no `expected_severity`"),
-            })?;
+        let severity =
+            entry
+                .get("expected_severity")
+                .cloned()
+                .ok_or_else(|| CorpusError::Malformed {
+                    path: MANIFEST_PATH.to_owned(),
+                    message: format!("the case `{id}` declares no `expected_severity`"),
+                })?;
         let expected_severity: Severity =
             serde_json::from_value(severity).map_err(|error| CorpusError::Malformed {
                 path: MANIFEST_PATH.to_owned(),
@@ -758,7 +765,8 @@ fn row_for(
 
     let (observed, agreement, comparison) = match measurement {
         Measurement::Severity { severity, reading } => {
-            let held = severity.is_some_and(|reached| reached.rank() >= case.expected_severity.rank());
+            let held =
+                severity.is_some_and(|reached| reached.rank() >= case.expected_severity.rank());
             let rule = reading.rule;
             let observed = Observation::Observed {
                 axis: Axis::Severity,
@@ -768,7 +776,11 @@ fn row_for(
                 surfaces: reading.surfaces,
                 anchors: reading.anchors,
             };
-            let agreement = if held { Agreement::Met } else { Agreement::Unmet };
+            let agreement = if held {
+                Agreement::Met
+            } else {
+                Agreement::Unmet
+            };
             let comparison = format!(
                 "`{}` requires `{}`; the machinery that grades it reaches `{}`, so the requirement is {}.",
                 case.id,
@@ -787,7 +799,11 @@ fn row_for(
                 surfaces: reading.surfaces,
                 anchors: reading.anchors,
             };
-            let agreement = if held { Agreement::Met } else { Agreement::Unmet };
+            let agreement = if held {
+                Agreement::Met
+            } else {
+                Agreement::Unmet
+            };
             let comparison = format!(
                 "`{}` states the expectation \"{}\", and the rule this report grades it by is: {}. \
                  The requirement is {}.",
@@ -881,9 +897,8 @@ fn scanners(
     id: &str,
 ) -> Result<Measurement, CorpusError> {
     let directory = fixtures_root.join(id);
-    let discovery = discover(&directory, &DiscoverOptions::default()).map_err(|error| {
-        unreadable(&directory, error.to_string())
-    })?;
+    let discovery = discover(&directory, &DiscoverOptions::default())
+        .map_err(|error| unreadable(&directory, error.to_string()))?;
 
     let groups: [(&str, Vec<CheckProposal>); 5] = [
         (
@@ -1026,7 +1041,9 @@ fn migrations(
             .max_by_key(|severity| severity.rank()),
         reading: Reading {
             statements,
-            surfaces: vec!["sure_core::db_migrations::MigrationsReport::of(..).claims()".to_owned()],
+            surfaces: vec![
+                "sure_core::db_migrations::MigrationsReport::of(..).claims()".to_owned(),
+            ],
             anchors,
             rule: SEVERITY_RULE.to_owned(),
         },
@@ -1055,7 +1072,10 @@ fn external_service(
          the heaviest severity is `{}` and {} of them are critical",
         proposals.len(),
         heaviest.map_or("nothing", Severity::as_str),
-        proposals.iter().filter(|proposal| proposal.critical()).count()
+        proposals
+            .iter()
+            .filter(|proposal| proposal.critical())
+            .count()
     )];
     let mut anchors: Vec<RowAnchor> = Vec::new();
     for proposal in proposals {
@@ -1125,10 +1145,12 @@ fn claim_recording(
     id: &str,
 ) -> Result<Measurement, CorpusError> {
     let document = scenario_of(fixtures_root, id)?;
-    let block = document.get("claim_check").ok_or_else(|| CorpusError::Malformed {
-        path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-        message: "it declares no `claim_check` block".to_owned(),
-    })?;
+    let block = document
+        .get("claim_check")
+        .ok_or_else(|| CorpusError::Malformed {
+            path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
+            message: "it declares no `claim_check` block".to_owned(),
+        })?;
     let claim = block.get("claim").ok_or_else(|| CorpusError::Malformed {
         path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
         message: "the `claim_check` block declares no `claim`".to_owned(),
@@ -1181,7 +1203,8 @@ fn claim_recording(
         claim_type: Some(claim_type.clone()),
     }];
     let newest_first: Vec<IngestedEvent> = ingested.iter().rev().cloned().collect();
-    let checked = check_claims_against_events(&documents, &newest_first, &FingerprintId::generate());
+    let checked =
+        check_claims_against_events(&documents, &newest_first, &FingerprintId::generate());
     let answer = checked.first().ok_or_else(|| CorpusError::Malformed {
         path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
         message: "the recording holds no claim, so there was nothing to check".to_owned(),
@@ -1268,15 +1291,17 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
             statements: vec![format!(
                 "the pipeline ran over `{FIXTURES_PATH}/{id}` and stopped at {} rather than reaching a \
                  report, so there is no record to read",
-                outcome
-                    .stopped_at
-                    .map_or_else(|| String::from("no stage it named"), |stage| format!("{stage:?}"))
+                outcome.stopped_at.map_or_else(
+                    || String::from("no stage it named"),
+                    |stage| format!("{stage:?}")
+                )
             )],
             missing: format!(
                 "the pipeline did not finish over this fixture: it stopped at {}",
-                outcome
-                    .stopped_at
-                    .map_or_else(|| String::from("no stage it named"), |stage| format!("{stage:?}"))
+                outcome.stopped_at.map_or_else(
+                    || String::from("no stage it named"),
+                    |stage| format!("{stage:?}")
+                )
             ),
             would_require: String::from(
                 "a fixture the pipeline can read to the end, which is what every other case in this \
@@ -1298,7 +1323,7 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
             compared.matched.len(),
             compared.unmatched.len(),
             compared.findings.len(),
-            compared.limitation.as_deref().unwrap_or("none")
+            compared.limitation.unwrap_or("none")
         ),
         format!(
             "the run's verdict says the report must carry the caveat: {}; the caveat it carries is: {}",
@@ -1387,15 +1412,17 @@ fn execution_refusal(fixtures_root: &Path, id: &str) -> Result<Measurement, Corp
             statements: vec![format!(
                 "the pipeline ran over `{FIXTURES_PATH}/{id}` and stopped at {} rather than reaching a \
                  report, so there is no record to read and nothing to say about the refusal",
-                outcome
-                    .stopped_at
-                    .map_or_else(|| String::from("no stage it named"), |stage| format!("{stage:?}"))
+                outcome.stopped_at.map_or_else(
+                    || String::from("no stage it named"),
+                    |stage| format!("{stage:?}")
+                )
             )],
             missing: format!(
                 "the pipeline did not finish over this fixture: it stopped at {}",
-                outcome
-                    .stopped_at
-                    .map_or_else(|| String::from("no stage it named"), |stage| format!("{stage:?}"))
+                outcome.stopped_at.map_or_else(
+                    || String::from("no stage it named"),
+                    |stage| format!("{stage:?}")
+                )
             ),
             would_require: String::from(
                 "a fixture the pipeline can read to the end, which is what every other case in this \
@@ -1408,7 +1435,9 @@ fn execution_refusal(fixtures_root: &Path, id: &str) -> Result<Measurement, Corp
         .report
         .results()
         .iter()
-        .filter(|result| result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized))
+        .filter(|result| {
+            result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized)
+        })
         .collect();
     let planned = record.schedule.checks().len();
     let allowed = record.schedule.may_run().count();
@@ -1460,9 +1489,9 @@ fn execution_refusal(fixtures_root: &Path, id: &str) -> Result<Measurement, Corp
     Ok(Measurement::Outcome {
         held: !refusals.is_empty()
             && allowed < planned
-            && refusals.iter().all(|result| {
-                result.status == CheckStatus::Skipped && result.critical
-            }),
+            && refusals
+                .iter()
+                .all(|result| result.status == CheckStatus::Skipped && result.critical),
         reading: Reading {
             statements,
             surfaces: vec![
@@ -1530,19 +1559,14 @@ fn checker_failure(fixtures_root: &Path, id: &str) -> Result<Measurement, Corpus
         let mut not_passing: Vec<String> = Vec::new();
         for scheduled in schedule.checks() {
             let check = scheduled.proposal();
-            let result = results
-                .iter()
-                .find(|result| result.id == *check.id());
+            let result = results.iter().find(|result| result.id == *check.id());
             let passed = result.is_some_and(|result| result.status == CheckStatus::Pass);
             if !passed {
                 not_passing.push(check.id().as_str().to_owned());
                 if check.critical() && result.is_none() {
                     // A critical check nobody reported on. The product's whole
                     // claim is that this becomes a row and not an absence.
-                    let row = report
-                        .critical()
-                        .iter()
-                        .find(|row| row.id() == check.id());
+                    let row = report.critical().iter().find(|row| row.id() == check.id());
                     if row.is_some_and(|row| row.detail() == NOTHING_CAME_BACK) {
                         a_missing_critical_is_a_row_with_the_product_sentence = true;
                     }
@@ -1637,10 +1661,14 @@ fn action(fixtures_root: &Path, id: &str, danger: Danger) -> Result<Measurement,
             continue;
         };
         let mode_name = required_string(run, "mode", id)?;
-        let declared = modes.get(&mode_name).ok_or_else(|| CorpusError::Malformed {
-            path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-            message: format!("the `{kind}` run names the mode `{mode_name}` and no such mode is declared"),
-        })?;
+        let declared = modes
+            .get(&mode_name)
+            .ok_or_else(|| CorpusError::Malformed {
+                path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
+                message: format!(
+                    "the `{kind}` run names the mode `{mode_name}` and no such mode is declared"
+                ),
+            })?;
         let (mode, permissions) = declared_mode(id, &mode_name, declared)?;
         let protection = required_string(run, "protection", id)?;
         let protection: crate::config::ProtectionMode = serde_json::from_value(Value::String(
@@ -1648,7 +1676,9 @@ fn action(fixtures_root: &Path, id: &str, danger: Danger) -> Result<Measurement,
         ))
         .map_err(|error| CorpusError::Malformed {
             path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-            message: format!("the `{kind}` run declares a protection mode this build does not know: {error}"),
+            message: format!(
+                "the `{kind}` run declares a protection mode this build does not know: {error}"
+            ),
         })?;
         let harness = required_string(run, "harness", id)?;
         let tool = required_string(run, "tool", id)?;
@@ -1752,11 +1782,11 @@ fn declaration_only(fixtures_root: &Path, id: &str) -> Measurement {
             "nothing callable observes `{id}`: the corpus ships `{FIXTURES_PATH}/{id}/scenario.json` and \
              no project beside it, and this build has no module that reads the case"
         ),
-        would_require: format!(
-            "a fixture that ships the project the case is about, and a module that observes it — the \
-             shape `missing-migration` and `dynamic-not-authorized` already have. Until then this case \
-             is `cannot_confirm` in the release report, and P14-T012's false-green rate cannot cover it"
-        ),
+        would_require: "a fixture that ships the project the case is about, and a module that observes \
+             it — the shape `missing-migration` and `dynamic-not-authorized` already have. Until then \
+             this case is `cannot_confirm` in the release report, and P14-T012's false-green rate \
+             cannot cover it"
+            .to_owned(),
     }
 }
 
@@ -1884,15 +1914,19 @@ fn fixture_anchor(
 ) -> RowAnchor {
     let normalized = location.replace('\\', "/");
     let root = repository_root.display().to_string().replace('\\', "/");
-    let without_root = root
-        .is_empty()
-        .then_some(normalized.as_str())
-        .unwrap_or_else(|| normalized.strip_prefix(&root).unwrap_or(&normalized))
-        .trim_start_matches('/');
+    let without_root = if root.is_empty() {
+        normalized.as_str()
+    } else {
+        normalized.strip_prefix(&root).unwrap_or(&normalized)
+    }
+    .trim_start_matches('/');
     let path = if without_root.starts_with("fixtures/") {
         without_root.to_owned()
     } else {
-        format!("{FIXTURES_PATH}/{id}/{}", without_root.trim_start_matches("./"))
+        format!(
+            "{FIXTURES_PATH}/{id}/{}",
+            without_root.trim_start_matches("./")
+        )
     };
     RowAnchor {
         subject: AnchorSubject::File.as_str().to_owned(),
@@ -1905,8 +1939,12 @@ fn fixture_anchor(
 fn record_name(record: crate::db_migrations::Record) -> String {
     match record {
         crate::db_migrations::Record::Empty => String::from("a location with no migration in it"),
-        crate::db_migrations::Record::Absent => String::from("a location the project does not have"),
-        crate::db_migrations::Record::Holds(count) => format!("a location holding {count} migration(s)"),
+        crate::db_migrations::Record::Absent => {
+            String::from("a location the project does not have")
+        }
+        crate::db_migrations::Record::Holds(count) => {
+            format!("a location holding {count} migration(s)")
+        }
     }
 }
 
@@ -1942,7 +1980,7 @@ fn protection_name(mode: crate::config::ProtectionMode) -> &'static str {
 
 /// One tool request, as a sentence.
 fn describe_request(request: &ToolRequest<'_>) -> String {
-    match (request.path.as_deref(), request.command.as_deref()) {
+    match (request.path, request.command) {
         (Some(path), None) => format!("`{}` on `{path}`", request.tool),
         (None, Some(command)) => format!("`{}` running `{command}`", request.tool),
         (Some(path), Some(command)) => {
@@ -1973,18 +2011,17 @@ fn declared_mode(
     mode_name: &str,
     declared: &Value,
 ) -> Result<(ExecutionMode, ExecutionPermissions), CorpusError> {
-    let mode: ExecutionMode = serde_json::from_value(
-        declared
-            .get("mode")
-            .cloned()
-            .ok_or_else(|| CorpusError::Malformed {
-                path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-                message: format!("the mode `{mode_name}` declares no execution mode"),
-            })?,
-    )
+    let mode: ExecutionMode = serde_json::from_value(declared.get("mode").cloned().ok_or_else(
+        || CorpusError::Malformed {
+            path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
+            message: format!("the mode `{mode_name}` declares no execution mode"),
+        },
+    )?)
     .map_err(|error| CorpusError::Malformed {
         path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-        message: format!("the mode `{mode_name}` declares an execution mode this build does not know: {error}"),
+        message: format!(
+            "the mode `{mode_name}` declares an execution mode this build does not know: {error}"
+        ),
     })?;
     let permissions = declared
         .get("permissions")
@@ -2035,10 +2072,14 @@ fn declared_schedule(
             path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
             message: String::from("the `schedule` block declares no `modes`"),
         })?;
-    let declared = modes.get(&mode_name).ok_or_else(|| CorpusError::Malformed {
-        path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-        message: format!("the `{what}` run names the mode `{mode_name}` and no such mode is declared"),
-    })?;
+    let declared = modes
+        .get(&mode_name)
+        .ok_or_else(|| CorpusError::Malformed {
+            path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
+            message: format!(
+                "the `{what}` run names the mode `{mode_name}` and no such mode is declared"
+            ),
+        })?;
     let (mode, permissions) = declared_mode(id, &mode_name, declared)?;
 
     let wanted = run
@@ -2060,13 +2101,17 @@ fn declared_schedule(
             .find(|check| check.get("id").and_then(Value::as_str) == Some(name))
             .ok_or_else(|| CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-                message: format!("the `{what}` run schedules `{name}` and no such check is declared"),
+                message: format!(
+                    "the `{what}` run schedules `{name}` and no such check is declared"
+                ),
             })?;
         builder
             .propose(declared_proposal(id, check)?)
             .map_err(|refused| CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
-                message: format!("the plan builder refused `{name}` for the `{what}` run: {refused}"),
+                message: format!(
+                    "the plan builder refused `{name}` for the `{what}` run: {refused}"
+                ),
             })?;
     }
     if !builder.refused().is_empty() {
@@ -2242,9 +2287,8 @@ fn fixtures_without_a_case(
     rows: &[CaseRow],
 ) -> Result<Vec<UncontractedFixture>, CorpusError> {
     let fixtures_root = repository_root.join(FIXTURES_PATH);
-    let entries = std::fs::read_dir(&fixtures_root).map_err(|error| {
-        unreadable(&fixtures_root, error.to_string())
-    })?;
+    let entries = std::fs::read_dir(&fixtures_root)
+        .map_err(|error| unreadable(&fixtures_root, error.to_string()))?;
     let mut directories: Vec<String> = Vec::new();
     for entry in entries.flatten() {
         if entry.path().is_dir() {

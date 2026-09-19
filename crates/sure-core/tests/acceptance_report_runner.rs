@@ -314,7 +314,11 @@ fn every_row_carries_what_it_claims_to_carry() {
                         reached
                     );
                 }
-                assert!(!rule.is_empty(), "`{}` is graded by a rule it states", row.id);
+                assert!(
+                    !rule.is_empty(),
+                    "`{}` is graded by a rule it states",
+                    row.id
+                );
                 assert!(
                     !surfaces.is_empty(),
                     "`{}` names the surface that observed it — a row with an observed outcome \
@@ -326,9 +330,8 @@ fn every_row_carries_what_it_claims_to_carry() {
                     "`{}` carries the measured facts it rests on",
                     row.id
                 );
-                assert_eq!(
-                    row.agreement == Agreement::CannotConfirm,
-                    false,
+                assert!(
+                    row.agreement != Agreement::CannotConfirm,
                     "`{}` is observed and its agreement is met or unmet",
                     row.id
                 );
@@ -397,7 +400,8 @@ fn no_observed_row_copies_the_requirement_it_is_graded_against() {
                     Agreement::Unmet
                 };
                 assert_eq!(
-                    row.agreement, wanted,
+                    row.agreement,
+                    wanted,
                     "`{}` requires `{}` and reached `{}`, so its agreement is `{wanted:?}` and not \
                      `{:?}`",
                     row.id,
@@ -415,9 +419,8 @@ fn no_observed_row_copies_the_requirement_it_is_graded_against() {
                      the requirement restated as an observation",
                     row.id
                 );
-                assert_eq!(
-                    row.agreement == Agreement::CannotConfirm,
-                    false,
+                assert!(
+                    row.agreement != Agreement::CannotConfirm,
                     "`{}` carries an observation and its agreement is met or unmet",
                     row.id
                 );
@@ -458,9 +461,8 @@ fn the_cannot_confirm_rows_are_the_named_ones_with_their_reasons() {
         report.totals.observed + report.totals.cannot_confirm,
         report.totals.cases
     );
-    assert_eq!(
-        row(&report, UNOBSERVABLE).release_blocking,
-        false,
+    assert!(
+        !row(&report, UNOBSERVABLE).release_blocking,
         "the unobservable case is not release-blocking, which is worth knowing and not worth \
          hiding"
     );
@@ -591,11 +593,7 @@ fn no_machine_path_appears_in_the_document() {
     std::fs::create_dir_all(out.parent().expect("the report has a parent"))
         .expect("target/tmp is creatable");
     std::fs::write(&out, &text).expect("the report is writable");
-    assert!(
-        out.is_file(),
-        "the report was written to {}",
-        out.display()
-    );
+    assert!(out.is_file(), "the report was written to {}", out.display());
 }
 
 #[test]
@@ -707,11 +705,8 @@ fn control_corpus() -> PathBuf {
             "expectation": "the control: a contract that requires more than the machinery reaches",
         }],
     });
-    std::fs::write(
-        root.join(MANIFEST_FILE),
-        format!("{manifest:#}\n"),
-    )
-    .expect("the control manifest is writable");
+    std::fs::write(root.join(MANIFEST_FILE), format!("{manifest:#}\n"))
+        .expect("the control manifest is writable");
     root
 }
 
@@ -720,7 +715,10 @@ fn the_limitations_are_in_the_document_rather_than_in_a_commit_message() {
     let report = the_report();
     let all = report.limitations.join("\n");
     for (what, wanted) in [
-        ("the re-check list this build passes is empty", "rechecks: &[]"),
+        (
+            "the re-check list this build passes is empty",
+            "rechecks: &[]",
+        ),
         ("no project code runs from a product path", "inspect_only"),
         ("nothing touched the store", "store: None"),
         ("what is deterministic about it", "byte-identical"),
@@ -989,7 +987,9 @@ fn result_of(proposal: &CheckProposal, outcome: &Outcome, state: &FingerprintId)
             CheckResult::fail(id, title, severity, critical, class, state.clone()).with_reason(
                 match code {
                     Some(code) => format!("the command exited with code {code}"),
-                    None => "the command was ended by a signal, so there is no exit code".to_owned(),
+                    None => {
+                        "the command was ended by a signal, so there is no exit code".to_owned()
+                    }
                 },
             )
         }
@@ -1053,9 +1053,12 @@ impl Run {
 fn run_the_checks(copy: &CopyOfFixture) -> Run {
     let found = discover(copy.path(), &DiscoverOptions::default())
         .unwrap_or_else(|error| panic!("discovery failed on {}: {error}", copy.path().display()));
-    let report = found
-        .report(Ecosystem::Node)
-        .unwrap_or_else(|| panic!("{} is a Node project and discovery did not report one", copy.path().display()));
+    let report = found.report(Ecosystem::Node).unwrap_or_else(|| {
+        panic!(
+            "{} is a Node project and discovery did not report one",
+            copy.path().display()
+        )
+    });
     let Findings::Node(node) = &report.findings else {
         panic!("the Node report carried {:?} findings", report.findings);
     };
@@ -1081,8 +1084,18 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
             .collect::<Vec<_>>()
     );
     for proposal in &proposed {
-        assert_eq!(declared_command(proposal), "npm test", "{}", proposal.title());
-        assert_eq!(proposal.severity(), Severity::MustFix, "{}", proposal.title());
+        assert_eq!(
+            declared_command(proposal),
+            "npm test",
+            "{}",
+            proposal.title()
+        );
+        assert_eq!(
+            proposal.severity(),
+            Severity::MustFix,
+            "{}",
+            proposal.title()
+        );
         assert!(proposal.critical(), "{}", proposal.title());
         assert_eq!(
             proposal.evidence_class(),
@@ -1105,7 +1118,12 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         builder.refused()
     );
     let schedule = builder.build();
-    assert_eq!(schedule.may_run().count(), 2, "the plan holds {} entries", schedule.len());
+    assert_eq!(
+        schedule.may_run().count(),
+        2,
+        "the plan holds {} entries",
+        schedule.len()
+    );
 
     let state = project_fingerprint(copy.path(), &FingerprintOptions::default())
         .unwrap_or_else(|error| panic!("cannot fingerprint {}: {error}", copy.path().display()))
@@ -1122,8 +1140,8 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         };
         let (member_path, script) = member_script(node, member);
         let (command, request) = request(&copy.path().join(member_path), script);
-        let outcome =
-            run(&request).unwrap_or_else(|error| panic!("`{command}` could not be started: {error}"));
+        let outcome = run(&request)
+            .unwrap_or_else(|error| panic!("`{command}` could not be started: {error}"));
         let output = format!(
             "{}{}",
             outcome.stdout().text_lossy(),
@@ -1366,16 +1384,25 @@ fn repair_regression() -> Measurement {
     );
 
     let complete = half(&finding, Repair::Complete);
-    assert_eq!(complete.checkout, CheckStatus::Pass, "{}", complete.checkout_output);
-    assert_eq!(complete.billing, CheckStatus::Pass, "{}", complete.billing_output);
+    assert_eq!(
+        complete.checkout,
+        CheckStatus::Pass,
+        "{}",
+        complete.checkout_output
+    );
+    assert_eq!(
+        complete.billing,
+        CheckStatus::Pass,
+        "{}",
+        complete.billing_output
+    );
 
     let blocked = careless.stayed_open
         && !careless.green
         && careless.severity == AggregateSeverity::NotReady
         && careless.blocking.contains(&before.billing);
-    let closes = !complete.stayed_open
-        && complete.green
-        && complete.severity == AggregateSeverity::Green;
+    let closes =
+        !complete.stayed_open && complete.green && complete.severity == AggregateSeverity::Green;
 
     Measurement::Outcome {
         held: blocked && closes,

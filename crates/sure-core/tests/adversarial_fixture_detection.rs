@@ -148,14 +148,16 @@ use serde_json::{Value, json};
 use sure_core::candidate_scanner::CandidateScanner;
 use sure_core::claim_capture::{ClaimCaptureOutcome, capture_agent_claim};
 use sure_core::claim_checker::{
-    ClaimDocument, CheckedClaim, check_claims_against_events, check_claims_in_store,
+    CheckedClaim, ClaimDocument, check_claims_against_events, check_claims_in_store,
 };
 use sure_core::claim_report::render_claim_section;
 use sure_core::db_migrations::{MigrationsReport, Record};
 use sure_core::demo_data_heuristics::DemoDataHeuristics;
 use sure_core::discover::{DiscoverOptions, Discovery, discover};
 use sure_core::env_completeness::CompletenessReport;
-use sure_core::evidence::{AnchorSubject, ClaimAssessment, EvidenceClass, Freshness, StalenessReason};
+use sure_core::evidence::{
+    AnchorSubject, ClaimAssessment, EvidenceClass, Freshness, StalenessReason,
+};
 use sure_core::external_service::ExternalServiceChecks;
 use sure_core::false_completion_aggregator::aggregate;
 use sure_core::harness_event::{IngestedEvent, ingest_event_str};
@@ -1156,9 +1158,12 @@ fn scenario_of(id: &str) -> Value {
 
 /// The `claim_check` block of one fixture's scenario.
 fn claim_block(id: &str) -> Value {
-    scenario_of(id).get("claim_check").cloned().unwrap_or_else(|| {
-        panic!("fixtures/adversarial/{id}/scenario.json declares no claim_check block")
-    })
+    scenario_of(id)
+        .get("claim_check")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!("fixtures/adversarial/{id}/scenario.json declares no claim_check block")
+        })
 }
 
 /// The events one block declares.
@@ -1176,18 +1181,20 @@ fn declared_events(id: &str, block: &Value, key: &str) -> Vec<DeclaredEvent> {
                 "{id}: an entry in `{key}` is not an event object"
             );
             let string = |name: &str| {
-                let value = event.get(name).and_then(Value::as_str).unwrap_or_else(|| {
-                    panic!("{id}: an event in `{key}` declares no `{name}`")
-                });
+                let value = event
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| panic!("{id}: an event in `{key}` declares no `{name}`"));
                 assert!(
                     !value.is_empty(),
                     "{id}: an event in `{key}` declares an empty `{name}`"
                 );
                 value.to_owned()
             };
-            let payload = event.get("payload").cloned().unwrap_or_else(|| {
-                panic!("{id}: an event in `{key}` declares no payload")
-            });
+            let payload = event
+                .get("payload")
+                .cloned()
+                .unwrap_or_else(|| panic!("{id}: an event in `{key}` declares no payload"));
             // The envelope's own rule, and the reason this is asserted rather
             // than assumed: an event with no body has an empty body, and `null`
             // would make "the adapter sent nothing" and "the adapter sent an
@@ -1310,8 +1317,9 @@ fn read_recording(what: &str, scratch: &str, claim: &Value, events: &[DeclaredEv
         .unwrap_or_else(|error| panic!("{what}: the scratch store does not open: {error}"));
     let fingerprint = FingerprintId::generate();
 
-    let claim_event = ingest_event_str(&agent_claim_document(claim))
-        .unwrap_or_else(|error| panic!("{what}: the declared claim is not a document SURE ingests: {error}"));
+    let claim_event = ingest_event_str(&agent_claim_document(claim)).unwrap_or_else(|error| {
+        panic!("{what}: the declared claim is not a document SURE ingests: {error}")
+    });
     let captured = capture_agent_claim(&claim_event, &store, CLAIM_PROJECT_ROOT, &fingerprint)
         .unwrap_or_else(|error| panic!("{what}: SURE refused the declared claim: {error}"));
     assert!(
@@ -1328,7 +1336,12 @@ fn read_recording(what: &str, scratch: &str, claim: &Value, events: &[DeclaredEv
             )
         });
         SessionEventStore::new(&store)
-            .persist(&stored, CLAIM_PROJECT_ROOT, &fingerprint, &EventId::generate())
+            .persist(
+                &stored,
+                CLAIM_PROJECT_ROOT,
+                &fingerprint,
+                &EventId::generate(),
+            )
             .unwrap_or_else(|error| {
                 panic!(
                     "{what}: the declared event {} at {} does not store: {error}",
@@ -1411,10 +1424,10 @@ fn assert_declared_outcome(
         // own sentence rather than a second copy of it, so the sentence a reader
         // sees and the reason the code reached cannot drift apart unnoticed.
         Some(name) => {
-            let declared: StalenessReason =
-                serde_json::from_value(expect["staleness_reason"].clone()).unwrap_or_else(|error| {
-                    panic!("{what}: `{name}` is not a staleness reason: {error}")
-                });
+            let declared: StalenessReason = serde_json::from_value(
+                expect["staleness_reason"].clone(),
+            )
+            .unwrap_or_else(|error| panic!("{what}: `{name}` is not a staleness reason: {error}"));
             assert_eq!(
                 recorded.answer.reason,
                 declared.plain_explanation(),
@@ -1471,7 +1484,10 @@ fn assert_declared_outcome(
     }
 
     for item in &recorded.answer.evidence {
-        assert_eq!(item.class, declared_class, "{what}: the evidence class changed");
+        assert_eq!(
+            item.class, declared_class,
+            "{what}: the evidence class changed"
+        );
         assert!(
             item.belongs_to_this_state,
             "{what}: the evidence is not bound to the project state it was checked against"
@@ -1606,7 +1622,11 @@ fn assert_the_control_is_one_thing_moved(id: &str, block: &Value, control: &Valu
     keys.dedup();
     assert_eq!(
         keys,
-        ["event_type".to_owned(), "payload".to_owned(), "timestamp".to_owned()],
+        [
+            "event_type".to_owned(),
+            "payload".to_owned(),
+            "timestamp".to_owned()
+        ],
         "{id}: a control event carries a field this check does not compare, so a difference could hide in it"
     );
 
@@ -1828,8 +1848,19 @@ fn tests_not_run_claim_is_cannot_confirm_with_no_evidence_and_the_control_flips_
     assert_the_control_is_one_thing_moved(id, &block, control);
     let control_events = declared_events(id, control, "events");
     let control_what = format!("{id}: the control");
-    let control_recorded = read_recording(&control_what, "tests-not-run control", claim, &control_events);
-    assert_declared_outcome(&control_what, claim, &control_events, &control["expect"], &control_recorded);
+    let control_recorded = read_recording(
+        &control_what,
+        "tests-not-run control",
+        claim,
+        &control_events,
+    );
+    assert_declared_outcome(
+        &control_what,
+        claim,
+        &control_events,
+        &control["expect"],
+        &control_recorded,
+    );
 }
 
 #[test]
@@ -1876,8 +1907,19 @@ fn stale_test_evidence_claim_is_cannot_confirm_and_points_at_the_run_it_cannot_u
     assert_the_control_is_one_thing_moved(id, &block, control);
     let control_events = declared_events(id, control, "events");
     let control_what = format!("{id}: the control");
-    let control_recorded = read_recording(&control_what, "stale-test-evidence control", claim, &control_events);
-    assert_declared_outcome(&control_what, claim, &control_events, &control["expect"], &control_recorded);
+    let control_recorded = read_recording(
+        &control_what,
+        "stale-test-evidence control",
+        claim,
+        &control_events,
+    );
+    assert_declared_outcome(
+        &control_what,
+        claim,
+        &control_events,
+        &control["expect"],
+        &control_recorded,
+    );
     assert_eq!(
         control_recorded.answer.evidence[0].locator, recorded.answer.evidence[0].locator,
         "{id}: the control moved the evidence itself, so what it measures is no longer the verdict"
@@ -1941,8 +1983,19 @@ fn unknown_evidence_claim_is_cannot_confirm_and_points_at_the_run_it_cannot_date
     assert_the_control_is_one_thing_moved(id, &block, control);
     let control_events = declared_events(id, control, "events");
     let control_what = format!("{id}: the control");
-    let control_recorded = read_recording(&control_what, "unknown-evidence control", claim, &control_events);
-    assert_declared_outcome(&control_what, claim, &control_events, &control["expect"], &control_recorded);
+    let control_recorded = read_recording(
+        &control_what,
+        "unknown-evidence control",
+        claim,
+        &control_events,
+    );
+    assert_declared_outcome(
+        &control_what,
+        claim,
+        &control_events,
+        &control["expect"],
+        &control_recorded,
+    );
 }
 
 #[test]

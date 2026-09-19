@@ -105,14 +105,20 @@ pub const REPAIR_REGRESSION: &str = "repair-regression";
 
 /// The rule every severity-axis row is graded by.
 ///
-/// Stated in the row so that no reader has to guess what "met" meant: the
-/// manifest names the *least* weight the case requires, and a product that
-/// treats something more seriously than the contract asks for has not gone
-/// green by mistake. It is also the rule that makes a lighter observation a
-/// visible `unmet` rather than a quiet pass.
-pub const SEVERITY_RULE: &str = "the manifest states the least severity this case requires; the case is met when the \
-     machinery that grades it reaches that level or a heavier one, and a row whose observed severity is \
-     `null` means nothing fired at all, which is a measurement and not a requirement met";
+/// Stated in the row so that no reader has to guess what "met" meant, and stated
+/// as an equality rather than a floor. A floor was the first version of this
+/// rule and it was wrong in the direction that matters most here: it cannot see
+/// an escalation, so a build that turned a `note` into a `must_fix` would have
+/// scored `met` over exactly the case `benign-test-mocks` exists to detect — a
+/// false green, inside the artefact whose purpose is to catch them. The
+/// manifest's field is `expected_severity`: what the product should say, not the
+/// least it may say. Both directions of disagreement are therefore `unmet`, and
+/// the row's comparison says which direction it went.
+pub const SEVERITY_RULE: &str = "the manifest states the severity this case should produce, and the case is met when \
+     the severity the machinery that grades it reaches equals that value exactly: a heavier observation is an \
+     escalation and a lighter one is a miss, and both are `unmet`, because a false positive and a false negative are \
+     the same defect seen from two sides. A row whose observed severity is `null` means nothing fired at all, which \
+     is a measurement and not a requirement met";
 
 // --- the shape of the report ----------------------------------------------
 
@@ -394,6 +400,16 @@ pub enum Measurement {
     Outcome {
         /// Whether it happened.
         held: bool,
+        /// The severity, in the manifest's vocabulary, that the machinery which
+        /// grades this case attached to what it produced — `None` where that
+        /// machinery answers with a decision, an assessment or a run aggregate
+        /// and no such severity exists.
+        ///
+        /// Carried so that an escalation cannot hide behind an outcome: a case
+        /// graded on whether something happened still says how heavily the
+        /// product weighed it, and a row that stayed `met` while weighing the
+        /// case more heavily than the manifest asks says so in its comparison.
+        severity: Option<Severity>,
         /// Everything behind it.
         reading: Reading,
     },
@@ -765,8 +781,9 @@ fn row_for(
 
     let (observed, agreement, comparison) = match measurement {
         Measurement::Severity { severity, reading } => {
-            let held =
-                severity.is_some_and(|reached| reached.rank() >= case.expected_severity.rank());
+            // The equality, not a floor. See `SEVERITY_RULE` for why the first
+            // version of this line was a false green waiting to happen.
+            let held = severity == Some(case.expected_severity);
             let rule = reading.rule;
             let observed = Observation::Observed {
                 axis: Axis::Severity,
@@ -781,19 +798,53 @@ fn row_for(
             } else {
                 Agreement::Unmet
             };
-            let comparison = format!(
-                "`{}` requires `{}`; the machinery that grades it reaches `{}`, so the requirement is {}.",
-                case.id,
-                case.expected_severity.as_str(),
-                severity.map_or("nothing at all", Severity::as_str),
-                if held { "met" } else { "not met" }
-            );
+            // Which direction the disagreement went, in the sentence itself, so
+            // that an escalation and a miss are two different readings to a
+            // reader who has not read the rule.
+            let comparison = match severity {
+                Some(reached) if held => format!(
+                    "`{}` requires `{}`; the machinery that grades it reaches `{}`, exactly what the \
+                     contract asks, so the requirement is met.",
+                    case.id,
+                    case.expected_severity.as_str(),
+                    reached.as_str()
+                ),
+                Some(reached) => format!(
+                    "`{}` requires `{}`; the machinery that grades it reaches `{}` — {} than the \
+                     contract asks, so the requirement is not met. {}",
+                    case.id,
+                    case.expected_severity.as_str(),
+                    reached.as_str(),
+                    if reached.rank() > case.expected_severity.rank() {
+                        "heavier"
+                    } else {
+                        "lighter"
+                    },
+                    if reached.rank() > case.expected_severity.rank() {
+                        "An escalation is a false positive, and a report that scored it `met` would be \
+                         the false green this case exists to catch."
+                    } else {
+                        "A miss, which is the direction the requirement is usually read in and not the \
+                         only one this rule sees."
+                    }
+                ),
+                None => format!(
+                    "`{}` requires `{}`; nothing fired at all, which is a measurement and not a \
+                     requirement met, so the requirement is not met.",
+                    case.id,
+                    case.expected_severity.as_str()
+                ),
+            };
             (observed, agreement, comparison)
         }
-        Measurement::Outcome { held, reading } => {
+        Measurement::Outcome {
+            held,
+            severity,
+            reading,
+        } => {
             let observed = Observation::Observed {
                 axis: Axis::Outcome,
-                severity: None,
+                severity: severity.map(|reached| reached.as_str().to_owned()),
                 rule: reading.rule.clone(),
                 statements: reading.statements,
                 surfaces: reading.surfaces,
@@ -804,12 +855,48 @@ fn row_for(
             } else {
                 Agreement::Unmet
             };
+            // The axis grades the outcome. The severity is still recorded, and
+            // where the machinery weighed the case more heavily than the
+            // manifest asks, the disagreement is in this sentence and not only
+            // among the statements: P14-T012 computes a rate over these rows and
+            // must not have to parse prose to find it.
+            let weight = match severity {
+                Some(reached) if reached.rank() > case.expected_severity.rank() => format!(
+                    " The machinery that grades it weighs the case `{}` where the manifest's \
+                     `expected_severity` is `{}` — heavier than the contract asks. This row records \
+                     that disagreement and does not hide it, and the expectation it states is about \
+                     the outcome, which the machinery {}.",
+                    reached.as_str(),
+                    case.expected_severity.as_str(),
+                    if held { "produces" } else { "does not produce" }
+                ),
+                Some(reached) if reached.rank() < case.expected_severity.rank() => format!(
+                    " The machinery that grades it weighs the case `{}` where the manifest's \
+                     `expected_severity` is `{}` — lighter than the contract asks, which this row \
+                     records; the expectation it states is about the outcome, which the machinery \
+                     {}.",
+                    reached.as_str(),
+                    case.expected_severity.as_str(),
+                    if held { "produces" } else { "does not produce" }
+                ),
+                Some(reached) => format!(
+                    " The machinery that grades it weighs the case `{}`, which is the manifest's \
+                     `expected_severity` exactly.",
+                    reached.as_str()
+                ),
+                None => String::from(
+                    " The machinery that grades this case answers with a decision, an assessment or a \
+                     run aggregate rather than a severity in the manifest's vocabulary, so the row \
+                     carries no observed severity: there is nothing here for a build to escalate.",
+                ),
+            };
             let comparison = format!(
-                "`{}` states the expectation \"{}\", and the rule this report grades it by is: {}. \
+                "`{}` states the expectation \"{}\", and the rule this report grades it by is: {}.{} \
                  The requirement is {}.",
                 case.id,
                 case.expectation,
                 reading.rule,
+                weight,
                 if held { "met" } else { "not met" }
             );
             (observed, agreement, comparison)
@@ -1122,6 +1209,11 @@ fn external_service(
 
     Ok(Measurement::Outcome {
         held: !proposals.is_empty() && every_one_is_a_refusal,
+        // The weight the product itself puts on an unconfirmable external
+        // service, read off its own proposals rather than out of the manifest —
+        // and it is heavier than this case's `expected_severity`, which the
+        // row's comparison says in words.
+        severity: heaviest,
         reading: Reading {
             statements,
             surfaces: vec![
@@ -1256,9 +1348,16 @@ fn claim_recording(
     });
     anchors.sort();
     anchors.dedup();
+    statements.push(format!(
+        "the machinery that grades this case answers with a `ClaimAssessment` (`{}`) and carries no \
+         severity in the manifest's vocabulary, so the row carries no observed severity — there is \
+         nothing here for a build to escalate",
+        answer.assessment.as_str()
+    ));
 
     Ok(Measurement::Outcome {
         held: answer.assessment == ClaimAssessment::CannotConfirm,
+        severity: None,
         reading: Reading {
             statements,
             surfaces: vec!["sure_core::claim_checker::check_claims_against_events".to_owned()],
@@ -1314,7 +1413,7 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
         .map_err(|error| unreadable(&root, error.to_string()))?;
     let compared = compare_intent_to_project(&ProjectIntent::empty(), &discovery);
 
-    let statements = vec![
+    let mut statements = vec![
         format!(
             "`sure_core::pipeline::Pipeline{{ .., goal: None, store: None }}` compared the project \
              against `ProjectIntent::empty()`: {} requirement(s) checked, {} matched, {} unmatched, {} \
@@ -1348,8 +1447,22 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
         && !may_claim_full_fulfilment(&ProjectIntent::empty(), 4096)
         && !may_claim_full_fulfilment(&ProjectIntent::empty(), usize::MAX);
 
+    // The weight the comparison puts on what it found, read off its own
+    // proposals rather than out of the manifest.
+    let heaviest = compared
+        .findings
+        .iter()
+        .map(CheckProposal::severity)
+        .max_by_key(|severity| severity.rank());
+    statements.push(format!(
+        "the comparison's own proposals carry the heaviest severity `{}`, which is the weight this \
+         report records for the case rather than the manifest's `expected_severity`",
+        heaviest.map_or("nothing", Severity::as_str)
+    ));
+
     Ok(Measurement::Outcome {
         held,
+        severity: heaviest,
         reading: Reading {
             statements,
             surfaces: vec![
@@ -1492,6 +1605,12 @@ fn execution_refusal(fixtures_root: &Path, id: &str) -> Result<Measurement, Corp
             && refusals
                 .iter()
                 .all(|result| result.status == CheckStatus::Skipped && result.critical),
+        // The run's weight is an `AggregateSeverity` — `green`, `needs_attention`,
+        // `not_ready`, `not_enough_checked` — which is a different vocabulary from
+        // the manifest's, and mapping one onto the other here would be this
+        // report inventing a value rather than measuring one. The row's rule and
+        // its comparison both say so.
+        severity: None,
         reading: Reading {
             statements,
             surfaces: vec![
@@ -1608,6 +1727,11 @@ fn checker_failure(fixtures_root: &Path, id: &str) -> Result<Measurement, Corpus
 
     Ok(Measurement::Outcome {
         held,
+        // The runs' weights are `AggregateSeverity` values, a different
+        // vocabulary from the manifest's, and each declared check's own severity
+        // comes out of the fixture's declaration rather than out of a product
+        // computation. Neither is an observed severity for this case.
+        severity: None,
         reading: Reading {
             statements,
             surfaces: vec![
@@ -1732,6 +1856,10 @@ fn action(fixtures_root: &Path, id: &str, danger: Danger) -> Result<Measurement,
 
     Ok(Measurement::Outcome {
         held: named_and_blocked,
+        // A protection decision is `allow`, `warn` or `block` with a danger
+        // named beside it; `hook_protection` carries no severity at all, so
+        // there is none to record and the row says so in its comparison.
+        severity: None,
         reading: Reading {
             statements,
             surfaces: vec![

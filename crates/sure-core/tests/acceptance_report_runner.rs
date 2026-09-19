@@ -297,23 +297,27 @@ fn every_row_carries_what_it_claims_to_carry() {
                 surfaces,
                 ..
             } => {
-                // A severity-axis row names the severity it reached, in the
-                // manifest's own vocabulary, or `null` for "nothing fired".
-                // Anything else is a row a reader cannot compare with a
-                // requirement, and this is where that is caught.
-                if row.observed_axis() == Axis::Severity {
-                    let reached = observed_severity(row);
-                    assert!(
-                        reached.is_none()
-                            || matches!(
-                                reached,
-                                Some("must_fix" | "should_fix_first" | "can_fix_later" | "note")
-                            ),
-                        "`{}` reaches `{:?}`, which is not a severity the manifest's vocabulary has",
-                        row.id,
-                        reached
-                    );
-                }
+                // Every observed row names the severity the grading machinery
+                // reached, in the manifest's own vocabulary, or `null` where the
+                // machinery reached none — and that is true of both rules, not
+                // only the severity one. An outcome-graded row carries the
+                // severity as well, because an escalation must not be invisible
+                // merely because a case is graded on whether something happened.
+                // A weight from any other vocabulary is a row a reader cannot
+                // compare with a requirement, and this is where that is caught.
+                let reached = observed_severity(row);
+                assert!(
+                    reached.is_none()
+                        || matches!(
+                            reached,
+                            Some("must_fix" | "should_fix_first" | "can_fix_later" | "note")
+                        ),
+                    "`{}` is graded on the {:?} axis and reaches `{:?}`, which is not a severity the \
+                     manifest's vocabulary has",
+                    row.id,
+                    row.observed_axis(),
+                    reached
+                );
                 assert!(
                     !rule.is_empty(),
                     "`{}` is graded by a rule it states",
@@ -373,28 +377,49 @@ fn every_row_carries_what_it_claims_to_carry() {
 #[test]
 fn no_observed_row_copies_the_requirement_it_is_graded_against() {
     // The trap the task is built around, as an assertion that can fail alone: a
-    // row on the severity axis whose observed severity is exactly the manifest's
-    // required severity, for every severity-axis row of the corpus at once, is
-    // the shape a report that read `expected_severity` and printed it back would
-    // have. Some rows legitimately *agree* — that is the point of a measurement —
-    // so this does not assert they differ; it asserts each one was produced by
-    // the machinery, which is what `surfaces` names, and that the agreement
-    // follows the rule the row states.
+    // row whose observed severity is exactly the manifest's required severity,
+    // for every row of the corpus at once, is the shape a report that read
+    // `expected_severity` and printed it back would have. Some rows legitimately
+    // *agree* — that is the point of a measurement — so this does not assert
+    // they differ; it asserts each one was produced by the machinery, which is
+    // what `surfaces` names, and that the agreement follows the rule the row
+    // states.
+    //
+    // The rule is an **equality**: an escalation is as much a failure as a miss,
+    // which is why the `>=` this file used to assert is gone. The one row in the
+    // corpus where the machinery and the manifest disagree in weight —
+    // `external-unverified`, whose own proposals are heavier than the manifest
+    // asks — is the positive evidence that the number in a row is measured and
+    // not copied: a copied value could never differ from the requirement it was
+    // copied from.
     let report = the_report();
     let mut on_the_severity_axis = 0_usize;
     let mut on_the_outcome_axis = 0_usize;
+    let mut heavier_than_asked: Vec<&str> = Vec::new();
     for row in &report.cases {
         let Observation::Observed { axis, .. } = &row.observed else {
             continue;
         };
+        let required = row.required.severity;
+        let carried = observed_severity(row).map(severity_of);
+        if carried.is_some_and(|reached| reached.rank() > required.rank()) {
+            heavier_than_asked.push(row.id.as_str());
+            assert!(
+                row.comparison.contains("heavier") && row.comparison.contains(required.as_str()),
+                "`{}` carries `{}` where the manifest asks for `{}`, and a reader has to be able to \
+                 see that from the row's own comparison rather than from the rule:\n{}",
+                row.id,
+                observed_severity(row).unwrap_or("nothing"),
+                required.as_str(),
+                row.comparison
+            );
+        }
         match axis {
             Axis::Severity => {
                 on_the_severity_axis += 1;
-                let severity = observed_severity(row)
-                    .expect("a severity-axis row names the severity it reached, or null");
-                let reached = severity_of(severity);
-                let required = row.required.severity.rank();
-                let wanted = if reached.rank() >= required {
+                // `None` is "nothing fired at all" and cannot meet a requirement
+                // of any weight, so the equality is over `Option<Severity>`.
+                let wanted = if carried == Some(required) {
                     Agreement::Met
                 } else {
                     Agreement::Unmet
@@ -405,19 +430,26 @@ fn no_observed_row_copies_the_requirement_it_is_graded_against() {
                     "`{}` requires `{}` and reached `{}`, so its agreement is `{wanted:?}` and not \
                      `{:?}`",
                     row.id,
-                    row.required.severity.as_str(),
-                    severity,
+                    required.as_str(),
+                    observed_severity(row).unwrap_or("nothing at all"),
                     row.agreement
                 );
             }
             Axis::Outcome => {
                 on_the_outcome_axis += 1;
-                assert_eq!(
-                    observed_severity(row),
-                    None,
-                    "`{}` is graded on an outcome, so it names no severity: a value there would be \
-                     the requirement restated as an observation",
-                    row.id
+                // An outcome-graded row carries the weight the machinery put on
+                // what it produced, where there is one to carry: an escalation
+                // must not be invisible merely because the case is graded on
+                // whether something happened.
+                assert!(
+                    observed_severity(row).is_none()
+                        || matches!(
+                            observed_severity(row),
+                            Some("must_fix" | "should_fix_first" | "can_fix_later" | "note")
+                        ),
+                    "`{}` carries `{:?}`, which is not a severity the manifest's vocabulary has",
+                    row.id,
+                    observed_severity(row)
                 );
                 assert!(
                     row.agreement != Agreement::CannotConfirm,
@@ -431,6 +463,17 @@ fn no_observed_row_copies_the_requirement_it_is_graded_against() {
         on_the_severity_axis > 0 && on_the_outcome_axis > 0,
         "both rules are used: {on_the_severity_axis} row(s) on the severity axis and \
          {on_the_outcome_axis} on the outcome axis"
+    );
+    assert!(
+        !heavier_than_asked.is_empty(),
+        "no row in the corpus observes a severity heavier than its requirement, so nothing here \
+         shows that an observed severity is measured rather than copied out of the manifest"
+    );
+    assert_eq!(
+        heavier_than_asked,
+        ["external-unverified"],
+        "the set of rows whose observed severity is heavier than the manifest asks moved, and the \
+         escalation control below is written about the one that exists"
     );
 }
 
@@ -631,7 +674,12 @@ fn a_row_that_should_be_unmet_does_not_read_met() {
     // with `let held = true;` — or replace the observed `severity` with
     // `Some(case.expected_severity.as_str().to_owned())`. Either one turns the
     // row `met` and turns the first assertion below red.
-    let control = control_corpus();
+    let control = control_corpus(
+        "miss",
+        "benign-test-mocks",
+        "must_fix",
+        "the control: a contract that requires more than the machinery reaches",
+    );
     let report = acceptance_report(&control)
         .unwrap_or_else(|error| panic!("the control corpus produced no report: {error}"));
     let controlled = row(&report, "benign-test-mocks");
@@ -667,26 +715,27 @@ fn a_row_that_should_be_unmet_does_not_read_met() {
     assert_eq!(observed_severity(same), observed_severity(controlled));
 }
 
-/// A one-case corpus under `target/tmp` whose contract requires more than the
-/// fixture's machinery produces.
+/// A one-case corpus under `target/tmp` whose contract disagrees with what the
+/// fixture's machinery produces, in one direction.
 ///
 /// Written rather than checked in: `evaluation/` and `fixtures/` are the real
 /// corpus and this task does not edit them, so the control builds its own copy
 /// of the fixture beside a manifest written for it. The directory is left in
 /// place for a reader — it is a build artefact under `target/tmp`, and
 /// `cargo clean` removes it.
-fn control_corpus() -> PathBuf {
+///
+/// Both directions are built from this one function, because they are the same
+/// experiment with one value moved: `control miss` requires more than the
+/// machinery reaches and `control escalation` requires less.
+fn control_corpus(what: &str, fixture: &str, required: &str, expectation: &str) -> PathBuf {
     let root = repository_root()
         .join("target")
         .join("tmp")
-        .join("sure 指纹 acceptance-report control");
-    let fixture = root.join(FIXTURES).join("benign-test-mocks");
+        .join(format!("sure 指纹 acceptance-report control {what}"));
+    let shipped = root.join(FIXTURES).join(fixture);
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("evaluation")).expect("the control corpus is creatable");
-    copy_tree(
-        &repository_root().join(FIXTURES).join("benign-test-mocks"),
-        &fixture,
-    );
+    copy_tree(&repository_root().join(FIXTURES).join(fixture), &shipped);
     // The five directories the module has a written reason for, created empty.
     // `fixtures_without_a_case` is computed from the disk in both directions and
     // a corpus that shipped only one directory would be a corpus with a reason
@@ -699,15 +748,95 @@ fn control_corpus() -> PathBuf {
     let manifest = serde_json::json!({
         "schema_version": 1,
         "cases": [{
-            "id": "benign-test-mocks",
+            "id": fixture,
             "release_blocking": true,
-            "expected_severity": "must_fix",
-            "expectation": "the control: a contract that requires more than the machinery reaches",
+            "expected_severity": required,
+            "expectation": expectation,
         }],
     });
     std::fs::write(root.join(MANIFEST_FILE), format!("{manifest:#}\n"))
         .expect("the control manifest is writable");
     root
+}
+
+#[test]
+fn an_escalation_does_not_read_met() {
+    // The control in the other direction, and the reason this file no longer
+    // grades a severity by a floor. `benign-test-mocks`'s manifest expectation
+    // is that benign test mocks do not become must-fix production findings, and
+    // its `forbidden_outcomes` record that outcome as a false positive. A rule
+    // of `reached >= required` cannot see that: a build that escalated the case
+    // would score `met` over the exact false positive the case exists to detect,
+    // which is a false green inside the artefact whose purpose is to catch them.
+    //
+    // So the control corpus here requires *less* than the machinery produces:
+    // `demo-analytics`, whose five scanners reach `should_fix_first`, under a
+    // contract that asks for `note`. The row must read `unmet`, and its own
+    // comparison must say which way the disagreement went.
+    //
+    // Reproducible mutation, and the one this test is for: in
+    // `sure_core::acceptance_report::row_for`, replace
+    //
+    //     let held = severity == Some(case.expected_severity);
+    //
+    // with the floor it used to be —
+    //
+    //     let held = severity.is_some_and(|reached| reached.rank() >= case.expected_severity.rank());
+    //
+    // The row reads `met` and the first assertion below goes red alone.
+    let control = control_corpus(
+        "escalation",
+        "demo-analytics",
+        "note",
+        "the control: a contract that requires less than the machinery reaches",
+    );
+    let report = acceptance_report(&control)
+        .unwrap_or_else(|error| panic!("the control corpus produced no report: {error}"));
+    let escalated = row(&report, "demo-analytics");
+
+    assert_eq!(
+        escalated.agreement,
+        Agreement::Unmet,
+        "the control corpus requires `note` and the machinery reaches `{}`, so this row is not met — \
+         a rule that treats a heavier observation as a pass scores `met` here, which is the false \
+         green `benign-test-mocks` exists to catch: {}",
+        observed_severity(escalated).unwrap_or("nothing"),
+        escalated.comparison
+    );
+    assert_eq!(
+        observed_severity(escalated),
+        Some("should_fix_first"),
+        "the observed severity is what the five scanners reached over the fixture, and not the `note` \
+         the control's manifest asks for"
+    );
+    assert_ne!(
+        observed_severity(escalated),
+        Some(escalated.required.severity.as_str()),
+        "the observed outcome and the requirement are two different readings"
+    );
+    // The direction is in the row's own sentence, not only in the rule: a reader
+    // who has the requirement and the observation side by side has to be able to
+    // tell an escalation from a miss without reading the paragraph above it.
+    assert!(
+        escalated.comparison.contains("heavier")
+            && escalated.comparison.contains("should_fix_first")
+            && escalated.comparison.contains("note"),
+        "the comparison does not say which way the disagreement went:\n{}",
+        escalated.comparison
+    );
+    assert_eq!(report.totals.unmet, 1);
+    assert_eq!(report.totals.release_blocking_unmet, 1);
+
+    // The same fixture under the real contract reads `met`, because the real
+    // contract asks for `should_fix_first`. The control's redness is therefore
+    // about the requirement it changed and not about a recipe that stopped
+    // working — and this is the pair that makes the rule an equality rather than
+    // a floor: the same measurement is `met` against one contract and `unmet`
+    // against the other.
+    let real = the_report();
+    let same = row(&real, "demo-analytics");
+    assert_eq!(same.agreement, Agreement::Met);
+    assert_eq!(observed_severity(same), observed_severity(escalated));
 }
 
 #[test]
@@ -1404,8 +1533,19 @@ fn repair_regression() -> Measurement {
     let closes =
         !complete.stayed_open && complete.green && complete.severity == AggregateSeverity::Green;
 
+    // The weight SURE's own node proposer put on the checks that produced this
+    // row — `ScriptRole::Test` is `must_fix` in its table — read off the results
+    // rather than out of the manifest, so the case is graded on an outcome and
+    // still says how heavily the product weighed it.
+    let weight = before
+        .results
+        .iter()
+        .map(|result| result.severity)
+        .max_by_key(|severity| severity.rank());
+
     Measurement::Outcome {
         held: blocked && closes,
+        severity: weight,
         reading: Reading {
             statements: vec![
                 format!(
@@ -1464,6 +1604,13 @@ fn repair_regression() -> Measurement {
                     "the check that catches the regression was not named by anything here: it was \
                      selected by `sure_core::repair_impact::select_impacted_checks`, which is the \
                      rule this half of the case is about",
+                ),
+                format!(
+                    "the weight on the checks that produced this row is `{}`, which is what SURE's own \
+                     node proposer gives a declared test script; it is read off the results and not out \
+                     of the manifest, so this outcome-graded case still records how heavily the product \
+                     weighed it",
+                    weight.map_or("nothing", Severity::as_str)
                 ),
             ],
             surfaces: vec![

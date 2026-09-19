@@ -111,14 +111,14 @@
                 ]
               },
               "axis": {
-                "description": "Which rule the case is graded on. `severity`: the manifest states a required severity and the case is met when the grading machinery reaches that level or a heavier one. `outcome`: the manifest names an outcome and the case is met when the machinery produces it.",
+                "description": "Which rule the case is graded on. `severity`: the manifest states a required severity and the case is met only when the grading machinery's observed severity equals it exactly — a reading heavier than the requirement is an escalation, and an escalation is `unmet`, not `met`. A floor rule would score a build that escalated a benign case to `must_fix` as met, which is the false green this corpus exists to catch. `outcome`: the manifest names an outcome and the case is met when the machinery produces it, whatever severity the machinery also weighs the case at.",
                 "enum": [
                   "severity",
                   "outcome"
                 ]
               },
               "severity": {
-                "description": "The severity the grading machinery reached, in the manifest's own vocabulary. `null` on an observed severity-axis row means nothing fired at all, which is a measurement and cannot meet a requirement.",
+                "description": "The severity the grading machinery reached, in the manifest's own vocabulary, recorded on both axes so that an escalation is never invisible merely because a case is graded on its outcome. `null` on a severity-axis row means nothing fired at all, which is a measurement and cannot meet a requirement. `null` on an outcome-axis row means the machinery that graded the case answers with a decision, an assessment or a run aggregate and computes no severity in the manifest's vocabulary; inventing one by mapping another vocabulary onto this one would be an inference and is not done.",
                 "type": [
                   "string",
                   "null"
@@ -196,7 +196,7 @@
             ]
           },
           "comparison": {
-            "description": "The requirement and the observation side by side, with the measured value in it.",
+            "description": "The requirement and the observation side by side, with the measured value in it. Where the two disagree, the sentence names the direction of the disagreement rather than only its existence: an escalation (`heavier` than the requirement) and a miss (`lighter` than it) are different readings and are written differently. On an outcome-axis row the observed severity is in this sentence too, so a reader grading this report does not have to parse `statements` to find an escalation that the row's own outcome grading left `met`.",
             "type": "string"
           }
         }

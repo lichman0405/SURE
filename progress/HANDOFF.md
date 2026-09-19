@@ -3,6 +3,43 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
+**In flight:** `P14-T012` — *"Meet mandatory false-green release metrics"* — is **dispatched**, not
+accepted, from base `2063b19` (the `P14-T011` acceptance), with its brief at
+`target/tmp/brief-p14t012.md` and the tree clean at dispatch. Its criterion has two clauses —
+*"Release-blocking corpus has zero false green."* and *"Any unmet case blocks P15 release
+packaging."* — and it is the task `P14-T013` and then the P15 packaging work wait behind.
+
+**What exists, and the gap the two clauses sit in.** The seven metrics are already written down at
+`docs/product/PRODUCT_EVALS.md:5-13` (false green rate 0, fabricated execution claims 0, insufficient
+evidence that becomes confirmed 0, repair-regression caught 100%, secret redaction 100%, benign-mock
+corpus tracked, jargon golden tests), and `:15` constrains the task itself — *"Do not optimize a
+single numeric score at the expense of honest unknowns."* The report those metrics should be computed
+from now exists: P14-T011 measures 20 cases, 13 release-blocking, 19 observed and 1 `cannot_confirm`,
+with `release_blocking_unmet` and `release_blocking_cannot_confirm` already in its totals. What does
+**not** exist is any of the seven as a value, or any gate. And the false-green machinery that does
+exist measures nothing at runtime: `false_green_violations` (`fixture_apps.rs:500`) reads a fixture's
+`forbidden_outcomes` and reports **structural** violations — that the list is non-empty, that one
+outcome has `kind: "false_green"` — and it is green today. It asks whether a fixture *declared* what
+must never happen; nothing asks whether it happened.
+
+**There is no packaging to block, and that is clause 2's whole difficulty.** `scripts/` holds
+bootstrap, install, preflight and validation scripts and nothing else — no artifact, no version
+stamping, no release workflow. The packaging work is P15-T002 through P15-T011, none of it started.
+So *"any unmet case blocks P15 release packaging"* is not "stop something that exists"; it is make
+the block a real thing the packaging tasks will consume, **and demonstrate that it blocks**. A gate
+that has only ever seen a passing corpus has not been shown to block anything.
+
+**The trap the task is built around: a number that cannot fail.** If the false-green rate is computed
+by asking whether each release-blocking fixture carries a `forbidden_outcomes` entry of
+`kind: "false_green"`, the answer is 0 by construction and always will be, because
+`every_fixture_forbids_the_false_green_shape` (`fixture_apps.rs:1058`) is already green and would have
+to be red for the rate to move — a metric that cannot be non-zero, which is worse than no metric. The
+report's own totals are the second version of the same trap: reporting `release_blocking_unmet: 0`
+back is reporting the report rather than evaluating anything. The task is also asked to be honest
+about the other direction — two of the seven metrics have no machinery behind them at all
+(`fixtures/privacy/manifest.json` is a different corpus, and a jargon golden test may not exist), and
+`PRODUCT_EVALS.md:15` makes an unmeasurable metric read as unmeasured rather than as zero.
+
 **In flight:** nothing, as of this paragraph. `P14-T011` — *"Implement product eval runner/report"* — is
 **accepted as `909f990`**, over five worker commits from base `b29dc6c` (the `P14-T010` acceptance), with its
 brief at `target/tmp/brief-p14t011.md` and the tree clean at dispatch and at acceptance. It was **sent back

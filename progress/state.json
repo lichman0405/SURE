@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P14",
-  "last_updated": "2026-09-19T09:08:43.669Z",
+  "last_updated": "2026-09-19T09:11:26.523Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2064,10 +2064,10 @@
       "notes": "P14-T011 gives the release contract a runner: `evaluation/acceptance-manifest.json` is now measured rather than asserted fixture by fixture, and the document it produces is at `target/tmp/acceptance-report.json`, written by `two_runs_are_byte_identical` and untracked by design (a committed reading of one checkout would go stale with nothing to redden it). Two boundaries are worth recording so they are not re-derived wrongly. First, a row may read `met` while its observed severity is heavier than the contract asks: that is deliberate, specified by the send-back, and applies only to outcome-axis cases, whose expectation is about the outcome; the disagreement is written into the row's own `comparison`. `external-unverified` is the only instance on this corpus and a test asserts it is the only one by equality against a named list, so a second would surface as a diff rather than silently. The severity axis is the other way: an escalation there is `unmet`, and that is the correction this task was sent back for. Second, nine outcome-axis rows carry `null` for the observed severity because the machinery that grades them answers with `AggregateSeverity::green|needs_attention|not_ready|not_enough_checked` or with a decision, and no severity in the manifest's vocabulary exists to record; mapping one vocabulary onto the other would be invention. That is a gap in what can be measured, and P14-T012 should treat those nine as unmeasured on the severity axis rather than as severities that happen to agree."
     },
     "P14-T012": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-19T09:11:26.523Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "2063b191ded0b8b6b9e4d2799f3c30c94ead3d26",
       "head_sha": null,
       "evidence": [],
       "notes": ""

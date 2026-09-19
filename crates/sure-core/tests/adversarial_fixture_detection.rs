@@ -154,7 +154,7 @@ use sure_core::claim_checker::{
     CheckedClaim, ClaimDocument, check_claims_against_events, check_claims_in_store,
 };
 use sure_core::claim_report::render_claim_section;
-use sure_core::config::{Authority, Config, ExecutionSettings};
+use sure_core::config::{Authority, Config, ExecutionSettings, ProtectionMode};
 use sure_core::container::{Availability, OVERCLAIMS, Runtime, isolation_claim, overclaims};
 use sure_core::db_migrations::{MigrationsReport, Record};
 use sure_core::demo_data_heuristics::DemoDataHeuristics;
@@ -167,6 +167,10 @@ use sure_core::execution::{ActionKind, ExecutionMode, ExecutionPermissions, Perm
 use sure_core::external_service::ExternalServiceChecks;
 use sure_core::false_completion_aggregator::aggregate;
 use sure_core::harness_event::{IngestedEvent, ingest_event_str};
+use sure_core::hook_protection::{
+    Assessment, Danger, ToolRequest, acts_a_request_could_be_held_for,
+    acts_a_tool_could_be_held_for, assess_claude_code_tool, assess_cursor_tool, danger_reason,
+};
 use sure_core::ids::{CheckId, ClaimId, EventId, FingerprintId};
 use sure_core::intent::{ProjectIntent, may_claim_full_fulfilment};
 use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_project};
@@ -5045,4 +5049,677 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
             );
         }
     }
+}
+
+// --- P14-T008: the dangerous-action fixtures -------------------------------
+
+/// The `P14-T008` fixtures, named rather than discovered for the reason every
+/// list in this file is: a test that discovered them would pass on an empty
+/// directory.
+///
+/// The same three ids are named in `crates/sure-testkit/tests/fixture_apps.rs`,
+/// which grades the artefacts — the schema, the false-green rule, the README,
+/// the manifest row and the shape of the control — and the guard below is what
+/// says the two files are talking about the same directories.
+const DANGEROUS_ACTION_FIXTURES: &[&str] = &["dangerous-delete", "force-push", "sensitive-read"];
+
+/// The keys of a declared run that are the request and the settings it is
+/// answered under — which is to say, the fields a control may move.
+///
+/// The same list is compared in `fixture_apps.rs`, for the same reason: a
+/// control whose difference is not the one the fixture declares is not a control,
+/// and the pair would then be two runs that happen to disagree.
+const REQUEST_AND_SETTINGS: &[&str] = &["harness", "tool", "path", "command", "mode", "protection"];
+
+/// The `dangerous_action` block of one fixture's scenario.
+fn dangerous_action_block(id: &str) -> Value {
+    scenario_of(id)
+        .get("dangerous_action")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "fixtures/adversarial/{id}/scenario.json declares no dangerous_action block, so \
+                 there is no declaration of what SURE answers to a request"
+            )
+        })
+}
+
+/// The runs one fixture declares, keyed by the name the corpus uses for them.
+fn declared_action_runs(id: &str, block: &Value) -> serde_json::Map<String, Value> {
+    block["runs"].as_object().cloned().unwrap_or_else(|| {
+        panic!("{id}/scenario.json declares no runs at all, so there is nothing to grade")
+    })
+}
+
+/// One declared run, driven through the product's own assessment for it.
+///
+/// The declaration is data and this is the only place it becomes a call: the
+/// harness picks the function the integration calls, and the mode name picks a
+/// declared settings set through `declared_mode` — every permission is read and
+/// none is defaulted — rather than a literal here.
+fn assess_declared_run(id: &str, block: &Value, kind: &str, run: &Value) -> Assessment {
+    let mode_name = run["mode"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no execution mode"));
+    let declared = block["settings"]["modes"]
+        .get(mode_name)
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: the `{kind}` run names the mode `{mode_name}` and the fixture declares no \
+                 such mode"
+            )
+        });
+    let (mode, permissions) = declared_mode(id, mode_name, declared);
+    let protection: ProtectionMode = from_wire(id, "a protection mode", &run["protection"]);
+    let harness = run["harness"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the `{kind}` run names no harness"));
+    let tool = run["tool"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the `{kind}` run names no tool"));
+    let request = ToolRequest {
+        tool,
+        path: run.get("path").and_then(Value::as_str),
+        command: run.get("command").and_then(Value::as_str),
+    };
+    match harness {
+        "claude_code" => assess_claude_code_tool(&request, mode, &permissions, protection),
+        "cursor" => assess_cursor_tool(&request, mode, &permissions, protection),
+        other => panic!(
+            "{id}: the `{kind}` run names the harness {other:?}, and this tree has two \
+             integrations: `claude_code` and `cursor`"
+        ),
+    }
+}
+
+/// Everything one assessment answers, as the fixture declares it.
+///
+/// The danger goes in as its **wire name** rather than as the words a user reads
+/// (`Danger::as_str`): the wire name is what a stored decision records and what
+/// the fixture declares, and the sentence is compared separately, against the
+/// product's own function.
+fn action_answers(assessment: &Assessment) -> Value {
+    json!({
+        "decision": assessment.decision.decision.as_str(),
+        "danger": assessment.danger.map(Danger::wire_name),
+        "reason": assessment.decision.reason.clone(),
+    })
+}
+
+/// A sentence the fixture declares, read as the list of lines it is.
+fn sorted_lines(value: &Value, what: &str) -> Vec<String> {
+    let mut lines = declared_lines(value, what);
+    lines.sort();
+    lines
+}
+
+/// The module and the functions a fixture names as the route that answers it.
+///
+/// The pointer is checked rather than trusted: a fixture naming a function that
+/// does not exist would be a declaration about code nobody ships, and the file it
+/// points at could then be renamed or split with nothing here noticing.
+fn assert_the_pointer_names_the_route(id: &str, what: &str, pointer: &Value) {
+    let module = pointer["module"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: {what} names no module"));
+    let path = sure_testkit::repository_root().join(module);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!("{id}: {what} names `{module}`, which is not a file this repository ships: {error}")
+    });
+    let functions = declared_lines(
+        &pointer["functions"],
+        &format!("the functions {what} names"),
+    );
+    assert!(
+        !functions.is_empty(),
+        "{id}: {what} names no function at all, so it is not a pointer"
+    );
+    for name in &functions {
+        assert!(
+            text.contains(&format!("fn {name}(")),
+            "{id}: {what} names `{name}` and `{module}` declares no such function, so the route \
+             this fixture is about has moved or been renamed and nothing here would notice"
+        );
+    }
+}
+
+/// The sentence a held request carries, held against the product's own answer
+/// for it.
+///
+/// The product writes more than one kind of hold sentence and they are different
+/// strings, so the fixture says which one it declares and this is where that
+/// claim is graded. Two of the checks are the ones the case exists for:
+///
+/// - a `danger_reason` sentence is compared **against the function's own return
+///   value**, not against a copy of the text in this file, so a reworded sentence
+///   in the product reddens the fixture even if the fixture is reworded to match;
+/// - the strict route's sentence is required to begin with the danger's own
+///   `consequence()` and to be **none** of the `danger_reason` sentences, because
+///   the product writes it as the consequence plus a different tail. A build that
+///   collapsed the two routes onto one sentence reddens here.
+///
+/// Every route is also held against the fixture's own declared text first, which
+/// is the direction that makes a rewrite of *any* of these sentences red.
+fn assert_the_reason_is_the_one_the_fixture_names(
+    id: &str,
+    kind: &str,
+    run: &Value,
+    assessment: &Assessment,
+) {
+    let declared = run["expect"]["reason"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no sentence"));
+    let named_by = run["reason_named_by"].as_str().unwrap_or_else(|| {
+        panic!("{id}: the `{kind}` run does not say which of the product's sentences it carries")
+    });
+    let reason = assessment.decision.reason.as_deref().unwrap_or_else(|| {
+        panic!(
+            "{id}: the `{kind}` run is answered with no sentence at all, and every decision the \
+             rule reaches carries one"
+        )
+    });
+    assert_eq!(
+        reason, declared,
+        "{id}: the `{kind}` run's sentence is not the one its own `expect` block declares, so the \
+         fixture and the product disagree about what a user is shown"
+    );
+    let danger: Option<Danger> =
+        from_wire(id, "the danger a run declares", &run["expect"]["danger"]);
+    let is_a_danger_sentence = Danger::ALL
+        .iter()
+        .any(|candidate| reason == danger_reason(*candidate));
+    match named_by {
+        "danger_reason" => {
+            let danger = danger.unwrap_or_else(|| {
+                panic!(
+                    "{id}: the `{kind}` run says its sentence is `danger_reason`'s and declares no \
+                     danger for it"
+                )
+            });
+            assert_eq!(
+                reason,
+                danger_reason(danger),
+                "{id}: the `{kind}` run's sentence is not the one `danger_reason` returns for `{}`, \
+                 so either the sentence moved or the danger did — and it is compared against the \
+                 function rather than against a copy here on purpose",
+                danger.wire_name()
+            );
+        }
+        "the_strict_hold_sentence" => {
+            if let Some(danger) = danger {
+                assert!(
+                    reason.starts_with(danger.consequence()),
+                    "{id}: the `{kind}` run is held by strict mode for `{}` and its sentence does \
+                     not begin with that danger's own `consequence()`, so the hold and the sentence \
+                     have stopped being about the same area",
+                    danger.wire_name()
+                );
+            }
+            assert!(
+                !is_a_danger_sentence,
+                "{id}: the `{kind}` run's sentence is strict mode's own and it equals a \
+                 `danger_reason`, so the two routes have collapsed onto one sentence"
+            );
+        }
+        "the_consent_sentence" | "the_permission_sentence" | "the_allow_sentence" => {
+            assert!(
+                danger.is_none(),
+                "{id}: the `{kind}` run carries `{named_by}`'s sentence and declares a danger for \
+                 it, and none of those three sentences is a danger's"
+            );
+            assert!(
+                !is_a_danger_sentence,
+                "{id}: the `{kind}` run carries `{named_by}`'s sentence, which names no danger, and \
+                 it equals a `danger_reason` — so this run is where a build that named a danger it \
+                 did not reach would show"
+            );
+        }
+        other => panic!(
+            "{id}: the `{kind}` run names its sentence {other:?}, and this file knows \
+             `danger_reason`, `the_strict_hold_sentence`, `the_consent_sentence`, \
+             `the_permission_sentence` and `the_allow_sentence`"
+        ),
+    }
+}
+
+/// The control, and the one thing it moved.
+///
+/// Returns the run the control is a control for. The difference is computed from
+/// the declaration and compared with the fields the fixture names, because a
+/// control that moved two things — or nothing — is a pair that measures something
+/// other than what the case is about, and nothing else here would notice.
+fn assert_the_control_is_the_one_thing_the_fixture_names(
+    id: &str,
+    block: &Value,
+    runs: &serde_json::Map<String, Value>,
+) -> String {
+    let of = block["control"]["of"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the control names no run"));
+    let named = runs.get(of).unwrap_or_else(|| {
+        panic!("{id}: the control names `{of}`, which is no run this fixture declares")
+    });
+    let control = runs.get("control").unwrap_or_else(|| {
+        panic!("{id}: the fixture declares no run called `control`, so nothing is held against it")
+    });
+    let mut differ: Vec<String> = REQUEST_AND_SETTINGS
+        .iter()
+        .filter(|field| control.get(**field) != named.get(**field))
+        .map(|field| (*field).to_owned())
+        .collect();
+    differ.sort();
+    assert!(
+        !differ.is_empty(),
+        "{id}: the control and the run it is a control for are the same request under the same \
+         settings, so the pair measures nothing"
+    );
+    let declared = sorted_lines(
+        &block["control"]["moved"]["fields"],
+        &format!("the fields {id}'s control declares it moved"),
+    );
+    assert_eq!(
+        declared, differ,
+        "{id}: the control declares it moved {declared:?} and the two runs differ in {differ:?}, \
+         so what moved is not what the fixture says moved"
+    );
+    of.to_owned()
+}
+
+/// What the corpus writes down about this fixture and what the fixture declares
+/// must be the same answers, in both directions.
+///
+/// Both directions matter for the same reason the checker-failure fixtures'
+/// version of this does: the forward one is the drift check on what a reader of
+/// `evaluation/` sees, and the reverse one is what makes deleting a
+/// `required_outcomes` entry a red test rather than a fixture that quietly
+/// stopped grading something.
+fn assert_the_dangerous_action_outcomes_account_for_the_declared_runs(id: &str, block: &Value) {
+    let outcomes = scenario_of(id)["required_outcomes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{id}/scenario.json requires no outcomes at all"));
+    assert!(
+        !outcomes.is_empty(),
+        "{id}/scenario.json requires no outcomes at all"
+    );
+    let runs = declared_action_runs(id, block);
+
+    for (kind, run) in &runs {
+        let outcome = required_outcome(id, &outcomes, kind);
+        assert_answers_account_for(
+            id,
+            &answer_keys(outcome),
+            &run["expect"],
+            &format!("the fixture's declared `{kind}` run"),
+        );
+    }
+    for outcome in &outcomes {
+        let kind = outcome["kind"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}/scenario.json has a required outcome with no kind"));
+        assert!(
+            runs.contains_key(kind),
+            "{id}/scenario.json records a `{kind}` outcome and the fixture declares no such run, \
+             so the corpus entry asserts something no fixture says"
+        );
+    }
+}
+
+/// What a recorded one-time allowance can be spent on, under the settings each
+/// row names.
+///
+/// Both public functions are read for every row and both answers are graded,
+/// because they differ where the tool narrows the acts and the difference is the
+/// reason there are two: a grant is spent by a request that matches the tool it
+/// names, so what a grant for one tool can cover is not what the settings leave
+/// reachable at all.
+///
+/// The store-backed half — held, allowance, allow, held again — is not driven
+/// here. Each fixture names the `sure-cli` test that grades it, and the pointer
+/// is checked rather than trusted.
+fn assert_the_allowance_is_the_rule_the_fixture_names(id: &str, block: &Value) {
+    let allowance = &block["allowance"];
+    assert_the_pointer_names_the_route(id, "the allowance's read_by", &allowance["read_by"]);
+
+    let behaviour = &allowance["one_time_behaviour"];
+    let file = behaviour["file"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the allowance names no file for the store-backed half"));
+    let path = sure_testkit::repository_root().join(file);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "{id}: the allowance names `{file}` for the store-backed half, and that is not a file \
+             this repository ships: {error}"
+        )
+    });
+    let tests = declared_lines(
+        &behaviour["tests"],
+        &format!("the tests {id} names for the store-backed half"),
+    );
+    assert!(
+        !tests.is_empty(),
+        "{id}: the allowance names no test for the store-backed half, so nothing says where the \
+         grant is actually spent"
+    );
+    for name in &tests {
+        assert!(
+            text.contains(&format!("fn {name}(")),
+            "{id}: the allowance names `{name}` in `{file}` and no such function is declared there, \
+             so the store-backed half of this act is graded nowhere"
+        );
+    }
+
+    let rows = allowance["rows"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{id}: the allowance declares no rows at all"));
+    assert!(
+        !rows.is_empty(),
+        "{id}: the allowance declares no rows, so nothing says what a grant can be spent on"
+    );
+    for row in &rows {
+        let mode_name = row["mode"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: an allowance row names no execution mode"));
+        let declared = block["settings"]["modes"]
+            .get(mode_name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{id}: an allowance row names the mode `{mode_name}` and the fixture declares \
+                     no such mode"
+                )
+            });
+        let (mode, permissions) = declared_mode(id, mode_name, declared);
+        let protection: ProtectionMode =
+            from_wire(id, "an allowance row's protection mode", &row["protection"]);
+        let tool = row["tool"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: an allowance row names no tool"));
+
+        let mut reachable: Vec<String> =
+            acts_a_request_could_be_held_for(mode, &permissions, protection)
+                .iter()
+                .map(|danger| danger.wire_name().to_owned())
+                .collect();
+        reachable.sort();
+        let declared_reachable = sorted_lines(
+            &row["acts_the_settings_leave"],
+            &format!("the acts an allowance row for `{tool}` under `{mode_name}` leaves in reach"),
+        );
+        assert_eq!(
+            reachable, declared_reachable,
+            "{id}: under `{mode_name}` and {protection:?} the settings leave {declared_reachable:?} \
+             in reach and the product answers {reachable:?}"
+        );
+
+        let mut for_tool: Vec<String> =
+            acts_a_tool_could_be_held_for(tool, mode, &permissions, protection)
+                .iter()
+                .map(|danger| danger.wire_name().to_owned())
+                .collect();
+        for_tool.sort();
+        let declared_for_tool = sorted_lines(
+            &row["acts_the_tool_can_be_held_for"],
+            &format!("the acts an allowance row for `{tool}` under `{mode_name}` declares"),
+        );
+        assert_eq!(
+            for_tool, declared_for_tool,
+            "{id}: a grant for `{tool}` under `{mode_name}` can be spent on {declared_for_tool:?} \
+             and the product answers {for_tool:?} — a grant SURE offers for an act this rule \
+             cannot reach is a promise it cannot keep"
+        );
+    }
+}
+
+#[test]
+fn every_dangerous_action_fixture_these_assertions_name_is_a_fixture_this_repository_ships() {
+    // The guard every list in this file has, for the same reason: a renamed
+    // directory would make every assertion below about a request nobody ships.
+    for id in DANGEROUS_ACTION_FIXTURES {
+        let dir = fixture(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        let scenario = dir.join("scenario.json");
+        assert!(
+            scenario.is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+
+        let block = dangerous_action_block(id);
+        assert!(
+            block.get("read_by").is_some(),
+            "{id}/scenario.json declares no read_by, so nothing says which route answers"
+        );
+        let runs = declared_action_runs(id, &block);
+        assert!(
+            runs.len() >= 2,
+            "{id}/scenario.json declares {} runs, and a fixture is worth nothing without a control",
+            runs.len()
+        );
+        let control = block["control"]["of"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}/scenario.json declares a control for no run"));
+        assert!(
+            runs.contains_key(control),
+            "{id}/scenario.json's control names `{control}`, which is no run this fixture declares"
+        );
+
+        // Exactly one run may declare itself the control, and it has to be the
+        // one the fixture points at. This is the acceptance stated as a property
+        // of the document rather than of the product: a directory whose control
+        // stopped reaching `Allowed` — or whose control run was replaced by the
+        // held run beside it — has stopped measuring the claim it is named after.
+        let allows: Vec<&str> = runs
+            .iter()
+            .filter(|(_, run)| run["expect"]["decision"] == "allow")
+            .map(|(kind, _)| kind.as_str())
+            .collect();
+        assert!(
+            allows.contains(&"control"),
+            "{id}/scenario.json declares no `control` run that reaches `allow`, and a fixture for a \
+             held request whose control does not reach `Allowed` measures nothing: {allows:?}"
+        );
+
+        // The tripwire, asserted here rather than left to the other file: this
+        // case is `release_blocking` and it is a request rather than a project,
+        // so the key that decides `fixture_has_an_app` in
+        // `finding_severity_rule.rs` must not be anywhere in the document.
+        let text = std::fs::read_to_string(&scenario)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", scenario.display()));
+        assert!(
+            !text.contains("\"entry_points\""),
+            "{id}/scenario.json declares entry points, and the case is a request rather than a \
+             project with runnable code: adding them would pull a release-blocking case into a list \
+             in finding_severity_rule.rs that it does not belong on"
+        );
+    }
+}
+
+#[test]
+fn a_dangerous_action_that_is_held_names_its_danger_before_its_decision_and_the_control_reaches_allowed()
+ {
+    let mut graded = 0usize;
+    for id in DANGEROUS_ACTION_FIXTURES {
+        let block = dangerous_action_block(id);
+        assert_the_dangerous_action_outcomes_account_for_the_declared_runs(id, &block);
+        assert_the_pointer_names_the_route(
+            id,
+            "the `dangerous_action` block's read_by",
+            &block["read_by"],
+        );
+        let runs = declared_action_runs(id, &block);
+
+        let mut answers: BTreeMap<String, Value> = BTreeMap::new();
+        for (kind, run) in &runs {
+            let assessment = assess_declared_run(id, &block, kind, run);
+            let expected = &run["expect"];
+
+            // 1. The danger, by wire name, **first**. This is the assertion the
+            //    fixture exists for. A build with the danger vocabulary deleted
+            //    still answers `block` to every one of these runs — the engine
+            //    holds every arbitrary command and `base_decision` holds a
+            //    request that needs consent with a sentence naming no danger —
+            //    so a test that asserted the decision first would pass it, and a
+            //    test that asserted only the decision would pass it silently.
+            let declared_danger: Option<Danger> =
+                from_wire(id, "the danger a run declares", &expected["danger"]);
+            let declared_phrase = declared_danger.map_or_else(
+                || "no danger".to_owned(),
+                |danger| format!("`{}`", danger.wire_name()),
+            );
+            let reported_phrase = assessment.danger.map_or_else(
+                || "no danger".to_owned(),
+                |danger| format!("`{}`", danger.wire_name()),
+            );
+            assert_eq!(
+                assessment.danger.map(Danger::wire_name),
+                declared_danger.map(Danger::wire_name),
+                "{id}: the `{kind}` run is declared as naming {declared_phrase}, and the product \
+                 answered {reported_phrase}. The danger is asserted before the decision because the \
+                 decision is not the measurement: a build that named no danger at all still blocks \
+                 every request here.",
+            );
+
+            // 2. The sentence, held against the product's own answer for it.
+            assert_the_reason_is_the_one_the_fixture_names(id, kind, run, &assessment);
+
+            // 3. Only now the decision kind: `block` is what this build answers
+            //    to a great deal, and it is the last of the three because it is
+            //    the only one that is satisfiable with no detector at all.
+            let declared_decision = expected["decision"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no decision"));
+            assert_eq!(
+                assessment.decision.decision.as_str(),
+                declared_decision,
+                "{id}: the `{kind}` run is declared as `{declared_decision}` and the product \
+                 answered `{}`",
+                assessment.decision.decision.as_str()
+            );
+
+            answers.insert(kind.clone(), action_answers(&assessment));
+        }
+
+        // What the fixture has to say about itself before the product's answers
+        // mean anything, in the three shapes every one of these directories is
+        // built from: a run that names a danger, a run that is held and names
+        // none, and the sentence a build with no detector answers all of them
+        // with. A directory that lost any of the three would still pass every
+        // assertion above while grading less than it says it grades.
+        let named: Vec<&str> = runs
+            .iter()
+            .filter(|(_, run)| run["expect"]["danger"].is_string())
+            .map(|(kind, _)| kind.as_str())
+            .collect();
+        assert!(
+            !named.is_empty(),
+            "{id}/scenario.json declares no run that names a danger, so nothing here is a \
+             measurement of the detector this case is about"
+        );
+        let unnamed: Vec<&str> = runs
+            .iter()
+            .filter(|(_, run)| {
+                run["expect"]["danger"].is_null() && run["expect"]["decision"] == "block"
+            })
+            .map(|(kind, _)| kind.as_str())
+            .collect();
+        assert!(
+            !unnamed.is_empty(),
+            "{id}/scenario.json declares no run that is held and names nothing, so the near-miss \
+             this case needs is missing and a product that named every request dangerous would \
+             satisfy every run here"
+        );
+        let consent: Vec<&str> = runs
+            .iter()
+            .filter(|(_, run)| run["reason_named_by"].as_str() == Some("the_consent_sentence"))
+            .map(|(kind, _)| kind.as_str())
+            .collect();
+        assert!(
+            !consent.is_empty(),
+            "{id}/scenario.json declares no run held for the consent sentence, which is the answer \
+             a build with no detector produces for every request here — leaving it out is what \
+             would let this fixture stop telling the two builds apart"
+        );
+        for (kind, run) in &runs {
+            if run["expect"]["decision"] == "allow" {
+                assert_eq!(
+                    run["reason_named_by"].as_str(),
+                    Some("the_allow_sentence"),
+                    "{id}: the `{kind}` run reaches `allow` and does not carry the mode's own \
+                     sentence for one, so an allow is declared here with a sentence this file \
+                     cannot check"
+                );
+            }
+        }
+
+        // The control: the same run under the settings beside it, one thing
+        // moved, and it must reach `Allowed`. `!blocked` would be satisfied by a
+        // warning and by a run that was never assessed, so the decision kind is
+        // asserted exactly.
+        let of = assert_the_control_is_the_one_thing_the_fixture_names(id, &block, &runs);
+        let control = answers
+            .get("control")
+            .unwrap_or_else(|| panic!("{id}: the control run produced no answer"));
+        assert_eq!(
+            control["decision"].as_str(),
+            Some("allow"),
+            "{id}: the control does not reach `Allowed`, and a fixture for a held request whose \
+             control cannot reach `Allowed` has measured nothing: a product that blocked every \
+             request would satisfy every other run in this directory"
+        );
+        assert_eq!(
+            control["danger"],
+            Value::Null,
+            "{id}: the control is allowed and a danger is recorded for it, and a danger is only \
+             ever attached to a request that was held"
+        );
+        assert_ne!(
+            control["decision"], answers[&of]["decision"],
+            "{id}: the control and the run it is a control for reach the same decision, so the \
+             pair is the same measurement written twice"
+        );
+
+        assert_the_allowance_is_the_rule_the_fixture_names(id, &block);
+
+        // The net, and it is last on purpose. Every claim above is named and says
+        // what it is about; this is the exhaustive one, holding **every** key of
+        // every run's answer against the fixture's declaration in both
+        // directions, so that a key nobody thought to name is still graded rather
+        // than ignored. The reverse direction is `answer_keys` /
+        // `assert_answers_account_for` at the top of this test; this is the
+        // forward one, and it is the reason a new key in the fixture is a red
+        // test rather than a line nothing reads.
+        for (kind, run) in &runs {
+            let declared = run["expect"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
+            let reported = answers[kind]
+                .as_object()
+                .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
+            let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
+            let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
+            assert_eq!(
+                reported_keys, declared_keys,
+                "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
+                 things, so one of them has stopped being graded"
+            );
+            for (key, expected) in declared {
+                assert_eq!(
+                    reported[key], *expected,
+                    "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the \
+                     case is not being graded as written"
+                );
+            }
+        }
+
+        graded += 1;
+    }
+    assert_eq!(
+        graded,
+        DANGEROUS_ACTION_FIXTURES.len(),
+        "every fixture named in DANGEROUS_ACTION_FIXTURES must be graded by this test"
+    );
 }

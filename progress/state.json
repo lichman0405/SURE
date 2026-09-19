@@ -2146,7 +2146,7 @@
       "started_at": "2026-09-18T23:56:39.004Z",
       "finished_at": "2026-09-19T02:00:48.870Z",
       "base_sha": "4b190e6",
-      "head_sha": null,
+      "head_sha": "a1fe4f669ea1983e1704ec49cc2717f3615c7100",
       "evidence": [
         "Structure: base commit 4b190e6 (the P13-T008 acceptance), dispatch commit 95f3da5, hand-backs 66c641f + e268777 (first, tip e268777), 2ec2f38 + e270fe8 (second, tip e270fe8), a1fe4f6 (third). Two send-backs, recorded in target/tmp/p13t010-sendback.md and target/tmp/p13t010-sendback-2.md with the measurement that caused each; the briefs are brief-p13t010.md, brief-p13t010b.md and brief-p13t010c.md.",
         "`git rev-parse HEAD` -> a1fe4f669ea1983e1704ec49cc2717f3615c7100; `git rev-parse origin/claude/v0.1-autonomous` -> the same 40 characters; `git status --porcelain` -> empty after the probe was reverted.",

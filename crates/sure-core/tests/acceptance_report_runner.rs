@@ -43,6 +43,14 @@
 //! this checkout on this day, and a committed one would be a document that goes
 //! stale in a way nothing reddens. `cargo clean` removes it, which is the right
 //! lifetime for a measurement — re-running this test regenerates it.
+//!
+//! # The gate written beside it
+//!
+//! `the_release_gate_over_this_report_permits_the_release_and_is_written_beside_it`
+//! writes `target/tmp/release-gate.json` — P14-T012's document, which the P15
+//! packaging tasks read — from this same report, because the gate must be taken
+//! from the report the release is judged on and this is the report that carries
+//! the one measurement no `src` module can make.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -65,6 +73,7 @@ use sure_core::process::{
 };
 use sure_core::project_verdict::{build_verdict, render_summary};
 use sure_core::recheck_lifecycle::{LifecycleInputs, reconcile};
+use sure_core::release_gate::{Decision, MetricValue, release_gate, release_gate_json};
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_core::severity::Severity;
@@ -85,6 +94,16 @@ const FIXTURES: &str = "fixtures/adversarial";
 
 /// Where the report is written, and what its bytes are.
 const REPORT: &str = "target/tmp/acceptance-report.json";
+
+/// Where the release gate is written, and the schema it is checked against.
+///
+/// The gate is `sure_core::release_gate`'s document: the seven metrics
+/// `docs/product/PRODUCT_EVALS.md` states, measured over this report, and the
+/// decision P15's packaging tasks read. It is written here, in the same binary
+/// that writes the report it is computed from, so the two cannot disagree about
+/// which reading of the corpus they describe.
+const GATE: &str = "target/tmp/release-gate.json";
+const GATE_SCHEMA: &str = include_str!("../../../schemas/release-gate.schema.json");
 
 /// The five corpus directories that answer to no case in the manifest.
 ///
@@ -888,6 +907,81 @@ fn the_limitations_are_in_the_document_rather_than_in_a_commit_message() {
             "the limitations do not state {what} (`{wanted}`):\n{all}"
         );
     }
+}
+
+#[test]
+fn the_release_gate_over_this_report_permits_the_release_and_is_written_beside_it() {
+    // P14-T012's document, taken from the report this file produces rather than
+    // from a second reading of the corpus. That is not a convenience: this
+    // report carries the one measurement no `src` module can make
+    // (`repair-regression`), and a gate computed from the module's own report
+    // would block the release over a case this file measured — a false red,
+    // which is the other half of the same failure as a false green.
+    //
+    // The gate's own properties are measured in
+    // `crates/sure-core/tests/release_gate_runner.rs`: the seven metrics as
+    // values, the control corpora that make it block and permit, and the
+    // module-only reading in which the unobserved case is what blocks. This test
+    // is the shipped document, and what it asserts is what a packaging task
+    // reading that document is entitled to take from it.
+    let report = the_report();
+    let gate = release_gate(&report);
+    assert_eq!(
+        gate.decision,
+        Decision::Permitted,
+        "the corpus's release-blocking cases are all met, as measured: {:#?}",
+        gate.blocked_by
+    );
+    assert!(
+        gate.blocked_by.is_empty(),
+        "a permitted release names no blocking case: {:#?}",
+        gate.blocked_by
+    );
+    assert_eq!(gate.corpus.manifest_digest, report.corpus.manifest_digest);
+    assert_eq!(gate.corpus.release_blocking, report.totals.release_blocking);
+    assert_eq!(
+        gate.corpus.release_blocking_cannot_confirm,
+        report.totals.release_blocking_cannot_confirm
+    );
+
+    // Clause 1 of the acceptance as a value rather than as a sentence: the
+    // release-blocking corpus has zero false green, and the rate is taken over
+    // the rows that carry an observation rather than over the corpus's own
+    // declarations.
+    let false_green = gate
+        .metrics
+        .iter()
+        .find(|metric| metric.claim.contains("false green rate"))
+        .expect("the gate carries the document's first metric");
+    assert_eq!(
+        false_green.value,
+        MetricValue::Rate {
+            numerator: 0,
+            denominator: report.totals.release_blocking_observed,
+        },
+        "the false-green rate over the release-blocking corpus, from the observed rows"
+    );
+
+    let text = release_gate_json(&gate).expect("the gate serialises");
+    let root = repository_root().display().to_string();
+    assert!(
+        !text.contains(&root) && !text.contains(&root.replace('\\', "/")),
+        "the gate names the checkout it was produced in, so it is not portable: {root}"
+    );
+    let value: serde_json::Value = serde_json::from_str(&text).expect("the gate is JSON");
+    let schema = sure_protocol::schema::Schema::parse("release-gate", GATE_SCHEMA)
+        .unwrap_or_else(|error| panic!("schemas/release-gate.schema.json: {error}"));
+    let violations = schema.validate(&value);
+    assert!(
+        violations.is_empty(),
+        "the gate does not match schemas/release-gate.schema.json: {violations:#?}"
+    );
+
+    let out = repository_root().join(GATE);
+    std::fs::create_dir_all(out.parent().expect("the gate has a parent"))
+        .expect("target/tmp is creatable");
+    std::fs::write(&out, &text).expect("the gate is writable");
+    assert!(out.is_file(), "the gate was written to {}", out.display());
 }
 
 /// A severity by its wire name, for the rows the report carries.

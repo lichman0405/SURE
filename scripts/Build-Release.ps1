@@ -507,10 +507,14 @@ two archives with two different digests. The .sha256 beside this archive is an
 integrity check over the bytes that were shipped - that they arrived unchanged -
 and it is not a claim that a rebuild would produce them again.
 
-HOW IT WAS CHECKED
-scripts/Build-Release.ps1 produced this archive, re-read the checksum it had
-written, extracted the archive to a fresh directory and ran the extracted
-sure.exe from there before this file was signed off on. See
+HOW THIS IS CHECKED
+This file is written before the checks run, so it describes the procedure
+rather than certifying its own archive. scripts/Build-Release.ps1 writes the
+.sha256 beside this archive, re-reads it, verifies the archive against it,
+extracts the archive to a fresh directory and runs the extracted sure.exe from
+there, comparing the running_from the binary reports with that directory. It
+prints OK and exits 0 only when every one of those steps agreed, so a run that
+failed is a run that said which step failed. See
 docs/development/RELEASE_PROCESS.md for how it is meant to be installed
 (P15-T003) and referenced (P15-T004).
 "@

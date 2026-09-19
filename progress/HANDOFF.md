@@ -3,7 +3,43 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing, as of this paragraph. `P15-T001` — *"Finalize `sure doctor` for
+**In flight:** nothing, as of this paragraph. `P15-T002` — *"Build Windows x64 release artifact"* —
+is **accepted at `ae36719`**, over three worker commits (`0443625`, `794673c`, `ae36719`) from base
+`673df59`. It adds `scripts/Build-Release.ps1` and the paragraph in
+`docs/development/RELEASE_PROCESS.md` that decides what a release artifact **is** — the format, the
+name, the layout inside it, the checksum — because that document had said only "Windows x64
+archive/package" plus "SHA-256 checksum", and `P15-T003` has to install what this produces. Measured
+on this machine: `sure-0.0.0-bootstrap-x86_64-pc-windows-msvc.zip`, 4045010 bytes, SHA-256
+`2fb0d05f…`, beside it a 114-byte `sha256sum`-format file naming exactly that digest.
+
+**The property this task had to establish is that the bytes that are checksummed are the bytes that
+were run**, and the script establishes it by extracting the archive to a scratch directory and running
+*that* `sure.exe`, then comparing the `running_from` the binary reports with the directory it extracted
+into. Verified by the supervisor rather than taken from the hand-back: the archive was extracted and
+run by absolute path, and `running_from` named the supervisor's own extraction directory with
+`target_env` `msvc`.
+
+**The false green that comparison guards against was reproduced by the supervisor, in full.** With the
+`running_from` comparison disabled and the run switched to a bare-name `sure.exe` with
+`target/debug` first on `PATH`, the script verified the correct artifact, extracted the correct
+`sure.exe`, ran the **debug** binary, printed `from the directory this script extracted to`, printed
+`OK the bytes that are checksummed are the bytes that were run`, and exited **0**. Every other check
+in that run passes — the checksum is over the right zip and the zip holds the right exe — which is why
+this comparison is the line the script exists for rather than decoration.
+
+**A defect the supervisor's verification found and the worker did not name.** `-Phase Verify`
+**fails when its output directory has no `logs\` subdirectory**: `New-Item … -Path $LogDirectory`
+occurs once, at `scripts/Build-Release.ps1:387`, inside the `if ($Phase -eq 'All')` branch, so a Verify
+run into a fresh directory dies at `:718` → `:278` with `Could not find a part of the path
+'…\logs\extracted-doctor.json.txt'` — *after* the checksum has verified and the archive has extracted.
+Checking a downloaded artifact in a new folder is the natural use of that phase, and it reports FAILED
+for a good archive. The parameter comment at `:200-202` also says Verify runs "without writing anything
+next to it", and it writes four log files into `$OutputDirectory\logs`. This is a false **red**, not a
+false green — it fails loudly and the artifact is unaffected — so it is recorded as an owed repair
+rather than treated as an acceptance blocker. Reproduction: `& .\scripts\Build-Release.ps1 -Phase
+Verify -OutputDirectory <fresh dir holding the zip and its .sha256>` → exit 1.
+
+**Before it,** `P15-T001` — *"Finalize `sure doctor` for
 Windows developer/user environment"* — is **accepted as `7720202` and repaired at `072ac9ee`**, over
 two worker commits (`c65604b`, `7720202`) from base `03f48f1`, and its four named gaps are
 recorded below rather than covered. The report now answers the four questions the module had been
@@ -33,7 +69,8 @@ NOT checked** — `rusqlite` is `bundled` and `ureq` brings `ring`, so both need
 that is not installed here. The disclosure is accurate, and every local gate stayed green on a crate
 no local gate compiles. Measured consequence: across `crates/` there are **56** arms gated
 `cfg(unix)` or `cfg(not(windows))` at HEAD and **50 of them are in `sure-core`**; this task added
-five of the 56 (`51` at `03f48f1`), and the other 45 pre-existed. Nothing was weakened to work
+five of the 56 (`51` at `03f48f1`), and the other 51 pre-existed — that is the `crates/`-wide figure;
+within `sure-core` alone the pre-existing count is 45. Nothing was weakened to work
 around the gap and nothing was installed. **Until a cross C compiler exists on this machine, CI is
 the only non-Windows gate `sure-core` and `sure-cli` have.**
 
@@ -2540,6 +2577,77 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T002` added
+
+- **`scripts/Build-Release.ps1`** packages `target/x86_64-pc-windows-msvc/release/sure.exe` into
+  `sure-<version>-<target>.zip` beside a `sha256sum`-format `.sha256`, extracts the archive into a fresh
+  scratch directory and runs the extracted binary from there, so "the artifact tests" means the bytes
+  that were checksummed are the bytes that were run. `-Phase Verify` re-checks an archive this script
+  already produced, without building.
+- **The artifact's shape was a decision, and it is written down in the document rather than left in the
+  script.** `docs/development/RELEASE_PROCESS.md:10-14` was the only statement in the repository of what
+  a release artifact is, and it named neither the archive format, the file naming nor what goes inside.
+  The new section records the name, the single top-level directory, the files within it and the
+  checksum's format — because `P15-T003` installs this archive and `P15-T004` references it.
+- **The checksum is over the artifact and deliberately not an entry in `SHA256SUMS.txt`.** That file is
+  a frozen manifest over a subset of the source tree, it names no `target/` path, and nothing verifies
+  it, so an artifact digest placed there would look like assurance and would not be.
+- **`RELEASE.txt` describes the procedure instead of certifying itself.** Its first draft said the script
+  "ran the extracted `sure.exe` from there before this file was signed off on", which was false about the
+  order — the file is written into the staging directory before anything is packaged, checksummed or run.
+  An archive whose verify step failed would still sit on disk containing that sentence.
+- **Packaging refuses to run unless the release gate reads `permitted`**, and the cost is named in the
+  script's header rather than hidden: a fresh clone cannot package until the acceptance test that writes
+  `target/tmp/release-gate.json` has run. That is a real cost against a real rule, and `P15-T011` inherits
+  the decision.
+- **Not byte-reproducible, and the document says so with the measurement behind it.** A ZIP embeds a
+  timestamp per entry, and every run over one unchanged checkout produced a digest no earlier run had.
+  It is written down so that "checksum" is not read as "rebuilds identically".
+
+## Validation of `P15-T002`
+
+The supervisor's own run, at `ae36719`, with nothing taken from the hand-back:
+
+- **Six gates from PowerShell** (`gates.ps1 -Label sup-p15t002`): all six exit 0,
+  `result-lines=79 passed=2623 failed=0 ignored=12`, 69 case-sensitive headers, bootstrap
+  `17 phases, 187 tasks`, taskctl `187 tasks`, the store byte-identical before and after
+  (`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`), worktree empty before and after.
+- **`cargo test --workspace --release --no-fail-fast`, run by the supervisor**, because release codegen
+  is not debug codegen and "the tests pass in debug" is not evidence about the binary in the archive:
+  **exit 0, 79 result lines, 2623 passed, 0 failed, 12 ignored** — the same counts as debug.
+- **The artifact recomputed, not read**: 4045010 bytes, SHA-256
+  `2fb0d05f8c903a159198e031dd9cb35d111172492c013632784a7d8b7761015f`. The checksum file is 114 bytes,
+  LF, no BOM, no CR; `sha256sum -c` over it exits 0 and prints `OK`.
+- **The archive extracted and run by the supervisor**, by absolute path: `running_from` named the
+  supervisor's own extraction directory rather than the worker's, `target_env` was `msvc`, exit 0,
+  stderr empty, and `doctor` created no store.
+- **Mutation 1 reproduced**: one byte appended to a copy of the archive → `-Phase Verify` exits 1,
+  prints `2fb0d05f…` against `3ace2834…`, and stops before extraction.
+- **Mutation 2b reproduced in full** — the false green described at the top of this file, exiting 0 while
+  naming `target\debug\sure.exe`. The worker's own mutation directories confirm the same shape: the
+  `mutation2` run has no human-form logs, because it died at the `running_from` comparison before that
+  line, and `mutation2b` has them.
+- **The timeline was checked rather than assumed.** `target/release/` did not exist before this task; its
+  directory timestamp is 19:21:11, 46 seconds after the base commit, and the first packaged archive is
+  19:27:20. Author and committer dates agree on all three commits and the reflog is linear, so the cold
+  release build really did happen inside the window the commit messages claim.
+- **`grep -rn "\[profile"` over every `Cargo.toml` is empty**, so nothing was added that would change
+  codegen for every later task.
+- **The release gate reads `decision: permitted` with `blocked_by: []`** — 20 cases, 13 release-blocking,
+  all observed.
+- **The security review's finding on this file was stale**: it flagged the bare-name invocation at
+  `scripts/Build-Release.ps1:672`, and the line at the final sha is `-Program $extractedExe`, an absolute
+  path. Not applicable, and re-confirmed at `ae36719` rather than assumed.
+
+**Gaps recorded rather than resolved**, every one of them named by the worker: `corpus.manifest_digest`
+is not content-verified (a gate-file mtime is compared instead, and the script labels it "timestamp, not
+content"); `.github/workflows/release-dry-run.yml`'s closing comment is now slightly stale;
+`cargo test --release` passes but is not part of the script; spaces and non-ASCII were exercised on the
+output path only; long paths are refused by name at 260 characters because `LongPathsEnabled` is `0` on
+this machine; packaging requires the gate, a cost `P15-T011` inherits; and the first gate run
+(`p15t002`) hit the known load-sensitive `runtime_start.rs:1184`. The `logs\` defect in `-Phase Verify`
+is the supervisor's to have found, and it is recorded as owed at the top of this file.
 
 ## What `P15-T001` added
 

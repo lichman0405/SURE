@@ -172,6 +172,24 @@ const INTENT_FIXTURES: &[&str] = &["missing-user-intent", "intent-mismatch"];
 /// about the computer rather than about the project.
 const EXECUTION_TRUST_FIXTURES: &[&str] = &["dynamic-not-authorized", "container-unavailable"];
 
+/// The `P14-T007` fixture: a critical check that produced no result.
+///
+/// A schedule and a set of runs over it, and **no project at all**. The case is
+/// *critical error/skipped/unknown cannot aggregate green*, and what the fixture
+/// grades is `aggregate_run`'s walk over the plan — the one place in the tree
+/// that decides a scheduled check nobody reported on is a row rather than an
+/// absence. Its `scenario.json` therefore declares no `entry_points`, for the
+/// same reason `container-unavailable` ships no manifest: what it is about is
+/// not a runnable project. `crates/sure-core/tests/finding_severity_rule.rs`
+/// reads that key to decide which release-blocking cases have a fixture app, and
+/// this case is not one of them.
+///
+/// This is a fifth thing a list in this file can mean — neither a language nor a
+/// recording nor an execution-trust pair, but an answer the product computes
+/// about its own plan — so it is a list of its own rather than another name in
+/// one of the others.
+const CHECKER_FAILURE_FIXTURES: &[&str] = &["check-crash"];
+
 /// The fixtures that ship with no case in `evaluation/acceptance-manifest.json`,
 /// and why each one does not have to.
 ///
@@ -328,6 +346,7 @@ fn every_fixture_this_task_implemented() -> impl Iterator<Item = &'static str> {
         .chain(CLAIM_FIXTURES)
         .chain(INTENT_FIXTURES)
         .chain(EXECUTION_TRUST_FIXTURES)
+        .chain(CHECKER_FAILURE_FIXTURES)
         .copied()
 }
 

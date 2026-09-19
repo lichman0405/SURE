@@ -141,11 +141,13 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
+use sure_core::aggregation::{NOTHING_CAME_BACK, RunReport, aggregate_run};
 use sure_core::candidate_scanner::CandidateScanner;
 use sure_core::claim_capture::{ClaimCaptureOutcome, capture_agent_claim};
 use sure_core::claim_checker::{
@@ -161,10 +163,11 @@ use sure_core::env_completeness::CompletenessReport;
 use sure_core::evidence::{
     AnchorSubject, ClaimAssessment, EvidenceClass, Freshness, StalenessReason,
 };
+use sure_core::execution::{ActionKind, ExecutionMode, ExecutionPermissions, Permission};
 use sure_core::external_service::ExternalServiceChecks;
 use sure_core::false_completion_aggregator::aggregate;
 use sure_core::harness_event::{IngestedEvent, ingest_event_str};
-use sure_core::ids::{ClaimId, EventId, FingerprintId};
+use sure_core::ids::{CheckId, ClaimId, EventId, FingerprintId};
 use sure_core::intent::{ProjectIntent, may_claim_full_fulfilment};
 use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_project};
 use sure_core::noop_heuristics::NoOpHeuristics;
@@ -176,9 +179,10 @@ use sure_core::recording_projection::{BuildTestKind, StandardProjection, project
 use sure_core::references::KeyStatus;
 use sure_core::route_consistency::RouteConsistency;
 use sure_core::scan::{ScanOptions, scan};
+use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::severity::Severity;
-use sure_core::status::{CheckStatus, NotCheckedReason};
+use sure_core::status::{CheckResult, CheckStatus, NotCheckedReason};
 use sure_core::store::Store;
 use sure_core::ui_action_bridge::UiActionBridge;
 use sure_core::vocabulary::Claim;
@@ -4222,5 +4226,764 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
     assert!(
         !scratch.project.exists(),
         "{id}: the configuration root this test wrote is still there after the test"
+    );
+}
+
+// --- checker failure: the fixture P14-T007 implemented --------------------
+//
+// A critical check that produced no result. `aggregate_run` walks the *schedule*
+// rather than the results, so a scheduled check nobody reported on becomes a row
+// and not an absence, and that function is the only place in the tree that
+// decides so — no fixture reached it before this one.
+//
+// The fixture is a schedule and six runs over it, and the acceptance it grades
+// is a **negative** claim. *Critical error/skipped/unknown cannot aggregate
+// green* is satisfied by three different broken things, and none of them looks
+// like one:
+//
+// - a product that never produced a result at all, which satisfies it vacuously
+//   because there is nothing left to be green;
+// - a product that answers `NotEnoughChecked` to everything, including a run in
+//   which the one critical check passed;
+// - a test asserting only `!severity.is_green()`, which is true of
+//   `NotEnoughChecked`, `NotReady`, `NeedsAttention` and of an empty plan.
+//
+// So nothing here is asserted as "not green". Every run declares the **exact**
+// severity it must reach, every row declares its state and its sentence, and
+// exactly one run — the control, the same schedule with a pass handed back
+// instead of nothing — must reach `Green`.
+
+/// The `P14-T007` fixture, named rather than discovered for the reason every
+/// list in this file is: a test that discovered it would pass on an empty
+/// directory.
+///
+/// The same id is named in `crates/sure-testkit/tests/fixture_apps.rs`, which
+/// grades the artefacts — the schema, the false-green rule, the README and the
+/// manifest row — and
+/// `every_checker_failure_fixture_these_assertions_name_is_a_fixture_this_repository_ships`
+/// is what says the two files are talking about the same directory.
+const CHECKER_FAILURE_FIXTURES: &[&str] = &["check-crash"];
+
+/// The `checker_failure` block of one fixture's scenario.
+fn checker_failure_block(id: &str) -> Value {
+    scenario_of(id)
+        .get("checker_failure")
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "fixtures/adversarial/{id}/scenario.json declares no checker_failure block, so \
+                 there is no declaration of what a check with no result answers"
+            )
+        })
+}
+
+/// A value the fixture declares by its wire name, read as the product's own type.
+///
+/// The vocabulary is not restated here: `Severity`, `EvidenceClass`,
+/// `CheckStatus`, `NotCheckedReason`, `ExecutionMode` and `ActionKind` are all
+/// `Deserialize` with their wire names, so a name the fixture gets wrong is a
+/// red test rather than a name this file would have had to write down a second
+/// time.
+///
+/// The one name this file *does* spell out is `CheckReason`, and it is spelled
+/// out at the call site rather than here: it is not a wire type — it is built by
+/// the proposers out of what a discovery read — so there is nothing to
+/// deserialise it from.
+fn from_wire<T: serde::de::DeserializeOwned>(id: &str, what: &str, value: &Value) -> T {
+    serde_json::from_value(value.clone()).unwrap_or_else(|error| {
+        panic!("{id}: the fixture declares {what} as {value}, and that is not one: {error}")
+    })
+}
+
+/// The execution mode and permission set one name in the fixture refers to.
+///
+/// Every permission is read and none is defaulted: a set that named only the
+/// permissions it grants would leave the rest to whatever `inspect_only()`
+/// happens to hold, which is a second place for the fixture's answer to live.
+fn declared_mode(id: &str, name: &str, declared: &Value) -> (ExecutionMode, ExecutionPermissions) {
+    let mode: ExecutionMode = from_wire(
+        id,
+        &format!("the execution mode `{name}`"),
+        declared.get("mode").unwrap_or_else(|| {
+            panic!("{id}: the mode `{name}` declares no execution mode of its own")
+        }),
+    );
+    let permissions = declared
+        .get("permissions")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("{id}: the mode `{name}` declares no permission set"));
+    assert_eq!(
+        permissions.len(),
+        Permission::ALL.len(),
+        "{id}: the mode `{name}` declares a permission set of {} names and there are {} \
+         permissions, so one of them is neither granted nor withheld and a test that read it \
+         would be guessing",
+        permissions.len(),
+        Permission::ALL.len()
+    );
+    let mut granted = ExecutionPermissions::inspect_only();
+    for permission in Permission::ALL {
+        let name = permission.as_str();
+        let allowed = permissions
+            .get(name)
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                panic!("{id}: the mode `{name}` does not say whether `{name}` is granted")
+            });
+        granted.set(*permission, allowed);
+    }
+    (mode, granted)
+}
+
+/// One declared check, as the proposal the plan builder is handed.
+fn declared_proposal(id: &str, check: &Value) -> CheckProposal {
+    let declared_id = check["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: a declared check has no id"));
+    let check_id = CheckId::parse(declared_id).unwrap_or_else(|error| {
+        panic!("{id}: `{declared_id}` is not a well-formed check id: {error}")
+    });
+    let severity: Severity = from_wire(id, "a check severity", &check["severity"]);
+    let evidence: EvidenceClass = from_wire(id, "an evidence class", &check["evidence_class"]);
+    let reason = match check["reason"].as_str() {
+        Some("project_wide") => CheckReason::ProjectWide,
+        other => panic!(
+            "{id}: a declared check gives `{other:?}` as its reason, and this file knows only \
+             `project_wide`: a check whose reason names a file, a component or a declared command \
+             would have to be a fact about a project, and this fixture ships none"
+        ),
+    };
+    let actions: Vec<ActionKind> = check["actions"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: a declared check takes no actions, and the plan builder refuses such a \
+                 check rather than scheduling it"
+            )
+        })
+        .iter()
+        .map(|action| from_wire(id, "an action", action))
+        .collect();
+    CheckProposal::new(
+        check_id,
+        check["title"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: a declared check has no title")),
+        severity,
+        check["critical"].as_bool().unwrap_or_else(|| {
+            panic!("{id}: a declared check does not say whether it is critical")
+        }),
+        evidence,
+        reason,
+        &actions,
+    )
+}
+
+/// One run's schedule, built by the product's own plan builder.
+///
+/// The plan is the same code a real run goes through, so what is graded below is
+/// the plan a person would actually get rather than one this file assembled. The
+/// builder's own `refused()` list is asserted empty before the plan is taken: a
+/// proposal it turned down would leave every run below describing a plan that
+/// never existed, and the check it named would be missing for a reason nothing
+/// else here would notice.
+fn declared_schedule(id: &str, block: &Value, run: &Value, what: &str) -> CheckSchedule {
+    let mode_name = run["mode"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id}: the `{what}` run declares no execution mode"));
+    let mode = block["schedule"]["modes"]
+        .get(mode_name)
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: the `{what}` run names the mode `{mode_name}` and the fixture declares no \
+                 such mode"
+            )
+        });
+    let (mode, permissions) = declared_mode(id, mode_name, mode);
+
+    let declared = block["schedule"]["checks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{id}: the fixture declares no checks at all"));
+    let wanted = declared_lines(
+        &run["schedule"],
+        &format!("the checks the `{what}` run schedules"),
+    );
+
+    let mut builder = PlanBuilder::new(mode, permissions);
+    for id_of_check in &wanted {
+        let check = declared
+            .iter()
+            .find(|check| check["id"].as_str() == Some(id_of_check.as_str()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{id}: the `{what}` run schedules `{id_of_check}` and the fixture declares no \
+                     such check"
+                )
+            });
+        builder
+            .propose(declared_proposal(id, check))
+            .unwrap_or_else(|refused| {
+                panic!(
+                    "{id}: the plan builder refused `{id_of_check}` for the `{what}` run: {refused}"
+                )
+            });
+    }
+    assert!(
+        builder.refused().is_empty(),
+        "{id}: the `{what}` run's plan holds refusals this test did not notice"
+    );
+    let schedule = builder.build();
+
+    let planned = sorted_ids(
+        schedule
+            .checks()
+            .iter()
+            .map(|check| check.proposal().id().as_str()),
+    );
+    let mut declared_ids = wanted;
+    declared_ids.sort();
+    assert_eq!(
+        planned, declared_ids,
+        "{id}: the plan the product built for the `{what}` run holds different checks from the \
+         ones the run declares"
+    );
+    schedule
+}
+
+/// The results one run declares it handed back, as the product's own values.
+///
+/// Three of the product's constructors and nothing else: a check that ran and
+/// passed, a checker that failed, and one recorded as not run with a reason.
+/// There is no branch here that builds a status by hand, so the fixture cannot
+/// declare a result the product has no constructor for.
+fn declared_results(
+    id: &str,
+    run: &Value,
+    schedule: &CheckSchedule,
+    fingerprint: &FingerprintId,
+    what: &str,
+) -> Vec<CheckResult> {
+    let declared = run["results"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{id}: the `{what}` run declares no results list at all"));
+    let mut results: Vec<CheckResult> = Vec::with_capacity(declared.len());
+    let mut seen: Vec<String> = Vec::new();
+    for result in declared {
+        let of = result["of"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: a declared result names no check"));
+        assert!(
+            !seen.iter().any(|already| already == of),
+            "{id}: the `{what}` run hands back two results for `{of}`, and `aggregate_run` refuses \
+             that rather than choosing between them"
+        );
+        seen.push(of.to_owned());
+        let check_id = CheckId::parse(of)
+            .unwrap_or_else(|error| panic!("{id}: a declared result names `{of}`: {error}"));
+        let scheduled = schedule.get(&check_id).unwrap_or_else(|| {
+            panic!(
+                "{id}: the `{what}` run hands back a result for `{of}` and its plan schedules no \
+                 such check, so the result would be reported as unscheduled and this run would not \
+                 be the one the fixture declares"
+            )
+        });
+        let proposal = scheduled.proposal();
+        let status: CheckStatus = from_wire(id, "a check status", &result["status"]);
+        let title = proposal.title().to_owned();
+        let severity = proposal.severity();
+        let critical = proposal.critical();
+        let built = match status {
+            CheckStatus::Pass => CheckResult::pass(
+                check_id,
+                title,
+                severity,
+                critical,
+                proposal.evidence_class(),
+                fingerprint.clone(),
+            ),
+            CheckStatus::Error => CheckResult::errored(
+                check_id,
+                title,
+                severity,
+                critical,
+                result["detail"].as_str().unwrap_or_else(|| {
+                    panic!(
+                        "{id}: a declared error result carries no detail, and the product has no \
+                         sentence of its own for a checker error"
+                    )
+                }),
+                fingerprint.clone(),
+            ),
+            CheckStatus::Skipped => CheckResult::not_run(
+                check_id,
+                title,
+                severity,
+                critical,
+                from_wire(id, "a not-checked reason", &result["reason"]),
+                fingerprint.clone(),
+            ),
+            other => panic!(
+                "{id}: the `{what}` run declares a result with status `{other:?}`, and this \
+                 fixture builds only the three the product has a constructor for"
+            ),
+        };
+        results.push(built);
+    }
+    results
+}
+
+/// The ids of a list of things, as strings and sorted.
+///
+/// Sorted rather than left in whatever order the product produced, because plan
+/// order is a property this fixture does not pin: what it is about is which
+/// rows are there and what each one says.
+fn sorted_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut ids: Vec<String> = ids.map(str::to_owned).collect();
+    ids.sort();
+    ids
+}
+
+/// Every critical row of a report, sorted by id.
+///
+/// A row is one object holding both halves — the result's own status and
+/// evidence class, and the classification, the blocking flag, the reason and the
+/// sentence the report shows for it — because all four are what the criterion is
+/// read as, and four parallel lists would let one of them be dropped without the
+/// others moving.
+fn rows_of(report: &RunReport) -> Value {
+    let mut rows: Vec<Value> = report
+        .critical()
+        .iter()
+        .map(|check| {
+            let result = report
+                .results()
+                .iter()
+                .find(|result| result.id == *check.id())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the report shows a critical row for `{}` and holds no result behind it",
+                        check.id()
+                    )
+                });
+            json!({
+                "id": check.id().as_str(),
+                "status": result.status.as_str(),
+                "evidence_class": result.evidence_class.as_str(),
+                "critical_state": check.state(),
+                "blocks": check.blocks(),
+                "not_checked_reason": check.reason(),
+                "detail": check.detail(),
+            })
+        })
+        .collect();
+    rows.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    Value::Array(rows)
+}
+
+/// Everything one run's report says, as the fixture declares it.
+fn report_answers(report: &RunReport, planned: &[String]) -> Value {
+    let aggregate = report.aggregate();
+    json!({
+        "check_ids": planned,
+        "row_count": report.results().len(),
+        "rows": rows_of(report),
+        "unreported": sorted_ids(report.unreported().iter().map(CheckId::as_str)),
+        "overruled": sorted_ids(report.overruled().iter().map(CheckId::as_str)),
+        "unscheduled": sorted_ids(report.unscheduled().iter().map(CheckId::as_str)),
+        "blocking": sorted_ids(report.blocking().map(|check| check.id().as_str())),
+        "critical_not_checked": sorted_ids(aggregate.coverage.critical_not_checked.iter().map(CheckId::as_str)),
+        "critical_errored": sorted_ids(aggregate.coverage.critical_errored.iter().map(CheckId::as_str)),
+        "critical_failed": sorted_ids(aggregate.coverage.critical_failed.iter().map(CheckId::as_str)),
+        "critical_out_of_scope": sorted_ids(aggregate.coverage.critical_out_of_scope.iter().map(CheckId::as_str)),
+        "critical_checked": aggregate.coverage.critical_checked,
+        "counts": aggregate.counts,
+        "checked": aggregate.counts.checked(),
+        "not_checked": aggregate.counts.not_checked(),
+        "aggregate_severity": aggregate.severity,
+        "aggregate_headline": aggregate.headline,
+        "report_is_green": report.is_green(),
+    })
+}
+
+/// What the corpus writes down about this fixture and what the fixture declares
+/// must be the same answers, in both directions.
+///
+/// Unlike the intent fixtures, this one declares a *run* per set of answers
+/// rather than one `expect` block, so the comparison is made per run. Both
+/// directions matter for the same reason: the forward one is the drift check on
+/// what a reader of `evaluation/` sees, and the reverse one is what makes
+/// deleting a `required_outcomes` entry a red test rather than a fixture that
+/// quietly stopped grading something.
+fn assert_the_checker_failure_outcomes_account_for_the_declared_runs(id: &str, block: &Value) {
+    let outcomes = scenario_of(id)["required_outcomes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{id}/scenario.json requires no outcomes at all"));
+    assert!(
+        !outcomes.is_empty(),
+        "{id}/scenario.json requires no outcomes at all"
+    );
+    let runs = block["runs"]
+        .as_object()
+        .unwrap_or_else(|| panic!("{id}/scenario.json declares no runs"));
+
+    for (kind, run) in runs {
+        let outcome = required_outcome(id, &outcomes, kind);
+        assert_answers_account_for(
+            id,
+            &answer_keys(outcome),
+            &run["expect"],
+            &format!("the fixture's declared `{kind}` run"),
+        );
+    }
+    for outcome in &outcomes {
+        let kind = outcome["kind"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}/scenario.json has a required outcome with no kind"));
+        assert!(
+            runs.contains_key(kind),
+            "{id}/scenario.json records a `{kind}` outcome and the fixture declares no such run, \
+             so the corpus entry asserts something no fixture says"
+        );
+    }
+}
+
+#[test]
+fn every_checker_failure_fixture_these_assertions_name_is_a_fixture_this_repository_ships() {
+    // The guard every list in this file has, for the same reason: a renamed
+    // directory would make every assertion below about a schedule nobody ships.
+    for id in CHECKER_FAILURE_FIXTURES {
+        let dir = fixture(id);
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+        let scenario = dir.join("scenario.json");
+        assert!(
+            scenario.is_file(),
+            "{id} has no scenario.json, so there is no declaration to read"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "{id} has no README.md, so nothing says in words what it traps"
+        );
+
+        let block = checker_failure_block(id);
+        assert!(
+            block.get("read_by").is_some(),
+            "{id}/scenario.json declares no read_by, so nothing says which route answers"
+        );
+        let checks = block["schedule"]["checks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            checks.len() >= 2,
+            "{id}/scenario.json declares {} checks, and the two kinds of `Skipped` it separates — \
+             one refused by the mode, one honestly out of scope — need two",
+            checks.len()
+        );
+        let runs = block["runs"].as_object().cloned().unwrap_or_default();
+        assert!(
+            runs.len() >= 2,
+            "{id}/scenario.json declares {} runs, and a fixture is worth nothing without a control",
+            runs.len()
+        );
+        assert!(
+            block["control"]["moved"]["what"].as_str().is_some(),
+            "{id}/scenario.json declares a control that does not say what moved"
+        );
+        assert!(
+            !block["control"]["why"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty(),
+            "{id}/scenario.json declares a control with no reason given"
+        );
+
+        // Exactly one run may declare itself green and it has to be the control.
+        // This is the acceptance stated as a property of the fixture rather than
+        // of the product: a directory in which two runs reach `Green`, or in
+        // which the control stopped reaching it, is a directory that has stopped
+        // measuring the claim it is named after.
+        let green: Vec<&str> = runs
+            .iter()
+            .filter(|(_, run)| run["expect"]["report_is_green"].as_bool() == Some(true))
+            .map(|(kind, _)| kind.as_str())
+            .collect();
+        assert_eq!(
+            green,
+            ["control"],
+            "{id}/scenario.json declares the runs that reach green as {green:?}, and the one run \
+             that may is the control: a fixture for *cannot aggregate green* in which nothing can \
+             reach green has not measured the refusal"
+        );
+        assert_eq!(
+            runs["control"]["expect"]["aggregate_severity"].as_str(),
+            Some("green"),
+            "{id}/scenario.json declares a control whose severity is not green"
+        );
+
+        // The tripwire, asserted here rather than left to the other file: this
+        // case is `release_blocking` and it is not a project, so the key that
+        // decides `fixture_has_an_app` in `finding_severity_rule.rs` must not be
+        // anywhere in the document.
+        let text = std::fs::read_to_string(&scenario)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", scenario.display()));
+        assert!(
+            !text.contains("\"entry_points\""),
+            "{id}/scenario.json declares entry points, and the case is a schedule rather than a \
+             project with runnable code: adding them would pull a release-blocking case into a list \
+             in finding_severity_rule.rs that it does not belong on"
+        );
+    }
+}
+
+#[test]
+fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
+    let id = "check-crash";
+    let block = checker_failure_block(id);
+    assert_the_checker_failure_outcomes_account_for_the_declared_runs(id, &block);
+    let runs = block["runs"].as_object().cloned().unwrap_or_default();
+
+    // One fingerprint for every run: `aggregate_run` refuses a result
+    // established against another project state, and a fixture whose runs
+    // disagreed about the state would be measuring the refusal rather than the
+    // aggregation.
+    let fingerprint =
+        FingerprintId::parse("fp_g7x2k4m9nq3t8wvb5cy1h").expect("a well-formed fingerprint id");
+
+    let mut answers: BTreeMap<String, Value> = BTreeMap::new();
+    let mut reports: BTreeMap<String, RunReport> = BTreeMap::new();
+    let mut schedules: BTreeMap<String, CheckSchedule> = BTreeMap::new();
+    for (kind, run) in &runs {
+        let schedule = declared_schedule(id, &block, run, kind);
+        let results = declared_results(id, run, &schedule, &fingerprint, kind);
+        let report = aggregate_run(&schedule, &results, &fingerprint).unwrap_or_else(|refused| {
+            panic!("{id}: aggregating the `{kind}` run was refused rather than answered: {refused}")
+        });
+        let planned = sorted_ids(
+            schedule
+                .checks()
+                .iter()
+                .map(|check| check.proposal().id().as_str()),
+        );
+        answers.insert(kind.clone(), report_answers(&report, &planned));
+        reports.insert(kind.clone(), report);
+        schedules.insert(kind.clone(), schedule);
+    }
+
+    // Every declared answer is the product's answer, key for key and in both
+    // directions. The reverse direction is `answer_keys` /
+    // `assert_answers_account_for` above; this is the forward one.
+    for (kind, run) in &runs {
+        let declared = run["expect"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run declares no expected answers"));
+        let reported = answers[kind]
+            .as_object()
+            .unwrap_or_else(|| panic!("{id}: the `{kind}` run produced no answers"));
+        let declared_keys: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
+        let reported_keys: BTreeSet<&str> = reported.keys().map(String::as_str).collect();
+        assert_eq!(
+            reported_keys, declared_keys,
+            "{id}: the `{kind}` run's answers and the fixture's declaration are about different \
+             things, so one of them has stopped being graded"
+        );
+        for (key, expected) in declared {
+            assert_eq!(
+                reported[key], *expected,
+                "{id}: the `{kind}` run's `{key}` is not the one the fixture declares, so the case \
+                 is not being graded as written"
+            );
+        }
+    }
+
+    // The row must be present. A run whose plan lost its check is not a run whose
+    // answer nobody needed: with nothing scheduled there is nothing to report, so
+    // every answer below would be vacuously non-green and the fixture would still
+    // pass a criterion it had stopped measuring. This is the assertion that
+    // removing the check from the declared schedule reddens, and the reason the
+    // declared ids are read from `expect` rather than from the run's own
+    // `schedule` list, which the same edit would empty.
+    for (kind, run) in &runs {
+        let planned = answers[kind]["check_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let declared = declared_lines(
+            &run["expect"]["check_ids"],
+            &format!("the checks the `{kind}` run must have rows for"),
+        );
+        assert!(
+            !declared.is_empty(),
+            "{id}: the `{kind}` run declares no checks, and a run with nothing scheduled is a run \
+             this fixture cannot say anything about"
+        );
+        assert_eq!(
+            planned.len(),
+            declared.len(),
+            "{id}: the `{kind}` run planned {} checks and declares {}",
+            planned.len(),
+            declared.len()
+        );
+        for wanted in &declared {
+            assert!(
+                planned
+                    .iter()
+                    .any(|planned| planned.as_str() == Some(wanted.as_str())),
+                "{id}: the `{kind}` run's plan holds {planned:?} and not `{wanted}`, so the check \
+                 the case is about is not a row in the report and nothing below is a measurement \
+                 of it"
+            );
+        }
+    }
+
+    // The exact severity, and the control. `!severity.is_green()` would be
+    // satisfied by every one of the runs above and by an empty plan — and the
+    // control is the only run that fails a product which answers
+    // `not_enough_checked` to everything.
+    assert!(
+        reports["control"].is_green(),
+        "{id}: the control does not reach green, and a fixture for *cannot aggregate green* whose \
+         control cannot reach green has not measured the refusal: {}",
+        reports["control"].aggregate().headline
+    );
+    assert_eq!(
+        reports["control"].aggregate().severity.as_str(),
+        "green",
+        "{id}: the control is not green"
+    );
+    let green: Vec<&String> = reports
+        .iter()
+        .filter(|(_, report)| report.is_green())
+        .map(|(kind, _)| kind)
+        .collect();
+    assert_eq!(
+        green,
+        ["control"],
+        "{id}: the runs that reach green are {green:?}, and the only one that may is the control"
+    );
+
+    // The pair that must differ, in the product's own answers and in the
+    // fixture's own declaration. A fixture whose control declares the same answer
+    // as the run it is a control for measures nothing, whether or not the product
+    // agrees with it, so both halves are asserted.
+    assert_ne!(
+        reports["control"].aggregate().severity,
+        reports["checker_failure_unknown"].aggregate().severity,
+        "{id}: the same schedule with nothing reported and with a pass reported reached the same \
+         severity, so the two halves of this fixture are the same measurement"
+    );
+    assert_ne!(
+        runs["control"]["expect"]["aggregate_severity"],
+        runs["checker_failure_unknown"]["expect"]["aggregate_severity"],
+        "{id}: the control declares the same severity as the run it is a control for"
+    );
+    assert_ne!(
+        runs["control"]["expect"]["report_is_green"],
+        runs["checker_failure_unknown"]["expect"]["report_is_green"],
+        "{id}: the control declares the same greenness as the run it is a control for"
+    );
+
+    // One thing moved. The control's plan is the fixture's own plan — the same
+    // checks, the same mode, the same decisions — and the results are the whole
+    // of the difference, which is what makes the pair a control rather than two
+    // runs that happen to disagree.
+    assert_eq!(
+        schedules["control"], schedules["checker_failure_unknown"],
+        "{id}: the control's plan is not the plan of the run it is a control for, so what moved is \
+         not only what came back"
+    );
+
+    // The sentences, held against the product's own constant and the
+    // vocabulary's own method rather than against the copies in the fixture. A
+    // rewrite of either sentence in the product reddens here even if the fixture
+    // is rewritten to match, which is the one change this pair exists to notice.
+    let unknown_detail = answers["checker_failure_unknown"]["rows"][0]["detail"].clone();
+    assert_eq!(
+        unknown_detail, NOTHING_CAME_BACK,
+        "{id}: the sentence a check that reported nothing carries is not the one \
+         `sure_core::aggregation` chose for it"
+    );
+    assert_eq!(
+        unknown_detail, runs["checker_failure_unknown"]["expect"]["rows"][0]["detail"],
+        "{id}: the fixture declares a different sentence from the one the product produced"
+    );
+    let skipped_detail = answers["checker_failure_skipped"]["rows"][0]["detail"].clone();
+    assert_eq!(
+        skipped_detail,
+        NotCheckedReason::ExecutionNotAuthorized.plain_explanation(),
+        "{id}: the sentence a refused check carries is not the vocabulary's own sentence for the \
+         reason the plan gave"
+    );
+    assert_eq!(
+        answers["checker_failure_skipped"]["rows"][0]["not_checked_reason"],
+        json!(NotCheckedReason::ExecutionNotAuthorized),
+        "{id}: a check the mode refused is not carrying the reason the plan gave for it"
+    );
+
+    // The measured ordering, asserted as the pair it is: the same out-of-scope
+    // skip alone is `not_enough_checked`, because nothing ran, and beside a pass
+    // it is `needs_attention`. Both differ from each other and from the control,
+    // so a build that collapsed either branch reddens here.
+    assert_eq!(
+        reports["scope_limit_alone"].aggregate().severity.as_str(),
+        "not_enough_checked",
+        "{id}: a lone out-of-scope critical skip no longer answers the empty-plan severity, so \
+         either the branch order moved or the counts did"
+    );
+    assert_eq!(
+        reports["scope_limit_beside_a_pass"]
+            .aggregate()
+            .severity
+            .as_str(),
+        "needs_attention",
+        "{id}: the same skip beside a pass no longer answers `needs_attention`"
+    );
+    assert_ne!(
+        reports["scope_limit_alone"].aggregate().severity,
+        reports["scope_limit_beside_a_pass"].aggregate().severity,
+        "{id}: one pass moved and the severity did not, so nothing here is a measurement of the \
+         branch this pair exists for"
+    );
+    assert!(
+        reports["scope_limit_beside_a_pass"]
+            .aggregate()
+            .counts
+            .not_checked()
+            > 0,
+        "{id}: the run with an unchecked critical check reports nothing unchecked, so it has \
+         stopped saying the project was not fully checked"
+    );
+
+    // An empty plan, which is what removing the check from the schedule leaves.
+    // It is asserted here rather than only described: it is not green — which is
+    // exactly why `!is_green()` is not the assertion this fixture makes — and it
+    // is not the answer any run above reaches, so the row assertion is doing work
+    // and not restating a vacuum.
+    let empty = PlanBuilder::new(
+        ExecutionMode::InspectOnly,
+        ExecutionPermissions::inspect_only(),
+    )
+    .build();
+    let nothing = aggregate_run(&empty, &[], &fingerprint).expect("an empty plan aggregates");
+    assert!(
+        nothing.results().is_empty() && nothing.unreported().is_empty(),
+        "{id}: an empty plan produced rows, so the fixture's row assertions would not distinguish \
+         it from a run that planned something"
+    );
+    assert!(
+        !nothing.is_green(),
+        "{id}: an empty plan is green, and this whole fixture is built on it not being"
+    );
+    assert_eq!(
+        nothing.aggregate().severity.as_str(),
+        "not_enough_checked",
+        "{id}: an empty plan no longer answers the same severity as the fixture's own run, so \
+         non-greenness alone would not tell the two apart even if it were the assertion"
+    );
+    assert_ne!(
+        report_answers(&nothing, &[]),
+        answers["checker_failure_unknown"],
+        "{id}: an empty plan answers what the fixture's own run answers, so the row assertions \
+         above are satisfied by a run that planned nothing"
     );
 }

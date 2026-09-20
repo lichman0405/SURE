@@ -849,14 +849,112 @@ and add it to `SCANNED_FOR_PHRASING` in the same change. The same paragraph
 appears in `docs/development/INSTALL_WINGET.md`, where it correctly says **may**,
 so the document and the manifest it describes currently disagree.
 
-### The other platforms
+### macOS: no Developer ID, no notarization and no staple
 
-Apple Developer ID signing/notarization is likewise an optional external
-credential-dependent enhancement for macOS artifacts. `scripts/Build-Release.sh`
-already reads the macOS artifact's signature with `codesign -d` and reports it,
-which is the standard the Windows half above was brought up to; **notarization
-is not read by that step at all**, because nothing in the build notarizes, and
-that half is `P15-T013`'s question rather than this one's.
+**This is the authoritative statement of the macOS half.** The Windows half is
+`### Windows: the state is read, not asserted` above, and the two are different
+facts: a signature and a notarization are produced by different tools, read by
+different tools, and this project has neither. `scripts/Build-Release.sh` reads
+the macOS artifact's signature with `codesign -d` and reports it, which is the
+standard the Windows half above was brought up to; the notarization half is
+what `P15-T013` was handed and what this section answers.
+
+**What is missing.** Three things, and none of them is a property of the bytes
+in either archive:
+
+* a **Developer ID Application certificate**, issued by Apple to an Apple
+  Developer Program member, which is what `codesign --sign` applies;
+* a **notarization credential** — an App Store Connect API key, or an Apple ID
+  with an app-specific password — which is what `xcrun notarytool submit` uses;
+* the **Apple Developer Program membership** both of those belong to, which is
+  an individual or an organisation with an Apple account and a paid enrolment.
+
+**Every other credential this project needs is configured somewhere; this one
+cannot be, because there is no step that would use it.** That is the whole of
+what "unavailable" means here, and it is stated as a property of the code
+rather than of intent: no file of the build path — `scripts/Build-Release.sh`,
+`scripts/Build-Release.ps1`, `scripts/Assemble-Release.sh` and the three files
+in `.github/workflows/` — names a notarization tool or an Apple credential, and
+`crates/sure-testkit/tests/notarization_status.rs` is the check that fails the
+moment one appears. It is stated as a property rather than as a count for the
+reason `.github/workflows/release.yml`'s own header gives about `secrets.`.
+
+**Who would have to provide it.** An Apple Developer Program member with an
+Apple account — a person or an organisation, and the enrolment is paid. Neither
+the membership nor the certificate can be produced by anything in this
+repository, substituted for, or scheduled: `MASTER_PROMPT.md` names Apple
+signing/notarization credentials in its own list of genuine external blockers,
+and this section is the macOS half of that list. Until a member provides them,
+the honest report is this one.
+
+**What the consequence is, for a person who downloads one.** Both macOS
+archives are unsigned, unnotarized and unstapled, and
+a person who downloads one meets Gatekeeper rather than an Apple-vouched
+artifact. A browser download carries the `com.apple.quarantine` attribute;
+Gatekeeper consults the signature and the notarization ticket, and an artifact
+that has neither is one Apple's software has to make a decision about on that
+person's machine. **Nothing in this repository asks anyone to turn Gatekeeper
+off**, and the paragraph inside the archive says the same thing to the person
+holding it.
+
+**Signing is not notarization, and the one reading this project takes is a
+signing reading.** `codesign -d --verbose=2` answers a question about a
+signature: the field it prints is `Authority=`, and `Authority=` is what a
+certificate produces. **It is not a notarization field**, and there is no
+notarization field in a Mach-O for it to print — what notarization produces is
+a ticket Apple holds and a staple that `xcrun stapler` attaches, neither of
+which is a line `codesign` can be asked for. **Notarization is not read by that
+step at all**, and it could not be: the notarization sentence rests on there
+being no notarization step in this build — which is what the rule above
+measures — and **not** on the `codesign` reading. An archive this project has
+never notarized has no staple, which is why the third clause in this section's
+title is as load-bearing as the first two: *unnotarized* and *unstapled* are
+one state reported twice.
+
+**What has been observed, and what has not.** Neither macOS archive has been
+downloaded by a person and launched on a Mac, so what Gatekeeper does with
+either is unobserved here and stays unobserved. The *Signature* step's
+`codesign` reading is a reading of the binary's signature on a CI runner, and a
+runner executing a binary out of its own scratch directory is not a launch
+through Gatekeeper. `### What the macOS Intel archive is, concretely` above
+records the same boundary for the Intel artifact.
+
+### What must not be claimed about macOS
+
+The acceptance is *"Do not fake signing/notarization."* The macOS half rules
+out, specifically and not as a general principle:
+
+* **A signature described as a notarization.** *The archive is notarized*,
+  *notarized by Apple*, *Apple has vetted it*, *notarization succeeded*. There
+  is no notarization step, no credential for one and no ticket, so a sentence
+  saying one happened describes a step that does not exist — and it is the
+  specific lie this half of the acceptance is about.
+* **The artifact presented as stapled.** *The ticket is stapled*, *the staple
+  validates*, *the ticket is attached*. A staple is what `xcrun stapler`
+  attaches to something Apple has already notarized, so a stapled archive is an
+  archive a notarization has already happened to. Neither is true here.
+* **A promised Gatekeeper outcome.** *Opens without a warning*, *passes
+  Gatekeeper*, *Gatekeeper will allow it*, *no Gatekeeper prompt*. What a
+  downloader meets is a fact about their machine, their browser, their
+  administrator and a check Apple's software performs, and this project can see
+  none of those.
+* **The absence presented as a neutral fact.** *Notarization is not required*,
+  *an unnotarized build is normal*, *notarization does not affect anything*. A
+  person who runs the program may meet a refusal or a prompt, and the sentence
+  has to leave them expecting that rather than surprised by it.
+
+`crates/sure-testkit/tests/notarization_status.rs` holds the bullets above as
+**four** families of strings it fails on, over the four files that make the
+claim to a reader — `scripts/Build-Release.sh`, `docs/development/MACOS.md`,
+`.github/workflows/release.yml` and `.github/workflows/release-dry-run.yml`.
+This section is exempt from its phrase rules for the same reason its Windows
+counterpart is: a file that lists these phrasings in order to forbid them
+cannot be scanned for them by substring. What guards it instead is a presence
+rule, and the same limit applies as above — a list of strings cannot contain
+the phrasing nobody thought of, and no test can prove what a person's Mac will
+do with a download.
+
+### The other platforms
 
 For Linux there is no field to sign into and none to read: a signature over an
 ELF is a detached file beside it, never a field inside the image. So

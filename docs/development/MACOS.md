@@ -16,3 +16,5 @@ macOS-specific concerns include:
 - plugin launchers must not assume Homebrew locations.
 
 macOS signing/notarization is an optional credential-dependent release enhancement, not a v0.1 correctness claim.
+
+**It is also not held, and that is a different sentence.** No Apple Developer ID certificate and no notarization credential are configured for this project, so neither macOS archive is signed, notarized or stapled, and a person who downloads one meets Gatekeeper rather than an Apple-vouched artifact. Nothing in this repository has observed what Gatekeeper does with either archive on a Mac, and nothing in it asks anyone to turn Gatekeeper off. `docs/development/RELEASE_PROCESS.md`, `### macOS: no Developer ID, no notarization and no staple`, is the authoritative statement of what is missing, who would have to provide it and what the consequence is; its own `### What must not be claimed about macOS` lists the phrasings that section forbids.

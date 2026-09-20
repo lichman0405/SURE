@@ -3,6 +3,66 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T005` is accepted at `83427649132c9622bd48b20ea9864f08b4a73953`, and the aarch64 macOS artifact
+exists.** The task is *"Build macOS Apple Silicon release artifact"*, whose acceptance is *"aarch64 macOS
+artifact builds/tests and checksum generated in CI/release environment"*: `scripts/Build-Release.sh`
+packages the `aarch64-apple-darwin` build into a `tar.gz` beside a `sha256sum`-format `.sha256`,
+extracts it to a fresh scratch directory and **runs the extracted binary from there**, so the property
+it establishes is the one the Windows script already states — the bytes that are checksummed are the
+bytes that were run. The architecture is read from the binary's own first eight bytes and required to
+be `cffaedfe0c000001` (64-bit Mach-O, little-endian, `CPU_TYPE_ARM64`) rather than believed from the
+runner's label, and `/usr/bin/file` is asked the same question as a second, independent reader. **CI
+run `35512934506` — `release-dry-run`, dispatched at this commit — is SUCCESS on all four jobs**, and
+its job printed `arch Mach-O 64-bit, arm64, read from the header bytes cffaedfe0c000001` with `file`
+agreeing `Mach-O 64-bit executable arm64`, over an archive of 4065656 bytes whose sha256
+`3308bb2c…` was computed by `sha256sum` and re-read from disk; it uploaded `sure-aarch64-apple-darwin`,
+4054412 bytes. **Two readers agreeing on the shipped bytes is what makes this the acceptance's
+measurement rather than a reading of the file name** — and it could not have been produced on this
+host at all, where there is no aarch64 std and no aarch64 C toolchain (`rustc` E0463; `cc-rs` `failed
+to find tool "cc"`), which is exactly why the task names the CI environment.
+
+**Two red runs produced this task, and the supervisor read six defects out of their logs.** `ci`
+`35510588761` was red at `shellcheck-secondary`: at `Build-Release.sh:881` an unquoted heredoc
+delimiter made backticks in the body command substitution, so the `RELEASE.txt` that ships *inside*
+the release archive lost the twelve characters of `` `Signature=adhoc` `` — and the substitution ran;
+at `:965` backticks inside a double-quoted `fail` string actually executed `sha256sum -c` and
+swallowed the failure message the check existed to print. Neither was visible to any local gate: the
+shell never runs on this host, and `sh -n` parses a heredoc body as text. `release-dry-run`
+`35510588722` was red twice over — the macOS job, after every substantive step had already passed, on
+a `running from` comparison that tested the extraction **directory** against a field
+`crates/sure-core/src/doctor.rs:633` fills from `std::env::current_exe()`, the **file**, so a correct
+artifact could only ever fail; and `validate (ubuntu-latest)`, which was **pre-existing and not this
+task's**, proved by the commit's own hunk arithmetic — the validate job's steps are context lines (old
+6-18 = new 19-31) — and fixed by giving it the AppArmor step `ci.yml:36-49` already documents. **The
+fifth defect is the one that matters most, because it is the failure this project exists to catch:**
+commit `c522699` changed three manifested files and did not regenerate `SHA256SUMS.txt`, and
+**nothing complained** — six gates exit 0, `cargo test` green, both workflows ran. That is recorded on
+`P15-T020`, which exists for it.
+
+**What this acceptance is not claiming, recorded so a later reader does not have to rediscover it.**
+(a) `ci` `35512888372` on this same commit is **red on `rust (ubuntu-latest)` alone** —
+`analysis_provider::tests::claude_cli_analyzer_runs_program_and_returns_stdout` panicking at
+`crates/sure-core/src/analysis_provider/mod.rs:591:44` with `Text file busy (os error 26)`. That is
+the ETXTBSY class `P15-T019` owns, at **a site not previously on record for it**; the commit changed no
+Rust and the same job was green on `c522699`, so it is the flake and not this task, and it is recorded
+on `P15-T019` rather than repaired, because repairing it is `P15-T019`. (b) A **fresh checkout at this
+commit reads eight entries of `SHA256SUMS.txt` as stale** while this worktree reads zero, because
+`.gitattributes` sets `*.ps1 text eol=crlf` and the manifest records LF digests — measured in both
+directions, and recorded on `P15-T020` with its mechanism, since a freshness check that does not name
+its reader's normalisation would raise false alarms on every clone. (c) The commit message's *"195
+entries, 195 unchanged, 0 stale"* is true of the instrument it names and silent about (b). (d) The
+message names *"shellcheck 0.9.0"*; the CI log reports the two SC codes but no version, so that version
+is an inference from the runner image rather than a reading. (e) Nothing here was run on a Mac by a
+human and no artifact was downloaded to this machine. The gates were run twice and **both readings are
+kept**: label `p15t005b-accept2` is six exits 0, `passed=2676 failed=0 ignored=12`, worktree `[]` at
+both ends; label `p15t005b-accept`, on the same commit, failed one test at
+`crates/sure-core/tests/runtime_start.rs:1184:5` — the known load-sensitive cluster — because other
+work was running concurrently. **§14 hands the next dispatch to `P15-T006`**, *"Build macOS Intel
+artifact or document support policy"*, the lowest-numbered READY task and the same script's other
+architecture.
+
+This task's own account is in "What `P15-T005` added" and "Validation of `P15-T005`" below.
+
 **CI caught what the acceptance could not: `P15-T004`'s `ManifestVersion` is now `1.4.0`, not the
 `1.12.0` it was delivered and accepted with.** CI run `35507591835` on `171dc21` — the acceptance
 commit — is **FAILURE on `rust (windows-latest)` alone**, the other four jobs green, and every failure
@@ -2876,6 +2936,107 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T005` added
+
+`scripts/Build-Release.sh` is the macOS sibling of the Windows release script, and it is the whole of
+this task: 1307 lines as first committed in `c522699`, 1341 after the corrections in `8342764`. It
+builds `aarch64-apple-darwin`, packages it into a `tar.gz` beside a `sha256sum`-format `.sha256`,
+extracts the archive into a fresh scratch directory and **runs the extracted binary from there**, so
+the property it establishes is the one the Windows script already states: the bytes that are
+checksummed are the bytes that were run. Two phases make that reusable rather than one-shot —
+`--phase all` builds, packages, checksums and checks; `--phase verify` re-checks an archive without
+building, so a downloaded artifact can be judged on a machine with no Rust toolchain.
+
+**The architecture is read from the binary's own bytes, not from the runner's label.** The first eight
+bytes are required to be `cffaedfe0c000001` — 64-bit Mach-O, little-endian, `CPU_TYPE_ARM64` — and
+`/usr/bin/file` is asked the same question as a second, independent reader. That is the task's
+acceptance clause *"aarch64 macOS artifact"* turned into a measurement: a build that produced an x86_64
+binary under an arm64 name would fail here rather than ship, which is the class of false claim this
+project exists to refuse. The RELEASE.txt that ships inside the archive is rendered from the archive's
+own bytes and the build environment, so a reader who unpacks it without a toolchain can see what it is.
+
+`.github/workflows/release-dry-run.yml` gained the `package-macos` job (8 steps) and, in the same
+commit, the pre-existing `validate` job gained the AppArmor step that `ci.yml:36-49` already documents
+— `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, conditioned on ubuntu — plus
+`--no-fail-fast`. The comment there records the decision: the product never passes `--no-sandbox`, so
+what has to change is the **runner**, not the rule.
+
+## Validation of `P15-T005`
+
+**This task's acceptance sentence was met by CI and not by anything runnable on this host.** CI run
+`35512934506`, dispatched at `8342764`, is SUCCESS on all four jobs. The macOS job printed
+`arch Mach-O 64-bit, arm64, read from the header bytes cffaedfe0c000001` with `file` agreeing
+`Mach-O 64-bit executable arm64`, over `sure-0.0.0-bootstrap-aarch64-apple-darwin.tar.gz`, 4065656
+bytes, sha256 `3308bb2c12aee7008ed7734565775e96cc092a6c46c1b2efaea87e6d2c820c23`, *"computed by
+sha256sum"* and re-read from disk, layout *"4 entries, exactly the promised set"*; it uploaded
+`sure-aarch64-apple-darwin`, 4054412 bytes. There is no aarch64 std and no aarch64 C toolchain on this
+machine (`rustc` E0463; `cc-rs` `failed to find tool "cc"`), so a local green was never available and
+the acceptance is read from the runner's own log. **Nothing was downloaded to this machine and no
+artifact was run by a human.**
+
+Two red runs preceded it, and reading their logs is where the work was. `ci` `35510588761` was red at
+`shellcheck-secondary`, finding two real defects rather than lint noise: at `Build-Release.sh:881` an
+unquoted heredoc delimiter made the body's backticks command substitution, so the `RELEASE.txt`
+shipped inside the archive lost the twelve characters of `` `Signature=adhoc` `` and the substitution
+executed; at `:965` backticks inside a double-quoted `fail` string executed `sha256sum -c` and ate the
+message. **Neither was reachable by any local gate** — the shell never runs on this host, and `sh -n`
+parses a heredoc body as text. `release-dry-run` `35510588722` was red at the macOS job on a `running
+from` comparison, and at `validate (ubuntu-latest)`, which was pre-existing: the commit's own hunk
+arithmetic shows the validate job's steps as context lines (old 6-18 = new 19-31).
+
+Four things were re-derived rather than read, because a hand-back is model output and the acceptance is
+the supervisor's.
+
+- **The `running from` comparison was driven with planted inputs.** Both blocks were lifted out of the
+  **shipped** file by `sed` and run over five cases: the old block given the runner's own two paths
+  reproduces `35510588722`'s failure exactly; the new block passes it, still fails a `sure` from a
+  different directory, still fails a sibling named `sure.old` in the same directory, and passes a
+  `..`-spelled path to the same file. The defect was that `crates/sure-core/src/doctor.rs:633` fills
+  `running_from` from `std::env::current_exe()` — the *file*, documented at `:484` as *"Where the
+  running executable is"* — while the script compared it against the extraction *directory*, so a
+  correct artifact could only ever fail. The fix folds both paths through `cd -P`/`pwd -P` before
+  comparing, which is why `..`-spellings pass and siblings still do not.
+- **The shipped heredoc was rendered by hand**, printing `` `Signature=adhoc` that is what it is. ``
+  with the `$(date -u …)`, `$(uname -s)` and `$(uname -m)` expansions intact — the exact line that had
+  been losing twelve characters.
+- **The corrected `fail` message was rendered** with stderr empty and no `sha256sum` process spawned,
+  which is what proves the message is now a message.
+- **A backtick sweep of the whole script** found exactly three non-comment backtick lines, all three
+  escaped.
+
+**The most serious defect in this task produced no red anywhere.** `c522699` changed three manifested
+files — `.github/workflows/release-dry-run.yml`, `docs/development/GITHUB_WORKFLOW.md`,
+`docs/development/RELEASE_PROCESS.md` — and did not regenerate `SHA256SUMS.txt`. Six gates exited 0,
+`cargo test` was green, and both workflows ran. A reader checking the manifest against that tree would
+have been told three files were unchanged when they were not, which is a false green of exactly the
+kind this repository is built to catch, and it was caught by the supervisor reading the manifest rather
+than by any check. `8342764` regenerates it: exactly three digests changed, the path set identical at
+195 entries, 19199 bytes, no trailing newline, each new digest re-hashed against the file it names.
+
+**A second, longer-standing crack was found while measuring that one and is recorded rather than
+fixed.** A fresh checkout at `8342764` reads **eight** entries of `SHA256SUMS.txt` as stale while this
+worktree reads zero, because `.gitattributes` has `* text=auto eol=lf` with `*.ps1 text eol=crlf`: a
+fresh checkout writes CRLF (measured CR counts 18/13/27 in fresh copies) while the manifest records the
+LF digests this long-lived worktree holds (CR 0). Measured in both directions, and the same class as
+the index-versus-checkout byte-length difference `P15-T020`'s acceptance already records. It is on
+`P15-T020` with its mechanism, and with the warning that a freshness check has to name its reader's
+normalisation or it will raise false alarms on every clone — which would be worse than the silence it
+replaces.
+
+The gates were run twice at `8342764` and **both readings are kept**. Label `p15t005b-accept2`, on an
+idle machine: `fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`,
+`passed=2676 failed=0 ignored=12 not-ok=0`, 71 headers, `state OK: 191 tasks`, store byte-identical,
+worktree `[]` at both ends. Label `p15t005b-accept`, on the same commit: `test exit 101`, one failure
+at `crates/sure-core/tests/runtime_start.rs:1184:5` — the known load-sensitive cluster — because other
+work was running concurrently. Reporting only the second run would have been the easier record and the
+less useful one.
+
+Two claims in the worker's hand-back are narrower than the commit message that carried them, and both
+are noted on `P15-T005`'s `notes` rather than left for a reader to trip over. *"195 entries, 195
+unchanged, 0 stale, 0 missing"* is true of this worktree and silent about a fresh clone. And
+*"shellcheck 0.9.0"* names a version the CI log does not contain — the log reports the two SC codes and
+no version — so that number is an inference from the runner image, not a reading.
 
 ## What `P15-T004` added
 

@@ -1,7 +1,15 @@
 # Autonomous handoff
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
+
+**`P15-T019` is accepted at `bdbc361`, and the program a test executes is now published by a rename rather than written at the path it is run from.** The task is *"Make the program a test executes one that nothing is still writing"*, and it was **re-opened before it was dispatched**: criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the tree already held one that command cannot reach — `crates/sure-core/src/analysis_provider/mod.rs:591` writes its program with `fs::write`, copies nothing, and lives in a `#[cfg(test)]` module inside `src/`. Dispatched against the original wording this task would have closed having left a known instance of the class unfixed, and reported the class fixed. `6ca551c` widened the criterion from the mechanism to the property and added the reverse direction to criterion 2. The answer to the widened criterion is **five program sites, and exactly one of them the named search could not find**.
+
+The four it can find are `runtime_start.rs:397`, `service_supervisor.rs:180`, `process_runner.rs:691` and `winget_manifest.rs:1078` — the last a `Links/sure.exe` alias the launcher is then asked to start, and one this record had never named at all. The fifth is the `fs::write` above. The record before this task named two fixtures and said the failure rate was unknown; both are corrected in place now, and the rate is no longer unknown — of the 60 most recent `ci` runs on this branch the ubuntu test step executed **59** times, **47** with zero failures and **11 on `Text file busy (os error 26)` and nothing else**, about one in five.
+
+**The mechanism is the kernel's rule, and the fix addresses one direction of it.** `ETXTBSY` is raised at `execve` when the inode being executed is open for writing by **any** process; `fork` duplicates the whole descriptor table into the child, which is how one thread's copy descriptor comes to be held by another thread's about-to-`execve` child; and `O_CLOEXEC` closes that descriptor at the child's own `execve`, the instant *after* the window that matters. `write_program` and `copy_program` close that direction by ordering — the executed path is only ever published by a `rename` after the descriptor on the temporary name is dropped. They do **not** close the reverse direction, `open(O_WRONLY|O_CREAT|O_TRUNC)` refused because the inode is at that moment the text of a running process, which is the direction `:591` measured; that one is closed by the destination being unique per caller, which is why `echoing_program`, `container.rs` and `approval.rs` were each given a directory of their own.
+
+**Nothing about `ETXTBSY` was reproduced, and the number criterion 6 asks for is 0.** Windows raises no `ETXTBSY`, so the platform that fails is one this loop cannot run, and every statement here about the eleven CI occurrences is a reading of their logs. Criterion 6 asks how many ubuntu executions of *this change* came back with zero failures; the change was unpushed while the criterion was answered, so the answer is **zero** and it is recorded as zero. What was measured instead is the rate the change inherits. The one collision actually produced on this machine is `approval.rs`'s fixed store directory under two concurrent `cargo test` processes — the same shape, a different failure, no errno involved — and it is recorded as exactly that rather than as evidence about `ETXTBSY`.
 
 **`P15-T006` is accepted at `dc8b129`, and the Intel macOS artifact exists and has been run.** The task is
 *"Build macOS Intel artifact or document support policy"*, whose acceptance is an **or** — *"x86_64 macOS
@@ -2993,6 +3001,94 @@ after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
 **The next task is `P15-T019`, not `P15-T007`.** Its own re-open condition — *"if this one fails a tree that cannot be its cause twice more, the ordering decision is to be reopened rather than defended"* — is met: three trees that changed no Rust have now failed on the ETXTBSY flake (`0b0af1d`, `8342764`, `6226ce8`), against two that came back green (`f6706d4`, `a009f57`), and each occurrence was read to its test name, line and errno before it was counted. The old argument's second half still holds — this task's verification is a number of clean ubuntu runs, and those arrive one push at a time whatever the order — but the first half does not, and a leading indicator exists so that the reopening happens *before* a failure is hidden rather than after. Two things moved besides the count. The task's own criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the fourth occurrence of the class, `crates/sure-core/src/analysis_provider/mod.rs:591`, is a site that command cannot reach — so the criterion has been widened from the mechanism to the property, and criterion 2 has gained the reverse direction that occurrence measured. And three of this window's ubuntu runs were red on trees the flake cannot be caused by, so every later acceptance pays a re-run to separate signal from noise.
+
+## What `P15-T019` added
+
+`crates/sure-testkit/src/program.rs` is new — 196 lines, `#![forbid(unsafe_code)]` at the top — and exports
+two functions, `write_program(path, contents, mode)` and `copy_program(from, to)`. Both claim a unique
+temporary name **in the destination's own directory** with `OpenOptions::new().write(true).create_new(true)`
+— `O_CREAT|O_EXCL`, the same atomic claim `create_dir` makes, so two processes racing for the same
+destination cannot both win the name — write or copy into it, **drop the file before the rename**, and only
+then `rename` onto the destination. The temporary is `.{name}.being-written-{pid}-{counter}`, with `counter`
+from a process-wide `AtomicU32` and the pid in it because two concurrent `cargo test` processes are two
+processes. `set_mode` applies the executable bit as a `#[cfg(unix)]` `set_permissions` and is a no-op
+elsewhere, so the Windows build carries no dead branch on a Unix-only call.
+
+The reason the ordering matters is the rule in the criterion and not a claim that a window got smaller: a
+write descriptor on the temporary name is a descriptor on an **inode nothing executes**, because the
+executing side computes the destination name and never the temporary one. The `rename` publishes a file
+that is already complete and already closed, and there is no moment at which the path being executed is
+the path being written.
+
+**Sixteen call sites across nine files — 4 `copy_program` and 12 `write_program`** — replace the previous
+open-then-write. Twenty-one lines in the tree name the two functions and five of those are a doc link or
+a comment, which is the distinction the supervisor's own review got wrong and the worker got right. Three
+of the sites are `#[cfg(test)]` modules inside `src/` rather than files under `tests/`:
+`analysis_provider/mod.rs`'s `echoing_program` built one fixed `target/tmp/claude-cli-analyzer/echo` for
+two independent `#[test]`s, and `container.rs` and `approval.rs` each cleared a fixed path before every use.
+The last two are repaired for the **overwrite** hazard rather than the `execve` one — neither is executed —
+and are additional to the five program sites rather than part of that count.
+
+**No product code changed.** All nine hunks inside the three `src/` files are within `mod tests`, checked
+hunk by hunk. **No retry, `#[ignore]`, `sleep` or backoff was added anywhere**, in product code or in a
+fixture, searched for by name: criterion 4 asks that any retry be bounded, named and deliberately placed,
+and that a retry existing so that a test can pass is not an answer — there is none to bound.
+
+## Validation of `P15-T019`
+
+**The first gate over this tree was red, and it was measured before it was accepted as pre-existing.**
+`p15t019-acceptance` failed the test gate alone — `test exit 101`, `2675 passed; 1 failed`, on
+`a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named` at `runtime_start.rs:1193:5`.
+The worker's tree was backed up and stashed and the **base** tree was run ten times: **1 failure in 10**,
+against **2 in 10** on this tree, the same test every time (`cargo test -p sure-core --test runtime_start`).
+The assertion's line moved from `:1184:5` to `:1193:5` because this change adds nine lines at
+`runtime_start.rs:397` (`@@ -397,2 +397,11 @@`), and `:1184:5` is already on record as load-sensitive from
+`P14-T006`, `P14-T007` and `P14-T008`; across 79 gate logs the budget test fails in **11** and the
+neighbouring outlives test in **1**. The stashed tree was restored and **proved** restored — `program.rs`'s
+sha256 matched the backup and the regenerated full diff was identical to the backup — before the stash was
+dropped. Both runs are part of the record and the red one is not a pass.
+
+The gate this acceptance rests on is green over the committed tree: all six exits 0, `passed=2676
+failed=0 not-ok=0`, `result-lines=81`, `headers (case-sensitive): 71`, `bootstrap: SURE bootstrap
+validation OK: 17 phases, 191 tasks.`, `taskctl: state OK: 191 tasks`, the store byte-identical before and
+after (`D1717556…7853`, 348160 bytes), and the `worktree at start:` and `worktree:` lists identical, so the
+run is evidence. Clippy's summary file is 332 bytes against the previous run's 73; that was resolved before
+the commit was made as a recompile (`Checking sure-testkit/sure-core/sure-cli … Finished … in 4.06s`) rather
+than a cached no-op (`Finished … in 0.20s`), and not a warning.
+
+**The worker's record was corrected three times, and once the worker corrected the supervisor.** The three
+were numeric and all three were sent back: the call-site attribution; an arithmetic sentence that
+contradicted the table three rows above it; and the attribution of a pre-existing local failure to the
+wrong test — the eleven historical failures belong to `a_service_that_runs_past_its_own_budget_…`, as the
+same hand-back's own section 8 says, and not to the neighbouring `a_service_that_outlives_…`. The worker
+also self-reported and repaired a defect it had introduced, a hard newline splitting a `P5-T003` table row;
+zero broken rows remain in either file. Against the supervisor it was right and said so: the revision
+request demanded *"21 call sites"*, and 21 is the number of lines **naming** the two functions with five of
+them prose, leaving **16 calls** — `grep -E "sure_testkit::(write_program|copy_program)\("` returns exactly
+16. It pushed back with the arithmetic rather than writing the number it had been told to write, and both
+counts are in the record.
+
+**The enumeration and the citations were re-run by the supervisor rather than read off the hand-back.** On
+`b229cff`, `grep -rn "fs::copy" crates/*/tests/` matches twelve lines, ten of them calls, four of them
+executed; on this tree the same command matches nine lines and six calls, and **not one of the four**. The
+`analysis_provider/mod.rs:591` citation was checked character by character against the log — run
+`35512888372`, commit `8342764`, `mod.rs:591:44`, `ExecutableFileBusy` — all four correct. The CI rate was
+recomputed from the raw API response rather than taken from the summary, and two of the eleven failing logs
+were opened directly.
+
+**Still not claimed, and written down as such.** No occurrence of this task's failure has been reproduced
+anywhere, because this machine cannot raise it. Criterion 6's number is **0** and cannot be anything else
+until the change reaches CI. Criterion 1's list is searched for systematically, not proved exhaustive, and
+the searches are textual — a fixed path built by concatenation, computed through a helper, or reached
+through a macro would not be found by them. Five fixed-path sites that carry **neither** hazard were
+deliberately not repaired and are listed with the reason: `fixture_apps.rs:1616` and
+`adversarial_fixture_detection.rs:982` (fixed directories cleared with `remove_dir_all`; nothing is
+executed), the `control_corpus` roots in `acceptance_report_runner.rs:783` and `release_gate_runner.rs:864`
+(per-test but not per-process), `acceptance_report_runner.rs:96,105` (JSON reports, one of which is the
+same path as the **product** constant `release_gate.rs:87`), and `acceptance_report.rs:1520` (keyed by
+fixture id). Two of those are the exact shape that demonstrably fails in `approval.rs` and would fail the
+same way under two concurrent processes; they are left so that the decision is visible rather than so that
+it is forgotten.
 
 ## What `P15-T006` added
 
@@ -23193,3 +23289,4 @@ absent text.
 | `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
+

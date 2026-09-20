@@ -1,3 +1,19 @@
+# The cross-platform matrix. `P15-T010`'s acceptance is *"Windows is mandatory
+# primary job; macOS/Linux core jobs mandatory; fmt/check/clippy/test/evals
+# included appropriately"*, and Windows is primary here in the sense
+# `docs/adr/0007-windows-primary-development.md` gives it: the Windows-only
+# bootstrap validation is a job of its own (`bootstrap-validate-windows`) rather
+# than a step of a matrix leg.
+#
+# A workflow file that says the right thing is not a run that did the right
+# thing, so what is checked here is what the file *says*.
+# `crates/sure-testkit/tests/ci_workflow.rs` reads this file and fails if a job
+# loses its runner, if a platform leaves the matrix, if a job becomes
+# conditional or tolerant, if a command family stops being run, or if the
+# `cargo test` step stops being a whole-workspace run that reaches the
+# acceptance corpus. It is not evidence that any run passed;
+# `docs/development/GITHUB_WORKFLOW.md` is where the runs themselves are the
+# subject, and nothing on a workstation can stand in for them.
 name: ci
 
 on:
@@ -31,8 +47,25 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
+      # Left on the default feature set on purpose, unlike the clippy and test
+      # steps below: features are additive, so `--all-features` compiles a
+      # superset and never compiles a `cfg(not(feature = "..."))` arm. This is
+      # the one command here that still says the default set builds.
       - run: cargo check --workspace --all-targets
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `--all-features`, because the repository has one definition of "the
+      # checks" and this is the flag the other clippy invocations in it already
+      # use: the supervisor's gate set
+      # (`cargo clippy --workspace --all-targets --all-features -- -D warnings`)
+      # and `scripts/check-non-windows.mjs`, which asks the same command of the
+      # other platform. **It selects nothing today**, which is measured rather
+      # than assumed: `cargo metadata --offline --no-deps --format-version 1`
+      # reports an empty `features` map for all five workspace members, and no
+      # `Cargo.toml` here declares `[features]` or an optional dependency — so
+      # this command compiles the same set as it would without the flag. What it
+      # changes is the first day a feature exists, when `cargo test` below would
+      # otherwise stop running the tests behind it while the local gate, which
+      # has always passed the flag, went on running them.
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # **The browser tests need a machine that can host a sandboxed Chromium,
       # and Ubuntu 24.04 is not one by default.** It restricts unprivileged user
       # namespaces through AppArmor, and Chromium refuses to start without a
@@ -51,7 +84,14 @@ jobs:
       # rest, and the targets are where the platform-specific tests live: a
       # failure in `sure-core --lib` would hide every integration target after
       # it, on the run whose whole job is to say what this platform does.
-      - run: cargo test --workspace --no-fail-fast
+      # `--all-features` for the reason the clippy step above gives, and this
+      # whole-workspace run is also what the evals are: the acceptance corpus's
+      # cases are plain `#[test]`s in
+      # `crates/sure-core/tests/acceptance_report_runner.rs`, so they are run
+      # here on every platform rather than by a step of their own. The release
+      # *metrics* computed from that report are `release-dry-run.yml`'s and
+      # `scripts/Build-Release.*`'s, and are not what this workflow answers.
+      - run: cargo test --workspace --all-features --no-fail-fast
 
   shellcheck-secondary:
     runs-on: ubuntu-latest

@@ -51,9 +51,35 @@ requests. Three jobs, and each is the only check of something:
 
 | Job | What nothing else checks |
 | --- | --- |
-| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast` |
+| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features --no-fail-fast` |
 | `shellcheck-secondary` | the POSIX shell scripts, on a machine that has `shellcheck` |
 | `bootstrap-validate-windows` | the Windows bootstrap scripts, `validate-bootstrap.mjs` and the task state |
+
+The two commands that take `--all-features` take it because the repository has
+one definition of "the checks": the gate set run before every acceptance uses the
+same two commands with that flag, and `scripts/check-non-windows.mjs` asks the
+same clippy command of the Unix targets. It selects nothing today — measured with
+`cargo metadata --offline --no-deps --format-version 1`, which reports an empty
+`features` map for all five workspace members, and no manifest here declares
+`[features]` or an optional dependency — so it changes no current result and
+closes the gap on the first day a feature exists, when `cargo test` would
+otherwise have stopped running the tests behind it while the local gate ran them.
+The `cargo check` step is the one command deliberately left on the default
+feature set, so that something still asks whether the default configuration
+builds; `ci.yml` carries that argument beside the line.
+
+**What holds that shape is a test, and a test about a file is not evidence about
+a run.** `crates/sure-testkit/tests/ci_workflow.rs` reads `ci.yml`, the runner
+that reads the acceptance corpus, and the corpus itself, and fails if a job loses
+its runner, if `windows-latest`, `macos-latest` or `ubuntu-latest` leaves the
+matrix, if a job becomes conditional or anything is allowed to fail, if one of
+the four command families stops being run, or if the `cargo test` step stops
+being a whole-workspace run that reaches the evals. It proves what the file
+says, and the rule below — **a push is not finished until its run has been
+read** — is what covers the other half. `ci.yml` does not run
+`scripts/check-non-windows.mjs`, and that is not a gap: that script cross-compiles
+clippy for Unix targets *from Windows*, and the macOS and Linux matrix jobs here
+compile those `cfg` arms natively.
 
 **A push is not finished until its run has been read.** CI is the only verifier
 for platform-gated code, and the local Windows gate set cannot stand in for it:

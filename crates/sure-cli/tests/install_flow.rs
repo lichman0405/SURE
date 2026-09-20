@@ -10,7 +10,7 @@
 //! # What it is really guarding
 //!
 //! `scripts/Install-Sure.ps1` installs into `%LOCALAPPDATA%\SURE\bin`, which is
-//! where seven launcher scripts across six integration packages already resolve
+//! where seven launcher scripts across five integration packages already resolve
 //! `sure.exe` — and which is **also** where `crates/sure-core/src/paths/mod.rs`
 //! puts the user's evidence, `sure.db`. So an uninstall that walks the install
 //! directory would destroy the history SURE exists to keep. The tests below are
@@ -250,8 +250,12 @@ if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force 
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 # .NET rather than `Get-FileHash`, so that this fixture runs in the same
 # environment the scripts are tested in: a PowerShell 7 session's `PSModulePath`
-# reaching Windows PowerShell 5.1 removes that function and nothing else, which
-# is a thing these tests measured before changing the scripts over it.
+# reaching Windows PowerShell 5.1 leaves `Get-FileHash` undefined there while
+# every other command either script uses still resolves. The scripts' own
+# headers carry the measurement, and `Get-Sha256` in `Install-Sure.ps1` carries
+# the diagnostic output it came from. No test here asserts that property: it is
+# a fact about this machine's environment, not about the product, and a test
+# asserting it would fail anywhere the parent session is not PowerShell 7.
 $stream = [System.IO.File]::OpenRead($archive)
 try { $hasher = [System.Security.Cryptography.SHA256]::Create(); try { $hash = $hasher.ComputeHash($stream) } finally { $hasher.Dispose() } } finally { $stream.Dispose() }
 $digest = ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()

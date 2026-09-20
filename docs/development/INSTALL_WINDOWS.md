@@ -22,7 +22,7 @@ copies files and one that removes them.
 ```
 
 `%LOCALAPPDATA%\SURE\bin\sure.exe` is not a preference chosen here. Seven
-launcher scripts, across six integration packages, already resolve exactly that
+launcher scripts, across five integration packages, already resolve exactly that
 path, and a different destination would be a binary those integrations cannot
 find. `Grep` over `integrations/` for `LOCALAPPDATA` returns these and no others
 (the `.sh` launchers beside them resolve `$SURE_BIN` and `PATH` instead, which is
@@ -39,8 +39,10 @@ correct for Unix):
 | `integrations/cursor/scripts/sure-hook.ps1` | 14 | the same candidate |
 
 Seven rather than three is worth stating because the brief that dispatched this
-task named three; the search is what is authoritative, and it is what a change to
-the install location would have to satisfy.
+task named three, and five packages rather than six because the first correction
+of that number still did not count them: the search is what is authoritative, it
+returns seven files and five directories, and it is what a change to the install
+location would have to satisfy.
 
 `crates/sure-cli/tests/install_flow.rs` drives the third of them end to end
 against a real install.
@@ -251,15 +253,20 @@ Named as limits rather than left to be assumed:
   installed binary.
 * **`Get-FileHash` is deliberately not used** by either script, and the reason is
   measured rather than imagined. It is a *script function* from
-  `Microsoft.PowerShell.Utility`, so it only exists when the host autoloads the
-  copy of that module which belongs to it. When a PowerShell 7 session sets
-  `PSModulePath` and then starts Windows PowerShell 5.1 — which is what a
-  launcher, a hook or a build script does — 5.1 resolves that module to the
-  PowerShell 7 directory, it does not load, and `Get-FileHash` is absent while
-  every other command either script uses still resolves as a *cmdlet*. The
-  failure lands on the integrity check and reads like a typo. Both scripts use
-  `[System.Security.Cryptography.SHA256]`, which is the same algorithm from the
-  same place and depends on no module being findable.
+  `Microsoft.PowerShell.Utility`, so it only exists in a host that brings that
+  module up — and the host these tests spawn does not. That host is Windows
+  PowerShell 5.1 started from a PowerShell 7 session, which is what a launcher, a
+  hook or a build script does, and the child inherits the 7 session's
+  `PSModulePath` verbatim, a PowerShell 7 `Modules` directory included:
+  `Get-FileHash` answers `ABSENT` there while every other command either script
+  uses still resolves as a *cmdlet*. The failure lands on the integrity check and
+  reads like a typo. The shadowing step itself was not isolated — a Windows
+  PowerShell 5.1 started by hand from a 7 session did bring the function up — so
+  the module resolution is written here as the consistent explanation rather than
+  as a proven cause. Both scripts use `[System.Security.Cryptography.SHA256]`,
+  which is the same algorithm from the same place and depends on no module being
+  findable. The measurement, with the child's own output, is in `Get-Sha256`'s
+  comment in `scripts/Install-Sure.ps1`.
 * **Both hosts are driven, but only the ones this machine has.** The suite runs
   the whole flow under Windows PowerShell, which is always installed, and under
   PowerShell 7 when it can find `pwsh.exe` on `PATH` or at its standard install

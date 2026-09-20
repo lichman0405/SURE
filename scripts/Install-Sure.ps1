@@ -12,7 +12,7 @@
 # =============================================================================
 #
 # `%LOCALAPPDATA%\SURE\bin\sure.exe`. The destination is already in use by seven
-# launcher scripts in six integration packages that this task does not own, and
+# launcher scripts in five integration packages that this task does not own, and
 # all of them resolve it in the order `$env:SURE_BIN` -> `PATH` -> here:
 #
 #   integrations/agent-plugin/scripts/install.ps1   (line 7)
@@ -27,8 +27,9 @@
 #
 # A different destination would be a binary those integrations cannot find, so
 # this is a place the tree already agreed on rather than one chosen here.
-# `grep -rn LOCALAPPDATA integrations/` is what says so, and it is the search to
-# repeat before moving this. The `.sh` launchers beside these resolve
+# `grep -rn LOCALAPPDATA integrations/` is what says so — it returns these seven
+# files under five package directories, and counting them is the search to repeat
+# before moving this. The `.sh` launchers beside these resolve
 # `$SURE_BIN` and `PATH` instead, which is right for Unix and is not a seventh
 # opinion about the Windows location.
 #
@@ -164,9 +165,9 @@ function Stop-Install {
 #
 # The variable first and the platform's own known-folder answer second, which is
 # `integrations/claude-code/scripts/sure-mcp.ps1:16`'s order. Read that line
-# before changing this one: three launchers resolve the install location this
-# way, and one that resolved it differently would look at a directory nothing
-# is installed in.
+# before changing this one: the seven launchers listed at the top of this file
+# resolve the install location this way, and one that resolved it differently
+# would look at a directory nothing is installed in.
 function Get-PerUserDataRoot {
     $root = $env:LOCALAPPDATA
     if (-not $root) { $root = [Environment]::GetFolderPath('LocalApplicationData') }
@@ -186,20 +187,38 @@ than write to a path relative to the current directory.
 # SHA-256 of a file, through .NET rather than through a module.
 #
 # `Get-FileHash` is the obvious call and it is deliberately not used here. It is
-# a *script function* that lives in `Microsoft.PowerShell.Utility`, and it is
-# therefore only defined when the host autoloads the copy of that module which
-# belongs to it. When a PowerShell 7 session sets `PSModulePath` and then starts
-# Windows PowerShell 5.1 — which is what a launcher, a hook or a build script
-# does — 5.1 resolves `Microsoft.PowerShell.Utility` to the PowerShell 7
-# directory, that module does not load, and `Get-FileHash` is simply absent.
-# This was measured rather than imagined, and the measurement is in
-# `crates/sure-cli/tests/install_flow.rs`: in exactly that environment every
-# other command this script uses still resolves (`Get-Content`, `Copy-Item`,
-# `ConvertTo-Json` and the rest are cmdlets from assemblies the console host
-# loads at startup, so they do not care what is on `PSModulePath`) and
-# `Get-FileHash` alone answers `MISSING`. The failure lands on the one step that
-# is the integrity check, and it lands there as "not recognized as the name of a
-# cmdlet", which reads like a typo rather than like an environment.
+# a *script function* that lives in `Microsoft.PowerShell.Utility`, so it exists
+# only in a host that brings that module up. Where it does not, the failure lands
+# on the one step that is the integrity check, and it lands there as "not
+# recognized as the name of a cmdlet" — which reads like a typo rather than like
+# an environment, and is the reason this is written down rather than assumed.
+#
+# That it does not come up here is measured rather than imagined. With a
+# throwaway diagnostic at the top of this function, a run of
+# `crates/sure-cli/tests/install_flow.rs` — the suite that starts this script the
+# way a launcher does — reported this from the child process itself, four times:
+#
+#     pshome  = C:\Windows\System32\WindowsPowerShell\v1.0
+#     version = 5.1.26100.9444
+#     command = ABSENT
+#     psmodulepath:
+#        [C:\Users\lishi\Documents\PowerShell\Modules]
+#        [C:\Program Files\PowerShell\Modules]
+#        [c:\program files\windowsapps\microsoft.powershell_7.6.6.0_x64__8wekyb3d8bbwe\Modules]
+#        [C:\Program Files\WindowsPowerShell\Modules]
+#        [C:\Windows\system32\WindowsPowerShell\v1.0\Modules]
+#     call    = THREW System.Management.Automation.CommandNotFoundException
+#
+# The child inherits the PowerShell 7 session's `PSModulePath` verbatim — the
+# `windowsapps` entry is a PowerShell 7 module directory — and that is the
+# consistent explanation for the module not coming up. It is named here as an
+# explanation and not as a proven mechanism: the shadowing step itself was not
+# isolated, and a Windows PowerShell 5.1 started by hand from a PowerShell 7
+# session did bring `Get-FileHash` up. What the same run *did* establish is that
+# nothing else here depends on the answer: `Get-Content`, `ConvertFrom-Json`,
+# `Get-ChildItem`, `Copy-Item` and `ConvertTo-Json` are cmdlets from assemblies
+# the console host loads at startup and do not care what is on `PSModulePath`,
+# and every one of them served this install in that same process.
 #
 # `[System.Security.Cryptography.SHA256]` is the same algorithm from the same
 # place — `Get-FileHash` calls it — and it depends on no module being findable.
@@ -569,7 +588,7 @@ if ($onPath -and $onPath.Source -eq $installedExe) {
 } elseif ($onPath) {
     Write-Host "   'sure' on PATH is $($onPath.Source), which is not this install."
     Write-Host "   This install is at $installedExe. It is reachable by its full path, and by the"
-    Write-Host "   three launchers in this repository, which resolve %LOCALAPPDATA%\SURE\bin\sure.exe"
+    Write-Host "   seven launcher scripts in this repository, which resolve %LOCALAPPDATA%\SURE\bin\sure.exe"
     Write-Host "   without PATH. To put it on PATH for your own shells, run:"
     Write-Host "     [Environment]::SetEnvironmentVariable('Path', ([Environment]::GetEnvironmentVariable('Path','User') + ';' + '$BinDirectory'), 'User')"
     Write-Host "   This installer does not run that line: it changes your user environment rather"

@@ -3,18 +3,21 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
-**`P7-T013` is accepted and delivered at `4bff01c`, which was the tip of this branch when this paragraph
-was written — this record commit supersedes it.** The tip is named as a dated fact and not restated as a
-standing one, which is the correction the paragraph below records for its own predecessor; the acceptance
-commit itself is `4bff01c3640b09f1676569ba36d26c7a4bbdf0e7`, carrying the two worker commits `4e1097d` and
-`3beebbd` on base `f810ffc`. The task is the one the Codex package's README said needed its own task:
-`sure check` now reads the capability tier from the project's own recorded events, at stage 10 of the
-pipeline, instead of from the command line. `progress/state.json` carries 190 records and `P7-T013` is
-accepted with **eleven** evidence entries; `tasks/tasks.json` carries 190 tasks, with `P15-T030` minted
-from a defect found while accepting this one; `SHA256SUMS.txt` was stale for **four** digests and is
-regenerated with all three of its invariants intact (195 entries, 19199 bytes, no trailing newline).
-**`P15-T003` is dispatched from this commit.** The task's own account is in "What `P7-T013` added" and
-"Validation of `P7-T013`" below.
+**`P15-T003` is accepted, and delivered at `c494909`, which was the tip of the worker's work when this
+paragraph was written — this record commit supersedes it and also corrects three of its files on top.**
+The task is *"Create Windows per-user install/uninstall PowerShell flow"*: `scripts/Install-Sure.ps1`
+installs the release archive into `%LOCALAPPDATA%\SURE\bin` per user at exit 0, with no PATH write, no
+service and no elevation, and `scripts/Uninstall-Sure.ps1` removes only what its own manifest records and
+hashes, which is why it cannot reach the `sure.db` sitting in that same directory — the store a recursive
+uninstall would have deleted in the name of tidying up. Two worker commits on base `6be9dac` (`ee20ce7`,
+`c494909`), 6 files, +2263/−1. **The three supervisor corrections are the reason the accepted tree is this
+commit rather than `c494909`**: a count the worker's own correction commit got wrong in the other
+direction, one visible to the person running the installer, and a measurement cited at a file that does
+not contain it. `progress/state.json` now carries 191 records and `P15-T003` **nine** evidence entries;
+`tasks/tasks.json` carries 191 tasks, with `P15-T031` minted from a limit the acceptance measured;
+`SHA256SUMS.txt` was stale for **four** digests and is regenerated with its invariants intact (195
+entries, 19199 bytes, no trailing newline). **`P15-T004` is dispatched from this commit.** The task's own
+account is in "What `P15-T003` added" and "Validation of `P15-T003`" below.
 
 **`P7-T012` is still accepted at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which was
 `origin/claude/v0.1-autonomous` when that sentence was written and has since been superseded twice.**
@@ -56,16 +59,22 @@ observed on Windows 11, with the `nonwindows` gate a static check rather than a 
 on three platforms is not the same thing as the task having been measured on three, and the difference is
 left standing rather than smoothed over.
 
-**`P15-T003` is dispatched from this commit** — *"Create Windows per-user install/uninstall PowerShell
-flow"* — and §14 hands it there **by measurement rather than by the hook's truncated `ready=` line**: the
-non-terminal set was counted rather than recalled, and it is `P15`'s 26 open tasks and `P16`'s nine, with
-every `P14` task accepted; the ready set is 20 tasks and all 20 are `P15`, so `P15-T003` is the
-lowest-numbered of them and no DAG edge is being traded away for it. Its brief is written, and its
-landmine is confirmed on disk rather than assumed: `%LOCALAPPDATA%\SURE\sure.db` exists — 348,160 bytes,
-mtime 2026-09-18 — and there is **no `bin\` beside it yet**, so the install creates `bin\` directly
-alongside the user's evidence store, and an uninstaller that removes the directory recursively destroys
-it. Criterion 2 is not "ask a yes/no question"; it is that the uninstaller must be structurally incapable
-of removing data the install did not create.
+**CI run `35503573837` on `6be9dac` — the commit that recorded the `P7-T013` acceptance and dispatched
+this task — is SUCCESS on all five jobs**, with `headSha` read back from the API as
+`6be9dac95f8f506cb5efd18ff6b0c1852e138613` rather than inferred from a queue state. It is the fourth
+supervisor record commit on this thread to carry its own reading, and the push carried it alone, so there
+is nothing else in that run's tree and no worker commit beside it to account for. The archive this
+acceptance installed was built by `scripts/Build-Release.ps1` rather than by a test fixture, which the
+`macos` and `ubuntu` rows do not speak to at all — they speak to the Rust tree, and the installer runs
+only on Windows.
+
+**`P15-T004` is dispatched from this commit** — *"Create WinGet manifest/template"*, `required: false`,
+depending on the accepted `P15-T002` — and §14 hands it there **by measurement rather than by the hook's
+truncated `ready=` line**: the non-terminal set was counted, and it is `P15`'s 26 open tasks and `P16`'s
+nine, with every `P14` task accepted; the ready set is 20 tasks, all `P15`, and `P15-T004` is the
+lowest-numbered of them. Its brief takes the artifact contract from `P15-T002` and `P15-T003` rather than
+restating it, because a WinGet manifest that disagrees with the installer about the archive's name or
+layout installs nothing.
 
 **Two fields of the record that every session reads were stale, and no gate can see either.**
 `progress/state.json`'s `current_phase` said `P14` and its `last_updated` said
@@ -2783,6 +2792,137 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T003` added
+
+`P15-T003` — *"Create Windows per-user install/uninstall PowerShell flow"* — is
+**accepted in `ee20ce7` and `c494909`** on base `6be9dac`, 6 files, +2263/−1, and
+none of them supervisor-owned. **Three of the six were corrected by the
+supervisor before acceptance**, which is why the accepted tree is the acceptance
+commit rather than `c494909`; the corrections are comments, prose and one
+printed string, they are listed under "Validation" below, and nothing
+behavioural changed.
+
+Two scripts and a test suite. `scripts/Install-Sure.ps1` (596 lines) takes a
+release archive and its `.sha256`, verifies the digest, unpacks into a scratch
+directory it made itself, refuses an archive whose entries would escape that
+directory, and copies `bin\sure.exe`, `bin\LICENSE` and `bin\RELEASE.txt` into
+`%LOCALAPPDATA%\SURE` — writing `install-manifest.json` beside them so that
+removal can be exact rather than approximate. `scripts/Uninstall-Sure.ps1` (420
+lines) removes a file only when the manifest records it **and** its digest is
+still the digest the install wrote, and removes a directory only when the
+filesystem already reports it empty. `crates/sure-cli/tests/install_flow.rs`
+(new, 967 lines, 13 tests) drives both, under Windows PowerShell 5.1 and under
+PowerShell 7 when it can find it.
+
+The landmine is why the task existed. `%LOCALAPPDATA%\SURE` is **also** where
+`crates/sure-core/src/paths/mod.rs` puts the user's evidence — `sure.db`, the
+history a verdict is read from — so an uninstaller that walked the install
+directory would destroy the record SURE exists to keep, in the name of tidying
+up. On this machine that is `C:\Users\lishi\AppData\Local\SURE\sure.db`,
+348,160 bytes, and it was already there when the task started.
+
+The destination is not a choice the task made. `integrations/` holds five
+package directories and **seven** files under them join
+`%LOCALAPPDATA%\SURE\bin\sure.exe` in the order `$env:SURE_BIN`, then `PATH`,
+then here: `agent-plugin/scripts/install.ps1:7`,
+`claude-code/scripts/sure-hook.ps1:14`, `claude-code/scripts/sure-mcp.ps1:16`,
+`codex/scripts/sure-hook.ps1:24`, `copilot/scripts/sure-hook.ps1:14`,
+`cursor/scripts/install.ps1:7`, `cursor/scripts/sure-hook.ps1:14`. The dispatch
+brief named three of them; the worker replaced that with a search and got seven,
+and the supervisor's correction is that the same sentence still said six
+packages where the tree has five.
+
+What the install deliberately does not do, each for a reason already in the
+tree: no administrator rights, no elevation, no `HKLM`, no service, no scheduled
+task and no `PATH` write — machine or user. `PATH` is reported rather than
+changed, and the line a person would run to change it is printed, named as
+theirs to run, and not run. No symlink is created, because `CLAUDE.md` prefers
+copy/render/install flows on Windows unless Developer Mode or administrator
+capability is explicitly detected, and a release binary is copied here. No
+signature is claimed: the archive is unsigned, and the output says so rather
+than implying a publisher.
+
+## Validation of `P15-T003`
+
+Three things were done by the supervisor rather than read from the hand-back:
+the gates, an end-to-end install/uninstall experiment, and a re-derivation of
+the counts the task asserts.
+
+**The gates, twice.** At the worker's tip `c494909`, label `p15t003-verify`:
+six exits 0, `passed=2664 failed=0 ignored=12 not-ok=0`, 70 headers, 190 tasks,
+`store identical: True` at `D1717556…7853` (348,160 bytes), and `worktree at
+start: []` identical to `worktree: []`, so the run is attributable. 2664 is
+2651 + 13 — the count moved by exactly the thirteen tests this task adds and by
+nothing else. Then again over the corrected tree, label `p15t003-accept`: six
+exits 0. **That second reading is in the acceptance commit's message rather than
+in `state.json`**, for the reason recorded when `P7-T013` was accepted: a
+reading written into the file it describes makes the committed file differ from
+the gated one by exactly the sentence that describes it.
+
+**Criterion 2 by experiment, not by description.** A file planted where
+`sure.db` would be (`fc0cb9afc038bf99fa59a763fe342718b4416aa2b4fe8fb90878d3d093d49d79`)
+and a stranger file the install never wrote (`2ab0575c68adc63c829f6e4ec7c3f1eef5df8b8afc938033faca242eebeb3d6f`),
+each hashed with .NET SHA-256 before the install, after the install and after
+the uninstall: **both unchanged and both still present**, `bin\` gone, uninstall
+exit **0**. With `-RemoveUserData`, `sure.db` is removed by name and
+`something else.db` in the same directory survives. With the manifest deleted,
+the uninstaller exits **2** and removes nothing, saying *"Removing files here
+would mean deleting by guesswork, in a directory that also holds the history
+SURE exists to keep."* The user's real store was hashed at the start and at the
+end of all five runs and is identical, with no `bin\` beside it before or after.
+
+**Criterion 1's destination was re-derived rather than taken.** `integrations/`
+holds exactly five package directories — `agent-plugin`, `claude-code`,
+`codex`, `copilot`, `cursor` — and seven of the files under them join the
+per-user path. The supervisor also drove the installer against **the archive
+`scripts/Build-Release.ps1` actually produced** (4045010 bytes, sha256
+`2fb0d05f8c903a159198e031dd9cb35d111172492c013632784a7d8b7761015f`), not the
+fixture the suite stages for itself, and it installed at exit 0.
+
+**The one claim that had to be reproduced rather than argued — and the
+supervisor's first three attempts to check it were wrong.** The hand-back
+explains that `Get-FileHash` is deliberately unused because a Windows PowerShell
+5.1 started from a PowerShell 7 session does not have it. Spawning 5.1 from the
+supervisor's own shell said the opposite three times over: `Get-FileHash
+Function from Microsoft.PowerShell.Utility`, present, including with
+`PSModulePath` forced to the PowerShell 7 directories. Those probes were not the
+environment the script runs in — the child computed its own three Windows
+PowerShell module paths each time. What settled it was a throwaway diagnostic at
+the top of `Get-Sha256` and one `install_flow` test, which reports from **the
+child process the suite actually spawns**: `command = ABSENT`, a `PSModulePath`
+carrying all five entries of the parent PowerShell 7 session verbatim —
+`c:\program files\windowsapps\microsoft.powershell_7.6.6.0_x64__8wekyb3d8bbwe\Modules`
+among them — and `call = THREW System.Management.Automation.CommandNotFoundException`.
+The same run then installed the archive with `[System.Security.Cryptography.SHA256]`,
+so `Get-Content`, `ConvertFrom-Json`, `Get-ChildItem`, `Copy-Item` and
+`ConvertTo-Json` all resolved in that same process. **The general lesson is worth
+more than the claim**: when the thing being checked is a fact about the
+environment a process runs in, a probe is evidence only if it spawns that
+process the way the code does, and three agreeing probes that spawn it
+differently are worth nothing. **The mechanism is still not isolated** — a
+Windows PowerShell 5.1 started by hand did bring the function up — so the module
+shadowing is recorded as the consistent explanation and not as a proven cause,
+in the script, in `INSTALL_WINDOWS.md` and in the acceptance record alike.
+
+**Two claims found false at acceptance, corrected rather than minted as owed.**
+(1) **The count, wrong in the other direction.** `c494909` exists to replace a
+number taken from the dispatch with a number taken from the tree, and its
+message says so in those words — and it introduced a new uncounted number in the
+same breath. It wrote "seven launcher scripts in six integration packages":
+seven is right, five is the tree. The wrong half reached three files
+(`scripts/Install-Sure.ps1:15`, `docs/development/INSTALL_WINDOWS.md:25`,
+`crates/sure-cli/tests/install_flow.rs:13`) and, worse, the *older* wrong number
+survived as **user-visible output**: `scripts/Install-Sure.ps1:572` told the
+person running the installer that "three launchers in this repository" resolve
+the install location, contradicting the file's own header two hundred lines
+above. (2) **A measurement cited where it is not.** `scripts/Install-Sure.ps1:196`
+said "the measurement is in `crates/sure-cli/tests/install_flow.rs`" and quoted
+`Get-FileHash` answering `MISSING`; that file contains no such measurement and
+the word appears nowhere in the tree. Both are the class of claim this project
+exists to catch — a sentence that reads as evidence and is not — so they were
+corrected here rather than recorded as owed, and the corrections are why the
+gates were run a second time.
 
 ## What `P7-T013` added
 

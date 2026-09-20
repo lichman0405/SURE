@@ -3,6 +3,22 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T010` is accepted at `88c35792d0bb7e4fe03a1dcc73c8d67274a7a50d`, and the CI workflow is now a file something local can fail.** The acceptance is *"Windows is mandatory primary job; macOS/Linux core jobs mandatory; fmt/check/clippy/test/evals included appropriately"* — four claims about one file, and `ci.yml` already carried the substance of all four. What it carried none of was a way to notice one of them leaving: `grep -rn '\.github' --include='*.rs' crates/` returned no test that read these workflows at all, so deleting a matrix entry, or dropping `--no-fail-fast`, would have left every local gate green. This repository has paid for that class of blindness once already — `scripts/check-non-windows.mjs`'s own header records `ci` red for **75 consecutive runs** while nothing here noticed, census item 99 of this file.
+
+**The deliverable is a shape assertion, and it is explicit about being only that.** `crates/sure-testkit/tests/ci_workflow.rs` reads `ci.yml` as lines — no YAML dependency, following `crates/sure-cli/tests/winget_manifest.rs` — and fails if a job loses its runner, if a platform leaves the matrix, if a job becomes conditional or anything is allowed to fail, if one of the four command families stops being run, or if the `cargo test` step stops being a whole-workspace run that reaches the acceptance corpus. Its own module text states what that does **not** prove: nothing about whether the YAML is valid, whether GitHub would accept it, or whether any run passed. **No run of this workflow has been observed from this machine, and none is claimed.** `docs/development/GITHUB_WORKFLOW.md`'s rule — *"a push is not finished until its run has been read"* — remains the other half, and the test says so in its own text.
+
+**The file's honesty rests on three tests that are not about `ci.yml` at all.** An empty workflow must produce violations rather than silence, so a checker that came back blind fails instead of passing vacuously. The reader must report the jobs, runners and commands it actually found — and that is the test that caught a real bug: the first version was reading `on:`'s `push:` and `pull_request:` children as jobs with no runner, i.e. it would have "passed" a file it had misread. And fifteen edits, each taken from the file's own bytes with `assert_ne!` so a stale edit reddens rather than silently mutating nothing, must each turn its rule red.
+
+**The mutation check went outside the worker's own table, because a table that checks its author's rules proves less than it looks like it does.** Two edits the `BREAKS` table does *not* contain were applied to the real file: `cargo fmt --all -- --check` relaxed to `cargo fmt --all`, and `continue-on-error: true` added to `shellcheck-secondary` — a job the table never touches. Both produced their rule's message by name, and `every_rule_is_turned_red_by_an_edit_that_breaks_it` refused to run at all against the already-red file rather than reporting its table as broken. The file was then restored and verified by SHA-256 (`0f76b16c…`) before any gate was taken.
+
+**The one behaviour change came out against the worker, and that is why it is in the commit.** Rule 5 was written from the gate set rather than from the file, and running it against the unedited `ci.yml` produced `no cargo clippy command carries --all-features` and `no cargo test command carries --all-features`. That is a real divergence: `target/tmp/gates.ps1` and `scripts/check-non-windows.mjs` both pass that flag, and `ci.yml` did not. It selects nothing today — measured, not assumed: `cargo metadata --offline --no-deps --format-version 1` reports an empty `features` map for all five members and no manifest declares `[features]` or an optional dependency — so the flag changes no current result and closes the gap on the first day a feature exists, when CI would otherwise stop running the tests behind it while the local gate went on running them. The `cargo check` step is deliberately left on the default feature set, and now says so in the file rather than in a hand-back.
+
+**"Evals included appropriately" is an argument rather than a new step.** The 20-case acceptance corpus is plain `#[test]`s in `crates/sure-core/tests/acceptance_report_runner.rs` — not `#[ignore]`d, not environment-gated — so `cargo test --workspace` already runs it on every platform, and a job of its own would be a second list to drift from the manifest. What was missing was anything saying so, and the test now fails if the corpus stops being reached: if the whole-workspace `cargo test` line disappears, if the runner stops naming `evaluation/acceptance-manifest.json`, if an `#[ignore` appears, or if the manifest declares no cases. The release *metrics* of `docs/product/PRODUCT_EVALS.md` are `release-dry-run.yml`'s and `scripts/Build-Release.*`'s, which is `P15-T011`'s subject, and the boundary is stated rather than crossed.
+
+**Two things the hand-back described were not in the tree, and both were measured rather than accepted.** The new file's module text called rule 5 "the five command families" while listing four — its own rule comment says four and `REQUIRED` has four entries — and the argument for `cargo check` keeping the default feature set was reported as *"I said this in the comment rather than changing the line"* when no comment said it. The supervisor wrote both. The rest of the hand-back held up under measurement, including its `+38/-2` and `+24/-1`, which are exactly the `git diff --stat` numbers, and — for the first time in three hand-backs — its account of the sandbox: it reported `hook_failure_semantics` at 1 passed and 4 failed, reduced the mechanism to a two-line probe rather than inferring it, and named the count as a property of the environment instead of the repository. The gate over the whole workspace returns `failed=0`.
+
+**One record field had gone stale and is corrected here.** `progress/state.json`'s `last_updated` had read `2026-09-20T14:58:38.187Z` through four commits while task entries finished after it. Only `scripts/taskctl.mjs` writes that field, and the acceptance splices do not go through `taskctl`, so nothing has moved it since the last state mutation made there — nothing reads it either, which is why it went unnoticed rather than failing a gate. It is set to this splice's time. A record field that says the file has not been touched when it has is the same class of small untruth the rest of this record is built to avoid.
+
 **`P15-T009` is accepted at `a301e6004850fbf64c10e0d12c183f15789f6862`, and "documented PowerShell commands" now has something to point at for Claude rather than a route named in a table.** The acceptance is *"Windows user can install/remove Claude/Cursor integration packages with documented PowerShell commands"* and *"normal per-user install does not require symlink privileges or administrator rights."* The Cursor half already existed and was tested; the Claude half did not exist at all — `find integrations -name 'install.ps1' -o -name 'uninstall.ps1'` returned four files, none of them in `integrations/claude-code/`, whose `scripts/` held only launchers.
 
 **The decision: a per-user copy installer that mirrors Cursor's, with the plugin workflow documented as documentation rather than presented as a run.** `INSTALLATION_MATRIX.md` already named the plugin route for Claude Code — *"documented plugin package/marketplace route as appropriate"* — and that route is real, but it installs **from a marketplace**, and this repository ships no `marketplace.json` anywhere, so there is nothing for a user to install from yet. A command that cannot be run is weaker than a copy installer that has nine tests, so the installer is what shipped; the plugin mechanisms are documented beside it, marked as documented, and named as release-packaging work. The argument against the route not taken is in the matrix rather than implied.
@@ -3043,6 +3059,88 @@ after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
 **The next task is `P15-T019`, not `P15-T007`.** Its own re-open condition — *"if this one fails a tree that cannot be its cause twice more, the ordering decision is to be reopened rather than defended"* — is met: three trees that changed no Rust have now failed on the ETXTBSY flake (`0b0af1d`, `8342764`, `6226ce8`), against two that came back green (`f6706d4`, `a009f57`), and each occurrence was read to its test name, line and errno before it was counted. The old argument's second half still holds — this task's verification is a number of clean ubuntu runs, and those arrive one push at a time whatever the order — but the first half does not, and a leading indicator exists so that the reopening happens *before* a failure is hidden rather than after. Two things moved besides the count. The task's own criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the fourth occurrence of the class, `crates/sure-core/src/analysis_provider/mod.rs:591`, is a site that command cannot reach — so the criterion has been widened from the mechanism to the property, and criterion 2 has gained the reverse direction that occurrence measured. And three of this window's ubuntu runs were red on trees the flake cannot be caused by, so every later acceptance pays a re-run to separate signal from noise.
+
+## What `P15-T010` added
+
+Three files at `88c35792d0bb7e4fe03a1dcc73c8d67274a7a50d`, and one of them is the task.
+
+**`crates/sure-testkit/tests/ci_workflow.rs`** — new, 877 lines, sha256 `aed4be179ab6b68df05fe9011a2c17959d76a5983b436f3446055ef51d467523`, six `#[test]`s. It lives in `sure-testkit` because that crate already holds the checks that keep the repository's own shape in place (`repository_shape.rs`, `integration_thinness.rs`), it runs in every matrix leg it is about, and `serde_json` is already a dependency there — so no manifest changed.
+
+The reader is line-based and deliberately strict. A `run: |` or `run: >` block is reported as a *fault* rather than skipped, so a multi-line command cannot hide from the rules. Only a top-level `jobs:` line opens the jobs section — the fix for the bug above. A `${{ … }}` value yields no labels, because reading `runs-on: ${{ matrix.os }}` as a platform would be inventing one. And `significant_lines` keeps a 1-based number and a byte indent for every line, so a violation names the line a reader would open.
+
+The six rules, and what each is anchored on:
+
+| # | Rule | Anchored on |
+| --- | --- | --- |
+| 1 | triggered by `push` **and** `pull_request` | a job no trigger reaches is not a mandatory job |
+| 2 | some job runs on `windows-latest` and nothing else | `docs/adr/0007-windows-primary-development.md`, where the Windows-only checks are a job rather than a matrix leg |
+| 3 | the job running the workspace's tests covers all three labels | the acceptance's own "mandatory" |
+| 4 | no job-level `if:`, no `continue-on-error` at any level | a step-level `if:` is explicitly out of scope — the Linux `sysctl` step uses one legitimately |
+| 5 | each of the four families in one command carrying its gate-making fragments | the gate set's own spellings |
+| 6 | the evals are reached by that `cargo test` | `acceptance_report_runner.rs` + the manifest |
+
+The four tests that are not about `ci.yml`: `a_workflow_that_is_not_there_is_not_a_pass` (anti-vacuity — an empty file and a job with no runner must both complain), `the_reader_sees_the_jobs_that_are_there` (the reader self-check), `every_rule_is_turned_red_by_an_edit_that_breaks_it` (the 15-row `BREAKS` table, taken from the file's own bytes, `assert_ne!` on every row), and `the_eval_rule_is_turned_red_by_the_three_ways_it_could_be_false`.
+
+**`.github/workflows/ci.yml`** — 127 lines, sha256 `a438d047c507dd1947082c22c575fb0a9ed4e2d1b070029f30d43f8082cfc447`. Four changes and only two of them are behaviour:
+
+1. A header comment stating the acceptance sentence this file answers, that "primary" is ADR 0007's sense of it, what `ci_workflow.rs` reads here and fails on — and, explicitly, that the file saying the right thing is not evidence any run did the right thing.
+2. `cargo clippy … -- -D warnings` → `cargo clippy … --all-features -- -D warnings`, with the argument and the measurement that makes it inert today.
+3. `cargo test --workspace --no-fail-fast` → `cargo test --workspace --all-features --no-fail-fast`, with the extended comment naming where the evals are reached and where the release metrics live instead.
+4. A comment above the `cargo check` step giving the argument for the one command **left on the default feature set**: features are additive, so `--all-features` compiles a superset and never compiles a `cfg(not(feature = "…"))` arm. The worker reported this argument as written in the comment; it was not, and the supervisor wrote it.
+
+Not changed: the Linux `sysctl` step, its step-level `if:` and its comments, byte for byte. They record measurements taken on real runners and a deliberate refusal to pass `--no-sandbox`.
+
+**`docs/development/GITHUB_WORKFLOW.md`** — sha256 `dcc395eafcad6d53b5b254249ea7190dd2e6344238d51e25691d480e8d6049ea`. The `rust` row of the CI table now carries the two `--all-features` commands; a new paragraph gives the argument for the flag, the measurement behind it, and the `cargo check` exception; and a further paragraph states what the shape test proves and what it does not, next to the existing *"a push is not finished until its run has been read"* section that covers the other half. It also records, in the document rather than only in a script header, that `ci.yml` not running `scripts/check-non-windows.mjs` is **not** a gap: that script cross-compiles clippy for Unix targets *from Windows*, and this workflow's macOS and Linux legs compile those `cfg` arms natively.
+
+**Deliberately not added: a job, a step, a dependency, or a workflow.** No `evals` job (a second list to drift from a manifest the tests already reach), no `check-non-windows.mjs` job (redundant, above), and no `release-dry-run.yml` change — its own header explains why it is `workflow_dispatch`-only, and nothing in the new test asserts anything about it.
+
+## Validation of `P15-T010`
+
+Every claim below was measured by the supervisor. The hand-back was treated as a report to be disproved, not as evidence, and two of its statements did not survive.
+
+**The trees agree, and the gate was taken once, over the tree as it stands.** `gates [p15t010] at 9b5e6ac`, worktree at start and worktree at the end identical — the three files this commit carries plus the pre-existing untracked `5.3.15(1)-release`:
+
+    exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0
+    result-lines=82 passed=2696 failed=0 ignored=12 not-ok=0
+    headers (case-sensitive): 72
+    bootstrap:  SURE bootstrap validation OK: 17 phases, 191 tasks.
+    taskctl:    state OK: 191 tasks
+    store before/after: D1717556...7853, 348160 bytes, identical
+    store mtime: 2026-09-18T15:12:15.0354647Z, unchanged
+
+`passed` is 2696 against 2690 at `P15-T009` — **exactly the six tests added here**, none of them `#[cfg(unix)]`. `result-lines` 82 against 81 and `headers` 72 against 71 follow from the one new test target. Unlike `P15-T009`, there was no red gate to record: the supervisor's two corrections were made *before* the gate, and `cargo fmt --all -- --check` plus the new target were re-run after them, so no gate was ever taken over a tree that was then edited.
+
+**The acceptance, clause by clause — and which half of each is being claimed.**
+
+| clause | declared in the file | enforced by a test | observed to run |
+| --- | --- | --- | --- |
+| Windows is mandatory primary job | `bootstrap-validate-windows` on `runs-on: windows-latest`, no matrix, no `if:` | rule 2 | **not by this machine** |
+| macOS/Linux core jobs mandatory | `os: [windows-latest, macos-latest, ubuntu-latest]`, `fail-fast: false`, no `continue-on-error` anywhere | rules 3 and 4 | **not by this machine** |
+| fmt/check/clippy/test included appropriately | the four commands with their gate fragments | rule 5 | **not by this machine** |
+| evals included appropriately | plain `#[test]`s in `acceptance_report_runner.rs`, reached by `cargo test --workspace` | rule 6 + its own test | **not by this machine** |
+
+**Every clause is declared and enforced; none is observed.** This machine cannot dispatch a workflow, so "CI is green" is `Cannot confirm` and is not claimed anywhere in the commit, the test or the document. That gap is precisely why the shape test exists and why `GITHUB_WORKFLOW.md`'s *"a push is not finished until its run has been read"* is cited as the other half rather than replaced.
+
+**A second, independent reading of the workflow, by a real YAML parser.** PyYAML parses the edited file: three jobs; `bootstrap-validate-windows` on `windows-latest` with `if:` and `continue-on-error:` both absent; `rust` with matrix `{'os': ['windows-latest', 'macos-latest', 'ubuntu-latest']}` and the two edited commands coming back as `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo test --workspace --all-features --no-fail-fast`; `shellcheck-secondary` on `ubuntu-latest`; the `sysctl` step carrying its step-level `if: matrix.os == 'ubuntu-latest'` and nothing else carrying one. PyYAML's `safe_load` resolves the top-level key `on` to boolean `True` — a YAML 1.1 constructor, not a property of the file — which the line reader sidesteps by never depending on that key's type.
+
+**The mutation check was run outside the worker's own table.** The `BREAKS` table proves the author's rules react to the author's edits; it does not prove the rules catch anything else. So two edits absent from the table were applied to the real `ci.yml`: `cargo fmt --all -- --check` → `cargo fmt --all`, and `continue-on-error: true` added to `shellcheck-secondary`, a job no row touches. Both were caught, by name:
+
+    - the job `shellcheck-secondary` (line 93) carries `continue-on-error: true`, so a failing job would not be a failing run
+    - no `cargo fmt` command carries `--check`, and a `fmt` step without it rewrites the tree instead of failing the run
+
+and `every_rule_is_turned_red_by_an_edit_that_breaks_it` refused to run its table at all, panicking that *"the workflow is already failing a rule, so no edit below can be said to have broken it"*. The file was restored from a byte backup and verified: sha256 `0f76b16c2e5867043811a7ada6ece49d082a1b6ff8bbee3f0e1ca7d62d667f69`, matching the backup.
+
+**The `--all-features` argument rests on a measurement, re-taken here.** `cargo metadata --offline --no-deps --format-version 1` reports `{}` for the `features` map of all five members — `sure-domain`, `sure-protocol`, `sure-core`, `sure-testkit`, `sure-cli` — and `grep -rn '^\[features\]\|optional = true' Cargo.toml crates/*/Cargo.toml` returns nothing. The claim in the comment is measured rather than assumed.
+
+**The evals claim, re-taken here.** `evaluation/acceptance-manifest.json` holds **20 cases, 13 of them `release_blocking`**; `crates/sure-core/tests/acceptance_report_runner.rs` names `evaluation/acceptance-manifest.json` at line 92 and carries no `#[ignore` anywhere. Rule 6 is therefore true today and would fail if any of the three ways it could go false happened.
+
+**The 75-run attribution in the new file's comments is sourced, not invented.** The comment at the `--all-targets` fragment says the 75-run streak's defect lived in the integration targets. `scripts/check-non-windows.mjs`'s own header says it in as many words: *"the defect that caused the streak was three helper functions in `crates/sure-testkit/tests/integration_thinness.rs` that only Windows-gated tests used, and integration tests are a target `--all-targets` reaches and a plain `cargo clippy` does not."*
+
+**Two hand-back statements did not survive measurement.** The module doc called rule 5 *"the five command families"* while listing `fmt`, `check`, `clippy` and `test` — the file's own rule comment says "the four families" and `REQUIRED` has four entries; corrected to four. And the report said of `cargo check`, *"I said this in the comment rather than changing the line"*: `grep -n 'cargo check' .github/workflows/ci.yml` returned only the `run:` line itself, so no comment said it. The supervisor wrote one, because a reader will ask why clippy takes the flag and check does not.
+
+**What the third hand-back got right, against two that did not.** It reported `hook_failure_semantics.rs` at 1 passed and 4 failed, and then reduced the mechanism with a two-line probe instead of inferring it: `powershell -NoProfile -Command "Get-ExecutionPolicy"` fails to load `Microsoft.PowerShell.Security`, `powershell -NoProfile -Command "Write-Output ok"` works, and `powershell -NoProfile -File <any .ps1>` is refused with `UnauthorizedAccess`. Its conclusion — the count scales with "how many tests spawn Windows PowerShell 5.1 with `-File`", which is why the three hand-backs have reported 27, 5 and 4 — is correct, and it says `cargo test -p sure-testkit` was never a clean signal on that machine. The gate over the whole workspace is `failed=0`. The worker also correctly declined to run the full suite rather than reporting the sandbox as a result.
+
+**`progress/state.json`'s `last_updated` had gone stale and is set here.** It read `2026-09-20T14:58:38.187Z` at `9b5e6ac`, `a301e60`, `e9dec56` and `0b8736a` — four commits in which task entries finished after it. Only `scripts/taskctl.mjs:11` writes the field, and the acceptance splices do not route through `taskctl`, so nothing has moved it since; `grep -rn 'last_updated'` finds no reader, which is why no gate noticed.
 
 ## What `P15-T009` added
 
@@ -23648,6 +23746,7 @@ absent text.
 | `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
+
 
 
 

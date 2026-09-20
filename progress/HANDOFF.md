@@ -3,6 +3,46 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T006` is accepted at `dc8b129`, and the Intel macOS artifact exists and has been run.** The task is
+*"Build macOS Intel artifact or document support policy"*, whose acceptance is an **or** — *"x86_64 macOS
+artifact is built/tested when supported, or exact limitation/policy is documented without false support
+claims"*. It closed on the **first** half. The first deliverable, `a009f57`, had closed on the second: its
+brief instructed it to establish by measurement whether x86_64 macOS is supported and only then choose a
+half, the worker could not push and therefore could not dispatch the workflow, so it documented the
+limitation — and the headline it wrote, *"No Intel (`x86_64-apple-darwin`) macOS artifact is produced,
+published or claimed"*, was false the moment the supervisor dispatched that workflow. Run `35514769749`,
+job `106088732392`: a **native Intel host** (`uname -m` `x86_64`, `RUNNER_ARCH` `X64`, `rustc host`
+`x86_64-apple-darwin`, and `cc` at `/usr/bin/cc` — the tool whose absence had stopped the local attempt
+the old document quoted). It built `sure-0.0.0-bootstrap-x86_64-apple-darwin.tar.gz`, 4307011 bytes,
+sha256 `5b6c6ecc…0ec5`, read `cffaedfe07000001` off the artifact's own bytes, extracted it, and ran the
+extracted `sure doctor` **from the extraction directory**, exit 0, reporting `built for macos x86_64`.
+The job's verdict line is `the bytes that are checksummed are the bytes that were run`.
+
+**The error was on the limitation side, not the capability side**, which is the opposite of the failure
+the brief guarded against — and it is still a false document. Three of the headline's four sentences were
+false, along with `RUST_DESIGN.md`'s *"no `x86_64-apple-darwin` artifact is produced or claimed"*,
+`MACOS.md`'s *"That job has never run"*, `GITHUB_WORKFLOW.md`'s *"there is no Intel artifact, no checksum
+of one, and no execution of an x86_64 macOS binary anywhere in this project's history"*, and
+`.github/workflows/release-dry-run.yml`'s own `**THIS JOB HAS NEVER RUN.**` header. The section body had
+been scrupulous — it listed three things it had not measured and said the label's availability was
+unmeasured — while the short form it labelled *"the one a reader should leave with"* said something the
+next dispatch disproved. **A document honest in its body and false in its headline is still false**, and
+the headline is what a reader keeps.
+
+**What the correction had to avoid is the same defect with the sign flipped.** `gh release list` is empty
+and the releases API returns 0: **nothing is published, for either architecture.** Both macOS archives are
+`actions/upload-artifact` workflow artifacts with `retention-days: 14`, and the arm64 one has been in
+exactly that position since `P15-T005`. So the corrected text says *produced and run, not published*
+everywhere, and every use of "published", "released", "shipped" or "available for download" among the
+added lines is a negation. It also repairs an overstatement that predates this task — `MACOS.md` had been
+calling the Apple Silicon artifact "built and published".
+
+`a009f57` is **superseded, not rewritten**: no force push, both commits stand, and the acceptance record
+names which one the tree agrees with. The revision took two rounds — the first corrected the seven
+locations the brief named and flagged two more (*"nothing in this change has been run on a Mac"* in
+`Build-Release.sh`, and the workflow's own stale header) as outside its scope, and the supervisor sent it
+back rather than accept a tree still carrying claims a run had falsified.
+
 **`P15-T005` is accepted at `83427649132c9622bd48b20ea9864f08b4a73953`, and the aarch64 macOS artifact
 exists.** The task is *"Build macOS Apple Silicon release artifact"*, whose acceptance is *"aarch64 macOS
 artifact builds/tests and checksum generated in CI/release environment"*: `scripts/Build-Release.sh`
@@ -2936,6 +2976,68 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T006` added
+
+`scripts/Build-Release.sh` gained a second macOS target. The architecture check became a two-row table
+rather than a constant: the first eight bytes of the extracted binary must be `cffaedfe0c000001` for
+`aarch64-apple-darwin` and `cffaedfe07000001` for `x86_64-apple-darwin`, and a Mach-O of the other
+architecture, a universal ("fat") binary and a PE or ELF image are each refused by name, with the refusal
+printing the bytes it found against the bytes it required. The x86_64 row of that table was, at the time
+it was written, the only part of this task that could be exercised locally: there is no `aarch64-apple-darwin`
+`std` on this host, so the arm64 bytes came from CI while the x86_64 bytes came from a genuine
+linker-produced Mach-O.
+
+**One defect was found by building that table, and no local gate could have seen it.** The checksum-shape
+pattern was `[0-9A-Za-z.+-]` as inherited from `P15-T005`, which does not admit `_` — and
+`x86_64-apple-darwin` contains one, so **every** Intel archive would have been refused at that check with
+a message about its own name. The local fixture run found it: the Intel row failed there and only there.
+The fix widens the class, and the arm64 output cannot differ from the change because
+`aarch64-apple-darwin` contains no `_` and the new class is a strict superset of the old one.
+
+`.github/workflows/release-dry-run.yml` gained the `package-macos-intel` job (8 steps, `runs-on:
+macos-26-intel`), whose first substantive step prints the runner's identity — `uname -m`, `RUNNER_ARCH`,
+`rustc -vV`'s host and `command -v cc` — precisely so that the log says which machine ran rather than
+leaving the label to be believed. That step is what turns the job's own success into a measurement rather
+than a claim, and it is the step that reported `x86_64` when the job finally ran.
+
+The rest of the task is documentation, corrected in `dc8b129` across eight files, so that no tracked file
+outside `progress/` still asserts that the Intel artifact does not exist.
+
+## Validation of `P15-T006`
+
+**The acceptance was met by CI, and the first attempt at it was falsified by CI.** Run `35514769749`,
+dispatched at `a009f57`, is SUCCESS on all five jobs — both macOS packaging jobs, and `validate` on
+ubuntu, macos and windows. Job `106088732392` printed the runner identity (`uname -m` `x86_64`,
+`RUNNER_ARCH` `X64`, `rustc host` `x86_64-apple-darwin`, image `macos-26` version `20260824.0517.1`),
+built with `cargo build --workspace --release --locked --target x86_64-apple-darwin` (exit 0, 2m41s),
+produced `sure-0.0.0-bootstrap-x86_64-apple-darwin.tar.gz` (4307011 bytes, sha256
+`5b6c6ecc30840c2a0d807ff3e9b6d533e3cf336e4ee26732d48a0ac04ee00ec5`), read `cffaedfe07000001` /
+`Mach-O 64-bit executable x86_64` off the extracted bytes with `/usr/bin/file` agreeing, and ran the
+extracted `sure doctor` from the extraction directory, exit 0, reporting `SURE 0.0.0-bootstrap (harness
+protocol 1), built for macos x86_64, C library none`. The job's verdict line is `OK  the bytes that are
+checksummed are the bytes that were run`, and the arm64 job in the same run printed it too.
+
+**The supervisor verified the correction rather than reading the hand-back.** `release-dry-run.yml` and
+`Build-Release.sh` were changed in comments only, proved three ways: `yaml.safe_load` of the HEAD version
+against the working version compares equal, which is conclusive for every key, value, `uses:`, `with:`,
+`name:`, `path:`, `if:`, `retention-days:` and every `run:` line; the comment-and-blank-stripped line
+streams are byte-identical at 158 and 742 lines; and `bash -n` parses the script. `SHA256SUMS.txt` was
+recomputed over the whole working tree — 195 entries, 19199 bytes, no trailing newline, 0 CR, 0
+mismatches, 0 missing — with six digests refreshed in place and no path added or removed. A sweep of
+every tracked file outside `progress/` and `tasks/` for the falsified phrasings returns no hit.
+
+Two things in the hand-back were corrected against the tree. It reported the manifest as holding **194**
+entries; it holds **195**, because `wc -l` counts newlines and the file deliberately has no trailing one.
+And the claim the original brief handed over as
+believed-but-unmeasured, that an x86_64 little-endian Mach-O begins `cffaedfe07000001`, is no longer a
+belief: the job printed exactly those bytes off the artifact it had just built.
+
+Still not claimed, and written down as such: no second build of the same commit has been measured, so
+non-reproducibility rests on the gzip/tar mechanism rather than on a repeat; the uploaded workflow
+artifact has never been downloaded and re-checked against its `.sha256`, and a 14-day retention window is
+not a distribution channel; nothing in this repository has observed what Gatekeeper does with the binary
+on a Mac; and the `Authority=` failure branch of the Signature step remains untested on every machine.
 
 ## What `P15-T005` added
 

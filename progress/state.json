@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P15",
-  "last_updated": "2026-09-20T13:22:58Z",
+  "last_updated": "2026-09-20T13:29:35Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2217,10 +2217,10 @@
       "notes": "Accepted 2026-09-20. The acceptance sentence is met by CI run 35512934506, all four jobs success, with the artifact uploaded. THE TWO RED RUNS THIS TASK PRODUCED, AND WHAT THEY WERE: `ci` 35510588761 was red at `shellcheck-secondary` (SC2006/SC2034 at Build-Release.sh:881 and SC2006 at :965 — both real defects, measured, not lint noise: the first deleted twelve characters from the file that ships inside the release archive, the second executed `sha256sum -c` and corrupted a failure message). `release-dry-run` 35510588722 was red at the macOS artifact job, after every substantive step had already passed, on the `running from` comparison; and at `validate (ubuntu-latest)`, which was pre-existing and not caused by this task — proved by the commit's own hunk arithmetic, the validate job's steps being context lines (old 6-18 = new 19-31). NOT CLAIMED. (a) `ci` run 35512888372, on the same commit, is RED at `rust (ubuntu-latest)`: one test, `analysis_provider::tests::claude_cli_analyzer_runs_program_and_returns_stdout`, panicking at crates/sure-core/src/analysis_provider/mod.rs:591:44 with `Os { code: 26, kind: ExecutableFileBusy, message: \"Text file busy\" }`. That is the ETXTBSY class P15-T019 exists to fix, at a site not previously recorded for it; the commit changed no Rust, and the same job was green on c522699, so it is the flake and not this task. It is recorded here and in P15-T019's notes rather than repaired, because repairing it is P15-T019. (b) The commit message of 8342764 says \"195 entries, 195 unchanged, 0 stale, 0 missing\"; that is true of the instrument it names — this worktree's bytes — and is silent about a fresh clone, where EIGHT entries read stale because .gitattributes sets `*.ps1 text eol=crlf` while the manifest records LF digests. Measured both ways (fresh checkout: stale 8; CRLF counts 18/13/27 in fresh copies against 0 in this worktree). That class predates this task and belongs to P15-T020, whose acceptance already records the index-versus-checkout ambiguity. (c) The commit message names \"shellcheck 0.9.0\"; the CI log the supervisor holds reports the two SC codes but no version, so the version is an inference from the runner image rather than a reading. (d) Nothing here was run on a Mac by a human; the artifact exists and its architecture was read from its own bytes on the runner, which is the measurement the acceptance asked for."
     },
     "P15-T006": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-20T13:29:35Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "f6706d4bd0e8d9aac9c5e7f1bcab5116723353e5",
       "head_sha": null,
       "evidence": [],
       "notes": ""

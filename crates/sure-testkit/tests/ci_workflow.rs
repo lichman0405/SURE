@@ -87,6 +87,30 @@
 //! place (`repository_shape.rs`, `integration_thinness.rs`), it runs on all
 //! three platforms — so this check runs in every matrix leg it is about — and
 //! nothing in the product depends on it.
+//!
+//! # The second file: `.github/workflows/release.yml` (`P15-T011`)
+//!
+//! `P15-T011`'s acceptance is two sentences of different kinds:
+//!
+//! > *Release workflow can produce artifacts without requiring marketplace
+//! > publication.*
+//! > *No automatic force/merge behavior.*
+//!
+//! The first is a capability with a restriction and the second is a
+//! prohibition, and a prohibition is the easiest kind of claim to assert
+//! **vacuously**. Both are properties of a file, so both are read here, by the
+//! same reader and the same rules-shaped function as the rest of this file —
+//! `release_violations` over `release.yml` and the `scripts/Assemble-Release.sh`
+//! its release job runs. What it proves is what that file says: no run of
+//! `release.yml` has happened, because `git tag` returns zero tags on this
+//! repository and its only trigger is a dispatch naming a tag. The rules and the
+//! reading each one freezes are in the section headed "release.yml" below.
+//!
+//! Two of the rules are about *order* rather than presence, because presence is
+//! where a rule of this kind goes vacuous: the two existence checks have to come
+//! **before** `gh release create` in the file (a check after the create is not a
+//! gate), and each job's `cargo test --workspace` has to come before the
+//! packaging command that refuses without the release gate that test writes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -101,6 +125,127 @@ const EVAL_RUNNER: &str = "crates/sure-core/tests/acceptance_report_runner.rs";
 
 /// The three platforms the acceptance makes mandatory, as the labels spell them.
 const PLATFORMS: [&str; 3] = ["windows-latest", "macos-latest", "ubuntu-latest"];
+
+/// The workflow `P15-T011` added, and the script its `release` job runs.
+const RELEASE_WORKFLOW: &str = ".github/workflows/release.yml";
+const ASSEMBLER: &str = "scripts/Assemble-Release.sh";
+
+/// The create, as the file spells it — not the bare words "gh release create".
+///
+/// The narrower anchor is load-bearing rather than fussy, and the first run of
+/// the rule below against the real file is what says so. The step that refuses a
+/// tag which is not in the checkout carries a message that *mentions*
+/// `gh release create` — "without `--verify-tag` would silently make one" — and
+/// reading the bare words finds that sentence first, at line 576, ahead of the
+/// step that checks whether a release already exists at line 601. The rule then
+/// reported the create as happening *after* a check it in fact precedes, which
+/// is a red test rather than a quiet misreading, and that is the whole reason
+/// this constant exists. An anchor that also matches prose about the anchor is
+/// not an anchor.
+const CREATE: &str = "gh release create \"$TAG\"";
+
+/// The four artifacts a release publishes, as `sure-$version-<triple>.<ext>`.
+///
+/// `<version>` is written as the shell variable the create step uses rather than
+/// as a number, and that is the point rather than a shortcut: the version a
+/// release is named after is the version `sure` itself reports, the tag is the
+/// only place it is written down, and a workflow that spelled a version out
+/// would be a second place for it to disagree with the artifact beside it.
+const RELEASE_ARTIFACTS: [(&str, &str); 4] = [
+    ("x86_64-pc-windows-msvc", "zip"),
+    ("aarch64-apple-darwin", "tar.gz"),
+    ("x86_64-apple-darwin", "tar.gz"),
+    ("x86_64-unknown-linux-gnu", "tar.gz"),
+];
+
+/// Tokens that would be automatic force or merge behaviour, and the act each is.
+///
+/// This is the second acceptance clause turned into text a reader can find. It
+/// is a *list of acts*, not a list of commands, and the entry for each is the
+/// act — `every_act_the_second_clause_forbids_is_one_this_reader_reports`
+/// injects each token into the real workflow and requires the rule to name it,
+/// so a token whose check had stopped working cannot stay here looking like a
+/// check. What no list can carry is the acts nobody thought of; the header of
+/// `scripts/git-guard.mjs` states the same two policies for the local case and
+/// is where a reader should look for the intent behind this one.
+const FORBIDDEN_ACTS: &[(&str, &str)] = &[
+    ("git push", "a push, of any ref, to anywhere"),
+    ("--force", "a force push, or a `--force-with-lease`"),
+    (
+        "--clobber",
+        "replacing a release's assets rather than refusing a second run",
+    ),
+    ("git tag", "creating or moving a tag"),
+    ("gh release delete", "deleting a release"),
+    (
+        "gh release edit",
+        "editing a release, which is how a draft is published",
+    ),
+    (
+        "gh release upload",
+        "adding an asset to a release that already exists",
+    ),
+    ("--draft=false", "publishing a draft"),
+    ("gh pr merge", "merging a pull request"),
+    ("git merge", "merging"),
+    ("git rebase", "rewriting history"),
+    ("git reset", "rewriting history"),
+    ("-X DELETE", "deleting through the API"),
+    ("--auto", "an automatic action"),
+];
+
+/// The publication channels the first acceptance clause is about, and each one.
+///
+/// A job whose credentials are a marketplace token is a job that needs one, so
+/// the clause is checked twice over: no channel's tooling is named, and no
+/// `secrets.` reference exists — the one credential any step uses is
+/// `${{ github.token }}`, which every run is issued and nothing has to be
+/// configured for. Every token here is matched **case-sensitively**, because
+/// they are command names: `WinGet` in a sentence inside the create step's
+/// release notes is prose about what is *not* published, and `winget` is the
+/// submitter.
+const PUBLICATION_CHANNELS: &[(&str, &str)] = &[
+    (
+        "secrets.",
+        "a repository secret, so the release would need configuring before it could run",
+    ),
+    ("vsce", "`vsce`, the Visual Studio Marketplace publisher"),
+    ("ovsx", "`ovsx`, the Open VSX publisher"),
+    ("npm publish", "the npm registry"),
+    ("winget", "the WinGet community repository"),
+    ("nuget", "the NuGet registry"),
+    ("twine", "the Python package index"),
+    ("homebrew", "a Homebrew tap"),
+];
+
+/// The credentials a publication channel's tooling reads, by the name it reads.
+///
+/// A second list rather than a case-insensitive match on the first, and this
+/// file is why: the release notes the create step writes say in prose that no
+/// WinGet package, no Marketplace extension and no npm package is published from
+/// here, and matching case-insensitively would read that sentence as a
+/// dependence on WinGet. The opposite mistake is the one that put this list
+/// here: a workflow authenticates to the Marketplace with `VSCE_PAT`, which is
+/// not spelled `vsce`, so the command-name list alone reported nothing when a
+/// `VSCE_PAT` was added to the real workflow. That was found by running the
+/// mutation, not by reading the rule. A list of command names is not a list of
+/// the ways a credential arrives.
+const PUBLICATION_CREDENTIALS: &[(&str, &str)] = &[
+    (
+        "VSCE_PAT",
+        "the Visual Studio Marketplace publisher's personal access token",
+    ),
+    ("OVSX_PAT", "the Open VSX publisher's personal access token"),
+    ("NPM_TOKEN", "the npm registry's token"),
+    (
+        "NODE_AUTH_TOKEN",
+        "the npm registry's token, under the name `actions/setup-node` reads",
+    ),
+    ("NUGET_API_KEY", "the NuGet registry's key"),
+    ("WINGET_TOKEN", "the WinGet submission token"),
+    ("TWINE_PASSWORD", "the Python package index's password"),
+    ("HOMEBREW_TAP_TOKEN", "a Homebrew tap's token"),
+];
 
 /// What each command family has to carry, and why the fragment is not decoration.
 ///
@@ -593,6 +738,487 @@ fn eval_violations(runner: &str, manifest: &str) -> Vec<String> {
     out
 }
 
+// --- release.yml: the reader, and the rules -------------------------------
+
+/// The line number of the first significant line carrying a token.
+///
+/// The first, and that matters: every rule below that asks *where* something is
+/// is asking about the first place a reader would arrive, and a second
+/// occurrence can only make a gate later rather than earlier.
+fn line_carrying(lines: &[Line<'_>], token: &str) -> Option<usize> {
+    lines
+        .iter()
+        .find(|line| line.text.contains(token))
+        .map(|line| line.number)
+}
+
+/// The job ids of a selection of jobs, as a phrase a violation can carry.
+///
+/// `listing` reads what each job runs on; this one is for the rules that are
+/// about the jobs themselves and would be unreadable if every line repeated the
+/// runner.
+fn names(jobs: &[&Job]) -> String {
+    if jobs.is_empty() {
+        return "no job at all".to_owned();
+    }
+    jobs.iter()
+        .map(|job| job.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A fault from the shared reader that `release.yml`'s rules accept on purpose.
+///
+/// `jobs()` reports every `run: |` block as a fault, because the rules `ci.yml`
+/// is held to cannot see inside one. `release.yml` uses multi-line shells for its
+/// identity steps, for its two refusal steps and for the create itself — a refusal
+/// that prints three lines and exits is not a one-liner — so that one fault is
+/// filtered here. The two faults those rules *are* about, a job-level `if:` and a
+/// `continue-on-error` at any level, are different faults from the same reader
+/// and are not filtered by this predicate; two of the edits in `RELEASE_BREAKS`
+/// add one of each and are what says so rather than this comment.
+///
+/// What is genuinely given up by the filter is stated plainly: a `run: |` block's
+/// *body* is not read by `jobs()`, so nothing that lives only inside one is
+/// covered by the job/step faults. The rules below are written against the whole
+/// text for that reason — `line_carrying` walks every significant line,
+/// indentation and all — so a `--clobber` inside a heredoc is found even though
+/// no job-level rule would see it.
+fn accepted_fault(fault: &str) -> bool {
+    fault.contains("runs a multi-line shell")
+}
+
+/// Every rule about `release.yml`, over its text and the assembler's.
+///
+/// Empty means the two acceptance sentences are the file's content. It is a
+/// function of both texts so that a way each rule could go false can be fed to
+/// it: the edits in `RELEASE_BREAKS` never touch the real files.
+fn release_violations(workflow: &str, assembler: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let lines = significant_lines(workflow);
+
+    // --- the first clause: it can produce artifacts, and needs no marketplace
+
+    // Rule R1. A dispatch is the only trigger, and the tag is a required input.
+    // Everything below this is about a run a person asked for by name; a `push:`
+    // trigger would be a run that started itself.
+    let found_triggers = triggers(workflow);
+    if !found_triggers
+        .iter()
+        .any(|found| found == "workflow_dispatch")
+    {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} has no `workflow_dispatch:` trigger, so there is no way for a \
+             person to ask for a release at all; the triggers read are {found_triggers:?}"
+        ));
+    }
+    for forbidden in [
+        "push",
+        "pull_request",
+        "schedule",
+        "workflow_run",
+        "repository_dispatch",
+        "release",
+        "create",
+    ] {
+        if found_triggers.iter().any(|found| found == forbidden) {
+            out.push(format!(
+                "{RELEASE_WORKFLOW} carries a `{forbidden}:` trigger, so a run can start without \
+                 anyone asking for it in a named tag — and this file's first outward-facing act is \
+                 creating a release"
+            ));
+        }
+    }
+    for (indent, wanted, what) in [
+        (2, "workflow_dispatch:", "the dispatch trigger"),
+        (4, "inputs:", "the dispatch's inputs"),
+        (6, "tag:", "the tag input"),
+        (
+            8,
+            "required: true",
+            "the input being required, without which a dispatch with no tag starts a run that \
+             cannot know what it is releasing",
+        ),
+    ] {
+        if !lines
+            .iter()
+            .any(|line| line.indent == indent && line.text == wanted)
+        {
+            out.push(format!(
+                "{RELEASE_WORKFLOW} does not carry `{wanted}` at indent {indent} under `on:`, which \
+                 is {what}"
+            ));
+        }
+    }
+
+    // Rule R2. Nothing conditional, nothing allowed to fail. This is the same
+    // reading `ci.yml`'s rule 4 takes, over this file's jobs.
+    let jobs = jobs(workflow);
+    if jobs.is_empty() {
+        out.push(format!(
+            "no job was read out of {RELEASE_WORKFLOW} at all, so every rule below is passing \
+             because the reader came back with nothing"
+        ));
+    }
+    for job in &jobs {
+        for fault in job.faults.iter().filter(|fault| !accepted_fault(fault)) {
+            out.push(fault.clone());
+        }
+        if job.labels.is_empty() {
+            out.push(format!(
+                "the job `{}` (line {}) declares no runner this reader can read (`runs-on: {}`), so \
+                 where it runs is not something this file says",
+                job.name,
+                job.line,
+                job.runs_on.as_deref().unwrap_or("nothing")
+            ));
+        }
+    }
+    for wanted in [
+        "package-windows",
+        "package-macos",
+        "package-macos-intel",
+        "package-linux",
+        "release",
+    ] {
+        if !jobs.iter().any(|job| job.name == wanted) {
+            out.push(format!(
+                "{RELEASE_WORKFLOW} has no job named `{wanted}`; the jobs read are {}",
+                listing(&jobs)
+            ));
+        }
+    }
+
+    // Rule R3. Four artifacts, four jobs that package them, and the tests before
+    // the packaging in each one — the packaging scripts refuse without the
+    // release gate `cargo test -p sure-core --test acceptance_report_runner`
+    // writes, so a packaging step that came first would be a packaging step that
+    // failed rather than a release built from an unmeasured tree.
+    let packaging: Vec<&Job> = jobs
+        .iter()
+        .filter(|job| {
+            job.commands
+                .iter()
+                .any(|command| command.contains("Build-Release."))
+        })
+        .collect();
+    if packaging.len() != RELEASE_ARTIFACTS.len() {
+        out.push(format!(
+            "{} job(s) run a `Build-Release.` command and a release carries {} archives, so the \
+             jobs and the artifacts do not line up: {}",
+            packaging.len(),
+            RELEASE_ARTIFACTS.len(),
+            names(&packaging)
+        ));
+    }
+    for job in &packaging {
+        let Some(build) = job
+            .commands
+            .iter()
+            .position(|command| command.contains("Build-Release."))
+        else {
+            // `packaging` was filtered on exactly this, so this arm is
+            // unreachable; it is written out rather than unwrapped so that a
+            // filter that changed shape could not panic the whole file.
+            continue;
+        };
+        match job
+            .commands
+            .iter()
+            .position(|command| command.starts_with("cargo test --workspace"))
+        {
+            None => out.push(format!(
+                "the job `{}` (line {}) packages without running `cargo test --workspace` first, \
+                 and `scripts/Build-Release.*` refuse to package without the release gate that test \
+                 writes: {:?}",
+                job.name, job.line, job.commands
+            )),
+            Some(tests) if tests > build => out.push(format!(
+                "the job `{}` (line {}) runs `cargo test --workspace` at position {tests} of its \
+                 commands and packages at position {build}, so the packaging happens before the \
+                 tests that write the release gate it is supposed to be gated on",
+                job.name, job.line
+            )),
+            Some(_) => {}
+        }
+    }
+    for &(triple, _) in RELEASE_ARTIFACTS
+        .iter()
+        .filter(|(triple, _)| *triple != "x86_64-pc-windows-msvc")
+    {
+        let found = packaging.iter().any(|job| {
+            job.commands
+                .iter()
+                .any(|command| command.contains("Build-Release.sh") && command.contains(triple))
+        });
+        if !found {
+            out.push(format!(
+                "no job packages for `{triple}`: no `Build-Release.sh` command in \
+                 {RELEASE_WORKFLOW} names that target, so the release would be missing \
+                 `sure-$version-{triple}.tar.gz`"
+            ));
+        }
+    }
+    // The Windows artifact's command names no triple — the PowerShell script
+    // builds for its own host — so the job that runs it is required to be on
+    // Windows, and the triple it stands for is the one the uploads and the asset
+    // list spell out (rule R4).
+    let windows = packaging.iter().any(|job| {
+        job.labels.iter().any(|label| label == "windows-latest")
+            && job
+                .commands
+                .iter()
+                .any(|command| command.contains("Build-Release.ps1"))
+    });
+    if !windows {
+        out.push(format!(
+            "the PowerShell build (`Build-Release.ps1`) is not run by a job on `windows-latest`, so \
+             the Windows artifact — the platform \
+             `docs/adr/0007-windows-primary-development.md` makes primary — is not what this file \
+             produces: {}",
+            names(&packaging)
+        ));
+    }
+
+    // Rule R4. Every archive, its checksum, and the one aggregate.
+    //
+    // Read from the **code lines** rather than from the whole text, and that is
+    // not fastidiousness: this file's own header names `SHA256SUMS.txt`,
+    // `scripts/Assemble-Release.sh` and `${{ github.token }}` in prose, and a
+    // `contains` over the whole text is satisfied by a sentence about the thing.
+    // The mutation that deleted the step running the assembler is what found
+    // that: the rule stayed green on the comment eleven lines from the top. A
+    // rule about what the file *does* has to read what the file does.
+    for (triple, extension) in RELEASE_ARTIFACTS.iter() {
+        let archive = format!("sure-$version-{triple}.{extension}");
+        if line_carrying(&lines, &archive).is_none() {
+            out.push(format!(
+                "{RELEASE_WORKFLOW} does not name `{archive}` on any line it runs, so the release \
+                 would not carry it"
+            ));
+        }
+        let checksum = format!("{archive}.sha256");
+        if line_carrying(&lines, &checksum).is_none() {
+            out.push(format!(
+                "{RELEASE_WORKFLOW} does not name `{checksum}` on any line it runs, so a download of \
+                 {archive} could not be checked against anything"
+            ));
+        }
+    }
+    if line_carrying(&lines, "sure-$version-release-checksums.txt").is_none() {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} does not name `sure-$version-release-checksums.txt` on any line it \
+             runs, so the release would not carry the one file a downloader needs to check all four \
+             archives at once"
+        ));
+    }
+    // The checksum trap, held in the same place. `SHA256SUMS.txt` is a curated
+    // manifest over the source tree and is not a release artifact; attaching or
+    // writing one under that name is the mistake
+    // `scripts/Build-Release.ps1`'s header calls the trap in this task.
+    if let Some(at) = line_carrying(&lines, "SHA256SUMS.txt") {
+        out.push(format!(
+            "line {at} of {RELEASE_WORKFLOW} names `SHA256SUMS.txt`, which is a curated manifest \
+             over the source tree and not a release artifact"
+        ));
+    }
+    if line_carrying(&lines, ASSEMBLER).is_none() {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} does not run `{ASSEMBLER}` in any step, so nothing recomputes the \
+             four digests from the bytes that came back through the upload and the download"
+        ));
+    }
+    // Every `--output-dir` this file passes is quoted and absolute, and this
+    // rule is the supervisor's rather than the worker's: the first version of
+    // this file passed `--output-dir target/tmp/release` to the assembler, which
+    // refuses a relative path and exits 1 with
+    // `FAILED: --output-dir must be an absolute path: target/tmp/release`. It
+    // was found by running the script with the argument the file gave it, and
+    // not by reading — the flag was correct, the *value* was not, which is the
+    // shape a rule about presence cannot see. The three `Build-Release.sh`
+    // commands happened to be right, so the file was inconsistent with itself.
+    for line in lines
+        .iter()
+        .filter(|line| line.text.contains("--output-dir"))
+    {
+        let Some(rest) = line.text.split("--output-dir ").nth(1) else {
+            continue;
+        };
+        let quoted = rest.starts_with('"');
+        let after_quote = rest.trim_start_matches('"');
+        let absolute =
+            after_quote.starts_with("$GITHUB_WORKSPACE/") || after_quote.starts_with('/');
+        if !quoted || !absolute {
+            out.push(format!(
+                "line {} of {RELEASE_WORKFLOW} passes `--output-dir {}`, which is not a quoted \
+                 absolute path; `{ASSEMBLER}` and `scripts/Build-Release.sh` both refuse a relative \
+                 output directory, so this step fails on the runner rather than checking anything",
+                line.number,
+                rest.split_whitespace().next().unwrap_or("")
+            ));
+        }
+    }
+    // The assembler's half of the same two properties, read from its code lines:
+    // the file it writes is a name of its own, and the four archives it verifies
+    // are the four this workflow publishes.
+    let assembler_lines = significant_lines(assembler);
+    let named = assembler_lines.iter().any(|line| {
+        line.text.starts_with("CHECKSUMS_NAME=")
+            && line.text.contains("release-checksums")
+            && !line.text.contains("SHA256SUMS")
+    });
+    if !named {
+        out.push(format!(
+            "{ASSEMBLER} does not assign `CHECKSUMS_NAME` a name holding `release-checksums` and not \
+             `SHA256SUMS`, so what it writes is not the object the release attaches and is named \
+             like"
+        ));
+    }
+    for (triple, extension) in RELEASE_ARTIFACTS.iter() {
+        let entry = format!("{triple}:{extension}");
+        if line_carrying(&assembler_lines, &entry).is_none() {
+            out.push(format!(
+                "{ASSEMBLER} does not carry `{entry}` in its list of artifacts, so the four archives \
+                 it verifies are not the four {RELEASE_WORKFLOW} publishes"
+            ));
+        }
+    }
+
+    // --- the second clause: no automatic force, and no merge
+
+    for &(token, act) in FORBIDDEN_ACTS {
+        if let Some(at) = line_carrying(&lines, token) {
+            out.push(format!(
+                "line {at} of {RELEASE_WORKFLOW} carries `{token}`, which is {act}; the second \
+                 acceptance clause is that this workflow does none of it"
+            ));
+        }
+    }
+    // The create happens once, as a draft, and only after both existence checks.
+    // Order is the property here and not presence: a check written *after* the
+    // create is not a gate on it, and a rule that only asked whether the tokens
+    // appear somewhere would go green on exactly that file.
+    match line_carrying(&lines, CREATE) {
+        None => out.push(format!(
+            "nothing in {RELEASE_WORKFLOW} runs `{CREATE}`, so no release is created and the four \
+             artifacts stay workflow artifacts that expire"
+        )),
+        Some(create) => {
+            for (token, what) in [
+                ("refs/tags/", "the tag being released exists"),
+                (
+                    "releases/tags/",
+                    "no release for that tag exists already, which is what makes a second run a \
+                     refusal rather than a replacement of the first one's assets",
+                ),
+            ] {
+                match line_carrying(&lines, token) {
+                    None => out.push(format!(
+                        "nothing in {RELEASE_WORKFLOW} reads `{token}`, so the create is not gated on \
+                         whether {what}"
+                    )),
+                    Some(guard) if guard > create => out.push(format!(
+                        "`{token}` is read at line {guard} of {RELEASE_WORKFLOW} and `{CREATE}` \
+                         is at line {create}, so the create happens before the check that {what}"
+                    )),
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    let draft = lines
+        .iter()
+        .any(|line| line.text.starts_with("--draft") && !line.text.contains('='));
+    if !draft {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} never calls `gh release create` with `--draft`, so a run would \
+             publish a release rather than leave one for a person to publish — and a release that \
+             has been public has been public"
+        ));
+    }
+    // The tag is read from the typed input, which is what makes the tag *this
+    // run's* tag rather than whatever the payload happened to carry, and what
+    // the `required: true` above applies to.
+    if line_carrying(&lines, "${{ inputs.tag }}").is_none() {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} does not read the tag it was dispatched with as `${{{{ \
+             inputs.tag }}}}` on any line it runs, so the tag it releases is not the one it was \
+             asked for"
+        ));
+    }
+    // `--verify-tag` as a flag on its own line, and not merely present: the
+    // refusal step's own message mentions the flag by name, so `contains` would
+    // be satisfied by a file whose create no longer passes it. The last clause
+    // of that message is measured — this is the shape that keeps the check from
+    // passing on the sentence describing the check.
+    let verify_tag = lines
+        .iter()
+        .any(|line| line.text.starts_with("--verify-tag") && !line.text.contains('='));
+    if !verify_tag {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} never calls `gh release create` with `--verify-tag` as a flag of \
+             its own, and without it `gh` creates the tag itself when it is missing — a tag made by \
+             a workflow rather than by a person, which is the act the second acceptance clause is \
+             about"
+        ));
+    }
+    let writes = lines
+        .iter()
+        .filter(|line| line.text == "contents: write")
+        .count();
+    if writes != 1 {
+        out.push(format!(
+            "`contents: write` appears {writes} time(s) in {RELEASE_WORKFLOW} and has to appear \
+             exactly once, on the one job that creates the release: a scope a packaging job does \
+             not need is a scope it can use"
+        ));
+    }
+    if lines
+        .iter()
+        .any(|line| line.indent == 0 && line.text.starts_with("permissions:"))
+    {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} carries a workflow-level `permissions:` block, which replaces the \
+             default its four packaging jobs inherit from `release-dry-run.yml`'s measured \
+             configuration, and what `actions/upload-artifact` does under a narrower scope is not \
+             something this repository has measured"
+        ));
+    }
+    // A release of three artifacts because one job's name drifted out of `needs:`
+    // is exactly the quiet failure the explicit asset list is there to prevent.
+    let needs = "needs: [package-windows, package-macos, package-macos-intel, package-linux]";
+    if line_carrying(&lines, needs).is_none() {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} does not declare `{needs}`, so the job that creates the release is \
+             not gated on all four artifacts being built"
+        ));
+    }
+
+    // --- the first clause again: it needs no marketplace to run
+
+    for &(token, channel) in PUBLICATION_CHANNELS
+        .iter()
+        .chain(PUBLICATION_CREDENTIALS.iter())
+    {
+        if let Some(at) = line_carrying(&lines, token) {
+            out.push(format!(
+                "line {at} of {RELEASE_WORKFLOW} carries `{token}`, which is {channel}; the first \
+                 acceptance clause is that this release is produced without any of them"
+            ));
+        }
+    }
+    if line_carrying(&lines, "${{ github.token }}").is_none() {
+        out.push(format!(
+            "{RELEASE_WORKFLOW} does not use `${{{{ github.token }}}}` on any line it runs, the \
+             token every run is issued and nothing has to be configured for, so whatever credential \
+             it does use is one the repository would have to carry"
+        ));
+    }
+
+    out.dedup();
+    out
+}
+
 // --- the repository, against every rule -----------------------------------
 
 #[test]
@@ -872,6 +1498,436 @@ fn the_eval_rule_is_turned_red_by_the_three_ways_it_could_be_false() {
         assert!(
             !eval_violations(&runner, empty).is_empty(),
             "a corpus of {empty:?} was read as a corpus with cases in it"
+        );
+    }
+}
+
+// --- release.yml, and the reader and the rules, against edits -------------
+
+#[test]
+fn the_release_workflow_satisfies_every_rule() {
+    let found = release_violations(&read(RELEASE_WORKFLOW), &read(ASSEMBLER));
+    assert!(
+        found.is_empty(),
+        "{RELEASE_WORKFLOW} no longer carries what the two acceptance sentences ask of it:\n{}",
+        found
+            .iter()
+            .map(|violation| format!("  - {violation}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// The reader found this workflow's jobs, runners and commands.
+///
+/// The same guard `the_reader_sees_the_jobs_that_are_there` is for `ci.yml`, and
+/// it is load-bearing in a second way here: three of the rules below are "no job
+/// does X" or "no job packages for Y", and a reader that came back empty would
+/// satisfy the first kind and violate the second — which is a red test, so the
+/// pair of them is what keeps the result a reading rather than a silence.
+#[test]
+fn the_release_reader_sees_the_jobs_that_are_there() {
+    let workflow = read(RELEASE_WORKFLOW);
+    let jobs = jobs(&workflow);
+    let names: Vec<&str> = jobs.iter().map(|job| job.name.as_str()).collect();
+    for expected in [
+        "package-windows",
+        "package-macos",
+        "package-macos-intel",
+        "package-linux",
+        "release",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "the reader did not find the job `{expected}`, and it read {names:?}"
+        );
+    }
+    for job in &jobs {
+        assert!(
+            !job.labels.is_empty(),
+            "the job `{}` (line {}) was read with no runner at all",
+            job.name,
+            job.line
+        );
+        assert!(
+            !job.commands.is_empty(),
+            "the job `{}` (line {}) was read with no single-line command at all, and every rule \
+             about a command would pass on it for that reason",
+            job.name,
+            job.line
+        );
+    }
+    let packaging: Vec<&str> = jobs
+        .iter()
+        .filter(|job| {
+            job.commands
+                .iter()
+                .any(|command| command.contains("Build-Release."))
+        })
+        .map(|job| job.name.as_str())
+        .collect();
+    assert_eq!(
+        packaging,
+        vec![
+            "package-windows",
+            "package-macos",
+            "package-macos-intel",
+            "package-linux"
+        ],
+        "the jobs the reader reads as packaging jobs are {packaging:?}"
+    );
+    let found_triggers = triggers(&workflow);
+    assert!(
+        found_triggers
+            .iter()
+            .any(|found| found == "workflow_dispatch"),
+        "the reader did not read `workflow_dispatch` out of `on:`, and it read {found_triggers:?}"
+    );
+}
+
+/// An empty workflow is not a pass, and neither is a workflow with the right
+/// jobs and no dispatch.
+#[test]
+fn a_release_workflow_that_is_not_there_is_not_a_pass() {
+    let found = release_violations("", "");
+    assert!(
+        !found.is_empty(),
+        "an empty pair of files satisfied every rule, so the rules prove nothing about the files \
+         that are there"
+    );
+    for wanted in ["workflow_dispatch", "no job was read", "gh release create"] {
+        assert!(
+            found.iter().any(|violation| violation.contains(wanted)),
+            "an empty file produced no violation carrying {wanted:?}: {found:#?}"
+        );
+    }
+    // A file with a `release` job and no dispatch: the trigger rules have to
+    // complain rather than read a trigger out of nothing.
+    let no_trigger = release_violations(
+        "name: release\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      \
+         - run: cargo test --workspace\n",
+        "",
+    );
+    assert!(
+        no_trigger
+            .iter()
+            .any(|violation| violation.contains("workflow_dispatch")),
+        "a workflow with no trigger was read as one with a trigger: {no_trigger:#?}"
+    );
+}
+
+/// The token lists are lists of things this reader actually reports.
+///
+/// This is the test that keeps them from being decoration. Each token is
+/// injected into the real workflow as a real `run:` line and the rules are
+/// required to name it, so a token whose check had stopped working — a typo in
+/// the token, a rule that returned early, a list that grew an entry the rule
+/// never reads — is a red test rather than a line in a table that looks like a
+/// check. It proves the *detector* works for every token here. It cannot prove
+/// the list is complete, and that is the part a reader has to weigh.
+#[test]
+fn every_forbidden_and_every_publication_token_is_one_this_reader_reports() {
+    let workflow = read(RELEASE_WORKFLOW);
+    let assembler = read(ASSEMBLER);
+    assert!(
+        release_violations(&workflow, &assembler).is_empty(),
+        "the workflow is already failing a rule, so nothing injected below could be said to have \
+         caused it"
+    );
+
+    let anchor = "      - uses: actions/checkout@v4";
+    for &(token, act) in FORBIDDEN_ACTS
+        .iter()
+        .chain(PUBLICATION_CHANNELS.iter())
+        .chain(PUBLICATION_CREDENTIALS.iter())
+    {
+        let broken = workflow.replace(anchor, &format!("{anchor}\n      - run: {token}"));
+        assert_ne!(
+            broken, workflow,
+            "the anchor {anchor:?} is not in the workflow"
+        );
+        let found = release_violations(&broken, &assembler);
+        assert!(
+            found.iter().any(|violation| violation.contains(token)),
+            "injecting `{token}` ({act}) into {RELEASE_WORKFLOW} produced no violation naming it \
+             — so the entry is a line in a list rather than a check:\n{found:#?}"
+        );
+    }
+}
+
+/// An edit to one of the two real files that must turn a rule red.
+struct ReleaseBreak {
+    /// What the edit is, in a sentence.
+    what: &'static str,
+    /// Which file the edit is made to.
+    file: ReleaseFile,
+    /// Text taken out of that file as it stands.
+    from: &'static str,
+    /// What goes in its place.
+    to: &'static str,
+    /// Text the resulting violation has to carry.
+    wanted: &'static str,
+}
+
+/// The two files the release rules are about.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReleaseFile {
+    Workflow,
+    Assembler,
+}
+
+/// Every release rule, broken the way it would really be broken.
+///
+/// Same discipline as `BREAKS`: the edits are taken from the files' own bytes
+/// rather than written as fixtures, so each one proves the checker reacts to
+/// *these* files; and a `replace` that found nothing is a failure rather than a
+/// pass, because that is the way this kind of table rots into decoration.
+///
+/// The list is deliberately longer than the rule list, because the second
+/// acceptance clause is a prohibition: a prohibition is satisfied by a file that
+/// says nothing, so each clause rule is broken once per way it could be broken
+/// rather than once per rule. The edits a supervisor would think of that are
+/// *not* here are the reason
+/// `every_forbidden_and_every_publication_token_is_one_this_reader_reports`
+/// exists: that one is generated from the token lists, so it cannot fall behind
+/// them.
+const RELEASE_BREAKS: &[ReleaseBreak] = &[
+    ReleaseBreak {
+        what: "the workflow starts running on a tag push",
+        file: ReleaseFile::Workflow,
+        from: "on:\n  workflow_dispatch:",
+        to: "on:\n  push:\n    tags: ['v*']\n  workflow_dispatch:",
+        wanted: "a `push:` trigger",
+    },
+    ReleaseBreak {
+        what: "the tag input stops being required",
+        file: ReleaseFile::Workflow,
+        from: "        required: true",
+        to: "        required: false",
+        wanted: "`required: true`",
+    },
+    ReleaseBreak {
+        what: "the release stops being a draft",
+        file: ReleaseFile::Workflow,
+        from: "            --draft \\",
+        to: "",
+        wanted: "`--draft`",
+    },
+    ReleaseBreak {
+        what: "a draft is published from the workflow",
+        file: ReleaseFile::Workflow,
+        from: "            --draft \\",
+        to: "            --draft=false \\",
+        wanted: "`--draft=false`",
+    },
+    ReleaseBreak {
+        what: "the create would make the tag itself",
+        file: ReleaseFile::Workflow,
+        from: "            --verify-tag \\",
+        to: "",
+        wanted: "`--verify-tag`",
+    },
+    ReleaseBreak {
+        what: "assets would be replaced instead of a second run refusing",
+        file: ReleaseFile::Workflow,
+        from: "            --verify-tag \\",
+        to: "            --verify-tag --clobber \\",
+        wanted: "`--clobber`",
+    },
+    ReleaseBreak {
+        what: "a job is allowed to fail",
+        file: ReleaseFile::Workflow,
+        from: "  release:\n    name: Attach the four artifacts to a draft release",
+        to: "  release:\n    continue-on-error: true\n    name: Attach the four artifacts to a draft release",
+        wanted: "continue-on-error",
+    },
+    ReleaseBreak {
+        what: "a step is allowed to fail",
+        file: ReleaseFile::Workflow,
+        from: "      - name: Refuse to touch a release that already exists",
+        to: "      - name: Refuse to touch a release that already exists\n        continue-on-error: true",
+        wanted: "continue-on-error",
+    },
+    ReleaseBreak {
+        what: "the job that creates the release becomes conditional",
+        file: ReleaseFile::Workflow,
+        from: "  release:\n    name: Attach the four artifacts to a draft release",
+        to: "  release:\n    if: github.event_name == 'workflow_dispatch'\n    name: Attach the four artifacts to a draft release",
+        wanted: "conditional",
+    },
+    ReleaseBreak {
+        what: "a repository secret is used, where a run-issued token was",
+        file: ReleaseFile::Workflow,
+        from: "          GH_TOKEN: ${{ github.token }}",
+        to: "          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+        wanted: "`secrets.`",
+    },
+    ReleaseBreak {
+        what: "a marketplace publisher's token appears",
+        file: ReleaseFile::Workflow,
+        from: "          GH_TOKEN: ${{ github.token }}",
+        to: "          VSCE_PAT: ${{ secrets.VSCE_PAT }}",
+        wanted: "`VSCE_PAT`",
+    },
+    ReleaseBreak {
+        what: "the create stops passing the tag it was given",
+        file: ReleaseFile::Workflow,
+        from: "          TAG: ${{ inputs.tag }}",
+        to: "          TAG: latest",
+        wanted: "`${{ inputs.tag }}`",
+    },
+    ReleaseBreak {
+        what: "the Windows artifact is packaged off Windows",
+        file: ReleaseFile::Workflow,
+        from: "  package-windows:\n    name: Windows x64 artifact (x86_64-pc-windows-msvc)\n    runs-on: windows-latest",
+        to: "  package-windows:\n    name: Windows x64 artifact (x86_64-pc-windows-msvc)\n    runs-on: ubuntu-latest",
+        wanted: "is not run by a job on `windows-latest`",
+    },
+    ReleaseBreak {
+        what: "a packaging job stops naming its target",
+        file: ReleaseFile::Workflow,
+        from: "sh scripts/Build-Release.sh --phase all --target x86_64-apple-darwin",
+        to: "sh scripts/Build-Release.sh --phase all",
+        wanted: "no job packages for `x86_64-apple-darwin`",
+    },
+    ReleaseBreak {
+        what: "the tests stop coming before the packaging",
+        file: ReleaseFile::Workflow,
+        from: "      - name: The workspace's tests, on this runner\n        shell: pwsh\n        run: cargo test --workspace --no-fail-fast\n",
+        to: "",
+        wanted: "packages without running `cargo test --workspace` first",
+    },
+    ReleaseBreak {
+        what: "the Intel archive leaves the release's asset list",
+        file: ReleaseFile::Workflow,
+        from: "sure-$version-x86_64-apple-darwin.tar.gz",
+        to: "sure-$version-x86_64-apple-darwin-absent.tar.gz",
+        wanted: "`sure-$version-x86_64-apple-darwin.tar.gz`",
+    },
+    ReleaseBreak {
+        what: "the aggregate checksum file stops being named",
+        file: ReleaseFile::Workflow,
+        from: "sure-$version-release-checksums.txt",
+        to: "sure-$version-checksums.txt",
+        wanted: "does not name `sure-$version-release-checksums.txt`",
+    },
+    ReleaseBreak {
+        what: "the source-tree manifest is attached as a release asset",
+        file: ReleaseFile::Workflow,
+        from: "            --notes-file \"$notes\" \\",
+        to: "            --notes-file \"$notes\" \\\n            SHA256SUMS.txt \\",
+        wanted: "names `SHA256SUMS.txt`",
+    },
+    ReleaseBreak {
+        what: "the assembly script stops being run",
+        file: ReleaseFile::Workflow,
+        from: "        run: sh scripts/Assemble-Release.sh --version \"${TAG#v}\" --output-dir \"$GITHUB_WORKSPACE/target/tmp/release\"",
+        to: "        run: echo nothing to assemble",
+        wanted: "does not run `scripts/Assemble-Release.sh`",
+    },
+    ReleaseBreak {
+        what: "the assembly script is given a relative output directory, which it refuses",
+        file: ReleaseFile::Workflow,
+        from: "        run: sh scripts/Assemble-Release.sh --version \"${TAG#v}\" --output-dir \"$GITHUB_WORKSPACE/target/tmp/release\"",
+        to: "        run: sh scripts/Assemble-Release.sh --version \"${TAG#v}\" --output-dir target/tmp/release",
+        wanted: "not a quoted absolute path",
+    },
+    ReleaseBreak {
+        what: "the check that the tag exists stops reading the tag",
+        file: ReleaseFile::Workflow,
+        from: "git rev-parse --verify \"refs/tags/${TAG}^{commit}\"",
+        to: "git rev-parse --verify HEAD",
+        wanted: "reads `refs/tags/`",
+    },
+    ReleaseBreak {
+        what: "the check that no release exists stops asking about the release",
+        file: ReleaseFile::Workflow,
+        from: "repos/$GITHUB_REPOSITORY/releases/tags/$TAG",
+        to: "repos/$GITHUB_REPOSITORY",
+        wanted: "reads `releases/tags/`",
+    },
+    ReleaseBreak {
+        what: "the release job stops waiting for all four artifacts",
+        file: ReleaseFile::Workflow,
+        from: "    needs: [package-windows, package-macos, package-macos-intel, package-linux]",
+        to: "    needs: [package-windows, package-macos-intel, package-linux]",
+        wanted: "is not gated on all four artifacts",
+    },
+    ReleaseBreak {
+        what: "a packaging job is handed write scope it does not need",
+        file: ReleaseFile::Workflow,
+        from: "  package-linux:\n    name: Linux x64 artifact (x86_64-unknown-linux-gnu)\n    runs-on: ubuntu-latest",
+        to: "  package-linux:\n    name: Linux x64 artifact (x86_64-unknown-linux-gnu)\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write",
+        wanted: "appears 2 time(s)",
+    },
+    ReleaseBreak {
+        what: "a workflow-level permissions block narrows every job at once",
+        file: ReleaseFile::Workflow,
+        from: "jobs:\n",
+        to: "permissions:\n  contents: read\n\njobs:\n",
+        wanted: "workflow-level `permissions:`",
+    },
+    ReleaseBreak {
+        what: "a job loses its runner",
+        file: ReleaseFile::Workflow,
+        from: "    runs-on: macos-26-intel",
+        to: "    runs-on: ${{ matrix.os }}",
+        wanted: "declares no runner",
+    },
+    ReleaseBreak {
+        what: "the assembly script writes the source-tree manifest's name",
+        file: ReleaseFile::Assembler,
+        from: "CHECKSUMS_NAME=\"sure-$VERSION-release-checksums.txt\"",
+        to: "CHECKSUMS_NAME=\"SHA256SUMS.txt\"",
+        wanted: "does not assign `CHECKSUMS_NAME`",
+    },
+    ReleaseBreak {
+        what: "the assembly script verifies a different set of archives",
+        file: ReleaseFile::Assembler,
+        from: "x86_64-pc-windows-msvc:zip",
+        to: "x86_64-pc-windows-msvc:tar.gz",
+        wanted: "`x86_64-pc-windows-msvc:zip`",
+    },
+];
+
+#[test]
+fn every_release_rule_is_turned_red_by_an_edit_that_breaks_it() {
+    let workflow = read(RELEASE_WORKFLOW);
+    let assembler = read(ASSEMBLER);
+    assert!(
+        release_violations(&workflow, &assembler).is_empty(),
+        "the files are already failing a rule, so no edit below can be said to have broken it"
+    );
+    for edit in RELEASE_BREAKS {
+        let (before, other) = match edit.file {
+            ReleaseFile::Workflow => (&workflow, &assembler),
+            ReleaseFile::Assembler => (&assembler, &workflow),
+        };
+        let after = before.replace(edit.from, edit.to);
+        assert_ne!(
+            after,
+            *before,
+            "\"{}\" edits text that is not in {} any more ({}), so it would have mutated nothing \
+             and passed for that reason instead. The table has to be re-pointed at what the file \
+             says now.",
+            edit.what,
+            match edit.file {
+                ReleaseFile::Workflow => RELEASE_WORKFLOW,
+                ReleaseFile::Assembler => ASSEMBLER,
+            },
+            edit.from
+        );
+        let found = match edit.file {
+            ReleaseFile::Workflow => release_violations(&after, other),
+            ReleaseFile::Assembler => release_violations(other, &after),
+        };
+        assert!(
+            found
+                .iter()
+                .any(|violation| violation.contains(edit.wanted)),
+            "breaking `{}` produced no violation carrying {:?}:\n{found:#?}",
+            edit.what,
+            edit.wanted
         );
     }
 }

@@ -129,7 +129,11 @@ so the pair above is the arm64 row of a two-row table rather than a constant.
 `### What the macOS Intel archive is, concretely`, which is also where the
 four-direction measurement of this check is written down. Both macOS archives
 are `actions/upload-artifact` workflow artifacts and **neither is published**;
-that section says what that does and does not mean.
+that section says what that does and does not mean. A fourth archive — the
+Windows ZIP — and a second workflow that attaches all four to a **draft** release
+are `## The release workflow` below; a draft is not a publication either, and
+that section says why, and records that the workflow has never run and that the
+Windows archive has never been built on a runner.
 
 **What "builds/tests" means here is two things.** The workspace's tests are
 `cargo test --workspace --no-fail-fast` in the workflow's own step, on the same
@@ -604,6 +608,95 @@ is the upload-download-rehash round trip the macOS Intel section above reports a
 not measured *for its own artifact*: it is now measured for this one, once, on one
 machine. That entry stands unchanged for both macOS archives, and a 14-day
 `actions/upload-artifact` artifact is still not a distribution channel.
+
+## The release workflow
+
+Every section above ends by saying that its artifact is not published, and that
+remains true of every artifact this project has produced. `P15-T011` adds
+`.github/workflows/release.yml`, a second `workflow_dispatch`-only workflow and
+the only file here that attaches an artifact to anything outward-facing. The
+boundary between it and `release-dry-run.yml` is one row:
+
+| | `release-dry-run.yml` | `release.yml` |
+| --- | --- | --- |
+| what it builds | three archives (macOS arm64, macOS x64, Linux x64) | four, adding `x86_64-pc-windows-msvc` |
+| where the output goes | `actions/upload-artifact`, 14 days, no public URL | the same upload, and then `gh release create` |
+| the outward-facing object | none | one GitHub Release, **draft** |
+| has it run | yes, several times | **never** |
+
+**No run of `release.yml` has happened, and the file says so.** This repository
+has zero tag refs, so the workflow has never been given a tag to
+release. Everything in this section is what the file says, read back by
+`crates/sure-testkit/tests/ci_workflow.rs`; nothing here is a measurement of a
+run, and no reader should upgrade a "would" to a "did". The one dispatch-shaped
+gap that is named as a gap is the Windows packaging path: it has only ever been
+run on the machine `P15-T002` was written on, and a `windows-latest` runner is
+not that machine.
+
+**Trigger and input.** `workflow_dispatch` only, with one input, `tag`, typed
+and `required: true`. There is no `push`, no tag pattern, no `schedule`, no
+`workflow_run` and no `pull_request`. A `push: tags: ['v*']` trigger is the
+conventional shape and was considered: pushing a tag is already a deliberate act.
+It is not here because it removes the last chance to stop — a tag arrives and the
+outward-facing act begins — and this repository has never had a tag at all. The
+dispatch keeps the two acts separate: the tag says which commit is a release, the
+dispatch says to go.
+
+**Four refusals, in order, before anything is created.** The tag must be `v`
+followed by a digit and must contain only characters a version in a file name may
+carry; `refs/tags/<tag>` must already resolve in the checkout (`fetch-depth: 0`,
+because `actions/checkout`'s default has no tags in it); the commit the tag names
+must equal the commit the run is building; and `gh api
+repos/$GITHUB_REPOSITORY/releases/tags/<tag>` must answer **404**. The last one is
+three-way on purpose — a 401, a 403 or a network failure is refused as "cannot
+tell", not read as "nothing is there", because a release this run cannot see is
+not a release that is absent. This is the step that makes a second run for the
+same tag a red run rather than a quiet replacement of the first one's assets.
+Order matters and is asserted: a check written after the act it guards is not a
+gate.
+
+**The release is created as a draft and nothing here can publish it.** `gh
+release create "$TAG" --repo … --draft --verify-tag --title … --notes-file …`
+with nine assets named one file at a time — the four archives, each `.sha256`,
+and the release checksum file. `--verify-tag` is what stops `gh` from silently
+creating a tag when one is missing. `--draft=false`, `gh release edit`, `gh
+release upload`, `gh release delete`, `--clobber`, `git tag`, `git push`,
+`--force`, `gh pr merge` and `--auto` appear nowhere in the file's code, so no
+step in it can publish, replace, edit, delete or force anything. A draft is
+reversible; a release that has been public has been public. Publishing is a
+decision a person makes on the release page.
+
+**The checksum file a downloader gets is not `SHA256SUMS.txt`.**
+`scripts/Assemble-Release.sh` recomputes every digest **from the bytes
+downloaded from the four jobs**, requires each to equal the `.sha256` the build
+wrote on the machine that built it, and writes
+`sure-<version>-release-checksums.txt` — four lines, `<64 lowercase hex><two
+spaces><name>`, ASCII, no BOM — then reads it back with `sha256sum -c`. The
+repository root's `SHA256SUMS.txt` is a curated manifest over the source tree, is
+no part of a release, and does not appear in the workflow's code or in the asset
+list.
+
+**The credential is the run's own token.** `${{ github.token }}`, as `GH_TOKEN`
+for `gh`, in the steps that talk to the API. `secrets.` does not occur outside a
+comment saying that it does not occur. No `vsce`, `ovsx`, `npm publish`, WinGet,
+NuGet, Homebrew or twine command is invoked, so `## Package managers` and
+`## Signing` above stay the last word on those channels, and the release does not
+require any of them to exist.
+
+**What the test proves, and what it cannot.** `crates/sure-testkit/tests/ci_workflow.rs`
+reads both `release.yml` and `scripts/Assemble-Release.sh` as text and fails if
+one of the refusals stops coming before the create, if `--draft` or
+`--verify-tag` leaves, if a job loses its runner or gains an `if:` or
+`continue-on-error`, if a packaging job stops running the workspace's tests
+before it packages, if one of the four archives, its `.sha256`, the aggregate or
+one of the nine asset paths leaves, if `contents: write` appears more than once,
+or if any word from the forbidden-act and publication-channel lists appears in
+the code of either file. Each of those rules is turned red by an edit that breaks
+it; the edits are in the test. It proves
+**what the files say**. It cannot prove that GitHub accepts the workflow, that
+`macos-26-intel` is obtainable, that `windows-latest` can package, or that any
+run passes — none of which this repository has observed, and none of which a
+file about a workflow can observe.
 
 ## Package managers
 

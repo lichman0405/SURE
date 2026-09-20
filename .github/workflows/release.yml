@@ -1,0 +1,728 @@
+# `P15-T011`'s acceptance is two sentences of different kinds, and the
+# difference decides how each can be checked:
+#
+#   "Release workflow can produce artifacts without requiring marketplace
+#    publication."
+#   "No automatic force/merge behavior."
+#
+# The first is a capability with a restriction. The second is a prohibition, and
+# a prohibition is the easiest kind of claim to assert and the easiest to assert
+# *vacuously*. Both are therefore properties of this file, read and enforced by
+# `crates/sure-testkit/tests/ci_workflow.rs`, which fails when one of them
+# leaves — and that test proves **what this file says** and nothing about
+# whether GitHub accepts it or whether any run passed.
+#
+# **No run of this workflow has ever happened, and this file does not claim
+# one.** `git tag` returns zero tags on this repository, so the dispatch below
+# has never been given a tag to release. Every sentence here is about what the
+# file would do.
+#
+# =============================================================================
+# What this workflow is for, next to `release-dry-run.yml`
+# =============================================================================
+#
+# `release-dry-run.yml` already builds, checks and packages three of the four
+# artifacts and uploads each as an `actions/upload-artifact` **workflow**
+# artifact, retained 14 days, attached to no release and reachable by no public
+# URL. That is the gap this file closes: the four archives plus the release
+# checksum file are attached here to a GitHub Release.
+#
+# The two workflows are `workflow_dispatch`-only for the same reason
+# `release-dry-run.yml`'s own header gives — a release build, a package and the
+# acceptance corpus's release gate in front of every push would make the
+# branch's red or green signal depend on a release decision rather than on the
+# code — and the difference between them is what the output *is*: a run-scoped
+# workflow artifact there, a draft release here.
+#
+# **Why the packaging steps are written out again here instead of being shared
+# with the dry run.** GitHub can share jobs between workflows only by moving
+# them into a workflow with `on: workflow_call`, and that is a refactor of a
+# 679-line file whose job names are cited as evidence anchors all over
+# `docs/development/RELEASE_PROCESS.md` — `job 106120068667` is
+# `package-linux`, `job 106088732392` is `package-macos-intel`, and a reader
+# following those references has to arrive somewhere. Moving the jobs would
+# invalidate those anchors to save duplication; the duplication is the cheaper
+# of the two costs, and it is named here rather than hidden.
+#
+# **What is checked here that the dry run does not check.** A download round
+# trip. Each packaging job verifies its archive against the `.sha256` written
+# beside it before uploading; the `release` job then recomputes every digest
+# **from the bytes it downloaded** and requires it to equal the one that
+# shipped with the artifact. That is the upload-download-rehash round trip
+# `docs/development/RELEASE_PROCESS.md` records as measured once, by hand, for
+# the Linux archive, and as not measured at all for the two macOS ones.
+#
+# =============================================================================
+# The trigger, and why the release is a draft (decision 1)
+# =============================================================================
+#
+# **`workflow_dispatch` only, with the tag as a required input.** There is no
+# `push`, no tag pattern, no `schedule`, no `workflow_run` and no
+# `pull_request`: nothing here can start without a person asking for it in a
+# named tag. The tag is checked three ways before anything is created —
+# it must exist as a ref, it must name the commit this run is dispatched from,
+# and no release for it may exist already.
+#
+# **A `push: tags: ['v*']` trigger was considered and is not here.** The
+# argument for it is real: pushing a tag is already a deliberate human act, and
+# a tag trigger is the conventional shape of a release workflow. The argument
+# against is that it removes the last chance to stop, and this repository has
+# never had a tag at all — so a tag-triggered workflow would be one whose
+# trigger has never fired *and* one that begins the outward-facing act the
+# instant a tag lands, including a tag pushed by mistake or by a script. The
+# dispatch keeps the two acts separate: a tag says which commit is a release,
+# and a dispatch says to go.
+#
+# **The release is always a draft.** `gh release create` is called with
+# `--draft` and with no way to un-draft it from here. A draft is reversible —
+# delete it and nothing was published — where publishing is an outward-facing,
+# hard-to-reverse act: a release that has been public has been public.
+#
+# **What a second run for the same tag does: it refuses.** A step before the
+# create asks the API whether a release for that tag exists, and exits 1 if it
+# does — it does not replace, update, delete or clobber anything. `--clobber`,
+# which would silently replace assets, appears nowhere in this file; a
+# replacement of a release's assets is exactly the class of automatic action
+# the second acceptance clause is about. The three-way answer matters as much
+# as the refusal: `gh` exiting non-zero because the release is absent is not the
+# same as `gh` failing to answer, and only the 404 is read as "nothing is there"
+# — anything else stops the run, because a release this run cannot see is not a
+# release that is absent.
+#
+# =============================================================================
+# "Without requiring marketplace publication" (decision 2)
+# =============================================================================
+#
+# The clause is about what the workflow must **not** depend on, and a job whose
+# credentials are a marketplace token is a job that needs one. So:
+#
+# * **`secrets.` appears on no line of this file that is not a comment.** That
+#   is the measurement, and it is the one to run: every occurrence in the file
+#   is in the prose of this header, including the sentence you are reading. An
+#   earlier version of this bullet said it "does not appear in this file at
+#   all", which was false in the sentence that said it, and is why the claim is
+#   stated as a property of the code rather than as a count. The one credential
+#   any step uses is `${{ github.token }}`, the token every run is issued, set
+#   as `GH_TOKEN` for `gh` in the three steps that talk to the API. Nothing has
+#   to be configured in the repository for this workflow to run.
+# * **No publication channel is invoked.** WinGet (`scripts/New-WingetManifest.ps1`
+#   renders a manifest; submitting one is a pull request against
+#   `microsoft/winget-pkgs`, a repository this project does not own), the Visual
+#   Studio Marketplace (`vsce publish`), Open VSX (`ovsx publish`) and npm
+#   (`npm publish`) are all publication channels, and none of them is named in
+#   this file. Homebrew and NuGet are not used either.
+# * **What it does instead** is attach files to a draft release in this
+#   repository: an upload to a place this project already owns, with the
+#   workflow's own token.
+#
+# `crates/sure-testkit/tests/ci_workflow.rs` holds that list as a list of
+# strings and fails if any of them appears in the code of this file or of the
+# script it runs.
+#
+# =============================================================================
+# "No automatic force/merge behavior" (decision 3)
+# =============================================================================
+#
+# Named, with where each is refused or absent:
+#
+# | act | where it is refused or absent |
+# | --- | --- |
+# | `git push`, of any ref, to anywhere | absent. No step in this file pushes. The only `git` here is `--version`, `rev-parse` and `describe --tags --always`, each of which reads and none of which writes a ref |
+# | `--force`, `-f`, `--force-with-lease` | absent as a git flag. The three `-f` in this file are `readlink -f`, which canonicalizes a path and forces nothing; the table names `-f` because a reader greps for it and would otherwise find those three |
+# | creating a tag | `gh release create --verify-tag` refuses rather than creating one, and a step refuses unless `refs/tags/<tag>` already resolves |
+# | moving a tag | no `git tag` of any kind, and no `git push`, so no ref can be rewritten |
+# | deleting a tag or a branch | no `--delete`, no `-X DELETE`, no `git push` |
+# | overwriting a release's assets | `--clobber` absent, and the exists-check stops the run before the create is reached |
+# | deleting or editing a release | no `gh release delete`, no `gh release edit` |
+# | publishing (un-drafting) | no `--draft=false` and no `gh release edit` |
+# | merging anything | no `gh pr merge`, no `--auto`, no `git merge`, no `git rebase`, no `git reset`; this workflow opens no pull request |
+# | pushing to `main` | there is no push at all |
+# | a job that fails without failing the run | no `continue-on-error` anywhere, at any level |
+#
+# The local equivalent of the same two policies is `scripts/git-guard.mjs`,
+# whose header states them — "no autonomous push to `main`" and "no force push,
+# and no autonomous merge into `main`" — and whose `assert-push` mode refuses a
+# non-fast-forward push. This file is the workflow-shaped statement of that
+# policy and points at the guard rather than restating it in a second place.
+#
+# `actions/checkout` is called with no `ref:`, so each job checks out the commit
+# the run was dispatched for and nothing else.
+#
+# =============================================================================
+# The release gate, and why every packaging job runs the tests first
+# =============================================================================
+#
+# `scripts/Build-Release.ps1` and `scripts/Build-Release.sh` both refuse to
+# package unless `target/tmp/release-gate.json` exists and reads `permitted`,
+# and that document is written by
+# `cargo test -p sure-core --test acceptance_report_runner`. On a fresh runner
+# `target/` does not exist until the job creates it, so a `permitted` gate there
+# is evidence that the acceptance corpus ran **on that runner**. That is why
+# each packaging job runs `cargo test --workspace --no-fail-fast` before it
+# packages, and why the test in `ci_workflow.rs` fails if the tests stop coming
+# first.
+#
+# =============================================================================
+# The checksum trap, named once more
+# =============================================================================
+#
+# `SHA256SUMS.txt` in the repository root is a curated manifest over a subset of
+# the **source tree**: one `sha256sum` line per covered file, no `target/` path,
+# no `sure.exe`, generated and verified by nothing. Its contents are `P15-T020`'s
+# and no entry count is written here, because a count is the part of that file
+# this workflow would have to keep editing. It is not a release artifact, and
+# this file must never write it, read it or attach it. What a release attaches
+# is, per archive, the `<archive>.sha256` the build wrote beside it, and one
+# release checksum file — `sure-<version>-release-checksums.txt` — written by
+# `scripts/Assemble-Release.sh` from the digests it recomputed from the
+# downloaded bytes. It is a different object with a different name, and the name
+# is deliberately not `SHA256SUMS.txt`.
+#
+# =============================================================================
+# What is not measured, stated plainly
+# =============================================================================
+#
+# * **That any of this runs.** No dispatch has happened. `macos-26-intel` is the
+#   x64 label in `actions/runner-images`' own image table and
+#   `release-dry-run.yml`'s job on it has succeeded once (run `35514769749`,
+#   job `106088732392`), which is evidence that this account can obtain that
+#   runner — and not evidence about this file.
+# * **That Windows can package on a `windows-latest` runner.** The Windows
+#   packaging path has only ever been run on the machine `P15-T002` was written
+#   on. `scripts/Build-Release.ps1` refuses a long output path by name, at 260
+#   characters, because `LongPathsEnabled` is `0` there; the runner's own
+#   setting is not known here, and a runner workspace
+#   (`D:\a\SURE\SURE\target\tmp\release`) is well inside that limit on paper.
+#   On paper is not measured.
+# * **That the four jobs descend from one commit.** They do by construction
+#   (`actions/checkout` with no `ref:` checks out `github.sha`), and nothing
+#   here reads that back.
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      # The typed form, so `inputs.tag` is a string and not the untyped
+      # `github.event.inputs` map. It is required: a dispatch with no tag is
+      # refused by GitHub before any job starts.
+      tag:
+        description: The tag to release, for example v0.1.0. It must already exist and must name the commit this run is dispatched from.
+        required: true
+        type: string
+
+# **There is no workflow-level `permissions:` block, and that is deliberate.**
+# The four packaging jobs check out a repository and upload workflow artifacts,
+# which is exactly what `release-dry-run.yml`'s jobs do under the same
+# conditions and have done green on real runners — so they keep that
+# configuration rather than being handed a narrower one this file cannot
+# measure the effect of. The one job that writes to the repository names the
+# scope it needs for itself, below.
+jobs:
+  # ===========================================================================
+  # Windows x64 — the primary platform, and the artifact nothing in CI has
+  # ever produced. `docs/adr/0007-windows-primary-development.md` makes Windows
+  # the primary development environment, and the artifact is built locally by
+  # `scripts/Build-Release.ps1 -Phase All` into `target/tmp/release/`.
+  # ===========================================================================
+  package-windows:
+    name: Windows x64 artifact (x86_64-pc-windows-msvc)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # The same pin `ci.yml` and `release-dry-run.yml` carry. The host
+          # triple of a `windows-latest` runner is `x86_64-pc-windows-msvc`, so
+          # no `targets:` line is needed here — the build target below is the
+          # host this job already is, and the script names it explicitly rather
+          # than letting the host decide.
+          toolchain: 1.98.1
+
+      # Printed for the log and for a reader. Nothing below reads it.
+      #
+      # `pwsh` is named on every step of this job rather than inherited, for the
+      # reason `ci.yml` names it on its bootstrap step: which PowerShell a
+      # `run:` on a Windows runner gets has changed before, and
+      # `scripts/Build-Release.ps1` sets
+      # `$PSNativeCommandUseErrorActionPreference`, which needs PowerShell 7.3
+      # or newer. The version is printed here so the log says whether the
+      # requirement holds rather than leaving it to be assumed.
+      - name: What this runner is
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rustc = (rustc -vV) -join ' '
+          "pwsh            $($PSVersionTable.PSVersion)"
+          "OSArchitecture  $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+          "RUNNER_ARCH     $env:RUNNER_ARCH"
+          "RUNNER_OS       $env:RUNNER_OS"
+          "rustc -vV       $rustc"
+          "cargo           $((Get-Command cargo).Source)"
+
+      # The "tests" half, and the writer of `target/tmp/release-gate.json`. The
+      # packaging step below refuses without it, so this step is not a courtesy:
+      # it is the thing that makes the gate a reading of this runner rather than
+      # of someone's laptop. `--no-fail-fast` for the reason `ci.yml` gives.
+      - name: The workspace's tests, on this runner
+        shell: pwsh
+        run: cargo test --workspace --no-fail-fast
+
+      # Single-line on purpose, and the test in `ci_workflow.rs` requires it to
+      # stay that way: it asserts that this command comes *after* the tests
+      # above in the same job, and an ordering is only readable from a parsed
+      # command. A `run: |` block here would put the invocation where that
+      # reader cannot see it.
+      - name: Build, package, checksum and check the artifact
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1 -Phase All -OutputDirectory (Join-Path $env:GITHUB_WORKSPACE 'target/tmp/release')
+
+      # The evidence first, and unconditionally: a run that failed is the run
+      # whose logs someone needs, and an upload that only happens on success is
+      # missing exactly when it matters. The `logs-` prefix keeps these out of
+      # the `sure-*` pattern the release job downloads.
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-x86_64-pc-windows-msvc
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Then the artifact itself, and only when every check above agreed. An
+      # upload that silently uploaded nothing is the shape of every false green
+      # this repository exists to prevent, which is what `if-no-files-found` is
+      # set to `error` for.
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-pc-windows-msvc
+          path: |
+            target/tmp/release/sure-*.zip
+            target/tmp/release/sure-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # macOS Apple Silicon — built by `release-dry-run.yml`'s `package-macos` job
+  # and by run `35514769749`, and packaged here by the same script.
+  # ===========================================================================
+  package-macos:
+    name: macOS Apple Silicon artifact (aarch64-apple-darwin)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          # The target is installed rather than assumed. `rustc --print cfg`
+          # knows the triple on any toolchain, but building for it needs its
+          # `std`, and a job that discovers that halfway through a release build
+          # reports it as a compile error about `core`.
+          targets: aarch64-apple-darwin
+
+      - name: What this runner is
+        run: |
+          set -euo pipefail
+          echo "uname -s          $(uname -s)"
+          echo "uname -m          $(uname -m)"
+          echo "RUNNER_ARCH       ${RUNNER_ARCH:-unset}"
+          echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
+          echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
+          echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          echo "cc                $(command -v cc || echo absent)"
+          # The interpreter that runs `sh scripts/Build-Release.sh` below. It is
+          # the tool whose identity decides what that script is allowed to
+          # contain: on a macOS runner `sh` is bash 3.2 in POSIX mode, on a Linux
+          # runner it is dash, and the script has to survive both.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" "shasum=$(command -v shasum || echo absent)"
+
+      # The "tests" half, and the writer of the release gate this job's
+      # packaging step refuses without.
+      - name: The workspace's tests, on this runner
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build, package, checksum and check the artifact
+        run: sh scripts/Build-Release.sh --phase all --target aarch64-apple-darwin --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-aarch64-apple-darwin
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-aarch64-apple-darwin
+          path: |
+            target/tmp/release/sure-*.tar.gz
+            target/tmp/release/sure-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # macOS Intel — `macos-26-intel` is the x64 label in `actions/runner-images`'
+  # own image table (macOS 26 / x64), as against `macos-latest`, which that
+  # table lists under macOS 26 Arm64. It is a standard label and not one of the
+  # billing `-large` ones, and run `35514769749` is the measurement that this
+  # account can obtain it: job `106088732392` concluded success there on a
+  # native `x86_64` host.
+  # ===========================================================================
+  package-macos-intel:
+    name: macOS Intel artifact (x86_64-apple-darwin)
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-apple-darwin
+
+      - name: What this runner is
+        run: |
+          set -euo pipefail
+          echo "uname -s          $(uname -s)"
+          echo "uname -m          $(uname -m)"
+          echo "RUNNER_ARCH       ${RUNNER_ARCH:-unset}"
+          echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
+          echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
+          echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          echo "cc                $(command -v cc || echo absent)"
+          # The line that decides whether the build below is a native one or a
+          # cross-compile: Xcode's clang produces a correct thin x86_64 image
+          # from an arm64 host too, so `uname -m` is what says which machine
+          # actually ran. A Rosetta reading is a weaker statement than a native
+          # one and the log says which happened rather than leaving it assumed.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" "shasum=$(command -v shasum || echo absent)"
+
+      - name: The workspace's tests, on this runner
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build, package, checksum and check the artifact
+        run: sh scripts/Build-Release.sh --phase all --target x86_64-apple-darwin --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-x86_64-apple-darwin
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-apple-darwin
+          path: |
+            target/tmp/release/sure-*.tar.gz
+            target/tmp/release/sure-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # Linux x64 — glibc 2.39 or newer, because it is built on the runner image
+  # and links that image's GNU C library. That floor is the artifact's and not
+  # this file's; `docs/development/RELEASE_PROCESS.md` records the reading.
+  # ===========================================================================
+  package-linux:
+    name: Linux x64 artifact (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-unknown-linux-gnu
+
+      - name: What this runner is
+        run: |
+          set -euo pipefail
+          echo "uname -s          $(uname -s)"
+          echo "uname -m          $(uname -m)"
+          echo "RUNNER_ARCH       ${RUNNER_ARCH:-unset}"
+          echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
+          echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
+          echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          echo "cc                $(command -v cc || echo absent)"
+          # `sh` here is dash, and the script run below is `sh` and not bash:
+          # this is the runner on which `set -o pipefail` reddened the Linux
+          # release job while every other machine ran the same file green
+          # (`P15-T007`, run `35524124026`). The identity of this interpreter is
+          # therefore the reason the script carries no bash extension at all.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" "shasum=$(command -v shasum || echo absent)"
+          echo "ldd               $(ldd --version 2>/dev/null | head -n 1 || echo absent)"
+
+      - name: The workspace's tests, on this runner
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build, package, checksum and check the artifact
+        run: sh scripts/Build-Release.sh --phase all --target x86_64-unknown-linux-gnu --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-x86_64-unknown-linux-gnu
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-unknown-linux-gnu
+          path: |
+            target/tmp/release/sure-*.tar.gz
+            target/tmp/release/sure-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # The release itself. Nothing above this job creates anything outward-facing;
+  # this job creates one draft and stops.
+  # ===========================================================================
+  release:
+    name: Attach the four artifacts to a draft release
+    needs: [package-windows, package-macos, package-macos-intel, package-linux]
+    runs-on: ubuntu-latest
+    # Named here rather than inherited, and this is the only place in the file
+    # where `contents: write` appears — the test in `ci_workflow.rs` fails if a
+    # second one does. Creating a release is the one thing here that writes to
+    # the repository, and the token that can do it is held by the one job that
+    # does it.
+    #
+    # `actions: read` is named beside it because a job-level `permissions:`
+    # block **replaces** the workflow default rather than adding to it, and
+    # reading the run's artifacts is an access this job needs. Whether the
+    # artifact API is reached through that scope or through the run's own
+    # runtime token is not something this file measures; naming the scope costs
+    # nothing and leaving it out would be betting on the answer.
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag has to be in the checkout for the check below, and
+          # `actions/checkout`'s default is a single commit with no tags in it.
+          fetch-depth: 0
+
+      # `merge-multiple: true` puts every matched artifact's files into one
+      # directory, which is what the assembly script and `gh` need: the four
+      # archives and their `.sha256` files have unique names, so nothing can
+      # collide. The `sure-*` pattern deliberately does not match the four
+      # `logs-*` artifacts.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sure-*
+          path: target/tmp/release
+          merge-multiple: true
+
+      - name: What this runner is, and what it was asked to release
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "uname -m          $(uname -m)"
+          echo "gh                $(gh --version | head -n 1)"
+          echo "git               $(git --version)"
+          echo "tag input         $TAG"
+          echo "head commit       $(git rev-parse HEAD)"
+          echo "head describe     $(git describe --tags --always 2>/dev/null || echo 'no tag reaches this commit')"
+          echo
+          ls -l target/tmp/release
+
+      # Four refusals in all, in the order that fails fastest and cheapest: the
+      # tag must be shaped like a release tag at all, it must exist, and it must
+      # name the commit these artifacts were built from — three here — and then,
+      # in the next step, that no release exists for it yet.
+      # `docs/development/RELEASE_PROCESS.md`, `## The release workflow`, counts
+      # the same four; it says so there rather than this comment saying three,
+      # which is what it said before the two were read next to each other.
+      - name: The tag must already exist, and must name the commit being released
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # The shape `docs/development/RELEASE_PROCESS.md` names, `v0.1.0` and
+          # `v0.1.0-alpha.1`. The version the archives are named after is this
+          # with the leading `v` removed, so a tag that is not `v` + a digit
+          # cannot name them, and the check below would fail later with a worse
+          # message.
+          case "$TAG" in
+            v[0-9]*) ;;
+            *)
+              echo "FAILED: the tag input is '$TAG', which is not 'v' followed by a digit."
+              echo "The archives are named after '<version>', the version sure reports, so a tag"
+              echo "that is not 'v<version>' cannot name them. Nothing was created."
+              exit 1
+              ;;
+          esac
+          case "$TAG" in
+            *[!0-9A-Za-z._+-]*)
+              echo "FAILED: the tag input is '$TAG', which has a character outside the set a"
+              echo "version in a file name may carry. Nothing was created."
+              exit 1
+              ;;
+          esac
+
+          tag_commit=''
+          tag_commit="$(git rev-parse --verify "refs/tags/${TAG}^{commit}" 2>/dev/null)" || {
+            echo "FAILED: there is no tag '$TAG' in this checkout, so there is nothing to"
+            echo "release. This workflow does not create a tag: creating one is a decision a"
+            echo "person makes, and 'gh release create' without --verify-tag would silently"
+            echo "make one from the default branch. Nothing was created."
+            exit 1
+          }
+          head_commit="$(git rev-parse HEAD)"
+          echo "tag commit        $tag_commit"
+          echo "head commit       $head_commit"
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "FAILED: the tag '$TAG' names $tag_commit and this run built $head_commit."
+            echo "Releasing the first under artifacts built from the second is a release that"
+            echo "does not describe itself. Nothing was created."
+            exit 1
+          fi
+          echo "OK: '$TAG' names the commit this run is releasing."
+
+      # The refusal that makes a second run for the same tag a red run rather
+      # than a silent replacement of the first one's assets.
+      - name: Refuse to touch a release that already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          status=0
+          body="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1)" || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "FAILED: a release for '$TAG' already exists. This workflow does not"
+            echo "replace, update, delete or clobber one: a second run for a tag that has"
+            echo "already been released stops here, and finishing or redoing that release is"
+            echo "a person's decision made by hand. Nothing was created or changed."
+            exit 1
+          fi
+          # Three-way on purpose. `gh` exiting non-zero because the release is
+          # absent is not the same answer as `gh` failing to answer at all, and
+          # only the 404 is read as "nothing is there". Anything else - a 401, a
+          # 403, a network failure - means this run cannot tell, and a release it
+          # cannot see is not a release that is absent. That is the shape of
+          # every false green this repository exists to prevent.
+          case "$body" in
+            *"HTTP 404"*)
+              echo "OK: no release for '$TAG' exists, which is what this step requires."
+              ;;
+            *)
+              echo "FAILED: cannot tell whether a release for '$TAG' exists. gh exited"
+              echo "$status saying:"
+              echo "$body"
+              echo "Nothing was created."
+              exit 1
+              ;;
+          esac
+
+      # The download round trip, and the release checksum file. The script
+      # recomputes every digest from the bytes that were downloaded, requires
+      # each to equal the `.sha256` that the build wrote on the machine that
+      # built it, and then writes and re-reads the one file a downloader needs.
+      # It never writes `SHA256SUMS.txt`, which is a manifest over the source
+      # tree and not a release artifact.
+      - name: Verify every archive against its checksum, and write the release checksum file
+        env:
+          TAG: ${{ inputs.tag }}
+        # Absolute, and quoted, like the three packaging commands above it.
+        # `scripts/Assemble-Release.sh` refuses a relative `--output-dir` and
+        # exits 1 saying so, which this line did before it was measured: the
+        # script was run with the argument this file passed it and printed
+        # `FAILED: --output-dir must be an absolute path: target/tmp/release`.
+        # A rule in `ci_workflow.rs` now reads every `--output-dir` this file
+        # passes, so the next one is found there rather than on a runner.
+        run: sh scripts/Assemble-Release.sh --version "${TAG#v}" --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      # The one outward-facing act in this file, and it is a draft. The asset
+      # list is written out one file at a time rather than as a glob so that a
+      # platform dropping out of the release is a red test rather than a
+      # quietly smaller release: `ci_workflow.rs` requires each of these nine
+      # names to be here.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          cat > "$notes" <<EOF
+          Draft release $TAG.
+
+          This release was created as a **draft** by \`.github/workflows/release.yml\`,
+          from commit $(git rev-parse HEAD). It is not published: publishing it is a
+          person's decision, made by hand on the release page.
+
+          | file | what it is |
+          | --- | --- |
+          | \`sure-$version-x86_64-pc-windows-msvc.zip\` | Windows x64 CLI, zipped |
+          | \`sure-$version-aarch64-apple-darwin.tar.gz\` | macOS Apple Silicon CLI |
+          | \`sure-$version-x86_64-apple-darwin.tar.gz\` | macOS Intel CLI |
+          | \`sure-$version-x86_64-unknown-linux-gnu.tar.gz\` | Linux x64 CLI (glibc 2.39+) |
+          | \`*.sha256\` | one line per archive, written beside it when it was built |
+          | \`sure-$version-release-checksums.txt\` | all four archives, one line each |
+
+          Every archive holds one top-level directory with the binary, \`LICENSE\` and
+          \`RELEASE.txt\`. To check a download:
+
+              sha256sum -c sure-$version-release-checksums.txt
+
+          **Nothing here is signed or notarized.** No Authenticode certificate and no
+          Apple Developer ID is configured, so Windows will warn about an unknown
+          publisher and a macOS download is subject to Gatekeeper. No package manager
+          carries these files: no WinGet package, no Visual Studio Marketplace
+          extension, no Open VSX extension and no npm package is published from here,
+          and this release does not depend on any of them.
+          EOF
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "SURE $TAG" \
+            --notes-file "$notes" \
+            "target/tmp/release/sure-$version-x86_64-pc-windows-msvc.zip" \
+            "target/tmp/release/sure-$version-x86_64-pc-windows-msvc.zip.sha256" \
+            "target/tmp/release/sure-$version-aarch64-apple-darwin.tar.gz" \
+            "target/tmp/release/sure-$version-aarch64-apple-darwin.tar.gz.sha256" \
+            "target/tmp/release/sure-$version-x86_64-apple-darwin.tar.gz" \
+            "target/tmp/release/sure-$version-x86_64-apple-darwin.tar.gz.sha256" \
+            "target/tmp/release/sure-$version-x86_64-unknown-linux-gnu.tar.gz" \
+            "target/tmp/release/sure-$version-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+            "target/tmp/release/sure-$version-release-checksums.txt"
+
+      # A reading, so that the log carries what was created rather than the
+      # reader having to believe the step above. If this step fails the draft
+      # has already been created, and that is stated here rather than hidden:
+      # the run is red, the draft exists, and it is reversible.
+      - name: What was created, read back
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,url,assets

@@ -142,12 +142,12 @@ Two consequences worth knowing when reading a run:
 
 ## The release workflow, which is not part of CI
 
-`.github/workflows/release-dry-run.yml` is the one workflow that produces
-release *artifacts*, and it is `workflow_dispatch`-only. It is deliberately not
-in `ci.yml`: a release build plus a package plus the acceptance corpus's release
-gate in front of every push would make the branch's red or green signal depend
-on a release decision rather than on the code. The two answer different
-questions.
+`.github/workflows/release-dry-run.yml` produces release *artifacts* and stops at
+the end of the run: it is `workflow_dispatch`-only, and what it uploads are
+`actions/upload-artifact` workflow artifacts. It is deliberately not in `ci.yml`:
+a release build plus a package plus the acceptance corpus's release gate in front
+of every push would make the branch's red or green signal depend on a release
+decision rather than on the code. The two answer different questions.
 
 ```
 gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
@@ -173,3 +173,20 @@ machine was `x86_64`. **This is not a release**: both macOS archives are
 boundary, and the command that reproduces the measurement, are written down in
 `docs/development/RELEASE_PROCESS.md`,
 `### What the macOS Intel archive is, concretely`.
+
+**A second workflow, `release.yml`, attaches those archives to a draft release,
+and it has never run.** `P15-T011` adds it: `workflow_dispatch`-only, with one
+required `tag` input, five jobs — the four packaging jobs and one `release` job
+that refuses a tag that is absent or names another commit, refuses a release that
+already exists, and then calls `gh release create --draft --verify-tag` with the
+four archives, their `.sha256` files and `sure-<version>-release-checksums.txt`
+as the nine assets. Nothing in it pushes, tags, merges, forces, deletes, edits or
+un-drafts anything. It is the only file in this repository that creates an
+outward-facing object, and it creates one a person can delete.
+
+**No dispatch of it has happened**: `git tag` lists zero tags here, so it has
+never been given a tag to release, and the Windows ZIP it would build has never
+been built on a runner. Every sentence about it is about what the file says —
+which is what `crates/sure-testkit/tests/ci_workflow.rs` reads and enforces, and
+what `docs/development/RELEASE_PROCESS.md`, `## The release workflow`, states
+along with what is not measured.

@@ -2,11 +2,17 @@ name: release-dry-run
 
 # Manual only, and deliberately so. `ci.yml` runs on every push to `claude/**`
 # and on pull requests; this workflow is the one that produces release
-# *artifacts*, which is minutes of release build and packaging that no commit
-# needs. Adding it to `ci.yml` would put a release build, a package and the
-# acceptance corpus's release gate in front of every push, and would make the
-# branch's green/red signal depend on a release decision rather than on the
-# code. The two workflows answer different questions and stay apart.
+# *artifacts* and stops at the end of the run, attaching them to nothing. Its
+# artifacts are `actions/upload-artifact` workflow artifacts; a second workflow,
+# `release.yml` (`P15-T011`), attaches the same three archives — and a Windows
+# ZIP this workflow does not build — to a draft release.
+# That is the difference between the two, and it is one sentence rather than a
+# rewrite because the paragraph below is true of both: adding *either* to
+# `ci.yml` would put a release build, a package and the acceptance corpus's
+# release gate in front of every push, and would make the branch's green/red
+# signal depend on a release decision rather than on the code. The two workflows
+# answer different questions and stay apart. Nothing else about this file
+# changed when `release.yml` was written.
 #
 #   gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
 #

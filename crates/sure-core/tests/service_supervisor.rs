@@ -167,9 +167,17 @@ fn scratch(name: &str) -> PathBuf {
 /// The name is the whole trick and the module documentation is where it is
 /// explained. `.exe` on Windows and nothing on the platforms that mark a program
 /// with an execute bit instead, because those are the two rules
-/// [`sure_core::safety`] applies to the name it is given — `std::fs::copy`
-/// carries the permission bits across, so the copy is executable where that is
-/// what matters.
+/// [`sure_core::safety`] applies to the name it is given —
+/// [`sure_testkit::copy_program`] carries the permission bits across, so the
+/// copy is executable where that is what matters.
+///
+/// **The bytes land beside `path` and are renamed onto it, never written to
+/// it.** The copy returns before the supervisor starts anything, so no
+/// descriptor of this call's is open on `path` when the service is started; what
+/// the detour buys is that the path is complete and closed from the instant it
+/// first names a file, which is the property `ETXTBSY` is raised against, and
+/// which a plain `fs::copy` only reaches by luck of scheduling. See
+/// `sure_testkit::program` for the rule.
 fn as_python(directory: &Path) -> PathBuf {
     let name = if cfg!(windows) {
         "python.exe"
@@ -177,8 +185,8 @@ fn as_python(directory: &Path) -> PathBuf {
         "python"
     };
     let path = directory.join(name);
-    fs::copy(
-        std::env::current_exe().expect("the test binary's own path"),
+    sure_testkit::copy_program(
+        &std::env::current_exe().expect("the test binary's own path"),
         &path,
     )
     .expect("a copy of the test binary");

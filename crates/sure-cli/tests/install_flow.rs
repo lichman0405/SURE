@@ -268,7 +268,12 @@ Write-Output $archive
 /// its checksum, both inside `scratch`.
 fn a_release_archive(host: &Path, scratch: &Path) -> (PathBuf, PathBuf) {
     let stager = scratch.join("stage-and-pack.ps1");
-    std::fs::write(&stager, STAGE_AND_PACK).expect("the staging script can be written");
+    // `run_script` hands this path to PowerShell and PowerShell starts it, so it
+    // is a program and is put at its path by the door for programs: written
+    // beside its name, closed there, renamed onto it, and never at a path with a
+    // write descriptor still open. See `sure_testkit::program`.
+    sure_testkit::write_program(&stager, STAGE_AND_PACK.as_bytes(), 0o755)
+        .expect("the staging script can be written");
     let scratch_text = scratch.to_string_lossy().into_owned();
     let run = run_script(
         host,

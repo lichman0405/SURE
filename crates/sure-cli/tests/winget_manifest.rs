@@ -571,7 +571,12 @@ Write-Output $archive
     /// it is the same string the binary in it will answer with.
     fn a_release_archive(host: &Path, scratch: &Path, version: &str) -> (PathBuf, PathBuf) {
         let stager = scratch.join("stage-and-pack.ps1");
-        std::fs::write(&stager, STAGE_AND_PACK).expect("the staging script can be written");
+        // `run_script` hands this path to PowerShell and PowerShell starts it, so
+        // it goes in by the door for programs — written beside its own name,
+        // closed there, renamed onto it — rather than straight to the path the
+        // interpreter is about to be given. See `sure_testkit::program`.
+        sure_testkit::write_program(&stager, STAGE_AND_PACK.as_bytes(), 0o755)
+            .expect("the staging script can be written");
         let scratch_text = scratch.to_string_lossy().into_owned();
         let run = run_script(
             host,
@@ -1075,7 +1080,12 @@ Write-Output $archive
         let links = scratch.join("Links");
         std::fs::create_dir_all(&links).expect("the Links directory");
         let linked = links.join("sure.exe");
-        std::fs::copy(SURE, &linked).expect("the alias can be planted");
+        // This is the copy the launcher is then asked to start, so it is the one
+        // site in this file where the copied file is executed: the bytes land on
+        // a temporary name in `Links`, are closed there and are renamed onto
+        // `sure.exe`, which is the name the launcher resolves. The executable bit
+        // and every other permission bit come across with the copy.
+        sure_testkit::copy_program(Path::new(SURE), &linked).expect("the alias can be planted");
 
         // What a WinGet install leaves in the per-user directory: nothing. It is
         // not created, so `Test-Path` on the third step's candidate has nothing

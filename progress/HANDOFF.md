@@ -2462,7 +2462,22 @@ tree is or is not intact would be reading a claim the file does not make.
     `P15-T019`, whose first criterion is that the fixture count be taken from
     the tree: the section names two call sites and
     `grep -rn "fs::copy" crates/*/tests/` finds four, of which three execute
-    what they copy and one copies fixture sources. Deliberately **not** placed
+    what they copy and one copies fixture sources. **Done, and the count was
+    short in both directions — added 2026-09-20 by that task.** Run on
+    `b229cff`, the command matches **twelve** lines of which **ten** are calls —
+    not four — and **four** of those ten are executed and not three: the three
+    this item names plus `crates/sure-cli/tests/winget_manifest.rs`'s
+    `Links/sure.exe` alias, which its own comment says the launcher is then
+    asked to start. Run on the corrected tree the same command matches **nine**
+    lines of which **six** are calls, and **none of those six is any of the
+    four**, which is what a search that tracks a mechanism rather than a
+    property does when the property is what gets fixed. The
+    fixtures that put a program where another test can reach it number
+    **five program sites** — the four executed copies that command names and
+    `analysis_provider/mod.rs:591`, which it cannot — the rate is no longer
+    unknown, and both are in the
+    paragraph *`P15-T019`: the fixtures counted from the tree* under "External
+    blockers". Deliberately **not** placed
     first, and the reasoning is in the task's notes: every recorded occurrence
     is the product reporting `Error` rather than a pass, the failure names
     itself in the log with an errno and a path nothing else produces, and the
@@ -6508,7 +6523,20 @@ three occurrences it records — because four clean runs are exactly the evidenc
 this file has already ruled out once: *a flake that has stopped appearing has not
 thereby been explained*. Correcting that section's occurrence count and its
 statement of the rate is criterion 7 of `P15-T019` and belongs to whoever does
-that task, not to this acceptance.
+that task, not to this acceptance. **That task has since been dispatched and its
+correction is in — added 2026-09-20, and the paragraph above is left standing
+because every sentence in it was true when it was written.** Three of its
+sentences have stopped holding: `P15-T019` has now been dispatched, the fixtures
+have changed (`crates/sure-testkit/src/program.rs`, plus **twenty-one lines
+naming the two functions and sixteen calls among them** — five `copy_program`
+lines and sixteen `write_program` lines, of which five are prose rather than
+calls, leaving **four `copy_program` and twelve `write_program`, sixteen calls
+across nine files**), and the
+rate is no longer unknown beyond three occurrences. The count is **five program
+sites**, the rate is **11 executions of the ubuntu test step in 59**, and the paragraph
+that says so is *`P15-T019`: the fixtures counted from the tree* under "External
+blockers" — which is also where the number of zero-failure executions of the
+changed tree stands at **zero**, because the change has not been pushed.
 
 ## What `P15-T016` added
 
@@ -14589,9 +14617,9 @@ Three of the five jobs were failing the whole time.
 
 | 35067317216 | `14ca785` — **the `P5-T002` acceptance** | **all five green.** Windows **1619** / macOS **1620** / Ubuntu **1621** passed, **0 failed**, 12 ignored, **59** result lines = **49 parents + 10 children** on each — **every one of those figures identical to `35064050013`, the run of `0b72dce` and this task's `base_sha`**, which is the shape an acceptance commit has to have: it changes `progress/` and nothing else, so a number that moved would be the acceptance's fault and not the suite's. The reading is the same one the row above records, and the parents/children split is derived the same way — **45 `Running` lines plus 4 `Doc-tests` lines are the 49 parents**, and the ten children are the ten consecutive `test result:` lines a reader finds with no `Running` line between them (nine of them `1 passed`, and `6 passed; 1 ignored` for the one that starts the multi-test child entry point), which is what makes the split a measurement rather than a convention carried forward. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **This row is a backfill**, and it is the case the table's own rule names: the run of the commit that *records* runs cannot be written into the commit that records them, so `P5-T002`'s acceptance section described the implementation's run and the escaping fix's run, and the acceptance's own run is read here — at `P5-T003`'s acceptance, in the session that pushed it, from `gh run view --log` rather than from the job colours |
 
-| 35086572733 | `e5d5b06` — **the `P5-T003` implementation and its tests** | **all five green, and only on the second attempt — the first attempt is recorded here rather than erased.** Windows **1643** / macOS **1644** / Ubuntu **1645** passed, **0 failed**, 12 ignored, **60** result lines = **50 parents + 10 children** on each — **+24 passed on every platform against `35067317216`, the row above, and nothing else moved**, which is the shape a task's first commit has to have. The nameset delta against that row reads **+24 −0 on Windows**, and the twenty-four names are exactly this task's own: the twelve `http_routes::tests::` unit tests and the twelve `tests/http_routes.rs` integration tests — so the run's extra passes are the tests that were added and not something else that began passing quietly, which a bare count would not have told apart. The parents/children split moved with them: **46 `Running` lines plus 4 `Doc-tests` lines are the 50 parents**, where the row above has 45, so the +1 parent is `tests/http_routes.rs` arriving as a test binary of its own, and **the twelve inside `sure-core`'s own lib result line — 796 to 808 — are the twelve unit tests**. The pairwise readings are **unchanged** (`−13 +14` against macOS, `−14 +16` against Ubuntu) and **not one of the thirty platform-gated names is a route name**, which is what a change with nothing platform-specific in it must read as. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The first attempt of this run was red on Ubuntu, and that is the part of this row worth reading.** `rust (windows-latest)` and `rust (macos-latest)` were green in it; Ubuntu failed `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` and `a_service_that_is_dropped_is_stopped_anyway` with **`Text file busy (os error 26)`** — the spawn refusing a program that a *concurrent* `fs::copy` still had open for writing. **Neither file is touched by `e5d5b06`, neither test is this task's, and the re-run of that one job came back green**, so what the attempt found is a pre-existing Linux-only race in another task's fixtures rather than a defect in this commit — its mechanism, its evidence and the reason it is recorded rather than fixed inside this task are in the section below. **The run id is the same run**: `gh run rerun --failed` re-runs a job inside a run and does not mint a second one, which is exactly why the failure had to be written down here instead of being left to the run's own state, where a green re-run replaces it |
+| 35086572733 | `e5d5b06` — **the `P5-T003` implementation and its tests** | **all five green, and only on the second attempt — the first attempt is recorded here rather than erased.** Windows **1643** / macOS **1644** / Ubuntu **1645** passed, **0 failed**, 12 ignored, **60** result lines = **50 parents + 10 children** on each — **+24 passed on every platform against `35067317216`, the row above, and nothing else moved**, which is the shape a task's first commit has to have. The nameset delta against that row reads **+24 −0 on Windows**, and the twenty-four names are exactly this task's own: the twelve `http_routes::tests::` unit tests and the twelve `tests/http_routes.rs` integration tests — so the run's extra passes are the tests that were added and not something else that began passing quietly, which a bare count would not have told apart. The parents/children split moved with them: **46 `Running` lines plus 4 `Doc-tests` lines are the 50 parents**, where the row above has 45, so the +1 parent is `tests/http_routes.rs` arriving as a test binary of its own, and **the twelve inside `sure-core`'s own lib result line — 796 to 808 — are the twelve unit tests**. The pairwise readings are **unchanged** (`−13 +14` against macOS, `−14 +16` against Ubuntu) and **not one of the thirty platform-gated names is a route name**, which is what a change with nothing platform-specific in it must read as. `bootstrap-validate-windows` printed `SURE bootstrap validation OK: 17 phases, 166 tasks.` and `state OK: 166 tasks`; `shellcheck-secondary` green. **The first attempt of this run was red on Ubuntu, and that is the part of this row worth reading.** `rust (windows-latest)` and `rust (macos-latest)` were green in it; Ubuntu failed `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` and `a_service_that_is_dropped_is_stopped_anyway` with **`Text file busy (os error 26)`** — the spawn refusing a program that a *concurrent* `fs::copy` still had open for writing. **Neither file is touched by `e5d5b06`, neither test is this task's, and the re-run of that one job came back green**, so what the attempt found is a pre-existing Linux-only race in another task's fixtures rather than a defect in this commit — its mechanism, its evidence and the reason it is recorded rather than fixed inside this task are in the section below. **The run id is the same run**: `gh run rerun --failed` re-runs a job inside a run and does not mint a second one, which is exactly why the failure had to be written down here instead of being left to the run's own state, where a green re-run replaces it. **Corrected in place on 2026-09-20, and left standing where it was true:** the row's account of this attempt is unedited, and two things it says have since stopped holding — the fixtures number **five program sites and not two** (the four executed copies the search names, plus `analysis_provider/mod.rs:591`), and the rate is **no longer unknown (11 executions of the ubuntu test step in 59, about one in five, over the 60 most recent runs of this branch)**. The paragraph that says so, and names the runs, is *`P15-T019`: the fixtures counted from the tree* under "External blockers" |
 
-| 35087849335 | `c4ec1ac` — **the `P5-T003` acceptance, progress files and nothing else** | **red on Ubuntu, and the redness cannot be this commit's** — `rust (windows-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary` are all `success`, and `rust (ubuntu-latest)` failed exactly one test: `a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange` in `crates/sure-core/tests/runtime_start.rs`, at line 936, with `left: Error` against `right: Pass` and **`Text file busy (os error 26)`** in SURE's own sentence about the program it could not start. **This commit changes three files, all of them under `progress/`, and `cargo test` does not compile them** — so the failure is a property of the tree it inherits and not of anything it did, which is why it is recorded here rather than fixed by a revert of something. **It is the second consecutive run to fail this way and it is a different test**: `35086572733`'s first attempt failed `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` and `service_supervisor.rs::a_service_that_is_dropped_is_stopped_anyway`, and this one fails `comes-up-and-answers` — **four distinct tests in three files across two runs, every one of them the same errno from a file the test itself had just copied and was about to execute**. The eight runs before `e5d5b06` contain **zero** occurrences of `Text file busy`, so the correlation with the commit that added `tests/http_routes.rs` and its twelve tests is real and the **causation is not established** — a rare race seen twice in a row is weak evidence, and the honest reading is that this branch now has a Linux-only flake whose failure rate is unknown and whose mechanism is derived rather than reproduced. The reasoning, the evidence and the falsifier are in the section below, which this row does not replace. |
+| 35087849335 | `c4ec1ac` — **the `P5-T003` acceptance, progress files and nothing else** | **red on Ubuntu, and the redness cannot be this commit's** — `rust (windows-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary` are all `success`, and `rust (ubuntu-latest)` failed exactly one test: `a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange` in `crates/sure-core/tests/runtime_start.rs`, at line 936, with `left: Error` against `right: Pass` and **`Text file busy (os error 26)`** in SURE's own sentence about the program it could not start. **This commit changes three files, all of them under `progress/`, and `cargo test` does not compile them** — so the failure is a property of the tree it inherits and not of anything it did, which is why it is recorded here rather than fixed by a revert of something. **It is the second consecutive run to fail this way and it is a different test**: `35086572733`'s first attempt failed `a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` and `service_supervisor.rs::a_service_that_is_dropped_is_stopped_anyway`, and this one fails `comes-up-and-answers` — **four distinct tests in three files across two runs, every one of them the same errno from a file the test itself had just copied and was about to execute**. The eight runs before `e5d5b06` contain **zero** occurrences of `Text file busy`, so the correlation with the commit that added `tests/http_routes.rs` and its twelve tests is real and the **causation is not established** — a rare race seen twice in a row is weak evidence, and the honest reading is that this branch now has a Linux-only flake whose failure rate is unknown and whose mechanism is derived rather than reproduced. The reasoning, the evidence and the falsifier are in the section below, which this row does not replace. **Corrected in place on 2026-09-20, and left standing where it was true:** "a Linux-only flake whose failure rate is unknown" was accurate for two runs and is not accurate now — the rate is **11 of the 59 executions of the ubuntu test step in the 60 most recent runs of this branch**, and this failure is one of them. The count, the run ids and the five program sites are in *`P15-T019`: the fixtures counted from the tree* under "External blockers" |
 
 **The pairwise readings in this table are not all the same number, and the ones
 that moved did so for a reason rather than drifting.** Every row from `P3-T006`'s
@@ -21901,6 +21929,134 @@ one has an explanation that a green re-run does not test.** Until then the hones
 statement is the one this section opens with: the gate went red once for a reason
 that is understood, the same gate went green on the same commit, and **both facts
 are part of the record of `e5d5b06` rather than only the second.**
+
+### `P15-T019`: the fixtures counted from the tree, the rate is no longer unknown, and the two fixtures above are now five program sites
+
+Added 2026-09-20 by the worker on `P15-T019`. **The two sections above are left
+standing.** They were true of the tree they were written against — two call sites
+named, the mechanism derived rather than reproduced, the rate unknown — and nothing
+in them was shown to be wrong. What follows is the paragraph that says which of
+those three statements no longer holds, which is what criterion 7 of `P15-T019`
+asks for and what the `P5-T003` run rows and item 101 point at this section for.
+
+**The count is wrong, and the search the sections above name is why.** They name
+two fixtures and rest on `grep -rn "fs::copy" crates/*/tests/`. Widened on
+2026-09-20 by the supervisor to the property rather than the mechanism — *every
+fixture that puts a program at a path another test can concurrently execute or
+overwrite* — the enumeration run from the workspace root finds **five program
+sites that put a program where another test can reach it, and that command names
+four of them**: the four executed `fs::copy` copies — `runtime_start.rs:397`,
+`service_supervisor.rs:180`, `process_runner.rs:691` and
+`winget_manifest.rs:1078`, the last being the `Links/sure.exe` alias the launcher
+is then asked to start. **Exactly one program site is one that command cannot
+name**, and it is `analysis_provider/mod.rs:591` — an `fs::write` of a two-line
+shell script at `target/tmp/claude-cli-analyzer/echo`, a `#[cfg(test)]` module
+inside `src/`, and the fourth occurrence recorded in `P15-T019`'s own notes. **Two
+other fixed paths were repaired without being programs and do not belong in that
+count**: `sure-core/src/container.rs`'s test module and `approval.rs`'s
+`Scratch::new` are fixed `target/tmp` directories cleared and recreated on every
+call, and neither is executed — they carry the **overwrite** hazard, not the
+`execve` one, which is why the number of program sites is five and not seven.
+**Run on the corrected tree, that command now finds
+none of the four sites it was originally written about** — `Fixture::python`,
+`as_python`, `process_runner.rs`'s space-and-non-ASCII copy and
+`winget_manifest.rs`'s `Links/sure.exe` are `copy_program` calls now — which is
+the cleanest statement of why a search is not a property: the
+command's output changed and the property is what was fixed. The full enumeration,
+with its commands and its per-site classification, is
+`target/tmp/p15t019-enumeration.txt` and `target/tmp/handback-p15t019.md`.
+
+**The rate is no longer unknown, and it is much worse than the three occurrences
+suggested.** Read on 2026-09-20 by `target/tmp/p15t019-ci.mjs`, which reads
+`gh run list --branch claude/v0.1-autonomous --workflow ci --limit 60` and then
+each run's jobs: **of the 60 most recent `ci` runs on this branch, the
+`Run cargo test --workspace --no-fail-fast` step of `rust (ubuntu-latest)`
+executed 59 times — 47 came back with zero failures, 11 failed with `Text file
+busy (os error 26)` and nothing else, and 1 failed for an unrelated reason**
+(`a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence`,
+`browser_driver.rs:397:53`, run `35430022867`). The sixtieth run is red before its
+tests start (run `35438699664`, clippy). The eleven are runs `35513761458`
+(`6226ce8`), `35512888372` (`8342764`), `35508587192` (`0b0af1d`), `35440641957`,
+`35435439064`, `35431356336`, `35427975530`, `35426296617`, `35421577682`,
+`35418199233` and `35414618313`, and they fail across **six distinct tests in
+three files**: `runtime_start.rs` (three tests —
+`a_service_that_outlives_the_window_and_then_ends_is_still_a_failure` at `:1450:5`,
+`a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange` at
+`:1007:5` and `a_service_that_ends_by_itself_inside_the_window_fails_and_says_why`
+at `:1332:5`), `service_supervisor.rs` (two —
+`a_service_starts_is_stopped_and_both_of_its_streams_are_kept` at `:475:10` and
+`a_service_that_is_dropped_is_stopped_anyway` at `:745:10`), and
+`analysis_provider/mod.rs` (the write-side one, three of the eleven runs and the
+only one of the six where the refused operation is the write rather than the
+`execve`). **The forty-seven zero-failure executions are runs**
+`35518215453`, `35518077170`, `35517905295`, `35514770029`, `35513602425`,
+`35510588761`, `35509212849`, `35509110517`, `35507591835`, `35505458707`,
+`35503573837`, `35503133165`, `35501495428`, `35501183734`, `35497429404`,
+`35441573661`, `35441171735`, `35440546882`, `35440460002`, `35439842828`,
+`35439272232`, `35436798102`, `35436599401`, `35435396418`, `35434033089`,
+`35433965294`, `35431116517`, `35429750260`, `35428339155`, `35426079336`,
+`35425807272`, `35425349709`, `35425236138`, `35425098501`, `35425067028`,
+`35424276573`, `35423922710`, `35421237088`, `35419990589`, `35419661554`,
+`35419217024`, `35417840090`, `35417125856`, `35416442854`, `35416297165`,
+`35414515368` and `35414475973`. Every one was read at job level, attempt 1, so
+none of them is a re-run whose earlier failure was replaced inside the run. **So
+the honest rate is 11 in 59, about one in five, and not "unknown"** — which
+strengthens rather than weakens the falsifier above: a flake that fires in a fifth
+of the runs is a flake that has been paying for a re-run on most days, and four
+clean runs at `P15-T016`'s acceptance were a sample of four out of that.
+
+**The window is the 60 runs above and no wider, and the sample is not
+independent.** All 60 are the same branch, the same workflow and the same runners,
+and the eleven failures are not evenly spread — they cluster where a tree touched
+Rust that spawns, which is why the two sites in `runtime_start.rs` and
+`service_supervisor.rs` alternate with the write-side one in
+`analysis_provider/mod.rs` rather than replacing it. What the count establishes is
+that this is not rare and not new. What it does not establish is a rate for any
+particular tree, because the sample is of runs and not of trees.
+
+**The two fixtures above are now five program sites, and only one of them failed
+from the write side.** The five are the four executed `fs::copy` copies —
+`runtime_start.rs`'s `Fixture::python`, `service_supervisor.rs`'s `as_python`,
+`process_runner.rs`'s copy and `winget_manifest.rs`'s `Links/sure.exe` — plus
+`analysis_provider/mod.rs`'s `echoing_program`. The change `P15-T019` made is in
+`crates/sure-testkit/src/program.rs`: `write_program(path, contents, mode)` and
+`copy_program(from, to)` put the bytes at a **temporary name in the destination's
+own directory, claimed with `create_new` so two callers cannot share it, close it,
+and `rename` it onto the destination** — and `rename` within a directory is
+atomic, so the executed path is only ever a complete file that no one is writing.
+The sites changed are `analysis_provider/mod.rs` (`echoing_program`, plus a
+directory of its own instead of a fixed one), `container.rs`'s test module,
+`runtime_start.rs`'s `Fixture::python`, `service_supervisor.rs`'s `as_python`,
+`process_runner.rs` (four sites), `hook_failure_semantics.rs`, `integration_thinness.rs`,
+`install_flow.rs` and `winget_manifest.rs`. **Counted from the tree, the change
+is twenty-one lines that name the two functions and sixteen calls among them**:
+`grep -rn "sure_testkit::copy_program" crates/ | wc -l` is **5** and
+`grep -rn "sure_testkit::write_program" crates/ | wc -l` is **16**, and five of
+those twenty-one lines are a doc link or a comment rather than a call
+(`analysis_provider/mod.rs:601`, `process_runner.rs:1656`, `:1758`, `:1829`,
+`service_supervisor.rs:171`) — so **four `copy_program` and twelve `write_program`
+calls, sixteen across nine files**. **One more fixed path was found by
+running the suite rather than by reading it**: `approval.rs`'s `Scratch::new`
+built `target/tmp/approval-{name}` with no pid and no counter and called
+`remove_dir_all` on it before every use, and two concurrent `cargo test` processes
+on this machine deleted one another's store mid-test — observed here, not derived,
+as three `approval::tests::*` panics at `approval.rs:1561:48`. It is fixed the same
+way, by claiming a directory with `create_dir` instead of by name.
+
+**What the change does not do.** It does not remove the `fork` window: a
+descriptor another thread holds open at the moment a third thread calls `fork` is
+still inherited by that child, and `O_CLOEXEC` still closes it only at the child's
+own `execve`. What it removes is the *millisecond* window — the whole duration of a
+5.6 MB copy — leaving the fork window, which is the width of one `fork`/`execve`
+pair. **No retry was added anywhere, in product code or in a fixture**, because the
+product's job where it stands is to report what the operating system said and in
+every recorded occurrence it said `Error` and never a pass. **And nothing here is
+verified by a green run yet**: the change is uncommitted and unpushed, so the
+number of zero-failure ubuntu executions *of the changed tree* is **zero**. The
+count above is the baseline it inherits. The falsifier is unchanged and now has a
+number to be measured against: **the first push of this change is clean or it is
+not, and a run that is green does not by itself explain the eleven that were not —
+what would falsify the change is a twelfth occurrence on a tree that carries it.**
 
 ### A sixth review, two findings, one of them false — and the real one is a hole in the first fix
 

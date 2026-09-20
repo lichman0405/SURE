@@ -576,28 +576,71 @@ mod tests {
     /// So those tests write the smallest real program each platform does start —
     /// a batch file on Windows, a shell script elsewhere — under the workspace's
     /// git-ignored `target/tmp`, and name it by its full path.
+    ///
+    /// **A directory of this call's own, and the program written into place.**
+    /// This used to be one fixed path — `target/tmp/claude-cli-analyzer/echo` —
+    /// built and `fs::write`n by every call, with
+    /// [`claude_cli_analyzer_runs_program_and_returns_stdout`] and
+    /// [`claude_cli_analyzer_redacts_prompt_before_passing_it`] as two
+    /// independent tests that both call it. Under cargo's parallel test threads
+    /// one of them could be running that program while the other truncated and
+    /// rewrote the very file it was running from, and on 2026-09-20 it was. Run
+    /// `35512888372` — commit `8342764`, `rust (ubuntu-latest)`, `cargo test
+    /// --workspace --no-fail-fast` — failed in
+    /// `analysis_provider::tests::claude_cli_analyzer_runs_program_and_returns_stdout`
+    /// at `crates/sure-core/src/analysis_provider/mod.rs:591:44` with
+    /// `the echoing program: Os { code: 26, kind: ExecutableFileBusy, message:
+    /// "Text file busy" }`. The panic message is the `expect` on the `fs::write`
+    /// at that column, so the errno came back from the **write** side: the
+    /// `open(O_WRONLY|O_CREAT|O_TRUNC)` was refused because the inode it would
+    /// have truncated was, at that moment, the text of a process the other test
+    /// was running. The directory is now unique per call by `create_dir`
+    /// rather than by its name, which is the pattern the rest of this crate's
+    /// test modules already keep (`commands.rs`'s and `mcp.rs`'s
+    /// `a_store_of_our_own` say so in as many words), and the program is written
+    /// by [`sure_testkit::write_program`], which writes under a temporary name,
+    /// closes it and renames it into place — so the executed path is never the
+    /// path an in-flight write holds open. See `sure-testkit`'s `program` module
+    /// for the kernel rule both halves rest on.
     fn echoing_program() -> PathBuf {
-        let directory = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("claude-cli-analyzer");
-        std::fs::create_dir_all(&directory).expect("the scratch directory");
+        let directory = a_directory_of_our_own();
 
         #[cfg(windows)]
         let (program, contents) = (directory.join("echo.cmd"), "@echo off\r\necho %*\r\n");
         #[cfg(not(windows))]
         let (program, contents) = (directory.join("echo"), "#!/bin/sh\necho \"$@\"\n");
 
-        std::fs::write(&program, contents).expect("the echoing program");
-
-        #[cfg(not(windows))]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
-                .expect("the echoing program is executable");
-        }
+        sure_testkit::write_program(&program, contents.as_bytes(), 0o755)
+            .expect("the echoing program");
 
         program
+    }
+
+    /// A scratch directory this call can call its own, under the workspace's
+    /// git-ignored `target/tmp`.
+    ///
+    /// Unique by `create_dir` rather than by the name, so that two calls — in
+    /// this process or in another one that has been handed the same process id —
+    /// cannot be handed the same directory and overwrite each other's program.
+    fn a_directory_of_our_own() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let base = sure_testkit::repository_root()
+            .join("target")
+            .join("tmp")
+            .join("claude-cli-analyzer");
+        std::fs::create_dir_all(&base)
+            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
+        for _ in 0..1_000 {
+            let candidate = base.join(format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
+            }
+        }
+        panic!("no free directory under {}", base.display());
     }
 
     /// A command that exits with a non-zero code, portable across Windows and Unix.

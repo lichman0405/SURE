@@ -11,9 +11,11 @@
 //! convenient `use` statement.
 
 pub mod integrations;
+pub mod program;
 pub mod workspace;
 
 pub use integrations::{IntegrationFile, ThinnessFinding};
+pub use program::{copy_program, write_program};
 pub use workspace::{BoundaryPolicy, Crate, DepKind, Edge, Violation, Workspace};
 
 /// The repository root this crate was built inside.

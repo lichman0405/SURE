@@ -150,15 +150,16 @@ fn stand_in(dir: &Path, code: u8) -> PathBuf {
          echo stub-err {code} 1>&2\r\n\
          exit /b {code}\r\n"
     );
-    std::fs::write(&path, body).expect("write the stand-in");
+    // This file is handed to the launcher as `SURE_BIN` and started, so it is a
+    // program and goes in by the door for programs: written beside its own name,
+    // closed there, renamed onto it. See `sure_testkit::program`.
+    sure_testkit::write_program(&path, body.as_bytes(), 0o755).expect("write the stand-in");
     path
 }
 
 /// The same, as a shell script.
 #[cfg(unix)]
 fn stand_in(dir: &Path, code: u8) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     let path = dir.join(format!("sure-stand-in-{code}.sh"));
     let body = format!(
         "#!/bin/sh\n\
@@ -168,13 +169,14 @@ fn stand_in(dir: &Path, code: u8) -> PathBuf {
          echo \"stub-err {code}\" >&2\n\
          exit {code}\n"
     );
-    std::fs::write(&path, body).expect("write the stand-in");
     // The launcher only accepts `SURE_BIN` when the file is executable, so the
     // test's own stand-in has to carry the bit. That is a permission on a file
     // this test just made in its own scratch directory; nothing here needs a
-    // privilege, a symlink or an administrator.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-        .expect("mark the stand-in executable");
+    // privilege, a symlink or an administrator. It is passed rather than applied
+    // afterwards, so the bit is on the file that gets renamed into place and the
+    // launcher never sees a `SURE_BIN` that is a program *and* a file somebody
+    // may still be writing: see `sure_testkit::program`.
+    sure_testkit::write_program(&path, body.as_bytes(), 0o755).expect("write the stand-in");
     path
 }
 

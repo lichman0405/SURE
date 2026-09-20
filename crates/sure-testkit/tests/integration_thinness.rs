@@ -487,7 +487,10 @@ fn claude_code_mcp_launcher() -> PathBuf {
 fn stub_binary(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     let text = format!("@echo off\r\n{body}");
-    std::fs::write(&path, text).expect("write stub binary");
+    // The launcher resolves this path and starts it, so it is a program and is
+    // put at its path by the door for programs: written beside its name, closed
+    // there, renamed onto it. See `sure_testkit::program`.
+    sure_testkit::write_program(&path, text.as_bytes(), 0o755).expect("write stub binary");
     path
 }
 
@@ -599,7 +602,11 @@ fn the_claude_code_mcp_launcher_does_not_invent_a_status_it_was_not_given() {
     let script = claude_code_mcp_launcher();
     let scratch = launcher_scratch("mcp-launcher-unrunnable");
     let broken = scratch.join("sure-broken.exe");
-    std::fs::write(&broken, "@echo off\r\nexit /b 2\r\n")
+    // Named `.exe` and handed to the launcher as `SURE_BIN`, so it is a path the
+    // launcher tries to start — which is the whole test. It is written through
+    // the program door for that reason; the bytes being `@echo off` rather than
+    // an image is the fixture's point, not a reason to write them another way.
+    sure_testkit::write_program(&broken, b"@echo off\r\nexit /b 2\r\n", 0o755)
         .expect("write a file that is not a program");
 
     let output = std::process::Command::new(powershell())

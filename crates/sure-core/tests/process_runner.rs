@@ -688,7 +688,14 @@ fn a_program_at_a_path_with_a_space_and_unicode_is_the_program_that_runs() {
     };
     let program = directory.join(name);
     let source = std::env::current_exe().expect("the test binary's own path");
-    fs::copy(&source, &program).expect("a copy of this test binary");
+    // Copied through a temporary name in the same directory and closed there,
+    // then renamed onto `program`, so the path the runner is handed is one no
+    // descriptor is open on. `fs::copy` here returns before the run and the file
+    // is therefore already closed by then — but a descriptor is duplicated into
+    // every child a `fork` makes, and the child is about to `execve` this path,
+    // so "already closed by luck of ordering" is the weaker statement of the two.
+    // See `sure_testkit::program`.
+    sure_testkit::copy_program(&source, &program).expect("a copy of this test binary");
 
     // The report is what proves the copy **ran**: the child writes it into the
     // scratch directory, and nothing on this machine writes that file except a
@@ -1645,7 +1652,12 @@ fn a_batch_file_named_with_its_extension_runs_and_windows_brings_the_interpreter
     // would arrive as a failing test and a decision rather than a quiet edit.
     let directory = scratch("batch-file");
     let program = directory.join("says-something.cmd");
-    fs::write(&program, "@echo off\r\necho it ran > ran.txt\r\n").expect("a batch file");
+    // A batch file is a program: Windows starts `cmd.exe` to run it, and this
+    // test asserts that it ran. So it goes in through `sure_testkit::write_program`
+    // — written beside its own name, closed and renamed onto it — rather than
+    // straight to the path the runner is about to be handed.
+    sure_testkit::write_program(&program, b"@echo off\r\necho it ran > ran.txt\r\n", 0o755)
+        .expect("a batch file");
 
     let request = ProcessRequest::new(
         program,
@@ -1696,7 +1708,11 @@ fn a_name_with_no_extension_never_becomes_a_batch_file_that_is_right_there() {
     let directory = scratch("bare-name");
     let stem = format!("build{}", std::process::id());
     let batch = directory.join(format!("{stem}.cmd"));
-    fs::write(&batch, "@echo off\r\necho it ran > ran.txt\r\n").expect("a batch file");
+    // Not started by this test — that is what it asserts — but it is a batch
+    // file, so it is a program Windows would run if the completion rule went the
+    // other way, and it is put at its path by the same door as the one above.
+    sure_testkit::write_program(&batch, b"@echo off\r\necho it ran > ran.txt\r\n", 0o755)
+        .expect("a batch file");
 
     let request = ProcessRequest::new(
         &stem,
@@ -1738,7 +1754,17 @@ fn a_power_shell_script_cannot_be_started_as_a_program() {
     // it ever is.
     let directory = scratch("power-shell");
     let program = directory.join("says-something.ps1");
-    fs::write(&program, "Set-Content -Path ran.txt -Value 'it ran'\r\n").expect("a script");
+    // Named to the runner and refused by it, because a `.ps1` is not an image.
+    // Written through `sure_testkit::write_program` all the same: this is a
+    // script the test asserts did **not** run, and a file that is complete and
+    // closed at the path from the moment it exists is what makes that assertion
+    // about the runner's decision rather than about timing.
+    sure_testkit::write_program(
+        &program,
+        b"Set-Content -Path ran.txt -Value 'it ran'\r\n",
+        0o755,
+    )
+    .expect("a script");
 
     let request = ProcessRequest::new(
         program,
@@ -1794,25 +1820,24 @@ const A_SCRIPT: &[u8] = b"#!/bin/sh\nprintf '%s' \"$1\" > \"$2\"\n";
 ///
 /// The mode is set rather than left to the umask, because these tests are
 /// *about* the executable bit and a premise the environment picks is not a
-/// premise. The failure messages are written out rather than kept short: this
-/// is the one thing here that cannot be measured on the machine this branch is
+/// premise. The failure message is written out rather than kept short: this is
+/// the one thing here that cannot be measured on the machine this branch is
 /// developed on, so a platform that refuses the file has to say which platform
 /// and why rather than leaving a reader with a bare `unwrap`.
+///
+/// **The mode is set on the file that is being written, before it is renamed
+/// onto `program`** — [`sure_testkit::write_program`] does both — so the script
+/// is executable at its own path from the instant that path names it, and never
+/// in between. The script ends up being started by the operating system, which
+/// is the whole of what these tests ask, so its path is the one path here that
+/// most has to be complete and closed before anything looks at it.
 #[cfg(unix)]
 fn write_a_script(program: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::write(program, A_SCRIPT).unwrap_or_else(|error| {
+    sure_testkit::write_program(program, A_SCRIPT, mode).unwrap_or_else(|error| {
         panic!(
-            "no file could be created at {}, so this platform cannot be asked the question this \
-             test asks: {error:?}",
+            "the program this test is about could not be put at {} with mode {mode:o}, so this \
+             platform cannot be asked the question this test asks: {error:?}",
             program.display()
-        )
-    });
-    fs::set_permissions(program, fs::Permissions::from_mode(mode)).unwrap_or_else(|error| {
-        panic!(
-            "the file was created and its mode could not be set to {mode:o}, so this test cannot \
-             state its own premise: {error:?}"
         )
     });
 }

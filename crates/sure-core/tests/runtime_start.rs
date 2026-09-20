@@ -394,8 +394,17 @@ impl Fixture {
             "python"
         };
         let path = directory.join(name);
-        fs::copy(
-            std::env::current_exe().expect("the test binary's own path"),
+        // Through `sure_testkit`, not straight to `path`: the bytes are copied
+        // beside it under a name nothing computes and closed there, and only
+        // then renamed onto `path`. The copy returns before this fixture starts
+        // anything, so no descriptor of *this* call's is open here either way —
+        // but a descriptor is duplicated into every child a `fork` makes, and
+        // the process being started is about to `execve` this very path. Writing
+        // it through a temporary name is what makes the path complete and closed
+        // at the moment it comes into existence, whatever else in the process is
+        // mid-copy. See `sure_testkit::program`.
+        sure_testkit::copy_program(
+            &std::env::current_exe().expect("the test binary's own path"),
             &path,
         )
         .expect("a copy of the test binary");

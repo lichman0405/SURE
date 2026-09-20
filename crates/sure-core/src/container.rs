@@ -640,6 +640,28 @@ mod tests {
         ContainerPlan::new(Runtime::Docker, "node:22-slim", "/tmp/project").expect("a plan")
     }
 
+    /// A temporary directory this call can call its own.
+    ///
+    /// Unique by `create_dir` rather than by the name, so that a second process
+    /// — this same test run twice, or a run whose process id has been recycled —
+    /// cannot be handed the directory this one is asserting about.
+    fn a_directory_of_our_own() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let base = std::env::temp_dir().join("sure-container-search-order");
+        std::fs::create_dir_all(&base).expect("a temporary directory");
+        for _ in 0..1_000 {
+            let candidate = base.join(format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
+            }
+        }
+        panic!("no free directory under {}", base.display());
+    }
+
     /// What `doctor` appends to a name with no extension, which is what a
     /// program on this platform is actually called.
     #[cfg(windows)]
@@ -886,9 +908,20 @@ mod tests {
         // all. `doctor::find_in` is what actually answers, and its own tests
         // cover the search; what is being checked here is the *order* and the
         // reporting, which are this module's.
-        let root = std::env::temp_dir().join("sure-container-search-order");
-        std::fs::remove_dir_all(&root).ok();
-        std::fs::create_dir_all(&root).expect("a temporary directory");
+        // **A directory of this call's own**, made unique by `create_dir` rather
+        // than by its name. This was one fixed path —
+        // `<temp>/sure-container-search-order`, with no per-test and no per-call
+        // component — so two processes running this test at once wrote the same
+        // two files and either was free to `remove_dir_all` the directory the
+        // other was asserting about. Nothing here is a program anything *runs*:
+        // the bytes are literally `not a program`, and `Availability::in_path`
+        // asks the filesystem whether a name is there and, on a Unix-like
+        // platform, whether it is marked executable. Neither direction of
+        // `ETXTBSY` is reachable from this file. It is unique anyway because a
+        // path two tests can reach is a path whose answer depends on which of
+        // them got there first, which is the reason the rest of this crate's
+        // test modules give for doing the same thing.
+        let root = a_directory_of_our_own();
 
         // Nothing there yet, on a search path that is nothing but that directory.
         let only = std::env::join_paths([&root]).expect("one entry");
@@ -896,14 +929,12 @@ mod tests {
 
         let program = |runtime: Runtime| {
             let path = root.join(format!("{}{}", runtime.program(), EXECUTABLE_SUFFIX));
-            std::fs::write(&path, b"not a program").expect("a file");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
-                permissions.set_mode(0o755);
-                std::fs::set_permissions(&path, permissions).expect("an execute bit");
-            }
+            // The execute bit is passed rather than applied afterwards, and the
+            // bytes land beside `path` and are renamed onto it: a stand-in for a
+            // program is put at its path by the same door as every other program
+            // in this tree. The contents being `not a program` is the point of
+            // the test, not a reason to write them by a different route.
+            sure_testkit::write_program(&path, b"not a program", 0o755).expect("a file");
             path
         };
 

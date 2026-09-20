@@ -11,11 +11,12 @@
 # Where this installs, and why that is not a free choice
 # =============================================================================
 #
-# `%LOCALAPPDATA%\SURE\bin\sure.exe`. The destination is already in use by seven
+# `%LOCALAPPDATA%\SURE\bin\sure.exe`. The destination is already in use by eight
 # launcher scripts in five integration packages that this task does not own, and
 # all of them resolve it in the order `$env:SURE_BIN` -> `PATH` -> here:
 #
 #   integrations/agent-plugin/scripts/install.ps1   (line 7)
+#   integrations/claude-code/scripts/install.ps1    (line 7)
 #   integrations/claude-code/scripts/sure-hook.ps1  (line 14)
 #   integrations/claude-code/scripts/sure-mcp.ps1   (line 16, and with a
 #       `[Environment]::GetFolderPath('LocalApplicationData')` fallback when
@@ -27,11 +28,16 @@
 #
 # A different destination would be a binary those integrations cannot find, so
 # this is a place the tree already agreed on rather than one chosen here.
-# `grep -rn LOCALAPPDATA integrations/` is what says so — it returns these seven
-# files under five package directories, and counting them is the search to repeat
-# before moving this. The `.sh` launchers beside these resolve
-# `$SURE_BIN` and `PATH` instead, which is right for Unix and is not a seventh
-# opinion about the Windows location.
+# `grep -rn LOCALAPPDATA integrations/` is what finds them: among its results are
+# these eight launcher scripts under five package directories, and counting them
+# is the search to repeat before moving this. (The search returns more than these
+# eight — 26 files on 2026-09-21 — so it is the launchers in its output that this
+# list is. The rest are READMEs and command files that mention the variable, plus
+# the uninstall scripts, which name the directory to remove from rather than the
+# binary to resolve: `grep -rln LOCALAPPDATA integrations --include='*.ps1'`
+# returns ten, and these eight are the ones that resolve `sure.exe`.) The `.sh`
+# launchers beside these resolve `$SURE_BIN` and `PATH` instead, which is right
+# for Unix and is not another opinion about the Windows location.
 #
 # The known-folder lookup is not hand-rolled, and the reason is written down in
 # `crates/sure-core/src/paths/mod.rs:1-14`: a bare read of `%LOCALAPPDATA%`

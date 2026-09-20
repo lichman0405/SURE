@@ -1680,6 +1680,434 @@ fn agent_plugin_uninstall_script_removes_installed_plugin() {
     let _ = std::fs::remove_dir_all(&temp);
 }
 
+// --- claude-code install/uninstall: what "install the Claude package" means ---
+//
+// P15-T009's acceptance is that a Windows user can install and remove the
+// Claude and Cursor packages with documented PowerShell commands, and that a
+// normal per-user install needs neither symlink privileges nor administrator
+// rights. The Cursor half was already here; the Claude package shipped no
+// installer of either kind.
+//
+// **What "install Claude" means is decided here.** This package names its own
+// files through `${CLAUDE_PLUGIN_ROOT}`, which is Claude Code's substitution
+// (`integrations/claude-code/README.md`), so the package is relocatable by
+// design and a per-user copy of it is a valid plugin root. The installer places
+// that copy and resolves the binary the way every other installer here does.
+// **Loading the plugin is Claude Code's own workflow, and this repository does
+// not claim to have watched it** — no plugin was installed into a running
+// session, which is the line `integrations/claude-code/README.md` already draws
+// for the MCP server. The argument for this option, and against shipping the
+// plugin CLI as the thing SURE documents, is in
+// `docs/integrations/INSTALLATION_MATRIX.md`, where a reader who is not reading
+// this file will look for it.
+//
+// Every test below runs a script into a scratch directory and sets
+// `CLAUDE_PLUGIN_DIR`, so nothing here reaches `%LOCALAPPDATA%\claude-plugins`,
+// `%USERPROFILE%\.claude` or any other directory of whoever runs the suite.
+
+/// The Claude Code package's README, which is where the documented commands
+/// live: the acceptance asks for *documented* PowerShell commands, so the
+/// document and the scripts are asserted against each other.
+fn claude_code_readme() -> String {
+    let path = sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("README.md");
+    assert!(path.is_file(), "claude-code README.md must exist");
+    std::fs::read_to_string(&path).expect("claude-code README.md readable")
+}
+
+/// A plugin script of the Claude Code package, for the tests that only read it.
+fn claude_code_script(name: &str) -> PathBuf {
+    sure_testkit::repository_root()
+        .join("integrations")
+        .join("claude-code")
+        .join("scripts")
+        .join(name)
+}
+
+#[test]
+fn claude_code_install_script_exists_and_has_required_contract() {
+    let script = claude_code_script("install.ps1");
+    assert!(script.is_file(), "claude-code install.ps1 must exist");
+
+    let text = std::fs::read_to_string(&script).expect("install.ps1 readable");
+
+    assert!(
+        text.contains("SURE_BIN"),
+        "claude-code install.ps1 must reference SURE_BIN for binary resolution"
+    );
+    assert!(
+        text.contains("CLAUDE_PLUGIN_DIR"),
+        "claude-code install.ps1 must reference CLAUDE_PLUGIN_DIR for the install location"
+    );
+    assert!(
+        text.contains("LOCALAPPDATA"),
+        "claude-code install.ps1 must reference LOCALAPPDATA for the per-user default"
+    );
+    assert!(
+        text.contains("Copy-Item") || text.to_ascii_lowercase().contains("copy"),
+        "claude-code install.ps1 must support copy fallback"
+    );
+    assert!(
+        text.contains("ForceCopy")
+            || text.contains("{{SURE_BIN}}")
+            || text.contains("{{PLUGIN_ROOT}}"),
+        "claude-code install.ps1 must have a copy/render fallback or force-copy switch"
+    );
+}
+
+#[test]
+fn claude_code_uninstall_script_exists() {
+    let script = claude_code_script("uninstall.ps1");
+    assert!(script.is_file(), "claude-code uninstall.ps1 must exist");
+
+    let text = std::fs::read_to_string(&script).expect("uninstall.ps1 readable");
+
+    assert!(
+        text.contains("CLAUDE_PLUGIN_DIR") || text.contains("LOCALAPPDATA"),
+        "claude-code uninstall.ps1 must know where to remove the plugin from"
+    );
+}
+
+#[test]
+fn claude_code_install_script_does_not_require_symlinks_unconditionally() {
+    let script = claude_code_script("install.ps1");
+    let text = std::fs::read_to_string(&script).expect("install.ps1 readable");
+
+    // The script must not unconditionally use New-Item -ItemType SymbolicLink;
+    // it should have a copy fallback or a ForceCopy switch. Acceptance line 2 is
+    // the reason: a per-user install may not need the privilege.
+    let has_symlink = text.contains("SymbolicLink");
+    let has_fallback = text.contains("ForceCopy") || text.contains("Copy-Item");
+    assert!(
+        !has_symlink || has_fallback,
+        "claude-code install.ps1 must not require symlink privileges unconditionally; \
+         it needs a copy fallback"
+    );
+}
+
+/// The install and the uninstall must agree on the directory they mean.
+///
+/// Remove is half of the acceptance, and it is the half that fails silently:
+/// an uninstaller whose default drifts from the installer's leaves the package
+/// in place and reports that it was never installed. The two scripts are
+/// asserted against each other rather than against a literal, so that changing
+/// the destination in one place only is what this catches. It is a text
+/// assertion: the destination is only ever materialised for the person running
+/// the installer, not for the suite.
+#[test]
+fn the_claude_code_install_and_uninstall_scripts_agree_on_where_the_package_goes() {
+    let install =
+        std::fs::read_to_string(claude_code_script("install.ps1")).expect("install.ps1 readable");
+    let uninstall = std::fs::read_to_string(claude_code_script("uninstall.ps1"))
+        .expect("uninstall.ps1 readable");
+
+    for (name, text) in [("install.ps1", &install), ("uninstall.ps1", &uninstall)] {
+        assert!(
+            text.contains("'claude-plugins'"),
+            "claude-code {name} does not name the same default plugin directory as its \
+             partner script; uninstall would then remove nothing"
+        );
+        assert!(
+            text.contains(r"'sure'"),
+            "claude-code {name} must name the package's own folder inside that directory"
+        );
+    }
+}
+
+#[test]
+fn the_claude_code_readme_documents_the_install_and_remove_commands() {
+    // "Documented PowerShell commands" is half of the acceptance sentence, so
+    // the document is asserted against the scripts rather than trusted: a
+    // rename that leaves the README naming a file that is not there would
+    // otherwise make the acceptance greener the less it was true.
+    let readme = claude_code_readme();
+
+    for command in [
+        r"integrations\claude-code\scripts\install.ps1",
+        r"integrations\claude-code\scripts\uninstall.ps1",
+    ] {
+        assert!(
+            readme.contains(command),
+            "claude-code README.md must give the PowerShell command that runs {command}"
+        );
+    }
+    assert!(
+        readme.contains("PowerShell"),
+        "claude-code README.md must say which shell the install commands are for"
+    );
+    assert!(
+        readme.to_ascii_lowercase().contains("no administrator")
+            || readme.to_ascii_lowercase().contains("administrator rights"),
+        "claude-code README.md must state that a per-user install needs no administrator rights"
+    );
+    // The documented destination and the script's default have to be the same
+    // string, or the README describes an install nobody gets. The assertion
+    // pins the whole backticked path and not the directory name alone: a
+    // substring check for `…\claude-plugins\sure` is satisfied by
+    // `…\claude-plugins\sure-old` too, which is how a documentation test goes
+    // green while describing somewhere the installer never writes.
+    assert!(
+        readme.contains(r"`%LOCALAPPDATA%\claude-plugins\sure`"),
+        "claude-code README.md must name the directory the installer defaults to, in \
+         backticks, as the table above it does"
+    );
+    assert!(
+        std::fs::read_to_string(claude_code_script("install.ps1"))
+            .expect("install.ps1 readable")
+            .contains(r"'claude-plugins'"),
+        "claude-code install.ps1 no longer defaults to the directory its README documents"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn claude_code_install_script_runs_into_temp_directory() {
+    let script = claude_code_script("install.ps1");
+    let scratch = launcher_scratch("claude-code-install");
+    let plugin_dir = scratch.join("claude-plugins");
+    let sure_bin = scratch.join("sure.exe");
+    std::fs::write(&sure_bin, "dummy").expect("write dummy sure.exe");
+
+    // `run_launcher` asks the PowerShell hosts on this machine in turn and
+    // fails with what each answered, rather than passing -ExecutionPolicy
+    // Bypass: an override would make the installer pass for a reason that is
+    // not the installer.
+    let output = run_launcher(
+        &script,
+        &[],
+        "",
+        &[
+            ("CLAUDE_PLUGIN_DIR", plugin_dir.as_os_str()),
+            ("SURE_BIN", sure_bin.as_os_str()),
+        ],
+        &[],
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "claude-code install.ps1 failed: stdout={stdout}, stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("Installed"),
+        "install.ps1 should say what it did: {stdout}"
+    );
+
+    let installed = plugin_dir.join("sure");
+    assert!(
+        installed.is_dir(),
+        "the package should be installed at {installed:?}"
+    );
+    for relative in [
+        [".claude-plugin", "plugin.json"],
+        ["hooks", "hooks.json"],
+        ["scripts", "sure-mcp.ps1"],
+        ["scripts", "sure-hook.ps1"],
+        ["commands", "check.md"],
+    ] {
+        let path = relative
+            .iter()
+            .fold(installed.clone(), |path, part| path.join(*part));
+        assert!(
+            path.is_file(),
+            "{} should be present in the installed package",
+            path.display()
+        );
+    }
+    assert!(
+        installed.join(".mcp.json").is_file(),
+        "the dotfile manifest should be copied too, or the installed package is not a plugin"
+    );
+
+    // The render step replaces `{{SURE_BIN}}` and `{{PLUGIN_ROOT}}`. This
+    // package is relocatable because it names `${CLAUDE_PLUGIN_ROOT}`, which is
+    // Claude Code's substitution, so the render step must not touch it — a
+    // render map keyed on `PLUGIN_ROOT` instead of `{{PLUGIN_ROOT}}` would
+    // rewrite the package's own placeholder and leave a plugin that points at a
+    // path nobody substitutes. Read only on the copy path: a symlinked install
+    // has no copy to read, and the files it points at are the source ones these
+    // assertions are about.
+    if !installed
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+    {
+        let mcp = std::fs::read_to_string(installed.join(".mcp.json"))
+            .expect("installed .mcp.json readable");
+        assert!(
+            mcp.contains("${CLAUDE_PLUGIN_ROOT}"),
+            "the installed .mcp.json lost Claude Code's own placeholder: {mcp}"
+        );
+        let hooks = std::fs::read_to_string(installed.join("hooks").join("hooks.json"))
+            .expect("installed hooks.json readable");
+        assert!(
+            hooks.contains("${CLAUDE_PLUGIN_ROOT}"),
+            "the installed hooks.json lost Claude Code's own placeholder: {hooks}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn claude_code_install_script_copies_when_a_symlink_is_not_allowed() {
+    // Acceptance line 2, exercised rather than read. The installer probes for
+    // symlink capability in `%TEMP%`; this points `TEMP` at a directory that
+    // does not exist, so the probe cannot succeed whatever the machine allows,
+    // and the run that follows is the copy path by construction.
+    //
+    // What breaks this test: making the symlink unconditional (`$link=$true`),
+    // or dropping the copy branch. Both make the install fail with
+    // `UnauthorizedAccessException` on a machine without Developer Mode — which
+    // is this one — and that was measured rather than assumed: see the
+    // hand-back for the run against a deliberately broken copy of the script.
+    let script = claude_code_script("install.ps1");
+    let scratch = launcher_scratch("claude-code-copy");
+    let plugin_dir = scratch.join("claude-plugins");
+    let sure_bin = scratch.join("sure.exe");
+    std::fs::write(&sure_bin, "dummy").expect("write dummy sure.exe");
+    let absent_temp = scratch.join("no-such-temp-directory");
+
+    let output = run_launcher(
+        &script,
+        &[],
+        "",
+        &[
+            ("CLAUDE_PLUGIN_DIR", plugin_dir.as_os_str()),
+            ("SURE_BIN", sure_bin.as_os_str()),
+            ("TEMP", absent_temp.as_os_str()),
+        ],
+        &[],
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "claude-code install.ps1 failed when it could not make a symlink: \
+         stdout={stdout}, stderr={stderr}"
+    );
+
+    let installed = plugin_dir.join("sure");
+    let metadata = std::fs::symlink_metadata(&installed)
+        .unwrap_or_else(|error| panic!("installed package at {}: {error}", installed.display()));
+    assert!(
+        metadata.file_type().is_dir(),
+        "the fallback did not produce a directory at {}",
+        installed.display()
+    );
+    assert!(
+        installed
+            .join(".claude-plugin")
+            .join("plugin.json")
+            .is_file(),
+        "the copied package is missing its manifest"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn claude_code_install_script_refuses_when_sure_is_not_installed() {
+    // The other half of the installer contract, and the one the package's own
+    // documentation states: `docs/integrations/CLAUDE_CODE.md` requires an
+    // install to fail safely when the binary is unavailable. A package placed
+    // where nothing can start it, with no word said, is the failure this
+    // refusal exists to prevent.
+    let script = claude_code_script("install.ps1");
+    let scratch = launcher_scratch("claude-code-missing-bin");
+    let plugin_dir = scratch.join("claude-plugins");
+    let empty_path = scratch.join("empty-path");
+    let empty_local = scratch.join("localappdata");
+    std::fs::create_dir_all(&empty_path).expect("empty PATH directory");
+    std::fs::create_dir_all(&empty_local).expect("per-user directory");
+
+    let output = run_launcher(
+        &script,
+        &[],
+        "",
+        &[
+            ("CLAUDE_PLUGIN_DIR", plugin_dir.as_os_str()),
+            ("LOCALAPPDATA", empty_local.as_os_str()),
+            ("PATH", empty_path.as_os_str()),
+        ],
+        &["SURE_BIN"],
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "install.ps1 succeeded with no SURE binary anywhere: stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("SURE not found"),
+        "install.ps1 must say why it refused: {stderr}"
+    );
+    assert!(
+        !plugin_dir.join("sure").exists(),
+        "install.ps1 refused but touched the plugin directory anyway"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[cfg(windows)]
+#[test]
+fn claude_code_uninstall_script_removes_installed_package() {
+    let script = claude_code_script("uninstall.ps1");
+    let scratch = launcher_scratch("claude-code-uninstall");
+    let plugin_dir = scratch.join("claude-plugins");
+    let installed = plugin_dir.join("sure");
+    std::fs::create_dir_all(&installed).expect("create installed package");
+    std::fs::write(installed.join("dummy.txt"), "hello").expect("write dummy file");
+
+    let output = run_launcher(
+        &script,
+        &[],
+        "",
+        &[("CLAUDE_PLUGIN_DIR", plugin_dir.as_os_str())],
+        &[],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "claude-code uninstall.ps1 failed: stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("Uninstalled"),
+        "uninstall.ps1 should report removal when the package was present: {stdout}"
+    );
+    assert!(
+        !installed.exists(),
+        "the package directory should be removed after uninstall"
+    );
+
+    // Run again against an empty directory; it must say so rather than fail or
+    // claim a removal that did not happen.
+    let output = run_launcher(
+        &script,
+        &[],
+        "",
+        &[("CLAUDE_PLUGIN_DIR", plugin_dir.as_os_str())],
+        &[],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "claude-code uninstall.ps1 failed on a machine where nothing was installed: {stdout}"
+    );
+    assert!(
+        stdout.contains("not installed"),
+        "uninstall.ps1 should report not-installed when the package is absent: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 // --- packaging: the version a package declares, and the launchers a platform
 // --- can actually start ---------------------------------------------------
 //

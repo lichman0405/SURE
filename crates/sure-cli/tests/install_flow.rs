@@ -10,7 +10,7 @@
 //! # What it is really guarding
 //!
 //! `scripts/Install-Sure.ps1` installs into `%LOCALAPPDATA%\SURE\bin`, which is
-//! where seven launcher scripts across five integration packages already resolve
+//! where eight launcher scripts across five integration packages already resolve
 //! `sure.exe` — and which is **also** where `crates/sure-core/src/paths/mod.rs`
 //! puts the user's evidence, `sure.db`. So an uninstall that walks the install
 //! directory would destroy the history SURE exists to keep. The tests below are
@@ -328,8 +328,8 @@ fn an_archive_installs_where_the_launchers_already_look_for_it() {
     let run = install(&host, &archive, &root, &[]);
     assert_eq!(run.status, 0, "the install failed:\n{}", run.everything());
 
-    // The path is the one seven launcher scripts resolve, and it is not a choice
-    // made here: `integrations/claude-code/scripts/sure-mcp.ps1:16` and the six
+    // The path is the one eight launcher scripts resolve, and it is not a choice
+    // made here: `integrations/claude-code/scripts/sure-mcp.ps1:16` and the seven
     // beside it join this same name, and `grep -rn LOCALAPPDATA integrations/`
     // is the search that says so. Asserting the exact location is what keeps a
     // later change from quietly installing somewhere nothing looks.

@@ -14,6 +14,100 @@ The hook is intentionally thin: it forwards stdin JSON to the local SURE core. C
 
 The integration must fail safely if `sure.exe` is not installed and must never invent evidence for a hook that did not run.
 
+## Installation (Windows)
+
+No administrator rights are required, and none are asked for: `scripts/install.ps1`
+writes only inside your own user profile, and it creates no symlink it cannot
+create.
+
+```powershell
+# From the repository root:
+powershell -ExecutionPolicy Bypass -File integrations\claude-code\scripts\install.ps1
+```
+
+Or with an explicit SURE binary location:
+
+```powershell
+$env:SURE_BIN = "C:\Path\To\sure.exe"
+powershell -ExecutionPolicy Bypass -File integrations\claude-code\scripts\install.ps1
+```
+
+To remove it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File integrations\claude-code\scripts\uninstall.ps1
+```
+
+`-ExecutionPolicy Bypass` there is the scoped, per-invocation choice of the
+person typing the command — the same one the Cursor and agent-plugin READMEs
+document — and not this package's position on policy: see
+[Execution policy](#execution-policy) below for what a command this repository
+starts on its own is allowed to do, and is not.
+
+### Where it installs
+
+| | |
+| --- | --- |
+| default | `%LOCALAPPDATA%\claude-plugins\sure` |
+| override | set `$env:CLAUDE_PLUGIN_DIR` before running either script |
+
+The installer resolves the SURE binary in the same order as the launchers above:
+`$env:SURE_BIN`, then `sure` on `PATH`, then `%LOCALAPPDATA%\SURE\bin\sure.exe`.
+If none of the three is found it stops before touching the plugin directory —
+`Write-Error 'SURE not found. Install SURE or set SURE_BIN.'`, exit 1 — because a
+package placed where nothing can start it, with no word said, is the failure
+`docs/integrations/CLAUDE_CODE.md` asks this step to avoid.
+
+### Copy vs. symlink
+
+As in the Cursor and agent-plugin packages: a symlink when Windows Developer Mode
+allows one, a copy otherwise or with `-ForceCopy`. Copied files have any
+`{{SURE_BIN}}` or `{{PLUGIN_ROOT}}` placeholders rendered to absolute paths; this
+package carries no such token today, and the render step has to leave
+`${CLAUDE_PLUGIN_ROOT}` alone — it is Claude Code's substitution, not SURE's, and
+a render keyed on the wrong string would produce a plugin that names a path
+nobody substitutes. A test asserts that of the installed copy.
+
+**The symlink is an optimisation of the development loop, never a requirement.**
+Measured on 2026-09-21 on the machine this package is developed on, which has no
+Developer Mode: `New-Item -ItemType SymbolicLink` answered
+`UnauthorizedAccessException` — *this operation requires administrator
+privileges* — and the installer completed anyway, exit 0, `Installed (copy)`.
+That is acceptance line 2 of `P15-T009` as a run rather than a claim.
+
+### Loading the plugin is Claude Code's step, and this repository did not watch it
+
+`scripts/install.ps1` places the package. It does not register it with Claude
+Code, and no plugin from this repository has been loaded into a running session,
+so **every loading mechanism below is Claude Code's documented behaviour read
+from its documentation on 2026-09-21 and is not something SURE observed**. The
+line is the same one the MCP server section above draws.
+
+- **Skills-directory plugin.** Documented: any folder under a skills directory
+  that holds a `.claude-plugin/plugin.json` is loaded as a plugin named
+  `<name>@skills-dir` on the next session, with no marketplace and no install
+  step. This package already has that manifest, so
+  `$env:CLAUDE_PLUGIN_DIR = "$env:USERPROFILE\.claude\skills"` puts it at
+  `%USERPROFILE%\.claude\skills\sure` and Claude Code loads it. It is *not* the
+  default, and that is a decision rather than an oversight: this package carries
+  hooks, personal skills load in every project on the machine, and turning
+  SURE's checks on for every session a person opens is a choice for that person
+  to make rather than one for an installer to make quietly.
+- **`claude plugin install <plugin>@<marketplace>`**, with
+  `claude plugin uninstall` to remove it, and `--scope` to choose which settings
+  file records it. Documented as the non-interactive CLI for plugin management.
+  It installs *from a marketplace*, and this repository ships no marketplace
+  file, so there is nothing here to install from yet; that is release-packaging
+  work, not something this installer can stand in for.
+- **`claude --plugin-dir <path>`** — documented as loading a plugin directory
+  for that session only. Nothing is installed, so there is nothing to uninstall;
+  point it at `%LOCALAPPDATA%\claude-plugins\sure` to try the package without
+  installing it.
+
+What was observed here is the half this repository owns: the copy on disk, at a
+path the commands above can name. What was not observed is Claude Code reading
+it, and this page does not claim otherwise.
+
 ## MCP server
 
 `.mcp.json` declares one MCP server, and it does not name `sure` directly:

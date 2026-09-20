@@ -1053,7 +1053,7 @@ Write-Output $archive
     /// Which of the launchers' three resolution steps finds a winget-installed
     /// SURE. The answer is the second one, and this is the experiment.
     ///
-    /// The seven launchers resolve `sure.exe` as `$env:SURE_BIN`, then `sure` on
+    /// The eight launchers resolve `sure.exe` as `$env:SURE_BIN`, then `sure` on
     /// `PATH`, then `%LOCALAPPDATA%\SURE\bin\sure.exe`. A WinGet package
     /// installs into a WinGet-managed directory and surfaces the command through
     /// its own `Links` directory, which WinGet puts on `PATH` — so the third

@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+
+# >>> template notes: removed when this file is rendered
+# =============================================================================
+# SURE — WinGet version manifest. THIS IS A TEMPLATE, NOT A MANIFEST.
+# =============================================================================
+#
+# Nothing in this directory is a manifest that anyone should publish or install
+# from. Each of the three files carries the same two placeholders, and each one
+# stands for a value that exists only after a build:
+#
+#   <version>                the version the built `sure.exe` reports about
+#                            itself, which is also the version in the archive's
+#                            file name
+#   <sha256-of-the-archive>  the SHA-256 of the release archive's bytes
+#
+# both of which are produced by `scripts/Build-Release.ps1`. They are filled in
+# by `scripts/New-WingetManifest.ps1`, and by nothing else. There is deliberately
+# no digest written down anywhere in this repository: a 64-hex constant in a
+# committed file that no build of these bytes ever produced is the exact artefact
+# SURE exists to refuse. If you found one here, it is a defect — report it rather
+# than filling in the rest by hand.
+#
+# The placeholders are spelled with angle brackets so that they survive a YAML
+# parse and then fail the manifest schema: `InstallerSha256` must match
+# `^[A-Fa-f0-9]{64}$`, so `winget validate` refuses an unsubstituted installer
+# manifest rather than reading it as a plausible manifest. Whether it also
+# refuses the version placeholder is measured and written down in
+# `docs/development/INSTALL_WINGET.md` rather than assumed here.
+#
+# `docs/development/INSTALL_WINGET.md` says where every value comes from, what
+# checks it, and what is still manual.
+# <<< end of template notes
+
+PackageIdentifier: lichman0405.SURE
+PackageVersion: <version>
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.12.0

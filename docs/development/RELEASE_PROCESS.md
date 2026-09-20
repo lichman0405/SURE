@@ -73,6 +73,15 @@ Also produce/document:
 
 A WinGet manifest/template is useful after the release artifact is stable. Homebrew formula support is secondary.
 
+`P15-T004` writes that template: `packaging/winget/template/` holds the three
+files, `scripts/New-WingetManifest.ps1` renders them from a release archive and
+refuses any value it cannot derive from those bytes, and
+`docs/development/INSTALL_WINGET.md` records what the package would install,
+where each value comes from, which parts of the update process are manual, and
+what none of it covers. **Nothing is published**: submitting a manifest to
+`microsoft/winget-pkgs` is a pull request against a repository this project does
+not own, and no package exists there.
+
 ## Signing
 
 Authenticode/code-signing credentials are external. If unavailable, document the unsigned state and expected Windows warnings. Do not fake signing.

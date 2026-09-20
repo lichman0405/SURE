@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+# >>> template notes: removed when this file is rendered
+# =============================================================================
+# SURE — WinGet installer manifest. THIS IS A TEMPLATE, NOT A MANIFEST.
+# =============================================================================
+#
+# `lichman0405.SURE.yaml` in this directory carries the contract: the two placeholders,
+# where their values come from, and why no digest is written down here.
+#
+# What this file asserts, and what checks each assertion:
+#
+#   InstallerType: zip            the release archive is a ZIP
+#                                 (`docs/development/RELEASE_PROCESS.md:22-24`)
+#   NestedInstallerType: portable `sure.exe` inside it is a self-contained
+#                                 executable with no installer and no service
+#   RelativeFilePath              the archive's documented layout: one top-level
+#                                 directory of the same name as the archive,
+#                                 holding `sure.exe`. Checked by
+#                                 `scripts/New-WingetManifest.ps1`, which extracts
+#                                 the archive and refuses if that path is not
+#                                 there — a wrong path here fails on a user's
+#                                 machine, after the download, which is why it is
+#                                 checked before the manifest is written
+#   PortableCommandAlias: sure    the command a user types. WinGet puts this name
+#                                 on PATH through its own `Links` directory; it
+#                                 is *not* `%LOCALAPPDATA%\SURE\bin`, which is
+#                                 what the integration launchers look at last.
+#                                 `docs/development/INSTALL_WINGET.md` records
+#                                 which of their three steps finds this install,
+#                                 measured rather than reasoned about
+#   Architecture: x64             `P15-T002`'s artifact is
+#                                 `x86_64-pc-windows-msvc` and is the only one
+#                                 that exists (`scripts/Build-Release.ps1`'s
+#                                 `$Target` has one member)
+#   InstallerUrl                  a GitHub release asset under the tag
+#                                 `v<version>`, which is the tag naming in
+#                                 `docs/development/RELEASE_PROCESS.md:5-8`. No
+#                                 release exists yet and nothing in this tree
+#                                 creates one: this is the one value the
+#                                 generator cannot check, and the document says
+#                                 so and says what checks it instead
+#   InstallerSha256               the SHA-256 of that archive's bytes, taken from
+#                                 the `.sha256` file beside it and re-computed by
+#                                 the generator before the manifest is written
+#
+# The `Scope` key is deliberately absent, and that is measured rather than
+# reasoned: adding `Scope: user` to a rendered copy of this file and running
+# `winget validate --manifest` over it on 2026-09-20 gave "Manifest validation
+# succeeded with warnings.", the warning "Scope is not supported for InstallerType
+# portable.", and exit -1978335192. A warning is not a pass in this repository,
+# so the key is left out. The absence of `Scope` is also what WinGet already does
+# for `portable` — it installs per user under
+# `%LOCALAPPDATA%\Microsoft\WinGet\Packages`.
+#
+# There is no `SignatureSha256` and no signature of any kind. The build is
+# unsigned, and `docs/development/RELEASE_PROCESS.md` says under `## Signing` not
+# to fake signing; writing a signature field here would be a claim about bytes
+# that were never signed. The SmartScreen warning is part of what a user meets,
+# and `docs/development/INSTALL_WINDOWS.md` documents it.
+# <<< end of template notes
+
+PackageIdentifier: lichman0405.SURE
+PackageVersion: <version>
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: sure-<version>-x86_64-pc-windows-msvc/sure.exe
+    PortableCommandAlias: sure
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/lichman0405/SURE/releases/download/v<version>/sure-<version>-x86_64-pc-windows-msvc.zip
+    InstallerSha256: <sha256-of-the-archive>
+ManifestType: installer
+ManifestVersion: 1.12.0

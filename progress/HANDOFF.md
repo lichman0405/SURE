@@ -3,33 +3,39 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
-**In flight: the `P7-T012` acceptance, uncommitted.** `HEAD` is
-`a21788265c2bfb08e2c449728fcdeb62815a22bd` — `P7-T012`'s own commit, **ahead 1 of
-`origin/claude/v0.1-autonomous` and unpushed**. On top of it sit the supervisor's record edits:
+**`P7-T012` is accepted and delivered at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which equals
+`origin/claude/v0.1-autonomous`, and the worktree is clean.** The acceptance commit is records plus one
+corrected doc sentence: `progress/state.json` (189 records; `P7-T012` accepted with 13 evidence entries),
 `tasks/tasks.json` (189 tasks; `P15-T028` and `P15-T029` minted, `P15-T015`'s note corrected),
-`progress/state.json` (189 records; `P7-T012` queued → accepted),
-`crates/sure-core/src/recheck_lifecycle.rs` (one doc sentence that claimed a symmetry with
+`crates/sure-core/src/recheck_lifecycle.rs` (one sentence that claimed a symmetry with
 `allowance::SCAN_LIMIT` the code does not have), this file, and `SHA256SUMS.txt` — whose dry run found
-**seven** digests stale, being the four `a217882` altered, the `recheck_lifecycle.rs` edit above, and
-this file and `progress/state.json`; it was regenerated with all three of its invariants intact (195
-entries, 19199 bytes, no trailing newline). Both validators pass on this `tasks`/`state.json` pair:
-`state OK: 189 tasks` and `SURE bootstrap validation OK: 17 phases, 189 tasks.`
+**seven** digests stale and which was regenerated with all three of its invariants intact (195 entries,
+19199 bytes, no trailing newline).
 
-**The first gate run on this tree is red, and the red is the known flake rather than this change.**
-`& .\target\tmp\gates.ps1 -Label p7t012-accept` → `fmt=0 clippy=0 test=101 bootstrap=0 taskctl=0
-nonwindows=0`, `passed=2631 failed=1 not-ok=1`, with the worktree list **identical at the start and at
-the end of the run**, so the run is attributable and is not the straddling failure recorded below. The
-failure is `runtime_start.rs::a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named`
-at `:1184:5` — the load-sensitive site already on record from `P14-T006`, `P14-T007` and `P14-T008` —
-where the first assertion (the run names the service's own budget) passes and the second (SURE asked
-`GET /health`) does not, because under a full-suite load the probe does not land its request before the
-3.5-second budget expires. **It passes 4 of 4 in isolation** (3.63s, then 3.61s three times). The change
-set is one doc comment and four records and cannot reach a process-spawning budget test, so this is a
-measurement of the flake and not a rate; both readings are kept in the acceptance section below and
-neither is withdrawn.
+**CI run `35501183734` on `ad5368e` is SUCCESS on all five jobs** — `rust (windows-latest)`,
+`rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` —
+with `headSha` read back from the API as `ad5368e…` rather than inferred from a queue state. The macOS
+and ubuntu rows are the ones that matter here: they are where the `runtime_start` flake and the ETXTBSY
+class have surfaced before, and neither fired. The push carried `a217882` as well as `ad5368e`, so the
+worker's own commit has a run of its own for the first time — the two local gate runs are in the
+acceptance section below.
 
-**The dispatch after it is `P7-T013`**, on §14's ordering; the paragraph further down works that out
-from the ready set rather than from the hook's truncated `ready=` line.
+**The next dispatch is `P7-T013`** — *"Let the check report read the capability tier from the project's
+recorded events"* — on §14's ordering, and the paragraph further down works that out from the ready set
+rather than from the hook's truncated `ready=` line. Its brief is written, and its anchors were re-read
+on this tree rather than carried over. The trap it carries is that the obvious implementation **deletes
+a blind spot while keeping the same tier**: `CapabilityReport::cli()` reports `Snapshot` with *two*
+blind spots and `report_from_events(&[], _)` reports `Snapshot` with *one*, so the naive swap makes the
+report read as more complete at exactly the moment SURE can see least.
+
+**One gate run on the accepted tree was red, and it is the known flake rather than that change.**
+`& .\target\tmp\gates.ps1 -Label p7t012-accept` → `test=101`, `passed=2631 failed=1`, the failure being
+`runtime_start.rs::a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named` at
+`:1184:5` — the load-sensitive site already on record from `P14-T006`, `P14-T007` and `P14-T008`. Its
+first assertion (the run names the service's own budget) passes and its second (SURE asked `GET /health`)
+does not, because under a full-suite load the probe does not land its request before the 3.5-second
+budget expires; it passes 4 of 4 in isolation. The acceptance section records all three gate runs, and
+none is withdrawn.
 
 **One hazard is cleared and worth knowing about anyway.** A gate run at this tree cannot reproduce the
 false red recorded below — the `sure commands` scratch pool held **1_122** directories then and holds
@@ -2873,6 +2879,18 @@ nothing is wrong may not read to a person the way the code means it.
 amended fixtures. The worker reported two; the supervisor's dry run found four. No
 gate reads that file, which is why it can drift unnoticed, and it is regenerated by
 the acceptance commit.
+
+**This is the third time the manifest has been found stale by hand, which is a data
+point for `P15-T020` rather than a new task.** That task — *"Give the checksum
+manifest a reader, or take it out of the tree"* — was minted on the second
+occurrence, and its own note carries the measurement that makes the drift structural
+rather than careless: `grep -rln "SHA256SUMS"` over the tree returns only
+`progress/HANDOFF.md` and `progress/state.json`, both prose *about* the manifest
+rather than code that reads it. **A file whose only readers are sentences describing
+it cannot go stale loudly.** One thing worth saying plainly, because "the supervisor
+regenerates it" reads as a process until you look: the tool that does the
+regenerating is a scratch script under `target/tmp`, which is git-ignored, so the
+maintainer of this manifest is not itself in the tree.
 
 ## What `P15-T002` added
 

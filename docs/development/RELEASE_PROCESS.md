@@ -65,7 +65,9 @@ Also produce/document:
 - macOS Intel CLI archive — **produced and run, not published.** See
   `### What the macOS Intel archive is, concretely` below for the run that does
   it, the exact boundary of what is therefore true, and how to reproduce it;
-- Linux x64 CLI archive;
+- Linux x64 CLI archive — **build path in place, not yet produced by any run.**
+  See `### What the Linux x64 archive is, concretely` below for what the path
+  is, what has been verified and where, and what is still unmeasured;
 - SHA-256 checksums;
 - Claude Code plugin package/instructions;
 - Cursor Plugin package/instructions;
@@ -244,6 +246,7 @@ the target installed:
 
 ```
 $ cargo build --workspace --release --locked --target x86_64-apple-darwin
+error: failed to run custom build command for `ring v0.17.14`
 cargo:warning=Compiler family detection failed due to error:
   ToolNotFound: failed to find tool "cc": program not found
 error occurred in cc-rs: failed to find tool "cc": program not found
@@ -253,13 +256,26 @@ $ ls target/x86_64-apple-darwin/release/sure
 ls: cannot access '...': No such file or directory
 ```
 
+That is an excerpt of a 74-line log, which is at
+`target/tmp/p15t006/local-x86_64-apple-darwin-build.txt` on the machine that
+wrote this and is not committed. The first line is the log's line 23 — the line
+that says *which* crate failed — `Compiling ring v0.17.14` is its line 18, and
+the two `cc-rs` lines are its lines 52 and 70 (line 65 repeats line 52; one of
+the two is shown), given here without the two-space indent they carry in the log.
+The line numbers are named because the omission of line 23 from this excerpt is
+what let the wrong crate be named underneath it.
+
 The `x86_64-apple-darwin` `std` **is** installed there, so the run got past the
-target's own absence and stopped at the C dependency: `rusqlite`'s `bundled`
-feature compiles SQLite from its own C source through `libsqlite3-sys`, whose
-`build.rs` invokes `cc`, and a Windows host has no C compiler that emits x86_64
-Mach-O objects. **This was always a fact about the host, not about the target**,
-and the CI log is what settles it: job `106088732392` found `/usr/bin/cc`, and
-the same build there exited 0. It is the same fact
+target's own absence and stopped at the C dependency: a crate's build script
+compiles C for this target through `cc-rs`, and a Windows host has no C compiler
+that emits x86_64 Mach-O objects. The crate this log names is `ring v0.17.14`.
+The workspace does carry the other C a reader of this section may be thinking of
+— `rusqlite`'s `bundled` feature compiles SQLite from its own C source through
+`libsqlite3-sys` — but `cargo` stops at `ring`'s build script and never compiles
+`libsqlite3-sys`. The sentence here used to name that crate, which this log does
+not mention. **This was always a fact about the host, not about the target**, and
+the CI log is what settles it: job `106088732392` found `/usr/bin/cc`, and the
+same build there exited 0. It is the same fact
 `docs/development/GITHUB_WORKFLOW.md` records about cross-target `clippy` — not
 evidence that the artifact cannot be built, only that it could not be built
 *here*.
@@ -327,6 +343,152 @@ x86_64-apple-darwin` runs the extracted binary **from the directory it was
 extracted into** and compares the `running from` it reports. If a future dispatch
 lands on an arm64 host instead, `uname -m` says so, and the log distinguishes a
 native run from a Rosetta one rather than the reader having to assume.
+
+### What the Linux x64 archive is, concretely
+
+Decided and written by `P15-T007`. It is produced by the same
+`scripts/Build-Release.sh` as the two macOS archives — one script, three targets,
+because the version read, the stage, the three files inside the archive, the
+`.sha256` format, the extraction and the run of the extracted binary are the same
+for all three and two scripts holding one archive contract are two places for it
+to drift — and by a third job in the same workflow, `package-linux`, on an
+`ubuntu-latest` runner.
+
+**No run of that job has happened.** The workflow is `workflow_dispatch`-only and
+the job was written by a task that could not dispatch it, so the artifact does not
+exist. That is a statement about this job's history and not about this job, and
+the sentence a reader should leave this section with is:
+
+> **This project's Linux x64 artifact is built, tested, packaged, checksummed and
+> run by the `package-linux` job whenever it is dispatched. Until that has
+> happened, no Linux archive exists and none is claimed here.**
+
+| | |
+| --- | --- |
+| name | `sure-<version>-x86_64-unknown-linux-gnu.tar.gz`, where `<version>` is the version `sure` itself reports |
+| layout | one top-level directory of the same name, holding `sure`, `LICENSE` and `RELEASE.txt` |
+| checksum | `<archive>.sha256` beside it: one `sha256sum`-format line, `<64 lowercase hex><two spaces><file name>`, ASCII, no BOM |
+| where | `target/tmp/release/` by default. `target/` is gitignored, so no binary is committed |
+| mode | `sure` is recorded as mode 755, as in the macOS archives |
+| signature | none, and there is no signing step and no reading to take: Linux has no `codesign` and an ELF has no field a signature lives in. See `## Signing` below |
+| produced by | `.github/workflows/release-dry-run.yml`, job `package-linux`, on an `ubuntu-latest` runner |
+| `aarch64-unknown-linux-gnu` | refused by name, exit 2. This repository commits to an x86_64 Linux artifact only, and the script will not produce a file named after a platform nothing here builds |
+
+**The architecture is read from the artifact and never from the runner's name.**
+`ubuntu-latest` being x86_64 is a belief about a label, and a belief is not a
+measurement — the same rule the macOS rows are held to. The Linux reader is where
+that rule is easiest to get wrong, so it is worth stating exactly:
+
+| offset | field | x86_64 value | aarch64 value |
+| --- | --- | --- | --- |
+| 0–3 | magic | `7f 45 4c 46` | `7f 45 4c 46` |
+| 4 | `EI_CLASS` | `02` (`ELFCLASS64`) | `02` |
+| 5 | `EI_DATA` | `01` (`ELFDATA2LSB`) | `01` |
+| 18–19 | `e_machine`, little-endian | `3e00` (`EM_X86_64`) | `b700` (`EM_AARCH64`) |
+
+**The first eight bytes of an ELF are `7f454c4602010100` for an x86_64 image and
+for an aarch64 one alike.** A check built by analogy with the macOS eight-byte
+read — magic plus a field that names the machine — would accept an arm64 ELF under
+a name that says x86_64 and report that it had checked. That is the false green
+this reader exists to avoid, and it is why the `e_machine` field at offset 18 is
+what the check compares: the script reads **twenty bytes**, prints them as hex,
+and compares the four discriminating fields one at a time (`magic`, `EI_CLASS`,
+`EI_DATA`, `e_machine`), refusing a mismatch by name and printing found against
+required. Offsets 16–17 (`e_type`) are deliberately **not** compared: `0300` is a
+PIE and `0200` is not, which is a property of the linker invocation rather than a
+promise this repository has made, and a fixed twenty-byte prefix would refuse a
+legitimate artifact for a reason that has nothing to do with architecture.
+`/usr/bin/file` is asked the same question as a second reader where it exists,
+and a disagreement fails the run.
+
+**The machine's glibc is part of the artifact's contract, and the archive says
+so.** An ELF built on a CI runner image links that image's GNU C library, so the
+oldest distribution it runs on is set by the glibc of the machine that built it —
+not by this repository, and not by anything a reader can assume. The
+`RELEASE.txt` inside the Linux archive carries a paragraph on this rather than a
+version number: it names the mechanism (a dynamically linked `x86_64-unknown-linux-gnu`
+binary, not static and not musl, so not Alpine), states that the requirement is
+readable **from the binary** as `GLIBC_x.yy` lines among its undefined symbols,
+and points at the two readings that give it — `objdump -p` on the extracted
+`sure`, and `ldd --version` on the reader's own machine. The `package-linux`
+job prints the runner's own `ldd --version` and `/etc/os-release` in its
+*"What this runner is"* step, and reads the `GLIBC_` versions off the packaged
+binary in a later step, so the log carries both ends of that number. **The floor
+itself is not stated here because no artifact has been built to read it off**;
+stating a version now would be a guess dressed as a measurement.
+
+**What has been verified, and where.** The build path cannot be finished on the
+machine that wrote it — Windows 11, native Rust MSVC — for the reason the Intel
+section above records for `x86_64-apple-darwin` and a second one of its own: this
+host has the `x86_64-unknown-linux-gnu` `std` installed, so the local build gets
+past the target's absence, and then stops in `cc-rs` with
+
+```
+error: failed to run custom build command for `ring v0.17.14`
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-linux-gnu-gcc": program not found (see https://… for help)
+  error occurred in cc-rs: failed to find tool "x86_64-linux-gnu-gcc": program not found (see https://… for help)
+$ echo $?
+101
+```
+
+(An excerpt of a 75-line log, at `target/tmp/p15t007/local-linux-build.txt` on
+the machine that wrote this and not committed. The `https://…` is the log's own
+`docs.rs/cc` link, elided here for width, and the two-space indent is the log's
+own. The first line is the log's line 26, which is the line that says *which*
+crate failed; `Compiling ring v0.17.14` is its line 17, and the two `cc-rs` lines
+are its lines 56 and 72, with line 67 repeating line 56. Those numbers are named
+for the reason the Intel excerpt above names its own.)
+
+That is a fact about the host and not about the target: `package-linux`'s runner
+has that compiler. What **was** verified locally is the half that does not need a
+Linux compiler — the reader, against real ELF bytes rather than invented ones:
+
+| archive name | `sure`'s first twenty bytes | Architecture step | bytes |
+| --- | --- | --- | --- |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `7f454c4602010100…03003e00` | accepted, `ELF 64-bit, little-endian, x86_64` | **real** — `/bin/ls` copied out of WSL |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `7f454c4602010100…0300b700` | refused, *not* x86_64 | **constructed** — the same file with bytes 18–19 changed `3e00`→`b700`, nothing else touched |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `7f454c4601010161…02002800` | refused, `ELF 32-bit, little-endian, ARM` | **real** — Qualcomm WLAN firmware from a Windows driver store |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `7f454c4601010100…02000300` | refused, `ELF 32-bit, little-endian, i386` | **real** — the same driver store's `m3.bin` |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `cffaedfe07000001…` | refused, `a Mach-O image` | **real** — `P15-T006`'s x86_64 Mach-O |
+| `...-x86_64-unknown-linux-gnu.tar.gz` | `4d5a9000…` | refused, `a PE image` | **real** — a PE from `C:\Windows\System32` |
+
+**The arm64 refusal is exercised against constructed bytes and is labelled as
+such.** WSL hands out linker-produced x86_64 ELF images and no aarch64 one, and no
+package may be installed to obtain one, so two bytes of a real ELF are the
+refusal fixture rather than an invented file: the file is otherwise byte-for-byte
+`/bin/ls`, `file(1)` calls the result `ARM aarch64`, and the two bytes changed are
+exactly the two the check compares. The acceptance direction is exercised against
+real bytes, and the two other-machine refusals (`EM_ARM`, `EM_386`) are real
+objects that were shipped by someone else.
+
+**What the local runs cannot reach, stated plainly.** The Windows host cannot make
+an extracted file executable, so the mode check stops every local run of the
+script and the steps after it are unreachable here: the *Signature* step, the
+*Run the extracted binary* step and the final verdict line have never run for a
+Linux target on any machine. `package-linux` is what runs them. Until it does,
+"the extracted `sure` runs on Linux and reports itself built for Linux" is
+**unmeasured**, and the acceptance sentence at the top of this section is not yet
+earned.
+
+**How to reproduce this.** Dispatch the workflow and read the `package-linux`
+job's log:
+
+```
+gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
+```
+
+The job's *"What this runner is"* step prints `uname -m`, `RUNNER_ARCH`,
+`rustc -vV`'s host, the image's `/etc/os-release` and its `ldd --version`, so the
+log says which machine and which C library produced the artifact rather than
+leaving the label to be believed; a later step reads the `GLIBC_` versions out of
+the packaged binary; and `scripts/Build-Release.sh --target
+x86_64-unknown-linux-gnu` extracts the archive to a fresh directory and runs the
+extracted `sure` **from the directory it was extracted into**, comparing the
+`running from` it reports with its own path — so *the bytes that are checksummed
+are the bytes that were run* is established by the order of the steps and not
+asserted. The job uploads the archive and its `.sha256` as the workflow artifact
+`sure-x86_64-unknown-linux-gnu`, retained for 14 days, like the two macOS ones:
+**not published, attached to no release and reachable by no public URL.**
 
 ## Package managers
 

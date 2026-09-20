@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# SURE - build, package and check a macOS release artifact: Apple Silicon
-# (aarch64-apple-darwin) or Intel (x86_64-apple-darwin).
+# SURE - build, package and check a release artifact for one of the three
+# non-Windows targets: macOS Apple Silicon (aarch64-apple-darwin), macOS Intel
+# (x86_64-apple-darwin) or Linux x64 (x86_64-unknown-linux-gnu).
 #
 #   sh scripts/Build-Release.sh --phase all
 #   sh scripts/Build-Release.sh --phase all --target x86_64-apple-darwin
+#   sh scripts/Build-Release.sh --phase all --target x86_64-unknown-linux-gnu
 #   sh scripts/Build-Release.sh --phase verify --output-dir <dir>
 #
 # Run from anywhere; every path is derived from this file's own location.
@@ -20,6 +22,12 @@
 # on a macOS runner — so the macOS build path cannot be a script that assumes
 # Windows, and it cannot be a Windows-only wrapper around one either. A POSIX
 # shell script is what runs there: `/bin/sh` on macOS, `sh` on a Linux runner.
+# `P15-T007` adds Linux x64 to this script rather than to a sibling one, because
+# it is built on the same kind of runner and by the same shape of job as the two
+# macOS targets: the version read, the stage, the three files inside the
+# archive, the `.sha256` format, the extraction and the run of the extracted
+# binary are identical, and two scripts holding the same archive contract are
+# two places for it to drift.
 # It is written to run under `sh` as well as under `bash` — no arrays, no
 # `[[ ]]`, no `mapfile`, no process substitution, no `${var,,}`, and no `${x//y}`
 # — because macOS's `/bin/sh` is bash 3.2 in POSIX mode and a Linux runner's
@@ -66,20 +74,31 @@
 #
 # **A file named `sure-<version>-aarch64-apple-darwin.tar.gz` is not evidence
 # that it holds an ARM binary, and a checksum of it is not evidence that it
-# runs.** `macos-latest` is *believed* to be an arm64 image; a belief is not a
-# measurement, and the label's meaning has changed before (`macos-13` is Intel,
-# `macos-14` and later are Apple Silicon) and will change again. So nothing here
-# reads the runner's name:
+# runs.** `macos-latest` is *believed* to be an arm64 image and `ubuntu-latest`
+# is *believed* to be x86_64; a belief is not a measurement, and the macOS
+# label's meaning has changed before (`macos-13` is Intel, `macos-14` and later
+# are Apple Silicon) and will change again. So nothing here reads the runner's
+# name:
 #
 # * the build names its target explicitly — `--target aarch64-apple-darwin` —
 #   so the artifact is what the invocation says it is rather than what the host
 #   happens to default to, and it would be an arm64 binary even on an Intel
 #   runner (Xcode's clang cross-compiles it);
-# * the architecture this script *checks* is read from the artifact's own first
-#   eight bytes: the 4-byte Mach-O magic and the 4-byte `cputype`. Those are
-#   `cf fa ed fe` (64-bit Mach-O, little-endian, the only shape a modern arm64
-#   binary has) and `0c 00 00 01` (`CPU_TYPE_ARM64`). The bytes are printed, so
-#   a reader can check the reading by hand rather than take it on trust;
+# * the architecture this script *checks* is read from the artifact's own bytes.
+#   There are two header families and the check is the family's own:
+#
+#   Mach-O (the two macOS targets), from the **first eight bytes**: the 4-byte
+#   magic and the 4-byte `cputype`. Those are `cf fa ed fe` (64-bit Mach-O,
+#   little-endian, the only shape a modern arm64 binary has) and `0c 00 00 01`
+#   (`CPU_TYPE_ARM64`) or `07 00 00 01` (`CPU_TYPE_X86_64`).
+#
+#   ELF (Linux x64), from the **first twenty bytes**: the 4-byte magic
+#   `7f 45 4c 46`, `EI_CLASS` at offset 4 and `EI_DATA` at offset 5 — `02 01`
+#   is 64-bit little-endian — and `e_machine`, a **2-byte little-endian field
+#   at offset 18**, `3e 00` for `EM_X86_64` and `b7 00` for `EM_AARCH64`.
+#
+#   The bytes read are printed either way, so a reader can check the reading by
+#   hand rather than take it on trust;
 # * `/usr/bin/file` is asked the same question as a second reader where it
 #   exists, its answer is printed, and a disagreement is a failure. It is not
 #   the required reader: the header read above is the measurement, and `file`
@@ -87,12 +106,74 @@
 # * the runner's own `uname -m` is printed and carried into the log, so a reader
 #   can see whether "and it ran" was possible on this machine at all.
 #
+# =============================================================================
+# Why the ELF check reads twenty bytes, and why it is not eight
+# =============================================================================
+#
+# **The Mach-O check's shape cannot be copied to an ELF, and a check built by
+# analogy would be a false green.** An ELF's first eight bytes are
+# `7f 45 4c 46` (magic), then `EI_CLASS` = `02` (ELFCLASS64), `EI_DATA` = `01`
+# (little-endian), `EI_VERSION` = `01` and `EI_OSABI` = `00` (System V) — that
+# is `7f454c4602010100`, **and it is identical for an x86_64 ELF and for an
+# aarch64 one**. An eight-byte read compared against a fixed expectation would
+# therefore accept an arm64 image under `sure-...-x86_64-unknown-linux-gnu.tar.gz`
+# and print that it had checked the architecture, which is the exact failure
+# this repository exists to refuse. The field that tells the two apart is
+# `e_machine` at offset 18, so the read is twenty bytes.
+#
+# **And it is not a twenty-byte expectation either.** Offsets 16-17 hold
+# `e_type`, which is `03 00` for a PIE (`ET_DYN`) and `02 00` for a non-PIE
+# (`ET_EXEC`) — the very two shapes the real bytes this was measured against
+# carry, `x86_64-unknown-linux-gnu`'s own `/bin/ls` being `03 00`. Which of the
+# two a build produces is a property of the linker invocation and not a promise
+# this repository has ever made, so a fixed twenty-byte prefix would refuse a
+# legitimate artifact for a reason that has nothing to do with architecture.
+# What is compared is the **discriminating fields** and nothing else: the magic,
+# `EI_CLASS`, `EI_DATA` and `e_machine`. The found and required values are both
+# printed, so a refusal says which field disagreed.
+#
 # **What a thin header read does not say.** It does not say the file is a whole
 # executable, and it is not treated as if it did: the checksum ties the archive
 # to the bytes that were built, and the run step below is what says the bytes
 # execute. A universal ("fat") binary is refused rather than accepted, because
 # the build asks for one thin architecture and a fat binary appearing here would
-# mean that invocation did not do what it says.
+# mean that invocation did not do what it says. The ELF reader refuses a
+# Mach-O, a PE, a 32-bit ELF and an ELF whose `e_machine` is not the named
+# target's, each by name.
+#
+# =============================================================================
+# Where the bytes each row is measured against came from
+# =============================================================================
+#
+# The Mach-O rows are `P15-T005`'s and `P15-T006`'s: the arm64 bytes are the
+# ones CI run `35512934506` shipped, the x86_64 bytes are the
+# `x86_64-apple-darwin` `std`'s own dylib, and the receiving direction is a real
+# universal (fat) binary and a real PE.
+#
+# **The Linux rows are not the same kind of evidence, and the difference is
+# recorded here rather than left for a reader to discover.** There is no aarch64
+# ELF on the machine this was written on — no aarch64 linker and none may be
+# installed — so:
+#
+# * the **accepted** row is a real, linker-produced x86_64 ELF: `cp /bin/ls` out
+#   of the WSL Ubuntu installation, 11352352 bytes, SHA-256
+#   `48893b0fb21436b54619db80486e83ef39dfccaf1aefe83dfa00c02d6146e8c0`,
+#   `ELF 64-bit LSB pie executable, x86-64`. It is an executable rather than
+#   this build, which is what a header read is a claim about;
+# * the **refused** row of the same width — an aarch64 ELF under an x86_64 name
+#   — is **constructed**: the real file above with only its 2-byte `e_machine`
+#   at offset 18 changed from `3e 00` to `b7 00`. `file` reads the result as
+#   `ELF 64-bit LSB pie executable, ARM aarch64`, so the patch is visible to a
+#   second reader and not only to this script's own comparison;
+# * two further refused rows are **real** ELF images of other machines, found in
+#   this machine's Windows driver store rather than invented: Qualcomm's
+#   `bdwlan.elf` (`ELF 32-bit LSB executable, ARM`, `e_machine` `2800`) and its
+#   `m3.bin` (`ELF 32-bit LSB executable, Intel i386`, `e_machine` `0300`).
+#   They are refused on `EI_CLASS` as well as on `e_machine`.
+#
+# So the accepted Linux row is real bytes and the arm64-refusal row is a
+# constructed pair of bytes, and neither statement is stronger than that. This
+# is what `RELEASE_PROCESS.md`'s Linux section records beside the table.
 #
 # =============================================================================
 # How the version is obtained, and why not by running the artifact
@@ -181,9 +262,13 @@
 # accepts now, so whether *this* host can produce that artifact was measured
 # rather than inherited. The `x86_64-apple-darwin` `std` **is** installed here —
 # `rustup target list --installed` lists it — so the run gets past the target's
-# own absence and stops at the C dependency: `libsqlite3-sys` compiles bundled
-# SQLite through `cc-rs`, which needs a C compiler that emits x86_64 Mach-O
-# objects, and a Windows host has none.
+# own absence and stops at the same C dependency the Linux run below stops at:
+# a crate's build script compiles C through `cc-rs`, which needs a compiler for
+# the target — here one that emits x86_64 Mach-O objects — and a Windows host
+# has none. The crate this log names is `ring v0.17.14`, and it is the crate the
+# Linux log below names too; the sentence here used to name `libsqlite3-sys`,
+# which neither log mentions: `cargo` stops at `ring`'s build script and never
+# compiles `libsqlite3-sys`.
 #
 #   $ cargo build --workspace --release --locked --target x86_64-apple-darwin
 #   cargo:warning=Compiler family detection failed due to error:
@@ -200,14 +285,55 @@
 # toolchain for the target and not the target itself — the same fact
 # `docs/development/GITHUB_WORKFLOW.md` records about cross-target `clippy`.
 #
+# **`P15-T007` asked it of the Linux target and got the same answer again, this
+# time with the C compiler's Linux name in it.** Unlike `aarch64-apple-darwin`,
+# the `x86_64-unknown-linux-gnu` `std` **is** installed on that host, so the run
+# gets past the target's own absence exactly as the Intel macOS one does:
+#
+#   $ cargo build --workspace --release --locked --target x86_64-unknown-linux-gnu
+#   cargo:warning=Compiler family detection failed due to error: ToolNotFound:
+#     failed to find tool "x86_64-linux-gnu-gcc": program not found (see
+#     https://docs.rs/cc/latest/cc/#compile-time-requirements for help)
+#   error occurred in cc-rs: failed to find tool "x86_64-linux-gnu-gcc":
+#     program not found (see https://docs.rs/cc/latest/cc/#compile-time-requirements
+#     for help)
+#   $ echo $?
+#   101
+#   $ ls target/x86_64-unknown-linux-gnu/release/sure
+#   ls: cannot access '...': No such file or directory
+#
+# The full log is `target/tmp/p15t007/local-linux-build.txt` on the machine that
+# wrote this and is not committed. So the Linux artifact's build half is not run
+# here either, for the reason the Intel macOS one is not: a crate's build script
+# compiles C through `cc-rs`, and a Windows host has no compiler that emits ELF
+# objects. The crate this log names is `ring v0.17.14` — the same one the Intel
+# run above names — and the log is where that name is read rather than supplied
+# from here. `cargo` stops at the first crate whose build script fails, so this
+# says which dependency failed and not that it is the only one that would.
+# **That says nothing about the target** — the same
+# build on a Linux runner finds `cc` — and the job that runs it is where the
+# artifact comes from.
+#
 # What *was* run there, so that the unrun half is the only unrun half:
 #
-# * `sh -n` parses the whole file, so it is a script and not a text file that
-#   looks like one.
+# * `sh -n` and `dash -n` both parse the whole file, so it is a script and not a
+#   text file that looks like one. `dash` is the point of saying so twice: it is
+#   what `/bin/sh` is on the Ubuntu runner, and it is a different shell from the
+#   one this file was written on.
+# * **The whole check path was then run under `dash` and under `sh`, and the two
+#   are identical.** Every `--phase verify` row below was run twice, once with
+#   each interpreter, into the same output directories; stdout, stderr, exit
+#   status and the failure text are byte-identical between the two runs. So the
+#   shell the runner uses is not the shell this *parse* check was taken in, and
+#   `printf`, `cut`, `od`, `tar` and `sed` were all exercised there rather than
+#   inferred to behave the same. What that still does not establish is the same
+#   tools under GNU coreutils on Linux: `dash` was run on this host, against
+#   this host's programs.
 # * The argument surface: `--help` exits 0, `--phase nonsense` exits 2, and each
-#   target refusal exits 2 with its reason named — `x86_64-unknown-linux-gnu`
-#   and `aarch64-unknown-linux-gnu` as `P15-T007`'s artifact, whose header is an
-#   ELF and not a Mach-O, and an unknown triple by name.
+#   target refusal exits 2 with its reason named — `aarch64-unknown-linux-gnu`,
+#   which no artifact of this repository is built for, and an unknown triple by
+#   name. `x86_64-unknown-linux-gnu` is no longer among the refusals: it is a
+#   value this script builds.
 # * The architecture reader, against **real Mach-O bytes** rather than invented
 #   ones, in four directions. The installed `x86_64-apple-darwin` `std` supplies
 #   a genuine linker-produced Mach-O `sure`; it is refused, with the message
@@ -237,6 +363,51 @@
 #   the two rows differ in the reading and not only in the verdict. Every row
 #   exits 1, at the *mode* check and not at this one, for the host reason named
 #   below; the Architecture step is read in all four before that happens.
+# * The architecture reader's **ELF** half, over real ELF bytes rather than
+#   invented ones, with the one row that cannot be real on this machine labelled
+#   as constructed. Each row below is one `--phase verify` run, the same shape
+#   as the four above:
+#
+#       archive name                sure's first 20 bytes        step
+#       x86_64-unknown-linux-gnu    7f454c4602010100..3e00       accepted, "ELF 64-bit, little-endian, x86_64"
+#       x86_64-unknown-linux-gnu    7f454c4602010100..b700       refused, "not ... x86_64"
+#       x86_64-unknown-linux-gnu    7f454c4601010161..2800       refused, "ELF 32-bit, little-endian, ARM"
+#       x86_64-unknown-linux-gnu    7f454c4601010100..0300       refused, "ELF 32-bit, little-endian, i386"
+#       x86_64-unknown-linux-gnu    cffaedfe07000001..           refused, "a Mach-O image"
+#       x86_64-unknown-linux-gnu    4d5a9000..                   refused, "a PE image"
+#
+#   The accepted row is a real one: `/bin/ls` copied out of the WSL Ubuntu
+#   installation on this machine, a linker-produced x86_64 ELF, PIE and
+#   dynamically linked. Its refusal sibling is that same file with **only** its
+#   2-byte `e_machine` field changed, `3e00` -> `b700`, and `file(1)` calls the
+#   result `ARM aarch64`. No aarch64 linker exists on that machine and none may
+#   be installed, so that row is **constructed**, and it is named as constructed
+#   rather than passed off as a real arm64 binary. The ARM32 and i386 rows are
+#   **real** objects another vendor shipped (Qualcomm WLAN firmware, and a
+#   driver store's `m3.bin`), which is why the two 32-bit refusals are readings
+#   rather than spellings. Every row exits 1 at the mode check, for the host
+#   reason above, after the Architecture step has printed its reading.
+# * The macOS rows, unchanged by this change. All four macOS rows above were run
+#   again — through this file as it stood at `HEAD` and as it stands here, into
+#   the same output directory so that the printed paths are the same strings —
+#   and stdout, stderr and exit status are **byte-identical** for all four
+#   (1841, 2201, 1901 and 2195 bytes). `--phase all --target
+#   x86_64-apple-darwin` through both files, over the same Mach-O via the
+#   stand-in `cargo`, produced two `RELEASE.txt` files of 3540 bytes each that
+#   are identical apart from the `built at` timestamp. That is the measurement
+#   behind "the macOS text did not move" rather than a reading of the diff:
+#   the two family-specific passages below became variables, and a
+#   parameterisation that rewrapped the Apple paragraphs would have reproduced
+#   the same words in different bytes.
+# * The Linux packaging half, end to end, by the same stand-in `cargo`:
+#   `--phase all --target x86_64-unknown-linux-gnu` reached the Release gate,
+#   the version, the stage, the `RELEASE.txt`, the package, the checksum write
+#   (119 bytes, 1 LF, 0 CR), the entry list, the checksum re-read, the
+#   extraction and the architecture read, which returned
+#   `7f454c4602010100..03003e00` / `ELF 64-bit, little-endian, x86_64` with
+#   `file` agreeing, and then stopped at the mode check. As with the Intel row,
+#   the stand-in compiles nothing, so this says nothing about whether a real
+#   Linux build succeeds; that half belongs to `package-linux`.
 # * The arm64 path, unchanged. `--phase verify` over **the artifact CI actually
 #   shipped** — `sure-0.0.0-bootstrap-aarch64-apple-darwin.tar.gz`, 4065656
 #   bytes, SHA-256
@@ -328,6 +499,12 @@
 #   `cffaedfe0c000001` / `Mach-O 64-bit, arm64` over it with `file` agreeing.
 # * **The `Authority=` failure branch of the Signature step**, which needs a
 #   signature chain to refuse and a `codesign` to read one with.
+# * **Every step the Linux target runs after the mode check**: the Signature
+#   step's *elf* branch, the Run step and the final verdict line. They are
+#   unreachable here for the mode reason above, and no Linux artifact exists
+#   yet for any other machine to have run them over. `package-linux` is what
+#   runs them, and until it has, "the extracted `sure` runs on Linux and says
+#   what it is" is unmeasured for this family.
 # * **Anything about Gatekeeper**, which nothing in this repository has observed.
 #
 # What no machine had exercised, and what changed. **The Intel artifact's Run
@@ -344,24 +521,29 @@
 # the same commit has been measured.
 #
 # A comment claiming the whole file is measured would be the defect this
-# repository exists to prevent. So: the build half was not run *here*; the check
-# half was; the Run step over a genuine artifact is measured on macOS in CI and
-# is still not reachable on this host; and the `Authority=` branch, Gatekeeper
-# and reproducibility remain unmeasured on every machine.
+# repository exists to prevent. So: the build half was not run *here* for any of
+# the three targets; the check half was; the Run step over a genuine artifact is
+# measured on macOS in CI and is still not reachable on this host, and for the
+# Linux target no artifact exists on any machine yet; and the `Authority=`
+# branch, Gatekeeper and reproducibility remain unmeasured on every machine.
 
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
-SURE - build, package and check a macOS release artifact.
+SURE - build, package and check a release artifact for a non-Windows target.
 
   sh scripts/Build-Release.sh [options]
 
   --phase all|verify    all (default) builds, packages, checksums and checks.
                         verify re-checks an archive this script already
                         produced and does not build.
-  --target TRIPLE       aarch64-apple-darwin or x86_64-apple-darwin (the
-                        only two values accepted).
+  --target TRIPLE       aarch64-apple-darwin, x86_64-apple-darwin or
+                        x86_64-unknown-linux-gnu. Those three are the values
+                        accepted; any other triple is refused by name.
+                        Default: aarch64-apple-darwin, so a run with no
+                        --target builds a macOS artifact whatever host it is
+                        run on — including a Linux one.
   --output-dir DIR      where the archive, its .sha256 and the scratch
                         extraction go. Default: target/tmp/release.
   --help                this text.
@@ -442,10 +624,23 @@ STAGE_ROOT="$SCRATCH/stage"
 # The target, and the facts the artifact has to agree with
 # =============================================================================
 #
-# Two members, for the reason `Build-Release.ps1` gives about its own set: a
+# Three members, for the reason `Build-Release.ps1` gives about its own set: a
 # script that accepted any triple would happily produce a file named after a
-# platform it never built for. Linux is `P15-T007`'s artifact and is not a value
-# here; the refusal below names that rather than leaving a reader to guess.
+# platform it never built for. Two are a macOS header family and one is the
+# Linux one.
+#
+# **`P15-T007` added the Linux row, and `x86_64-unknown-linux-gnu` stopped being
+# a refusal.** The value used to reach the `case` below as a named refusal that
+# said the Linux artifact was "not a value this script accepts: this script
+# reads a Mach-O header, and an ELF has a different one" — which was true of the
+# script and is true of the header, and is exactly why the row added here is not
+# the macOS row with different constants. `aarch64-unknown-linux-gnu` is still
+# refused, and now for a reason that does not go stale: **no artifact of this
+# repository is built for it.** `docs/development/RELEASE_PROCESS.md` lists a
+# "Linux x64 CLI archive" and `docs/architecture/RUST_DESIGN.md` names "Linux
+# x64"; nothing names an arm64 Linux artifact, no job produces one, and a script
+# that accepted the triple would produce a file named for a platform nothing
+# here builds.
 #
 # **The two macOS targets are one code path and one table row apart.** `P15-T006`
 # added the second row and changed nothing else: the architecture is read from
@@ -454,6 +649,18 @@ STAGE_ROOT="$SCRATCH/stage"
 # and the only values that differ are the four the check compares against. A
 # second script for the Intel artifact would have been a second place for those
 # reads to drift apart.
+#
+# **The Linux row is one code path and one table row apart in the same way, and
+# the one thing it changes is how many bytes the header read takes.** The
+# version read, the stage, the three files inside the archive, the `.sha256`
+# format, the entry-list comparison, the extraction, the second reader and the
+# run of the extracted binary are the same steps reached the same way. What
+# differs is the family: `HEADER_FAMILY` selects the reader, because the two
+# families do not merely have different constants — an eight-byte read
+# discriminates a Mach-O's architecture and does **not** discriminate an ELF's.
+# A sibling script for the Linux artifact would also have been a *third* place
+# for the archive contract to drift, and the parts that would have drifted are
+# the parts `P15-T005` and `P15-T006` measured.
 #
 # **`cffaedfe07000001` was confirmed against real bytes before it was written
 # here**, because the supervisor's brief said not to trust it and was right not
@@ -474,6 +681,24 @@ STAGE_ROOT="$SCRATCH/stage"
 # little-endian and `07 00 00 01` is `CPU_TYPE_X86_64` little-endian; both were
 # read off the file rather than recalled.
 #
+# **`3e00` for the Linux row was read off real bytes the same way**, because a
+# header constant taken from memory is the defect this file exists to refuse.
+# The file is WSL Ubuntu's own `/bin/ls`, copied out with `cp` rather than piped
+# through `cat` — a pipe produced a zero-byte file here, which is the shape of
+# evidence that says nothing:
+#
+#   $ od -An -tx1 -N20 target/tmp/p15t007/bytes/sure-x86_64-real
+#    7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+#    03 00 3e 00 ...
+#   $ file -b target/tmp/p15t007/bytes/sure-x86_64-real
+#   ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked,
+#   interpreter /lib64/ld-linux-x86-64.so.2, ..., for GNU/Linux 3.2.0, stripped
+#
+# 11352352 bytes, SHA-256
+# `48893b0fb21436b54619db80486e83ef39dfccaf1aefe83dfa00c02d6146e8c0`. Note
+# `03 00` at offsets 16-17: that is `e_type` = `ET_DYN`, a PIE, which is why
+# `e_type` is one of the fields this check deliberately does **not** compare.
+#
 # **`EXPECT_ARCH` is not a guess either.** The run step below requires the
 # artifact to describe itself as built for `$EXPECT_OS $EXPECT_ARCH`, and those
 # two words come from `std::env::consts::OS` and `std::env::consts::ARCH`
@@ -481,15 +706,18 @@ STAGE_ROOT="$SCRATCH/stage"
 # `target_arch` cfgs of the target the binary was built for. `rustc --print cfg
 # --target <T>` prints the strings that will be compiled in:
 #
-#   x86_64-apple-darwin    target_arch="x86_64"   target_os="macos"
-#   aarch64-apple-darwin   target_arch="aarch64"  target_os="macos"
+#   x86_64-apple-darwin        target_arch="x86_64"   target_os="macos"
+#   aarch64-apple-darwin       target_arch="aarch64"  target_os="macos"
+#   x86_64-unknown-linux-gnu   target_arch="x86_64"   target_os="linux"
 #
-# so `macos x86_64` is a measurement of the target rather than a spelling
-# chosen here. Note that `file(1)`'s word for the same cputype is different
-# again (`arm64`, not `aarch64`), which is why the second reader has its own
-# value rather than being compared against `EXPECT_ARCH`.
+# so `macos x86_64` and `linux x86_64` are measurements of the targets rather
+# than spellings chosen here. Note that `file(1)`'s word for the same cputype is
+# different again (`arm64`, not `aarch64`; `x86-64` with a hyphen, not `x86_64`),
+# which is why the second reader has its own value rather than being compared
+# against `EXPECT_ARCH`.
 case "$TARGET" in
     aarch64-apple-darwin)
+        HEADER_FAMILY='macho'
         EXPECT_OS='macos'
         EXPECT_ARCH='aarch64'
         EXPECT_MACHO_BYTES='cffaedfe0c000001'
@@ -508,6 +736,7 @@ case "$TARGET" in
 that the kernel will load the image'
         ;;
     x86_64-apple-darwin)
+        HEADER_FAMILY='macho'
         EXPECT_OS='macos'
         EXPECT_ARCH='x86_64'
         EXPECT_MACHO_BYTES='cffaedfe07000001'
@@ -523,15 +752,41 @@ that the kernel will load the image'
         SIGNATURE_LOAD_NOTE='which the toolchain may apply; whether macOS requires an Intel binary to carry one
 before it will load it has not been measured here'
         ;;
-    x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu)
-        echo "FAILED: $TARGET is the Linux artifact, which is P15-T007's task and is deliberately" >&2
-        echo "not a value this script accepts: this script reads a Mach-O header, and an ELF has" >&2
-        echo "a different one. Nothing was built." >&2
+    x86_64-unknown-linux-gnu)
+        HEADER_FAMILY='elf'
+        EXPECT_OS='linux'
+        EXPECT_ARCH='x86_64'
+        # The four discriminating fields. They are four values rather than one
+        # twenty-byte string, and the reason is in this file's header: offsets
+        # 16-17 hold `e_type`, `03 00` for a PIE and `02 00` for a non-PIE, and
+        # which one a build produces is the linker's business rather than a
+        # promise this repository has made. A fixed twenty-byte expectation
+        # would refuse a legitimate artifact for a reason that has nothing to do
+        # with architecture.
+        EXPECT_ELF_MAGIC='7f454c46'
+        EXPECT_ELF_CLASS='02'     # ELFCLASS64
+        EXPECT_ELF_DATA='01'      # ELFDATA2LSB, little-endian
+        EXPECT_ELF_MACHINE='3e00' # EM_X86_64, little-endian, at offset 18
+        EXPECT_ELF_DESCRIPTION='ELF 64-bit, little-endian, x86_64'
+        # `file(1)`'s word, which is not the triple's. Measured with both the
+        # `file` on this Windows host (file-5.48) and WSL Ubuntu's (file-5.46),
+        # which agree: `ELF 64-bit LSB pie executable, x86-64, ...`.
+        EXPECT_FILE_ARCH='x86-64'
+        ARTIFACT_LABEL='Linux x64'
+        ARTIFACT_MACHINES='x86_64 Linux machines'
+        ;;
+    aarch64-unknown-linux-gnu)
+        echo "FAILED: $TARGET is not a target any artifact of this repository is built for." >&2
+        echo "The Linux artifact this repository commits to is x86_64-unknown-linux-gnu" >&2
+        echo "(docs/development/RELEASE_PROCESS.md, docs/architecture/RUST_DESIGN.md), no job" >&2
+        echo "produces an arm64 Linux archive, and this script will not produce a file named" >&2
+        echo "after a platform nothing here builds. Nothing was built." >&2
         exit 2
         ;;
     *)
         echo "FAILED: unknown target: $TARGET" >&2
-        echo "The values this script accepts are aarch64-apple-darwin and x86_64-apple-darwin." >&2
+        echo "The values this script accepts are aarch64-apple-darwin, x86_64-apple-darwin" >&2
+        echo "and x86_64-unknown-linux-gnu." >&2
         exit 2
         ;;
 esac
@@ -717,15 +972,26 @@ cross_check_digest() {
 }
 
 # -----------------------------------------------------------------------------
-# The architecture, from the file's own first eight bytes
+# The architecture, from the file's own header bytes
 # -----------------------------------------------------------------------------
 #
 # `od` is the POSIX byte dumper and is in a macOS base install. `-An` drops the
-# address column, `-tx1` prints one hex byte per field, `-N8` reads eight bytes.
-# The output is written to a file and read back, and the whitespace is stripped
-# by `tr` reading from that file rather than from the `od` output on a pipe.
-MACHO_BYTES=''
-MACHO_DESCRIPTION=''
+# address column, `-tx1` prints one hex byte per field, `-N` reads a fixed
+# number of them. The output is written to a file and read back, and the
+# whitespace is stripped by `tr` reading from that file rather than from the
+# `od` output on a pipe.
+#
+# **The Mach-O read is eight bytes and the ELF read is twenty, and the
+# difference is not tidiness.** Eight bytes are the whole of what discriminates
+# a Mach-O's architecture — the 4-byte magic and the 4-byte cputype — and they
+# are not the whole of what discriminates an ELF's: the first eight bytes of an
+# ELF are `7f454c4602010100` for an x86_64 image and for an aarch64 one alike,
+# and the machine is two bytes at offset 18. Widening the Mach-O read would
+# change the bytes this script has already printed over artifacts `P15-T005` and
+# `P15-T006` measured, so the two reads are separate and each is the length its
+# own header needs.
+HEADER_BYTES=''
+HEADER_DESCRIPTION=''
 FILE_READING=''
 
 read_macho_header() {
@@ -740,8 +1006,8 @@ read_macho_header() {
     if [ $status -ne 0 ]; then
         fail "od exited $status reading $path; its stderr is $err"
     fi
-    MACHO_BYTES="$(tr -d ' \t\r\n' <"$out")"
-    if [ -z "$MACHO_BYTES" ]; then
+    HEADER_BYTES="$(tr -d ' \t\r\n' <"$out")"
+    if [ -z "$HEADER_BYTES" ]; then
         fail "$path is empty, so it has no Mach-O header and is not an executable"
     fi
 
@@ -749,38 +1015,147 @@ read_macho_header() {
     # type. Both are read as bytes on disk rather than through any tool's prose.
     local magic=''
     local cpu=''
-    magic="$(printf '%s' "$MACHO_BYTES" | cut -c1-8)"
-    cpu="$(printf '%s' "$MACHO_BYTES" | cut -c9-16)"
+    magic="$(printf '%s' "$HEADER_BYTES" | cut -c1-8)"
+    cpu="$(printf '%s' "$HEADER_BYTES" | cut -c9-16)"
 
     case "$magic" in
         cffaedfe)
             case "$cpu" in
-                0c000001) MACHO_DESCRIPTION='Mach-O 64-bit, arm64' ;;
-                07000001) MACHO_DESCRIPTION='Mach-O 64-bit, x86_64' ;;
-                *) MACHO_DESCRIPTION="Mach-O 64-bit, cputype 0x$cpu" ;;
+                0c000001) HEADER_DESCRIPTION='Mach-O 64-bit, arm64' ;;
+                07000001) HEADER_DESCRIPTION='Mach-O 64-bit, x86_64' ;;
+                *) HEADER_DESCRIPTION="Mach-O 64-bit, cputype 0x$cpu" ;;
             esac
             ;;
-        cefaedfe) MACHO_DESCRIPTION='Mach-O 32-bit, which no macOS release artifact is' ;;
-        cafebabe) MACHO_DESCRIPTION='a universal (fat) binary, or a Java class file' ;;
-        bebafeca) MACHO_DESCRIPTION='a universal (fat) binary, little-endian magic' ;;
-        4d5a*) MACHO_DESCRIPTION='a PE image, which is the Windows artifact shape' ;;
-        7f454c46) MACHO_DESCRIPTION='an ELF image, which is the Linux artifact shape' ;;
-        *) MACHO_DESCRIPTION="no Mach-O magic at all (first bytes: $MACHO_BYTES)" ;;
+        cefaedfe) HEADER_DESCRIPTION='Mach-O 32-bit, which no macOS release artifact is' ;;
+        cafebabe) HEADER_DESCRIPTION='a universal (fat) binary, or a Java class file' ;;
+        bebafeca) HEADER_DESCRIPTION='a universal (fat) binary, little-endian magic' ;;
+        4d5a*) HEADER_DESCRIPTION='a PE image, which is the Windows artifact shape' ;;
+        # The magic only. This line used to be the whole of the ELF answer here,
+        # and it is true and says nothing about the machine — which is why the
+        # ELF reader below exists rather than this one being widened. In this
+        # family the verdict is a refusal whatever the machine is: no ELF is a
+        # macOS artifact.
+        7f454c46) HEADER_DESCRIPTION='an ELF image, which is the Linux artifact shape' ;;
+        *) HEADER_DESCRIPTION="no Mach-O magic at all (first bytes: $HEADER_BYTES)" ;;
     esac
 }
 
-# `require_macho_arch <path>` - the whole check, in one place, so that both
-# phases reach it and neither can be run without it.
+# The ELF reader. Same shape as the Mach-O one, twenty bytes of input, and the
+# four fields it compares are the four that are about the architecture.
+#
+# The offsets are named here because they are the whole subject of this
+# function: byte 0-3 magic, byte 4 `EI_CLASS`, byte 5 `EI_DATA`, and byte 18-19
+# `e_machine`, which is 2 bytes little-endian on the only byte order any ELF
+# this script accepts can have. `e_type` at bytes 16-17 is read past and
+# deliberately not compared.
+ELF_MAGIC=''
+ELF_CLASS=''
+ELF_DATA=''
+ELF_MACHINE=''
+
+read_elf_header() {
+    local path="$1"
+    local out="$LOGS/elf-header.txt"
+    local err="$LOGS/elf-header.err.txt"
+    if [ ! -f "$path" ]; then
+        fail "there is no file at $path to read an ELF header from"
+    fi
+    local status=0
+    run_captured od "$out" "$err" -An -tx1 -N20 "$path" || status=$?
+    if [ $status -ne 0 ]; then
+        fail "od exited $status reading $path; its stderr is $err"
+    fi
+    HEADER_BYTES="$(tr -d ' \t\r\n' <"$out")"
+    if [ -z "$HEADER_BYTES" ]; then
+        fail "$path is empty, so it has no ELF header and is not an executable"
+    fi
+
+    # Two hex characters per byte, so byte n is characters 2n+1 to 2n+2. A file
+    # shorter than twenty bytes leaves the later of these empty, and an empty
+    # value is refused below rather than read as agreement: `cut` on a line that
+    # ran out is not an error and produces no output.
+    ELF_MAGIC="$(printf '%s' "$HEADER_BYTES" | cut -c1-8)"
+    ELF_CLASS="$(printf '%s' "$HEADER_BYTES" | cut -c9-10)"
+    ELF_DATA="$(printf '%s' "$HEADER_BYTES" | cut -c11-12)"
+    ELF_MACHINE="$(printf '%s' "$HEADER_BYTES" | cut -c37-40)"
+
+    local class_word=''
+    case "$ELF_CLASS$ELF_DATA" in
+        0201) class_word='ELF 64-bit, little-endian' ;;
+        0202) class_word='ELF 64-bit, big-endian' ;;
+        0101) class_word='ELF 32-bit, little-endian' ;;
+        0102) class_word='ELF 32-bit, big-endian' ;;
+        *) class_word="ELF with EI_CLASS 0x$ELF_CLASS and EI_DATA 0x$ELF_DATA" ;;
+    esac
+
+    local machine_word=''
+    case "$ELF_MACHINE" in
+        3e00) machine_word='x86_64' ;;
+        b700) machine_word='aarch64' ;;
+        0300) machine_word='i386' ;;
+        2800) machine_word='ARM' ;;
+        '') machine_word='no e_machine, because the file is shorter than 20 bytes' ;;
+        *) machine_word="e_machine 0x$ELF_MACHINE" ;;
+    esac
+
+    case "$ELF_MAGIC" in
+        7f454c46)
+            HEADER_DESCRIPTION="$class_word, $machine_word"
+            ;;
+        cffaedfe | cefaedfe) HEADER_DESCRIPTION='a Mach-O image, which is the macOS artifact shape' ;;
+        cafebabe | bebafeca) HEADER_DESCRIPTION='a universal (fat) binary, or a Java class file' ;;
+        4d5a*) HEADER_DESCRIPTION='a PE image, which is the Windows artifact shape' ;;
+        *) HEADER_DESCRIPTION="no ELF magic at all (first bytes: $HEADER_BYTES)" ;;
+    esac
+}
+
+# The second reader, where one exists. Its absence is reported rather than
+# passed over: a machine with no `file` has one measurement of this file and a
+# reader should know that from the log rather than infer it.
+#
+# One implementation for both families, because it is the same question. What
+# differs per target is the word the answer is held to, and that is
+# `EXPECT_FILE_ARCH` rather than a second check.
+require_file_reading() {
+    local path="$1"
+    local label="$2"
+    if have file; then
+        local out="$LOGS/file-$label.txt"
+        local err="$LOGS/file-$label.err.txt"
+        local status=0
+        run_captured file "$out" "$err" -b "$path" || status=$?
+        if [ $status -ne 0 ]; then
+            fail "file exited $status on $path; its stderr is $err"
+        fi
+        FILE_READING="$(head -n 1 "$out")"
+        detail "file says   $FILE_READING"
+        # `$EXPECT_FILE_ARCH` and not `$EXPECT_ARCH`: `file` words a machine
+        # differently from the triple — it says `arm64` where the triple says
+        # `aarch64`, and `x86-64` where the triple says `x86_64` — so the second
+        # reader is held to the word it actually uses.
+        case "$FILE_READING" in
+            *"$EXPECT_FILE_ARCH"*) ;;
+            *)
+                fail "file reads $path as '$FILE_READING', which does not name $EXPECT_FILE_ARCH, and the header read above says $HEADER_DESCRIPTION. Two readers disagree and neither is overridden: $out"
+                ;;
+        esac
+    else
+        detail 'file says   (no file on PATH on this runner; the header read above is the measurement)'
+    fi
+}
+
+# `require_macho_arch <path> <label>` - the whole check, in one place, so that
+# both phases reach it and neither can be run without it.
 require_macho_arch() {
     local path="$1"
     read_macho_header "$path"
-    detail "header      $MACHO_BYTES"
-    detail "reads as    $MACHO_DESCRIPTION"
-    if [ "$MACHO_BYTES" != "$EXPECT_MACHO_BYTES" ]; then
+    detail "header      $HEADER_BYTES"
+    detail "reads as    $HEADER_DESCRIPTION"
+    if [ "$HEADER_BYTES" != "$EXPECT_MACHO_BYTES" ]; then
         printf '\n' >&2
         printf 'FAILED: the bytes in %s are not %s.\n' "$path" "$EXPECT_MACHO_DESCRIPTION" >&2
         printf '\n' >&2
-        printf '  found     %s (%s)\n' "$MACHO_DESCRIPTION" "$MACHO_BYTES" >&2
+        printf '  found     %s (%s)\n' "$HEADER_DESCRIPTION" "$HEADER_BYTES" >&2
         printf '  required  %s (%s)\n' "$EXPECT_MACHO_DESCRIPTION" "$EXPECT_MACHO_BYTES" >&2
         printf '\n' >&2
         printf 'The name of the archive says %s and the header says something else, so the\n' "$TARGET" >&2
@@ -792,32 +1167,66 @@ require_macho_arch() {
         printf 'reading does not depend on how any tool words its answer.\n' >&2
         exit 1
     fi
+    require_file_reading "$path" "$2"
+}
 
-    # The second reader, where one exists. Its absence is reported rather than
-    # passed over: a machine with no `file` has one measurement of this file and
-    # a reader should know that from the log rather than infer it.
-    if have file; then
-        local out="$LOGS/file-$2.txt"
-        local err="$LOGS/file-$2.err.txt"
-        local status=0
-        run_captured file "$out" "$err" -b "$path" || status=$?
-        if [ $status -ne 0 ]; then
-            fail "file exited $status on $path; its stderr is $err"
-        fi
-        FILE_READING="$(head -n 1 "$out")"
-        detail "file says   $FILE_READING"
-        # `$EXPECT_FILE_ARCH` and not `$EXPECT_ARCH`: `file` words a cputype
-        # differently from the triple — it says `arm64` where the triple says
-        # `aarch64` — so the second reader is held to the word it actually uses.
-        case "$FILE_READING" in
-            *"$EXPECT_FILE_ARCH"*) ;;
-            *)
-                fail "file reads $path as '$FILE_READING', which does not name $EXPECT_FILE_ARCH, and the header read above says $MACHO_DESCRIPTION. Two readers disagree and neither is overridden: $out"
-                ;;
-        esac
-    else
-        detail 'file says   (no file on PATH on this runner; the header read above is the measurement)'
+# `require_elf_arch <path> <label>` - the same thing for the other family, and
+# the four fields are compared one at a time rather than as one twenty-byte
+# string. The reason is in this file's header and it is the difference between a
+# check and a spelling: a twenty-byte comparison would include `e_type`, so it
+# would refuse a legitimate non-PIE artifact over a linker detail, and the row
+# this exists to refuse — an arm64 image under an x86_64 name — differs from the
+# accepted row in exactly one of these four fields and in none of the others.
+require_elf_arch() {
+    local path="$1"
+    read_elf_header "$path"
+    detail "header      $HEADER_BYTES"
+    detail "reads as    $HEADER_DESCRIPTION"
+    detail "fields      magic $ELF_MAGIC, EI_CLASS $ELF_CLASS, EI_DATA $ELF_DATA, e_machine $ELF_MACHINE"
+    if [ "$ELF_MAGIC" != "$EXPECT_ELF_MAGIC" ] ||
+        [ "$ELF_CLASS" != "$EXPECT_ELF_CLASS" ] ||
+        [ "$ELF_DATA" != "$EXPECT_ELF_DATA" ] ||
+        [ "$ELF_MACHINE" != "$EXPECT_ELF_MACHINE" ]; then
+        printf '\n' >&2
+        printf 'FAILED: the bytes in %s are not %s.\n' "$path" "$EXPECT_ELF_DESCRIPTION" >&2
+        printf '\n' >&2
+        printf '  found     %s (%s)\n' "$HEADER_DESCRIPTION" "$HEADER_BYTES" >&2
+        printf '  required  %s (magic %s, EI_CLASS %s, EI_DATA %s, e_machine %s)\n' \
+            "$EXPECT_ELF_DESCRIPTION" "$EXPECT_ELF_MAGIC" "$EXPECT_ELF_CLASS" "$EXPECT_ELF_DATA" "$EXPECT_ELF_MACHINE" >&2
+        printf '\n' >&2
+        printf '  magic       found %s   required %s   bytes 0-3\n' "$ELF_MAGIC" "$EXPECT_ELF_MAGIC" >&2
+        printf '  EI_CLASS    found %s         required %s         byte 4, ELFCLASS64\n' "$ELF_CLASS" "$EXPECT_ELF_CLASS" >&2
+        printf '  EI_DATA     found %s         required %s         byte 5, ELFDATA2LSB\n' "$ELF_DATA" "$EXPECT_ELF_DATA" >&2
+        printf '  e_machine   found %s       required %s       bytes 18-19, EM_X86_64\n' "$ELF_MACHINE" "$EXPECT_ELF_MACHINE" >&2
+        printf '\n' >&2
+        printf 'The name of the archive says %s and the header says something else, so the\n' "$TARGET" >&2
+        printf 'name would be a claim about bytes that do not carry it. Nothing was run.\n' >&2
+        printf 'The first eight bytes of an ELF are 7f454c4602010100 for an x86_64 image and\n' >&2
+        printf 'for an aarch64 one alike: the machine is e_machine, two bytes at offset 18.\n' >&2
+        printf 'That is why twenty bytes are read here and why the fields above are compared\n' >&2
+        printf 'one at a time; a check that stopped at eight would accept an arm64 image\n' >&2
+        printf 'under a name that says x86_64, and report that it had checked.\n' >&2
+        printf 'e_type, at bytes 16-17, is deliberately not compared: 0300 is a PIE and 0200\n' >&2
+        printf 'is not, and which one a build produces is the linker invocation and not a\n' >&2
+        printf 'promise this repository has made.\n' >&2
+        printf 'The bytes are read directly rather than through a tool, so this reading does\n' >&2
+        printf 'not depend on how any tool words its answer.\n' >&2
+        exit 1
     fi
+    require_file_reading "$path" "$2"
+}
+
+# `require_arch <path> <label>` - the family's own check, chosen by the target
+# table. The Architecture step calls this and neither reader directly, so a
+# target cannot reach one phase without the check the other phase gets.
+require_arch() {
+    case "$HEADER_FAMILY" in
+        macho) require_macho_arch "$1" "$2" ;;
+        elf) require_elf_arch "$1" "$2" ;;
+        *)
+            fail "the target table names header family '$HEADER_FAMILY', which is neither macho nor elf, so this script has no architecture check for $TARGET and will not proceed without one"
+            ;;
+    esac
 }
 
 # =============================================================================
@@ -1034,6 +1443,85 @@ if [ "$PHASE" = 'all' ]; then
     binary_bytes="$(wc -c <"$staged_binary" | tr -d ' ')"
     detail "sure        $binary_bytes bytes, SHA-256 $binary_digest"
 
+    # The two passages of RELEASE.txt that cannot be the same text for every
+    # target, selected by the header family the way the header check itself is.
+    # An Apple Developer ID paragraph is not true of an ELF, and a glibc
+    # paragraph is not true of a Mach-O, so a single heredoc carrying either one
+    # into both archives would put a sentence about macOS into the Linux
+    # artifact's own bytes. Everything else in the file below is shared, which
+    # is why this is one heredoc with two variables in it rather than two files
+    # that would drift apart.
+    #
+    # The line breaks inside the values are part of the values. P15-T005 and
+    # P15-T006 read the shipped aarch64 `RELEASE.txt` out of an archive and
+    # recorded it, so the `macho` branch reproduces those bytes exactly -
+    # including the break inside SIGNATURE_LOAD_NOTE and the escaped backticks -
+    # and only the `elf` branch is new text.
+    case "$HEADER_FAMILY" in
+        macho)
+            RELEASE_SIGNATURE_SECTION="THIS BUILD CARRIES NO APPLE DEVELOPER ID SIGNATURE AND NOTHING NOTARIZES IT
+Neither is an oversight: docs/development/RELEASE_PROCESS.md records Developer
+ID signing and notarization as an external credential this project does not
+have, and says \"Do not fake signing\". No step of this build applies one. What
+that means is a fact about the build procedure and not a claim about the bytes,
+and the bytes are read: scripts/Build-Release.sh runs \"codesign -d\" on the
+extracted binary and prints everything it says. A signing *chain* there - an
+Authority= line, which is what a certificate produces - fails the run, because
+this file says there is none.
+
+An $EXPECT_FILE_ARCH binary can carry an ad-hoc signature, $SIGNATURE_LOAD_NOTE. That is not a certificate, it names no
+developer, and it does not contradict the paragraph above; if the reading says
+\`Signature=adhoc\` that is what it is.
+
+What macOS does with a program that carries no Developer ID signature is
+Apple's behaviour and not SURE's, and this project has not observed it on a Mac
+- the general shape is that Gatekeeper refuses or warns about one whose
+com.apple.quarantine attribute is set, which is what a browser download sets
+and what a command-line download may not. Nothing in SURE asks you to turn
+Gatekeeper off. If a prompt appears, treat it as the unsigned state above and
+decide for yourself; do not read this file as saying the build is trusted."
+
+            RELEASE_HEADER_READING="reads the first eight bytes of the extracted
+binary and requires them to be the Mach-O magic and the $EXPECT_FILE_ARCH CPU type, reads
+the binary's signature with codesign"
+            ;;
+        elf)
+            RELEASE_SIGNATURE_SECTION="THIS BUILD CARRIES NO SIGNATURE AND NO STEP OF THIS BUILD APPLIES ONE
+Neither is an oversight: docs/development/RELEASE_PROCESS.md records code
+signing as an external credential this project does not have, and says \"Do not
+fake signing\". That sentence is deliberately a fact about the build procedure
+and not a claim about the bytes, and unlike the macOS build there is no reading
+that would turn it into one: Linux has no \`codesign\`, and a signature over an
+ELF is a detached file beside it or a digest in a distribution packager's
+database, never a field inside the image. So there is nothing in
+$ARTIFACT_NAME.tar.gz to read a certificate out of. The entries of the archive
+are listed and checked against the promised set before it is written, and
+they are three files. The .sha256 beside the archive is an integrity digest,
+not a signature: it says the bytes arrived unchanged and says nothing about
+who wrote them.
+
+WHAT THIS BINARY NEEDS FROM THE MACHINE IT RUNS ON
+This is built for the x86_64-unknown-linux-gnu target, which links the GNU C
+library (glibc) of the machine it was built on rather than a static C library,
+so it needs a glibc at least as new as the symbols it asks for, and it does not
+run on a musl distribution such as Alpine or against an older loader. It is
+linked dynamically, not statically: the interpreter path it records (normally
+/lib64/ld-linux-x86-64.so.2) is the loader the machine has to provide. The
+oldest distribution it runs on is set by the glibc of the machine it was built
+on, and this file does not name it: the binary carries the answer itself, as
+GLIBC_x.yy lines among its undefined symbols, which \"objdump -p\" on the
+extracted \`sure\` prints, and \"ldd --version\" on your machine prints what your
+machine has. Nothing here patches or bundles a C library, and no step of this
+build uses patchelf or similar: what the linker produced is what is inside the
+archive."
+
+            RELEASE_HEADER_READING="reads the first twenty bytes of the extracted
+binary and requires the ELF magic, the 64-bit little-endian class and data
+bytes, and the x86_64 e_machine field
+at offset 18"
+            ;;
+    esac
+
     # The provenance travels inside the archive rather than beside it: an
     # archive that travels without its RELEASE.txt is the one whose origin
     # nobody can state. The worktree marker is here because a recorded commit
@@ -1058,27 +1546,7 @@ The SURE command-line program for $ARTIFACT_MACHINES, built for the
 $TARGET target. "sure doctor" reports the build it is running
 from and where it is running from; "sure --help" lists the commands.
 
-THIS BUILD CARRIES NO APPLE DEVELOPER ID SIGNATURE AND NOTHING NOTARIZES IT
-Neither is an oversight: docs/development/RELEASE_PROCESS.md records Developer
-ID signing and notarization as an external credential this project does not
-have, and says "Do not fake signing". No step of this build applies one. What
-that means is a fact about the build procedure and not a claim about the bytes,
-and the bytes are read: scripts/Build-Release.sh runs "codesign -d" on the
-extracted binary and prints everything it says. A signing *chain* there - an
-Authority= line, which is what a certificate produces - fails the run, because
-this file says there is none.
-
-An $EXPECT_FILE_ARCH binary can carry an ad-hoc signature, $SIGNATURE_LOAD_NOTE. That is not a certificate, it names no
-developer, and it does not contradict the paragraph above; if the reading says
-\`Signature=adhoc\` that is what it is.
-
-What macOS does with a program that carries no Developer ID signature is
-Apple's behaviour and not SURE's, and this project has not observed it on a Mac
-- the general shape is that Gatekeeper refuses or warns about one whose
-com.apple.quarantine attribute is set, which is what a browser download sets
-and what a command-line download may not. Nothing in SURE asks you to turn
-Gatekeeper off. If a prompt appears, treat it as the unsigned state above and
-decide for yourself; do not read this file as saying the build is trusted.
+$RELEASE_SIGNATURE_SECTION
 
 THIS ARCHIVE IS NOT BYTE-FOR-BYTE REPRODUCIBLE
 A gzip stream records a modification time in its header and a tar records one
@@ -1092,9 +1560,7 @@ This file is written before the checks run, so it describes the procedure
 rather than certifying its own archive. scripts/Build-Release.sh writes the
 .sha256 beside this archive, re-reads it, verifies the archive against it,
 lists the archive's entries and requires them to be the promised set, extracts
-the archive to a fresh directory, reads the first eight bytes of the extracted
-binary and requires them to be the Mach-O magic and the $EXPECT_FILE_ARCH CPU type, reads
-the binary's signature with codesign, and runs the extracted "sure" from there,
+the archive to a fresh directory, $RELEASE_HEADER_READING, and runs the extracted "sure" from there,
 comparing the running_from it reports with that directory. It prints OK and
 exits 0 only when every one of those steps agreed, so a run that failed is a
 run that said which step failed.
@@ -1350,7 +1816,7 @@ fi
 # -----------------------------------------------------------------------------
 step 'Architecture'
 
-require_macho_arch "$extracted_binary" 'extracted'
+require_arch "$extracted_binary" 'extracted'
 
 # The mode, now that the bytes have been read. An extracted binary without an
 # execute bit cannot be run at all, and the failure a user would meet is their
@@ -1370,12 +1836,13 @@ fi
 # 6b. The signature, read from the artifact rather than asserted in prose.
 # -----------------------------------------------------------------------------
 #
-# The RELEASE.txt inside this archive says the build carries no Apple Developer
-# ID signature, and a sentence about a file is not evidence about that file. This
-# is the reading behind the sentence: `codesign -d` is macOS's own question, its
-# answer is printed in full whatever it is, and the failure is on the one
-# direction that matters — a signature **chain**, which is what a certificate
-# produces, arriving in an archive whose own text says there is none.
+# For the macOS family, the RELEASE.txt inside this archive says the build
+# carries no Apple Developer ID signature, and a sentence about a file is not
+# evidence about that file. This is the reading behind the sentence: `codesign
+# -d` is macOS's own question, its answer is printed in full whatever it is, and
+# the failure is on the one direction that matters — a signature **chain**, which
+# is what a certificate produces, arriving in an archive whose own text says
+# there is none.
 #
 # **An arm64 binary is expected to carry an ad-hoc signature**, and that is not
 # a certificate: it is what the toolchain applies so the kernel will load the
@@ -1389,9 +1856,26 @@ fi
 # unknown; unknown is reported as unknown rather than turned into "unsigned".
 # **Notarization is not read here at all**: nothing in this build notarizes, so
 # the sentence rests on there being no such step, not on this measurement.
+#
+# The ELF family has no equivalent question to ask — see the branch below, which
+# reports that as not-read rather than printing a line that sounds like a
+# measurement. The RELEASE.txt paragraph for that family is written to rest on
+# there being no signing step, which is what can be established here.
 step 'Signature'
 
-if have codesign; then
+if [ "$HEADER_FAMILY" = 'elf' ]; then
+    # Linux has no `codesign`, and an ELF has no field a signature lives in: a
+    # signature over one is a detached file beside it, and the entries of this
+    # archive were just checked against the promised set, which is three files
+    # and none of them a signature. So there is nothing to read, and the honest
+    # report of a reading that did not happen is that it did not happen. A line
+    # saying "no signature found" would describe a question this run never
+    # asked, which is the shape of claim this repository exists to refuse.
+    detail 'signature   not read'
+    detail 'reason      an ELF carries no signature field and no step of this'
+    detail '            build applies one, so this run measured nothing about'
+    detail '            whether the binary is signed'
+elif have codesign; then
     sign_out="$LOGS/codesign.txt"
     sign_err="$LOGS/codesign.err.txt"
     sign_status=0
@@ -1436,7 +1920,7 @@ if [ -s "$run_err" ]; then
     while IFS= read -r line; do detail "stderr      $line"; done <"$run_err"
 fi
 if [ $run_status -ne 0 ]; then
-    fail "the extracted sure exited $run_status on this host ($(uname -s) $(uname -m)). If this host's processor is not $EXPECT_FILE_ARCH, a $EXPECT_FILE_ARCH Mach-O cannot be executed here at all, and that is a fact about the runner rather than about the artifact — the header read above already said what the bytes are. stderr is $run_err"
+    fail "the extracted sure exited $run_status on this host ($(uname -s) $(uname -m)). If this host's processor is not $EXPECT_FILE_ARCH, or its operating system is not $EXPECT_OS, a binary built for $EXPECT_OS $EXPECT_ARCH cannot be executed here at all, and that is a fact about the runner rather than about the artifact — the header read above already said what the bytes are. stderr is $run_err"
 fi
 if [ ! -s "$run_out" ]; then
     fail "the extracted sure wrote nothing to stdout; the report should be in $run_out"
@@ -1516,7 +2000,7 @@ printf '  checksum    %s\n' "$SHA_PATH"
 printf '  verified    the archive matches the checksum file, re-read from disk\n'
 printf '  layout      %s entries, exactly the promised set\n' "$(wc -l <"$normalised" | tr -d ' ')"
 printf '  runs        %s\n' "$extracted_binary"
-printf '  arch        %s, read from the header bytes %s\n' "$MACHO_DESCRIPTION" "$MACHO_BYTES"
+printf '  arch        %s, read from the header bytes %s\n' "$HEADER_DESCRIPTION" "$HEADER_BYTES"
 printf '  gate        permitted; read from %s\n' "$GATE_PATH"
 printf '  OK          the bytes that are checksummed are the bytes that were run\n'
 exit 0

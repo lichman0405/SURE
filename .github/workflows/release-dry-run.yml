@@ -300,11 +300,14 @@ jobs:
           echo "codesign          $(command -v codesign || echo absent)"
 
       # The C compiler line above is the specific thing that decided this job
-      # could not be done on the machine that wrote it: `libsqlite3-sys` compiles
-      # bundled SQLite through `cc-rs`, and a Windows host has no `cc` that emits
-      # x86_64 Mach-O objects. On a macOS runner that tool is Xcode's clang and
-      # is present; the line is printed so the log says so rather than implying
-      # it.
+      # could not be done on the machine that wrote it: a crate's build script
+      # compiles C through `cc-rs`, and a Windows host has no `cc` that emits
+      # x86_64 Mach-O objects. The crate that log names is `ring v0.17.14`, and
+      # it is the crate the Linux job's local build names too; the sentence here
+      # used to name `libsqlite3-sys`, which neither log mentions: `cargo` stops
+      # at `ring`'s build script and never compiles `libsqlite3-sys`. On a macOS
+      # runner that tool is Xcode's clang and is present; the line is printed so
+      # the log says so rather than implying it.
 
       # The "tests" half of builds/tests, and the writer of the release gate.
       - name: The workspace's tests, on this runner
@@ -356,5 +359,198 @@ jobs:
           path: |
             target/tmp/release/sure-*.tar.gz
             target/tmp/release/sure-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # The Linux x64 artifact — P15-T007. **THIS JOB HAS NOT RUN.** Nothing in
+  # this repository has produced `sure-*-x86_64-unknown-linux-gnu.tar.gz`, and
+  # that is a statement about this job's history rather than about this job.
+  # ===========================================================================
+  #
+  # Its acceptance is
+  #
+  #   "Linux x64 Rust core/CLI package builds/tests and checksum generated."
+  #
+  # which is the same two claims the two macOS jobs answer, on a third machine:
+  # **the tests** are `cargo test --workspace --no-fail-fast` below, the same
+  # command `ci.yml`'s `rust (ubuntu-latest)` job runs and the writer of
+  # `target/tmp/release-gate.json` that the package step requires to say
+  # `permitted`; **the build** is `scripts/Build-Release.sh --phase all
+  # --target x86_64-unknown-linux-gnu`, the same script the two macOS jobs run,
+  # which packages, checksums and then reads the artifact back.
+  #
+  # **What is not here yet.** The dispatch. Everything below is written to be
+  # run and has been exercised on a Windows host only up to the point that host
+  # can reach — the architecture read over real ELF bytes, the package, the
+  # `.sha256` and the extraction — with the mode check, the signature step, the
+  # run of the extracted binary and the verdict line unreached there. This job
+  # is what measures the rest, and until it has run, the accepted sentence above
+  # is not yet earned for Linux.
+  #
+  # **Why the architecture cannot come from the label.** `ubuntu-latest` being
+  # x86_64 is a belief about a label, and this repository does not read beliefs
+  # as evidence about bytes. The ELF's machine is `e_machine`, two bytes at
+  # offset 18, and it is *not* in the first eight bytes: those are
+  # `7f454c4602010100` for an x86_64 image and for an aarch64 one alike, so a
+  # check built by analogy with the macOS eight-byte read would accept an arm64
+  # binary under an x86_64 name. The script reads twenty bytes, compares the
+  # four discriminating fields (magic, `EI_CLASS`, `EI_DATA`, `e_machine`) and
+  # prints them as hex, so the reading can be checked by hand.
+  #
+  # **Why the AppArmor step is here.** The same reason it is in `validate` and
+  # in `ci.yml`: Ubuntu 24.04 restricts unprivileged user namespaces, and a
+  # sandboxed Chromium cannot start without the knob. The product never passes
+  # `--no-sandbox`, so the runner is what changes. It is deliberately not made
+  # tolerant: if a future image drops the knob, this job fails loudly rather
+  # than running the browser tests somewhere they cannot mean anything.
+  package-linux:
+    name: Linux x64 artifact (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          # The target is installed rather than assumed, for the reason the
+          # arm64 job gives: building for a triple needs its `std`, and a job
+          # that discovers that halfway through a release build reports it as a
+          # compile error about `core`.
+          targets: x86_64-unknown-linux-gnu
+
+      # Printed for the log and for a reader. This is not a check and nothing
+      # below reads it: it is the context in which the checks below are read,
+      # and `uname -m` is the line that says whether the run step below was a
+      # native execution or something else.
+      #
+      # The last three lines are the other half of a sentence the archive's own
+      # `RELEASE.txt` carries: an ELF built here links the glibc of *this*
+      # image, so the distribution the archive needs is set here and nowhere
+      # else. Printing `ldd --version` and the image's `PRETTY_NAME` puts the
+      # answer for this run in this log rather than in a guess, and the
+      # `objdump -p` line is the tool a reader would use on the artifact to
+      # read the same requirement out of the binary itself.
+      - name: What this runner is
+        run: |
+          set -euo pipefail
+          echo "uname -s          $(uname -s)"
+          echo "uname -m          $(uname -m)"
+          echo "RUNNER_ARCH       ${RUNNER_ARCH:-unset}"
+          echo "RUNNER_OS         ${RUNNER_OS:-unset}"
+          echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
+          echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
+          echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          echo "cc                $(command -v cc || echo absent)"
+          echo "tar               $(tar --version | head -n 1)"
+          echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" \
+               "shasum=$(command -v shasum || echo absent)" \
+               "openssl=$(command -v openssl || echo absent)"
+          echo "file              $(command -v file || echo absent)"
+          echo "objdump           $(command -v objdump || echo absent)"
+          echo
+          echo "/etc/os-release:"
+          sed -n 's/^/  /p' /etc/os-release
+          echo "ldd --version:"
+          ldd --version | sed -n 's/^/  /p'
+
+      - name: Let a sandboxed browser start on Linux
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # The "tests" half of builds/tests, and the writer of the release gate.
+      - name: The workspace's tests, on this runner
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build, package, checksum and check the artifact
+        run: sh scripts/Build-Release.sh --phase all --target x86_64-unknown-linux-gnu --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      # The one thing about this archive that no sentence in this repository can
+      # supply and that a Linux reader needs: which glibc it asks for. The
+      # archive's own `RELEASE.txt` names the mechanism and points at
+      # `objdump -p`; this step takes the same reading, out of the archive's own
+      # bytes and with no tool but `grep`, so the number is in this log beside
+      # the image that produced it instead of being left to a reader's guess.
+      #
+      # It is a reading and not a check: nothing here fails the job, because a
+      # requirement printed to a log is evidence someone can check, while a
+      # threshold asserted here would be a rule this repository has not decided
+      # anything must satisfy. `package-linux` needs no such rule — the artifact
+      # is either correct for its target or the step above already said so.
+      - name: What this archive asks of its glibc, read off the binary
+        working-directory: ${{ github.workspace }}/target/tmp/release
+        run: |
+          set -euo pipefail
+          archive=$(ls sure-*.tar.gz)
+          name=${archive%.tar.gz}
+          extract="$RUNNER_TEMP/glibc-reading"
+          rm -rf "$extract"
+          mkdir -p "$extract"
+          tar -xzf "$archive" -O "$name/sure" > "$extract/sure"
+          echo "read from     $archive -> $name/sure"
+          versions=$(grep -a -o 'GLIBC_[0-9.]*' "$extract/sure" | sort -u -V || true)
+          echo
+          if [ -n "$versions" ]; then
+            echo "GLIBC symbol versions this binary requires, highest last:"
+            printf '%s\n' "$versions" | tail -n 5 | sed 's/^/  /'
+            echo
+            echo "The highest of these is the oldest glibc that can run this binary."
+          else
+            echo "No GLIBC_ version strings appear in the bytes of this binary, which"
+            echo "would mean it does not link glibc dynamically — the opposite of what"
+            echo "the archive's own RELEASE.txt says, and worth looking at."
+          fi
+
+      # The script verifies the archive against its own checksum with one tool
+      # and cross-checks it with a second. This step asks the platform's own
+      # `sha256sum -c` the same question, from the directory the file was
+      # written into, which is how a person who downloaded two files would ask
+      # it — and it is the tool a Linux reader would reach for, where the two
+      # macOS jobs ask `shasum -a 256 -c`.
+      - name: The checksum, read by the platform's own tool
+        working-directory: ${{ github.workspace }}/target/tmp/release
+        run: |
+          set -euo pipefail
+          ls -l
+          sha256sum -c sure-*.tar.gz.sha256
+          echo
+          echo "And the control, because a checksum step that cannot fail is not a"
+          echo "check. A copy is modified and the same command is required to refuse"
+          echo "it; the artifact itself is not touched."
+          control="${RUNNER_TEMP:?RUNNER_TEMP is not set}/checksum-control"
+          rm -rf "$control"
+          mkdir -p "$control"
+          cp sure-*.tar.gz sure-*.tar.gz.sha256 "$control/"
+          cd "$control"
+          sha256sum -c sure-*.tar.gz.sha256
+          printf 'x' >> sure-*.tar.gz
+          if sha256sum -c sure-*.tar.gz.sha256; then
+            echo "FAILED: the checksum check passed over an archive modified after it was written"
+            exit 1
+          fi
+          echo "the modified copy failed the check, as it must"
+
+      # The evidence first, and unconditionally: a run that failed is the run
+      # whose logs someone needs, and an upload that only happens on success is
+      # missing exactly when it matters. The logs directory is written before
+      # the first check runs, so a run that fails early still uploads what it
+      # got to.
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-unknown-linux-gnu-logs
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-unknown-linux-gnu
+          path: |
+            target/tmp/release/sure-*.tar.gz
+            target/tmp/release/sure-*.tar.gz.sha256
+          # An upload that silently uploaded nothing is the shape of every false
+          # green this repository exists to prevent.
           if-no-files-found: error
           retention-days: 14

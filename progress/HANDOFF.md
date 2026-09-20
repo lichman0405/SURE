@@ -2977,6 +2977,8 @@ A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
+**The next task is `P15-T019`, not `P15-T007`.** Its own re-open condition — *"if this one fails a tree that cannot be its cause twice more, the ordering decision is to be reopened rather than defended"* — is met: three trees that changed no Rust have now failed on the ETXTBSY flake (`0b0af1d`, `8342764`, `6226ce8`), against two that came back green (`f6706d4`, `a009f57`), and each occurrence was read to its test name, line and errno before it was counted. The old argument's second half still holds — this task's verification is a number of clean ubuntu runs, and those arrive one push at a time whatever the order — but the first half does not, and a leading indicator exists so that the reopening happens *before* a failure is hidden rather than after. Two things moved besides the count. The task's own criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the fourth occurrence of the class, `crates/sure-core/src/analysis_provider/mod.rs:591`, is a site that command cannot reach — so the criterion has been widened from the mechanism to the property, and criterion 2 has gained the reverse direction that occurrence measured. And three of this window's ubuntu runs were red on trees the flake cannot be caused by, so every later acceptance pays a re-run to separate signal from noise.
+
 ## What `P15-T006` added
 
 `scripts/Build-Release.sh` gained a second macOS target. The architecture check became a two-row table

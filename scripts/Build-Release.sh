@@ -1506,7 +1506,25 @@ detail "gate file   $GATE_PATH"
 # hand-rolled copy of a crypto format. So this check can say "the manifest was
 # written after the gate" and cannot say "the manifest is the one the gate read".
 # The gap is named rather than papered over.
-if [ -f "$MANIFEST_PATH" ] && [ "$MANIFEST_PATH" -nt "$GATE_PATH" ]; then
+#
+# `find -newer` rather than `test -nt`, and the reason is a measurement rather
+# than a preference. `-nt` is not defined by POSIX, and this file's shebang is
+# `#!/bin/sh`, so the CI job that lints it pins the dialect to `sh` to match -
+# which is the correct dialect and is what reported `-nt` as undefined
+# (`SC3013`). The construct *worked* on the runner's own `dash`, so what the pin
+# found was a portability gap and not a live breakage; those are different
+# findings with different urgency and both halves of that sentence are true.
+# `find -newer` is POSIX and asks the identical question.
+#
+# What it answers when it cannot answer is the part that had to be checked
+# rather than assumed: measured under `dash`, `find <newer-file> -newer
+# <older-file>` prints the path and `find <older-file> -newer <newer-file>`
+# prints nothing, and with a **missing** reference file it prints nothing rather
+# than treating the absent file as older. The reference for this check cannot be
+# missing - the gate is read out of it above, and a gate that is not there fails
+# the run before reaching this line - so the third case is closed by the order of
+# the script rather than by the construct.
+if [ -f "$MANIFEST_PATH" ] && [ -n "$(find "$MANIFEST_PATH" -newer "$GATE_PATH" 2>/dev/null)" ]; then
     fail "the acceptance manifest was written after the release gate:
 
   $MANIFEST_PATH

@@ -37,8 +37,16 @@ fi
 ARCH="$(uname -m 2>/dev/null || echo unknown)"
 case "$ARCH" in
   arm64) add_check "CPU architecture" "PASS" "core" "Apple Silicon (arm64)" ;;
-  x86_64) add_check "CPU architecture" "PASS" "core" "Intel (x86_64)" ;;
-  *) add_check "CPU architecture" "WARN" "core" "$ARCH" "SURE v0.1 targets arm64 and x86_64 macOS" ;;
+  # PASS is about this machine as a *development host*, and it is deserved on
+  # Intel: `cargo build` here is a native build for x86_64-apple-darwin and the
+  # workspace compiles. It is deliberately not a statement that a release
+  # artifact exists for it. **No x86_64 macOS artifact is published**, so an
+  # Intel Mac can develop SURE and cannot run a SURE release; the two are
+  # different claims and this checker makes only the first. The boundary is
+  # written down in docs/development/RELEASE_PROCESS.md, "What the macOS Intel
+  # archive is, and why none exists yet".
+  x86_64) add_check "CPU architecture" "PASS" "core" "Intel (x86_64) - builds SURE from source; no Intel release artifact is published" ;;
+  *) add_check "CPU architecture" "WARN" "core" "$ARCH" "SURE builds from source on arm64 and x86_64 macOS; the published artifact is arm64 only" ;;
 esac
 
 if xcode-select -p >/dev/null 2>&1; then

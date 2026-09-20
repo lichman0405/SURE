@@ -62,7 +62,10 @@ A future user-friendly installer may use MSIX/WiX or another appropriate Windows
 
 Also produce/document:
 - macOS Apple Silicon CLI archive — see `### What the macOS Apple Silicon archive is, concretely`, below;
-- macOS Intel support/artifact where feasible under the chosen release policy;
+- macOS Intel CLI archive — **not produced, and not claimed.** See
+  `### What the macOS Intel archive is, and why none exists yet` below for the
+  measurement, the exact boundary of what is therefore true, and the one
+  dispatch that would settle it;
 - Linux x64 CLI archive;
 - SHA-256 checksums;
 - Claude Code plugin package/instructions;
@@ -100,13 +103,20 @@ directory, the three files inside it, and the `.sha256` beside it.
 before and will change again, and a belief is not a measurement. So the build
 names its target explicitly (`--target aarch64-apple-darwin`), and the script
 then reads the extracted binary's **first eight bytes** — the 4-byte Mach-O
-magic and the 4-byte `cputype` — prints them as hex, and refuses anything other
-than `cf fa ed fe` / `0c 00 00 01`. A thin x86_64 Mach-O, a universal ("fat")
-binary and a PE or ELF image are each refused by name. `/usr/bin/file` is asked
-the same question as a second reader where it exists; its absence is reported
-rather than passed over, and a disagreement fails the run. The runner's own
-`uname -m` is printed too, so a reader can see whether "and it ran" was possible
-on that machine at all.
+magic and the 4-byte `cputype` — prints them as hex, and requires exactly the
+pair the named target calls for: `cf fa ed fe` / `0c 00 00 01` for this artifact.
+A Mach-O of the other architecture, a universal ("fat") binary and a PE or ELF
+image are each refused by name, and the refusal prints the bytes it found against
+the bytes it required. `/usr/bin/file` is asked the same question as a second
+reader where it exists; its absence is reported rather than passed over, and a
+disagreement fails the run. The runner's own `uname -m` is printed too, so a
+reader can see whether "and it ran" was possible on that machine at all.
+
+`P15-T006` extended the same script to a second target, `x86_64-apple-darwin`,
+so the pair above is the arm64 row of a two-row table rather than a constant.
+**That extension produced no artifact** — see
+`### What the macOS Intel archive is, and why none exists yet`, which is also
+where the four-direction measurement of this check is written down.
 
 **What "builds/tests" means here is two things.** The workspace's tests are
 `cargo test --workspace --no-fail-fast` in the workflow's own step, on the same
@@ -139,6 +149,102 @@ carry so the kernel will load it, is not a certificate and does not contradict
 that. Nothing in this repository has observed what Gatekeeper does with the
 result on a Mac, and `RELEASE.txt` inside the archive says so rather than
 guessing.
+
+### What the macOS Intel archive is, and why none exists yet
+
+Decided by `P15-T006`. The short form is the one a reader should leave with:
+
+> **No Intel (`x86_64-apple-darwin`) macOS artifact is produced, published or
+> claimed. An Intel Mac cannot run the artifact this project does produce. If
+> you are on an Intel Mac, there is nothing here for you yet, and that is a
+> measured limitation rather than a roadmap item.**
+
+The rest of this section is what that sentence rests on, and what it does not.
+
+**What was measured, and where the run stopped.** The build was attempted on the
+machine that wrote this — Windows 11, native Rust MSVC — with the target
+installed:
+
+```
+$ cargo build --workspace --release --locked --target x86_64-apple-darwin
+cargo:warning=Compiler family detection failed due to error:
+  ToolNotFound: failed to find tool "cc": program not found
+error occurred in cc-rs: failed to find tool "cc": program not found
+$ echo $?
+101
+$ ls target/x86_64-apple-darwin/release/sure
+ls: cannot access '...': No such file or directory
+```
+
+The `x86_64-apple-darwin` `std` **is** installed there, so the run got past the
+target's own absence and stopped at the C dependency: `rusqlite`'s `bundled`
+feature compiles SQLite from its own C source through `libsqlite3-sys`, whose
+`build.rs` invokes `cc`, and a Windows host has no C compiler that emits x86_64
+Mach-O objects. **This is a fact about the host, not about the target**, and it
+is the same fact `docs/development/GITHUB_WORKFLOW.md` records about
+cross-target `clippy`. It is not evidence that the artifact cannot be built; it
+is evidence that it cannot be built *here*.
+
+**What was verified here, and what that does and does not buy.** The architecture
+check in `scripts/Build-Release.sh` was extended to serve both macOS targets and
+is a discriminating check, in four directions, over real Mach-O bytes:
+
+| archive name | `sure`'s first eight bytes | Architecture step |
+| --- | --- | --- |
+| `...-aarch64-apple-darwin.tar.gz` | `cffaedfe0c000001` | accepted, `Mach-O 64-bit, arm64` |
+| `...-x86_64-apple-darwin.tar.gz` | `cffaedfe07000001` | accepted, `Mach-O 64-bit, x86_64` |
+| `...-x86_64-apple-darwin.tar.gz` | `cffaedfe0c000001` | refused, *not* `Mach-O 64-bit, x86_64` |
+| `...-aarch64-apple-darwin.tar.gz` | `cffaedfe07000001` | refused, *not* `Mach-O 64-bit, arm64` |
+
+The arm64 bytes are the ones `P15-T005`'s CI run shipped; the x86_64 bytes are
+genuine linker-produced Mach-O bytes. The arm64 path was also compared against
+itself before and after the Intel target was added, over the artifact CI actually
+uploaded, and the two outputs are byte-identical. **What this buys is that the
+packaging and checking half is ready and known to discriminate. What it does not
+buy is an artifact**: no `x86_64-apple-darwin` archive exists, so no checksum of
+one exists, and no x86_64 macOS binary has ever been executed by this project.
+
+**What is not measured, stated plainly.**
+
+- **Whether the Intel artifact can be built at all.** The job that would build it
+  is in `.github/workflows/release-dry-run.yml` and **has never run**. Its
+  existence is not evidence; a green log would be.
+- **Whether the runner label queues for this repository.** `macos-26-intel` is
+  the x64 label according to `actions/runner-images`' own image table, but
+  whether a dispatch on this account obtains one is a property of the repository
+  and not of the image. Nothing here has measured it.
+- **Anything about running an Intel artifact**, on any machine. No x86_64 macOS
+  binary has been executed, so the standard `P15-T005` set for the arm64 artifact
+  — *the bytes that are checksummed are the bytes that were run* — is **not met
+  for Intel by anything in this repository**, and nothing here should be read as
+  if it were.
+
+**The one command that would settle it**, and the reason it has not been run: the
+workflow is `workflow_dispatch`-only and needs the commit on the remote, and
+dispatching is the supervisor's step rather than a packaging task's.
+
+```
+gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
+```
+
+That dispatch answers three questions at once, in one log. The job's first step
+prints `uname -m`, `RUNNER_ARCH` and `rustc -vV`'s host, so the log says which
+machine actually ran rather than leaving the label to be believed. It prints
+`command -v cc`, which is the specific tool whose absence stopped the local
+attempt. And `scripts/Build-Release.sh --target x86_64-apple-darwin` runs the
+extracted binary **from the directory it was extracted into** and compares the
+`running from` it reports, so an x64 runner turns "and it ran" from an assumption
+into a reading. If that job lands on an arm64 host instead, `uname -m` says so
+and a Rosetta run is visibly weaker than a native one; the log distinguishes them
+rather than the reader having to assume.
+
+**Why the arm64 artifact does not cover Intel Macs.** They are different
+architectures and the artifact is a thin `aarch64` binary; an Apple Silicon
+translation layer runs x86_64 code on arm64 hardware, not the reverse. This is
+stated as the shape of the two architectures rather than as a measurement, for
+the reason the rest of this section gives: no Intel Mac has been used anywhere in
+this repository, so the honest statement is about which artifacts exist, not
+about what one machine did.
 
 ## Package managers
 

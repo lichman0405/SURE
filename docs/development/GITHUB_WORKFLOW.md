@@ -132,3 +132,16 @@ all, and it does. Its `validate` job is the three-platform test-and-build matrix
 its `package-macos` job (`P15-T005`) builds, packages, checksums and reads back
 the macOS Apple Silicon artifact with `scripts/Build-Release.sh`.
 `docs/development/RELEASE_PROCESS.md` states what that artifact is.
+
+**Its `package-macos-intel` job has never run.** `P15-T006` added it so that one
+dispatch answers whether an `x86_64-apple-darwin` artifact can be built and run,
+and nothing in this repository may be read as if that had happened: there is no
+Intel artifact, no checksum of one, and no execution of an x86_64 macOS binary
+anywhere in this project's history. The job runs on `macos-26-intel`, which is
+the x64 label in `actions/runner-images`' own image table — as against
+`macos-latest`, which that table lists under macOS 26 **Arm64**, and which is why
+the arm64 job is on an arm64 machine. Whether that label queues for this
+repository is unmeasured, and the job's first step prints `uname -m`,
+`RUNNER_ARCH` and `rustc -vV`'s host precisely so its log says which machine ran.
+The boundary this leaves is written down in `docs/development/RELEASE_PROCESS.md`,
+`### What the macOS Intel archive is, and why none exists yet`.

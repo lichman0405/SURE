@@ -205,3 +205,146 @@ jobs:
           # green this repository exists to prevent.
           if-no-files-found: error
           retention-days: 14
+
+  # ===========================================================================
+  # The macOS Intel artifact — P15-T006. **THIS JOB HAS NEVER RUN.**
+  # ===========================================================================
+  #
+  # It is written and not dispatched. Nothing below has produced an artifact,
+  # nothing below has executed an x86_64 macOS binary, and no reading in this
+  # repository comes from it. `P15-T006`'s acceptance is an **or** — build the
+  # artifact, or document the exact limitation — and this job is the half that
+  # cannot be finished from a Windows host: it needs the commit on the remote
+  # and a dispatch, which the supervisor owns.
+  #
+  # **Why `macos-26-intel` and not a guess.** `actions/runner-images`' own
+  # table is the authority on what a label means, and it reads:
+  #
+  #   macOS 26        x64     macos-latest-large, macos-26-intel, macos-26-large
+  #   macOS 26 Arm64  arm64   macos-latest, macos-26, macos-26-xlarge
+  #   macOS 15        x64     macos-15-large, macos-15-intel
+  #   macOS 15 Arm64  arm64   macos-15, macos-15-xlarge
+  #
+  # Two things follow, and the second is the one that matters here. `macos-latest`
+  # — the runner `package-macos` uses — resolves to the **Arm64** row, so this
+  # repository's arm64 artifact is built on an arm64 machine and the `-intel`
+  # suffix is the x64 spelling. And the x64 image is reachable from a *standard*
+  # label (`macos-26-intel`), not only from the `-large` ones: the `-large` and
+  # `-xlarge` labels are larger runners, which are billed, and a job that needed
+  # one would be a job this project could not promise to run.
+  #
+  # What that table does **not** say is that this account can obtain the runner.
+  # Availability, queueing and billing are properties of the repository and not
+  # of the image, and nothing here has measured them. **The dispatch is the
+  # measurement**, and the first step below exists so that its log answers the
+  # question even if the answer is no.
+  #
+  # **What makes this job evidence rather than a claim.** It is the same script
+  # as the arm64 job, with `--target x86_64-apple-darwin`, so the architecture is
+  # read from the artifact's own first eight bytes and required to be
+  # `cffaedfe07000001` — not inferred from the label, the file name or `uname`.
+  # The archive is extracted to a fresh directory and the extracted `sure` is
+  # **run from there**, which is the step `P15-T005`'s standard is built on and
+  # the step a Windows host cannot reach at all. On an x64 runner that binary is
+  # native, so "and it ran" is a reading this job produces and no other machine
+  # in this repository can.
+  #
+  # Note what the runner's identity step is for here specifically: on the arm64
+  # image it would print `x86_64` only if Rosetta 2 were present and the shell
+  # were running under it. If this job lands on an arm64 host and `uname -m` says
+  # `x86_64`, the build is still a correct Intel artifact and the *run* is a
+  # Rosetta run — a weaker statement than a native one, and the log says which
+  # happened rather than leaving a reader to assume.
+  package-macos-intel:
+    name: macOS Intel artifact (x86_64-apple-darwin)
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-apple-darwin
+
+      # Printed for the log and for a reader. This is not a check and nothing
+      # below reads it: it is the context in which the checks below are read.
+      # `uname -m` is the line that decides whether the run step below is a
+      # native execution or a Rosetta one, so it is printed before anything
+      # expensive happens.
+      - name: What this runner is
+        run: |
+          set -euo pipefail
+          echo "uname -s          $(uname -s)"
+          echo "uname -m          $(uname -m)"
+          echo "RUNNER_ARCH       ${RUNNER_ARCH:-unset}"
+          echo "RUNNER_OS         ${RUNNER_OS:-unset}"
+          echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
+          echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
+          echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          echo "cc                $(command -v cc || echo absent)"
+          echo "clang             $(command -v clang || echo absent)"
+          echo "tar               $(tar --version | head -n 1)"
+          echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" \
+               "shasum=$(command -v shasum || echo absent)" \
+               "openssl=$(command -v openssl || echo absent)"
+          echo "file              $(command -v file || echo absent)"
+          echo "codesign          $(command -v codesign || echo absent)"
+
+      # The C compiler line above is the specific thing that decided this job
+      # could not be done on the machine that wrote it: `libsqlite3-sys` compiles
+      # bundled SQLite through `cc-rs`, and a Windows host has no `cc` that emits
+      # x86_64 Mach-O objects. On a macOS runner that tool is Xcode's clang and
+      # is present; the line is printed so the log says so rather than implying
+      # it.
+
+      # The "tests" half of builds/tests, and the writer of the release gate.
+      - name: The workspace's tests, on this runner
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build, package, checksum and check the artifact
+        run: sh scripts/Build-Release.sh --phase all --target x86_64-apple-darwin --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
+
+      - name: The checksum, read by the platform's own tool
+        working-directory: ${{ github.workspace }}/target/tmp/release
+        run: |
+          set -euo pipefail
+          ls -l
+          shasum -a 256 -c sure-*.tar.gz.sha256
+          echo
+          echo "And the control, because a checksum step that cannot fail is not a"
+          echo "check. A copy is modified and the same command is required to refuse"
+          echo "it; the artifact itself is not touched."
+          control="${RUNNER_TEMP:?RUNNER_TEMP is not set}/checksum-control"
+          rm -rf "$control"
+          mkdir -p "$control"
+          cp sure-*.tar.gz sure-*.tar.gz.sha256 "$control/"
+          cd "$control"
+          shasum -a 256 -c sure-*.tar.gz.sha256
+          printf 'x' >> sure-*.tar.gz
+          if shasum -a 256 -c sure-*.tar.gz.sha256; then
+            echo "FAILED: the checksum check passed over an archive modified after it was written"
+            exit 1
+          fi
+          echo "the modified copy failed the check, as it must"
+
+      # The evidence first, and unconditionally: a run that failed is the run
+      # whose logs someone needs — and this job has never had a successful run,
+      # so its first log is the one that matters most.
+      - name: Upload the run's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-apple-darwin-logs
+          path: target/tmp/release/logs/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the artifact and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sure-x86_64-apple-darwin
+          path: |
+            target/tmp/release/sure-*.tar.gz
+            target/tmp/release/sure-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14

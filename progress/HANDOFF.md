@@ -3,6 +3,8 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T015` is accepted at `b2a646daccc8077f8ede4c98ae576e0a090e32b1`, and no copy of the test scratch helper can run out of names any more.** The acceptance is *"No sequence of suite runs exhausts any copy of the helper"*, with four more clauses about uniqueness across processes, the never-clear reason, boundedness, and *"All nineteen copies are addressed, not the one the title names."* **That nineteen was wrong by six.** At `2f90b24`, `for _ in 0..1_000` occurs in **25** files and `AlreadyExists => continue` in **26**; the file in the difference and not the first is `crates/sure-testkit/src/program.rs`, which bounds on a `NAMES` array rather than on a thousand, claims a temporary *file* name with `create_new`, and returns `io::Result` instead of panicking — so the search is right and the note is wrong. The note had already corrected its own count three times, four then nineteen then nineteen, each time by *changing how the tree was searched* rather than by thinking harder about it, which is the note's own thesis arriving as its own history. One helper (`crates/sure-testkit/src/scratch.rs`, 254 lines) replaces all twenty-five copies: a run claims `<root>/<pool>/run-<pid>` — a name no other live process can have — and hands out `<run>/<what>-<n>` from a single process-wide counter, so uniqueness is by construction rather than by collision, and the shared namespace that could be filled up is gone rather than enlarged. The original never-clear reason is quoted verbatim and **answered rather than repealed**: only this process id's own names are cleared, a directory is never adopted, and nothing that survives is reused — so a silently failed deletion costs space and cannot produce a test describing a directory that was never emptied. Criterion 1 is met *by filling rather than by reading the allocator*: a unit test fills a pool with two thousand taken names and then asks for one, and the repository met the same premise for real — `target/tmp/support levels` carries the old helper's whole budget in **7,000** names, seven test names × the old thousand, an exact fit to `for _ in 0..1_000`, and the gate's own run of that suite over that pool is **7 passed, 0 failed**. The fill is still on disk and is now **frozen**, which is stronger than a snapshot: the shape search returns nothing from the working tree, so no code here can create another name of that form. **The author's workspace run reported `2700 passed, 29 failed`; all 29 were its sandbox refusing to execute a `.ps1`, and from native PowerShell on the same tree the six affected targets are 118 passed, 0 failed** — the third task in a row where that distinction decided something, and the author named the trap rather than working around it. Reported and not fixed: `crates/sure-cli/tests/mcp_protocol.rs:1253` assumes a child's stderr is UTF-8 and panics on the console's GBK refusal text. The anomaly the note records — pools the old bound says must have blocked, that passed anyway — is **still unexplained**, and the fix does not depend on the explanation. **The chain-rule reading owed by this acceptance found that `claude/v0.1-autonomous` is red, and the record would otherwise have carried it as the fourth consecutive green run.** `35538414257` on `2f90b24` is `completed / failure`: four jobs green, `rust (windows-latest)` red at `cargo test`, on one test — `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check` panicking at `crates/sure-cli/tests/quickstart_flow.rs:508:13` because the run the quickstart quotes does not carry `1 of the 12 stages did not run`. The guard fired correctly and **the claim underneath it is wrong**: the walk's quoted transcript is a run of *this* machine, where one stage is NOT CHECKED, and a fresh runner has **two** — stage 8, no analysis provider, plus stage 9, *"SURE has no recorded history for this machine"*. So the quickstart quotes output a reader on a machine without a SURE store will not see, held in place by a literal rather than by the property — a defect of exactly this task's family, a check failing for a reason the change under test did not cause. It is recorded and **not fixed here**, because it is not this task's and folding it in would hide it; the gate below is green **on this machine** and this record does not claim CI is green.
+
 **`P15-T014` is accepted at `974550a30519ba3a607cf491e6b716b4bd5a4b5f`, and the Windows quickstart opens by saying there is nothing to download.** The acceptance is *"Nontechnical Windows user can install CLI + one harness integration and run first check."* There was no quickstart, and there is no published archive: `gh release list`, the releases API and the tags API all return empty, `git tag` returns nothing, `release.yml` runs `gh release create "$TAG" … --draft` with no `--draft=false` and no `gh release edit`, **and that file is not on `origin/main` at all**, so it cannot even be dispatched from here. The document therefore states the gap in its own words — *"A nontechnical Windows user cannot install SURE today: the step between a bare machine and an archive in your hand runs through a Rust toolchain"* — and gives the one path that does work, labelled honestly as a developer's step, rather than inventing a download link. Each of those facts is held by a rule in `crates/sure-cli/tests/quickstart_flow.rs` (1465 lines, 22 `BREAKS` rows) instead of by the paragraph that states it, and the walk itself is a *measured* journey rather than described one: nine tests pass from native PowerShell, including `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check`, which installs a real archive, installs the Claude Code integration into a scratch directory and answers a check. The same task extended `P15-T012`'s guard rather than working around it — `STATEMENTS` 5 → 6 and `SCANNED_FOR_PHRASING` 3 → 4, adding the new document to the set the signing-phrase rules read. **The worker corrected a factual error in the supervisor's own brief** (it claimed `INSTALL_WINDOWS.md` is in `SHA256SUMS.txt`; it is not) and reported it instead of acting on it.
 
 **`P15-T013` is accepted at `957324790bdf0fd6a19f5d83177bf93ae5fa21e6`, and the macOS half of the signing claim is now measured instead of merely written down.** The acceptance is *"If Apple credentials are unavailable, mark external limitation honestly"* and *"Do not fake signing/notarization."* Before this task, `signing_status.rs` mentioned "notariz" **zero** times, and the word "stapl" in any spelling appeared **nowhere in the tracked tree** — so the notarization half of *"nothing here is signed or notarized"* was carried by prose that nothing checked, while the signing half had rules behind it. The repair is a statement and a check over it: `docs/development/RELEASE_PROCESS.md` gains *`### macOS: no Developer ID, no notarization and no staple`* naming the three missing things and who would have to provide them, plus *`### What must not be claimed about macOS`* holding four families of overclaim; `crates/sure-testkit/tests/notarization_status.rs` (1409 lines, 7 tests, 37 `BREAKS` rows) measures both directions over eight files. **The load-bearing distinction is that `codesign -d`'s `Authority=` is a *signing* field and notarization "is not read by that step at all"** — the ticket Apple holds and the staple `xcrun stapler` attaches are not lines `codesign` can be asked for, so the notarization sentence rests on there being no notarization step in the build rather than on that reading. Nothing was added to the build: no step notarizes, no Apple credential exists, and neither archive has been launched on a Mac, which the statement says. Verified independently by injecting two edits the author did not write — `xcrun notarytool submit` into `scripts/Build-Release.sh` (4 of 7 tests red) and *"This archive has been notarized by Apple."* into `MACOS.md` (3 of 7 red) — with both files restored byte-identical.
@@ -2792,6 +2794,231 @@ twice more, this placement is to be reconsidered rather than defended. `P7-T010`
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
+
+## What `P15-T015` added
+
+The work is `b2a646daccc8077f8ede4c98ae576e0a090e32b1`, on base
+`2f90b2422f6bc785448a2b85f64838a9ee972943`.
+
+The acceptance is *"No sequence of suite runs exhausts any copy of the helper"*,
+with four more clauses about uniqueness, the never-clear reason, boundedness, and
+— the one that decides the size of the change — *"All nineteen copies are
+addressed, not the one the title names."*
+
+**That nineteen was wrong, and the searches that corrected it are the task's
+first act rather than an afterthought.** The note had already corrected its own
+count three times — four, then nineteen, then nineteen again with an explicit
+retraction of the claim that the five `src/` copies ship — and each revision came
+from *changing how the tree was searched* rather than from thinking harder about
+it. It was still wrong:
+
+    git grep -c -E 'for _ in 0\.\.1_000' HEAD -- '*.rs'        -> 25 files, 1 each = 25 sites
+    git grep -l -E 'AlreadyExists => continue' HEAD -- '*.rs'  -> 26 files
+    the one file in the second set and not the first: crates/sure-testkit/src/program.rs
+
+The six files the note never named are `crates/sure-cli/tests/install_flow.rs`,
+`crates/sure-cli/tests/quickstart_flow.rs`,
+`crates/sure-cli/tests/winget_manifest.rs`,
+`crates/sure-core/src/analysis_provider/mod.rs`, `crates/sure-core/src/approval.rs`
+and `crates/sure-core/src/container.rs`. Two of them were read at `HEAD` line by
+line, and both are the shape down to the panic wording — `fn a_directory_of_our_own`,
+`for _ in 0..1_000`, `create_dir`, `AlreadyExists => continue`,
+`panic!("no free directory under {}", base.display())` — so the searches are right
+and the note is wrong by six. That is the fourth count in one note and the third
+corrected by search, which is the note's own thesis arriving as its own history.
+
+**The fix is one helper, twenty-five files and thirty-six call sites.**
+`crates/sure-testkit/src/scratch.rs`
+(254 lines) replaces every copy. A run claims **one directory per pool per
+process** — `<root>/<pool>/run-<pid>` — and hands out `<run>/<what>-<n>` from a
+single process-wide `AtomicU64` that only ever goes up. That inverts the question
+the old helper asked: *"is this name free?"* can be answered **no** a thousand
+times on a healthy tree, while *"what is this process's own next name?"* cannot be
+affected by anything outside the process. Uniqueness becomes a property of the
+design rather than of a collision, and the shared namespace that could be filled
+up is gone rather than enlarged.
+
+**The never-clear reason is preserved and answered rather than repealed.** The
+helper quotes the original sentence verbatim and then says where the deletion now
+happens and what happens to a name afterwards: only `run-<pid>` names are cleared,
+which no *live* process can own; a directory is never adopted, because `create_dir`
+creates-and-fails and a name that is already there is skipped rather than entered;
+and nothing that survives is reused, so a silently failed deletion costs space
+and cannot produce a test describing a directory that was never emptied.
+
+**What it does when it cannot tell is stated, and it errs towards keeping.** A
+run directory that cannot be removed is the case the helper cannot decide: it is
+left exactly as it is, the run moves to the next name, and the space is leaked
+rather than a directory handed out that could not be verified. It never errs
+towards emptying something it could not verify, which is the failure the original
+comment was written about. A pool or a name that cannot be created for any other
+reason panics and names the path, because that is a broken working copy and not a
+product condition.
+
+**The five criteria, and what answers each.**
+
+| criterion | what answers it |
+| --- | --- |
+| 1 — no sequence of runs exhausts any copy, *observed by filling* | `a_pool_full_of_the_names_the_old_allocator_would_have_tried_still_hands_one_out` fills a pool with **two** thousand taken names and then asks for a directory; and the same premise was met in the repository itself, by filling `target/tmp/support levels` with 7,000 names and running the suite over it |
+| 2 — unique across processes, and across two suites at once | uniqueness is the `run-<pid>` directory: two suites are two process ids, and within a process the counter is process-wide. Verified by running two copies of one test binary at once — both `7 passed`, two run directories, nothing shared |
+| 3 — the never-clear reason | quoted verbatim in `scratch.rs`, then answered; the migrated call sites point at it rather than repeating it |
+| 4 — bounded or reclaimed | this process id's own leftovers are reclaimed before the run starts; a foreign run directory is left byte-identical. Growth is now one directory per pool per process, where the helper's own note measured a suite run at about 123 names under one pool |
+| 5 — every copy, and how the count was taken | the two searches above, whose commands and output are in the hand-back, and the same two searches re-run by the supervisor |
+
+## Validation of `P15-T015`
+
+The gate is recorded in this acceptance's commit message rather than reproduced
+here, which is where `P15-T013` moved it and why: a block printed into this file
+describes a run taken over a tree that did not yet contain the block.
+
+**The searches were re-run rather than read.** Both were taken by the supervisor
+against `HEAD` by git object, so the current edits cannot pollute them: 25 files
+with the loop, 26 with the guard, one file in the difference and it is a different
+construct. `crates/sure-testkit/src/program.rs` is the nearest thing to a
+false positive and it is not one — it bounds on `NAMES` rather than on a
+thousand, claims a temporary **file** name with `create_new` rather than a
+directory, returns `io::Result` instead of panicking, and carries none of the
+five exhaustion wordings. It is named in the record so that the next search does
+not have to decide it again.
+
+**The six failures the author reported were its sandbox, and this is the third
+task in a row where that distinction decided something.** The author's full
+workspace run reported `2700 passed, 29 failed` across six targets, every one of
+them PowerShell refusing to execute a `.ps1` in its environment. Run from native
+PowerShell on the same tree, all six are clean: `install_flow` 13, `mcp_protocol`
+25, `quickstart_flow` 9, `winget_manifest` 12, `hook_failure_semantics` 5,
+`integration_thinness` 54 — **118 passed, 0 failed** — and the new
+`scratch_directories` is 5 of 5. The author named the trap, did not work around
+it, and asked for exactly this confirmation.
+
+**Criterion 1 was met twice, in two different ways, and the second is the one the
+criterion asks for.** The unit test fills a pool with two thousand taken names and
+then asks for a directory — two thousand because the old counter is process-wide
+and starts at zero, so the state must not depend on how many names the test's own
+root has already consumed. That is a synthetic pool. The real one is
+`target/tmp/support levels`, which the author filled with the old helper's whole
+budget — **seven test names × one thousand = 7,000**, an exact fit to
+`for _ in 0..1_000` — and then ran the suite over it. The gate's own run of that
+suite is **7 passed, 0 failed**, over a pool where every one of those thousand
+names per test is already taken; the block is in `gates-p15t015-verify-test.txt`
+under `Running tests\support_levels.rs`.
+
+**The fill is still on disk and is now frozen, which is a stronger statement than
+a snapshot.** Classifying the pool's own entries at this acceptance:
+
+    7805  names ending in -<digits>, and nothing in the tree can add another
+            7000  the deliberate fill     (7 test names x 1000, exact)
+             805  ordinary legacy names   (5 fixture names x 161)
+       7  run-<pid> directories, each holding that process's own <what>-<n> children
+
+The 7,000 is exact and the 805 is stable, because the search above returns
+**nothing** from the working tree: no code in this tree can create a name of that
+form again, so the legacy population can only be deleted and never grow. The
+count of `run-<pid>` directories is deliberately **not** quoted as a fact about
+the repository — it is one directory per pool per process and it moves on every
+test run, which is precisely the design working. What the seven directories show
+is the new shape live: each holds the five fixture names with scattered indices
+(`run-19368` has `empty-0`, `lockfile-only-2`, `rust-only-3`, `mixed-4`,
+`both-generic-5`), which is a process-wide counter advancing across calls rather
+than five independent per-name budgets.
+
+**The mutation check is one the author chose the shape of, and it is the right
+shape.** Restoring the old algorithm inside the new helper's `under` reddens
+`a_pool_full_of_the_names_the_old_allocator_would_have_tried_still_hands_one_out`
+with the old panic text — because the test asserts a property of the *answer*
+(a directory inside a run directory) and not the presence of new code. A rule
+that a message can satisfy is a check on the message; this one fails on the
+behaviour.
+
+**No assertion was weakened to make the migration fit.** The whole diff contains
+three changed lines matching `assert`, and all three are prose in doc comments.
+Nothing was deleted, `#[ignore]`d, or `cfg`-gated. The migration is 216 lines in
+and 558 out across the twenty-six tracked files it edited, plus two new files of
+254 and 157 lines — and every edited file is a net reduction.
+
+**The helper cannot reach the shipped binary.** Every reference to
+`sure_testkit::scratch` in a `src/` file sits *after* that file's `#[cfg(test)]`,
+so the dependency is test-only — which is the property `sure_testkit::workspace`
+exists to enforce and which the gate exercises.
+
+**Found and not fixed, named and argued.** The pool inventory the old helper left
+behind is still on disk — tens of thousands of empty directories under
+`target/tmp`, the 7,805 in `support levels` among them. They were not deleted,
+and the reason is sound: on Windows a recursive delete can fail part-way, and
+deleting tens of thousands of directories nobody can prove are unowned is not
+something to do unattended. They are inert — nothing reads them, and as
+established above nothing can add to them. No magnitude is quoted for the
+inventory as a whole, and that is a decision rather than an omission: the same
+reason the `run-<pid>` count is not quoted applies, and a total for `target/tmp`
+is a reading of a directory that every test run writes into. Also reported and
+not fixed:
+`crates/sure-cli/tests/mcp_protocol.rs:1253` assumes a child's stderr is UTF-8 and
+panics on the console's GBK refusal text, which is only reachable when PowerShell
+refuses the script and is therefore a property of that condition rather than of
+this task.
+
+**Cannot confirm, and stated rather than explained away.** The anomaly the note
+records — pools that the 1,000-attempt bound says must have blocked, that passed
+anyway, with a `store-2374` appearing where no 1,000-iteration loop can reach —
+is **still unexplained**. The author says so. What matters for this acceptance is
+that the fix does not depend on the explanation: it is correct under either model,
+which is what the note's own instruction asked for, and the fill-and-run test pins
+the premise directly instead of resting on the anomaly. Also not measured here:
+reclamation of other process ids' directories, which is deliberately not
+attempted and is the design's accepted cost; and `remove_dir_all` on a
+filesystem that does not implement advisory locking.
+
+**Chain-rule backfill, and it is the reason this acceptance says something the
+last three did not.** `2f90b24`'s own push started a run that did not exist when
+`2f90b24` was written, so it had no row anywhere. Read from the API at this
+acceptance, job by job:
+
+| run | commit | workflow | result |
+| --- | --- | --- | --- |
+| `35538414257` | `2f90b24` | `ci` | **`completed / failure`** — four jobs green, `rust (windows-latest)` red |
+
+**The streak is broken and this record would have carried it as green.**
+`target/tmp/runs-owed.md` was written when the run was `queued` and had no
+result; the standing instruction on that file is *"re-read each row from the API
+at the acceptance that carries it — do not copy a row from this file on trust."*
+Doing that found `failure`. The three runs before it were green, they were
+recorded as green, and the fourth was about to be recorded the same way because
+it *looked* like the pattern. It is the third time in this session that a number
+or a status taken from a note rather than re-measured was wrong.
+
+**The failing job is not this task's, and the failure is a real defect that
+P15-T014 shipped.** Step 8, `cargo test --workspace --all-features --no-fail-fast`:
+
+    test the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check ... FAILED
+    panicked at crates\sure-cli\tests\quickstart_flow.rs:508:13:
+    Windows PowerShell: the run the document quotes does not carry
+    "1 of the 12 stages did not run", so the quoted output is no longer a run of
+    this command:
+    ...
+    2 of the 12 stages did not run, and each is marked NOT CHECKED above.
+
+Every other target in the job passed, `quickstart_flow` was 8 passed / 1 failed,
+and the other four jobs — `rust (ubuntu-latest)`, `rust (macos-latest)`,
+`bootstrap-validate-windows`, `shellcheck-secondary` — are green.
+
+**The guard did its job and the claim underneath it is the thing that is wrong.**
+The walk's quoted transcript is a run of *this* machine, where one stage is NOT
+CHECKED — stage 8, no analysis provider. On a fresh runner **two** are: stage 9
+adds *"SURE has no recorded history for this machine, so there are no agent
+claims to check against evidence"*, in the CI output's own words. So the
+quickstart quotes output that a reader on a machine without a SURE store will not
+see, and the rule holding it in place is pinned to the literal `1 of the 12`
+rather than to the property. That is a defect of exactly the family this task is
+about — *a check that fails for a reason the change under test did not cause* —
+and it is now the reason `claude/v0.1-autonomous` is red. It is **not fixed
+here**, because it is not this task's and folding it in would hide it; it is
+recorded, and it is the next thing this session does.
+
+**What this acceptance therefore does not claim.** The gate below is a run on
+this machine from native PowerShell, and it is green. It is *not* evidence that
+CI is green, and this record does not say CI is green. The T015 commit's own push
+will start a run that is expected to be red for the same reason, and the next
+acceptance owes a reading of it rather than a prediction of it.
 
 ## What `P15-T014` added
 

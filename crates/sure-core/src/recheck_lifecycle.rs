@@ -9,11 +9,13 @@
 //! run stays auditable even after a finding is closed.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use sure_domain::finding::{Finding, FindingStatus};
 use sure_domain::ids::{CheckId, FindingId, FingerprintId};
 use sure_domain::status::{CheckResult, CheckStatus};
 
+use crate::paths::CaseSensitivity;
 use crate::store::{RecordKind, Store, StoreError};
 
 /// A stable identity for a finding across runs.
@@ -22,9 +24,19 @@ use crate::store::{RecordKind, Store, StoreError};
 /// two different findings. The key is built from the human title and the first
 /// checkable evidence anchor, which is what SURE can point a repair at.
 ///
-/// On Windows, file paths are case-insensitive, so the location/locator are
-/// normalised to lowercase. The title is kept exact: two findings with the same
-/// location but different user-facing descriptions are different issues.
+/// Whether two spellings of a location name **one file** — `src/EMAIL/SEND.rs`
+/// and `src/email/send.rs` — decides whether a previous finding matches this
+/// run's finding, and that is a fact about the volume the project is on and not
+/// about the operating system's name. CI run `35544579833` measured both answers
+/// in one workflow: the `rust (macos-latest)` job (`106168109227`) wrote one
+/// spelling and read the other back, so they are one file there, while
+/// `rust (ubuntu-latest)` (`106168109213`) found two files. So the rule is
+/// **passed in** — [`CaseSensitivity`], asked once per run by [`case_rule_for`]
+/// — rather than compiled in by a `cfg` on the platform. See
+/// [`crate::paths::volume`] for the probe and what it does when it cannot tell.
+///
+/// The title is kept exact: two findings with the same location but different
+/// user-facing descriptions are different issues.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FindingKey {
     title: String,
@@ -35,34 +47,82 @@ pub struct FindingKey {
 impl FindingKey {
     /// Build a key from a finding, if the finding has at least one checkable
     /// anchor.
+    ///
+    /// `case` is the volume's rule for this project, from [`case_rule_for`]. It
+    /// is an argument rather than something this function works out, so that one
+    /// run asks the volume once for every key it builds, and so that both answers
+    /// can be exercised on one machine — see the tests below.
     #[must_use]
-    pub fn from_finding(finding: &Finding) -> Option<Self> {
+    pub fn from_finding(finding: &Finding, case: CaseSensitivity) -> Option<Self> {
         let anchor = finding.evidence.iter().find(|e| e.anchor.is_checkable())?;
         Some(Self::new(
             &finding.title,
             &anchor.anchor.location,
             &anchor.anchor.locator,
+            case,
         ))
     }
 
-    fn new(title: &str, location: &str, locator: &str) -> Self {
+    fn new(title: &str, location: &str, locator: &str, case: CaseSensitivity) -> Self {
         Self {
             title: title.to_owned(),
-            location: normalise_path(location),
-            locator: normalise_path(locator),
+            location: normalise_path(location, case),
+            locator: normalise_path(locator, case),
         }
     }
 }
 
-fn normalise_path(text: &str) -> String {
+/// The rule that decides whether two of this project's findings anchor one file.
+///
+/// **What it asks.** The volume that holds `project_root`, once per run, with the
+/// probe [`crate::paths::volume`] documents in full: a name is read from the
+/// project root's own listing, its case is flipped, and the volume is asked
+/// whether the flipped spelling resolves. Windows folds case in the operating
+/// system's name; macOS folds it on the volume Apple ships and can be made to
+/// keep it; a Linux mount can be either — CI run `35544579833` measured macOS and
+/// Linux answering opposite ways in one workflow.
+///
+/// **What it does when the volume cannot be asked.** [`CaseSensitivity::Sensitive`]:
+/// two spellings are two files. `project_root` that is a file, that does not
+/// exist, or that holds nothing whose case can be flipped is answered the same
+/// way, and no error is raised — this decides an identity, and refusing to decide
+/// would stop a re-check over a question that has a safe answer.
+///
+/// **Which way it errs.** Toward two findings for one file rather than one
+/// finding for two. Folding a volume that keeps case merges two files into one
+/// key: this run's spelling is reported, the previous finding is dropped from the
+/// verdict as a duplicate, and a problem that exists stops being reported — a
+/// false green, which `CLAUDE.md` says is more serious than a visible error. Not
+/// folding a volume that folds reports one problem twice, and a previous finding
+/// is carried open beside this run's copy of it, which a reader can see.
+#[must_use]
+pub fn case_rule_for(project_root: &str) -> CaseSensitivity {
+    crate::paths::case_rule_of_volume_or_sensitive(Path::new(project_root))
+}
+
+/// The form of a path a [`FindingKey`] is built from, under `case`.
+///
+/// **What it asks**: `case` is the project's volume's answer to *are these two
+/// spellings one file*, asked once per run by [`case_rule_for`] and held for the
+/// whole of [`reconcile`]'s work. Under [`CaseSensitivity::Insensitive`] the path
+/// is lowercased; under [`CaseSensitivity::Sensitive`] only the whitespace around
+/// it goes, because on that volume `src/EMAIL/SEND.rs` and `src/email/send.rs`
+/// are two files and folding them would report two problems as one.
+///
+/// **What it costs**: `to_lowercase` walks the text and allocates, and this is
+/// called twice per finding, for `location` and `locator`. On a folding volume
+/// that pass is what buys the match; on a volume that keeps case the same call
+/// site allocates once for `to_owned` and folds nothing. Making the rule a value
+/// rather than a `cfg` moves the choice to run time and moves no work with it:
+/// the branch is a comparison, and a build for either platform pays the same.
+///
+/// **Which way it errs**: it cannot — it is handed an answer, and the answer's
+/// error direction belongs to [`case_rule_for`] and [`crate::paths::volume`].
+fn normalise_path(text: &str, case: CaseSensitivity) -> String {
     let trimmed = text.trim();
-    #[cfg(windows)]
-    {
-        trimmed.to_lowercase()
-    }
-    #[cfg(not(windows))]
-    {
-        trimmed.to_owned()
+    match case {
+        CaseSensitivity::Insensitive => trimmed.to_lowercase(),
+        CaseSensitivity::Sensitive => trimmed.to_owned(),
     }
 }
 
@@ -91,6 +151,15 @@ pub struct LifecycleInputs<'a> {
     /// fixed. When a finding has no entry here, its re-check is treated as
     /// absent and the finding stays open unless a current finding matches it.
     pub rechecks: &'a [(FindingId, Vec<CheckId>)],
+    /// The rule this project's volume applies to two spellings of one path.
+    ///
+    /// Asked once per run by [`case_rule_for`] and passed in, rather than worked
+    /// out per finding or per path: [`FindingKey`] is the only thing that needs
+    /// it, and every key in one comparison has to be built by the same rule — a
+    /// folded key compared with an unfolded one is how two findings for one file
+    /// become one finding for two. See `normalise_path` below for what the answer
+    /// does and [`crate::paths::volume`] for what the question is.
+    pub case: CaseSensitivity,
 }
 
 /// Reconcile previous findings with current findings and check results.
@@ -116,7 +185,7 @@ pub fn reconcile(
     let current_keys: HashMap<FindingKey, &Finding> = inputs
         .current_findings
         .iter()
-        .filter_map(|f| FindingKey::from_finding(f).map(|k| (k, f)))
+        .filter_map(|f| FindingKey::from_finding(f, inputs.case).map(|k| (k, f)))
         .collect();
 
     let result_by_id: HashMap<CheckId, CheckStatus> = inputs
@@ -136,7 +205,7 @@ pub fn reconcile(
     let mut kept_open = Vec::new();
 
     for previous in inputs.previous_open {
-        let Some(key) = FindingKey::from_finding(previous) else {
+        let Some(key) = FindingKey::from_finding(previous, inputs.case) else {
             // A previous finding with no checkable anchor cannot be matched or
             // resolved; carry it forward as-is so it does not vanish.
             findings.push(clone_for_state(
@@ -269,6 +338,15 @@ pub const HISTORY_SCAN_LIMIT: usize = 4096;
 /// dropped**: SURE cannot tell two of them apart, so it cannot choose between them
 /// without discarding a record it has no basis to call a duplicate.
 ///
+/// **`case` decides how much that deduplication takes out**, and it is the same
+/// rule [`reconcile`] matches by — the caller asks the volume once per run
+/// ([`case_rule_for`]) and hands the one answer to both, because two rules here
+/// would mean a finding this function dropped as a duplicate reappearing as a
+/// finding of its own one call later. On a volume that folds case, a stored
+/// `src/EMAIL/SEND.rs` and a stored `src/email/send.rs` are one finding and the
+/// newer row wins; on a volume that keeps it they are two, because they are two
+/// files.
+///
 /// # Why there is no project-state filter
 ///
 /// There was one, and it could never fire: it skipped a record whose
@@ -289,6 +367,7 @@ pub const HISTORY_SCAN_LIMIT: usize = 4096;
 pub fn previous_open_findings(
     store: &Store,
     project_root: &str,
+    case: CaseSensitivity,
 ) -> Result<Vec<Finding>, StoreError> {
     let filter = crate::store::HistoryFilter {
         project_fingerprint: None,
@@ -308,7 +387,7 @@ pub fn previous_open_findings(
         if !finding.status.needs_attention() {
             continue;
         }
-        if let Some(key) = FindingKey::from_finding(&finding)
+        if let Some(key) = FindingKey::from_finding(&finding, case)
             && !seen.insert(key)
         {
             continue;
@@ -387,6 +466,12 @@ pub fn open_after_reconcile(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    // Every `LifecycleInputs` below states its case rule as
+    // `CaseSensitivity::Sensitive` unless the test is *about* the rule. That is
+    // what `case_rule_for` answers when a volume cannot be asked
+    // (`paths::volume`), so a test that is about something else never has two
+    // spellings folded together underneath it, and the tests that are about the
+    // rule say so in their own names.
     use super::*;
     use sure_domain::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
     use sure_domain::finding::{
@@ -453,6 +538,7 @@ mod tests {
                 current_findings: std::slice::from_ref(&new),
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -473,6 +559,7 @@ mod tests {
                 current_findings: std::slice::from_ref(&current),
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -502,6 +589,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[check_result],
                 rechecks: &[(previous.id.clone(), vec![recheck])],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -521,6 +609,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[],
                 rechecks: &[(previous.id.clone(), vec![recheck])],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -548,6 +637,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[check_result],
                 rechecks: &[(previous.id.clone(), vec![recheck])],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -575,6 +665,7 @@ mod tests {
                     another_fingerprint(),
                 )],
                 rechecks: &[(previous.id.clone(), vec![first, second])],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -591,6 +682,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -612,6 +704,7 @@ mod tests {
                 current_findings: std::slice::from_ref(&current),
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -622,8 +715,20 @@ mod tests {
         assert!(!previous.status.needs_attention());
     }
 
+    /// Two spellings, one file, on a volume that folds case: **one finding**,
+    /// and the previous run's finding matched rather than carried.
+    ///
+    /// This was `keys_match_case_insensitively_on_windows`, which asserted one
+    /// count under `#[cfg(windows)]` and another under `#[cfg(not(windows))]`:
+    /// the rule was compiled in, so only one of the two answers could be run on
+    /// any one machine and the case-keeping answer could not be run on the
+    /// machine this repository is developed on at all. The rule is now an input,
+    /// so both answers are exercised **here, on every platform**, which is the
+    /// stronger half of what that test could do. What it still cannot do is say
+    /// which answer this machine's volume gives; the test below asks that, and
+    /// `paths::volume` pins the answers the two platform classes ship with.
     #[test]
-    fn keys_match_case_insensitively_on_windows() {
+    fn two_spellings_of_one_file_are_one_finding_when_the_volume_folds_them() {
         let previous = finding_with("Email not sent", "src/EMAIL/SEND.rs", FindingStatus::Open);
         let current = finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open);
         let update = reconcile(
@@ -632,56 +737,158 @@ mod tests {
                 current_findings: std::slice::from_ref(&current),
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Insensitive,
             },
             another_fingerprint(),
         );
 
-        // Stated outside the platform blocks on purpose: these hold whichever
-        // answer the platform gives to *is this the same file*, so asserting
-        // them inside one branch would leave the other branch's version of them
-        // unrun on two of the three machines this suite runs on. The earlier
-        // finding stayed open either way, it is a finding of this run rather
-        // than last run's record (`clone_for_state` mints this run's id), and
-        // its evidence still anchors the file the previous run complained about.
+        // One problem, one finding, and it is this run's finding — the previous
+        // run's copy of it is not a second entry in the verdict.
+        assert_eq!(update.findings.len(), 1);
+        assert_eq!(update.findings[0].id, current.id);
+        // The previous finding is neither resolved nor lost: it is the same
+        // issue, still open, and it is what the count a reader sees is about.
         assert_eq!(update.kept_open.len(), 1);
         assert_eq!(update.kept_open[0].title, previous.title);
         assert_eq!(update.kept_open[0].status, FindingStatus::Open);
+        assert!(update.resolved.is_empty());
+        // Matched by key, so the entry in `kept_open` is the previous finding
+        // itself rather than a fresh copy of it.
+        assert_eq!(update.kept_open[0].id, previous.id);
+    }
+
+    /// The same two spellings on a volume that keeps case: **two findings**, and
+    /// the previous one carried open beside this run's copy of it.
+    ///
+    /// This is the answer the task's third clause is about, and the defect the
+    /// task exists to remove where it is wrong: it is correct on a volume where
+    /// the two spellings really are two files, and it was the answer macOS got
+    /// because `normalise_path` asked the operating system instead of the volume
+    /// (`#[cfg(not(windows))]`) while the volume CI run `35544579833` measured
+    /// there folds case.
+    #[test]
+    fn two_spellings_of_two_files_are_two_findings_when_the_volume_keeps_case() {
+        let previous = finding_with("Email not sent", "src/EMAIL/SEND.rs", FindingStatus::Open);
+        let current = finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open);
+        let update = reconcile(
+            LifecycleInputs {
+                previous_open: std::slice::from_ref(&previous),
+                current_findings: std::slice::from_ref(&current),
+                check_results: &[],
+                rechecks: &[],
+                case: CaseSensitivity::Sensitive,
+            },
+            another_fingerprint(),
+        );
+
+        // Both files are named, because both are files here. Sorted rather than
+        // in report order: which of the two comes first is not part of this
+        // test's subject.
+        assert_eq!(update.findings.len(), 2);
+        let mut locations: Vec<String> = update
+            .findings
+            .iter()
+            .map(|finding| finding.evidence[0].anchor.location.clone())
+            .collect();
+        locations.sort();
+        assert_eq!(locations, ["src/EMAIL/SEND.rs", "src/email/send.rs"]);
+        // The previous finding did not reappear under its own spelling, so it is
+        // carried forward by `reconcile`'s last `else` — the same carry as
+        // `a_previous_finding_without_passing_rechecks_stays_open` and
+        // `a_previous_finding_that_did_not_reappear_is_carried_beside_the_current_ones`
+        // — and `clone_for_state` mints this run's id rather than reusing last
+        // run's, because a carried finding belongs to this run.
+        assert_eq!(update.kept_open.len(), 1);
+        assert_eq!(update.kept_open[0].title, previous.title);
+        assert_eq!(update.kept_open[0].status, FindingStatus::Open);
+        assert_ne!(update.kept_open[0].id, previous.id);
         assert_eq!(
             update.kept_open[0].evidence[0].anchor.location,
             "src/EMAIL/SEND.rs"
         );
-
-        // What the platform decides is how many findings a reader sees. Windows
-        // folds case in `normalise_path`, so the two spellings are one file and
-        // the current finding is the only one reported; on a case-sensitive
-        // filesystem they are two files, so the current finding is reported and
-        // the previous one is carried forward beside it by `reconcile`'s last
-        // `else` — the same carry as
-        // `a_previous_finding_without_passing_rechecks_stays_open` and
-        // `a_previous_finding_that_did_not_reappear_is_carried_beside_the_current_ones`,
-        // which expect the one `kept_open` entry asserted above and do so on
-        // every platform. So the two branches agree about everything except the
-        // count, and the Unix branch's count is the only claim in this test that
-        // cannot be run on the machine this repository is developed on.
-        #[cfg(windows)]
-        {
-            assert_eq!(update.findings.len(), 1);
-            // Matched by key, so the entry in `kept_open` is the previous
-            // finding itself rather than a fresh copy of it.
-            assert_eq!(update.kept_open[0].id, previous.id);
-        }
-        #[cfg(not(windows))]
-        assert_eq!(update.findings.len(), 2);
+        assert!(update.resolved.is_empty());
     }
 
-    /// The shape the case-sensitive branch of that test has, written so that it
-    /// holds on every platform: a previous finding for one file and a current
-    /// finding for another. The previous finding is neither matched nor
-    /// resolvable, so it is reported open *and* counted as kept open — which is
-    /// why the `#[cfg(not(windows))]` branch above expects a non-empty
-    /// `kept_open` rather than an empty one. Kept platform-independent on
-    /// purpose: this is the statement that a Unix-only branch cannot make
-    /// locally on the machine this repository is developed on.
+    /// The rule this machine's volume gives, reaching the verdict.
+    ///
+    /// The two tests above say what each answer does. This one asks the volume
+    /// the suite is running on — a scratch directory under `target/tmp`, the
+    /// same volume as the checkout — and asserts that the answer it gives is the
+    /// answer the comparison was made with, which is the claim no `cfg` can
+    /// carry and no reasoning can supply.
+    ///
+    /// **The assertion differs by platform, and this is what it is asking that
+    /// platform**: what its volume, not its operating system, does with two
+    /// spellings of one name — `paths::volume` names the two answers the shipped
+    /// volumes of the two platform classes give, and this test is deliberately
+    /// written against the *answer that came back* rather than against the
+    /// platform's name, so a machine that mounts a volume which is not its
+    /// platform's default still runs, and asserts, whichever arm the volume puts
+    /// it in.
+    ///
+    /// **What it does if the probe cannot answer**: it fails. `case_rule_for`
+    /// would fall back to `Sensitive` and the case-keeping arm below would then
+    /// pass without the volume having been asked anything, which is a test
+    /// passing for the wrong reason. `case_rule_of_volume` is called directly so
+    /// that the `None` is visible here rather than absorbed.
+    #[test]
+    fn the_rule_this_machines_volume_gives_is_the_rule_the_comparison_is_made_with() {
+        let root = crate::store::scratch_root().join(format!("case-rule-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        std::fs::write(root.join("Send.rs"), b"x").expect("a name with a case to flip");
+        let root = root.to_string_lossy();
+
+        let case = crate::paths::case_rule_of_volume(Path::new(root.as_ref())).unwrap_or_else(|| {
+            panic!(
+                "the volume holding {root} could not be asked, so this test could not say which \
+                 answer it was asserting"
+            )
+        });
+        assert_eq!(
+            case_rule_for(root.as_ref()),
+            case,
+            "`case_rule_for` did not carry the answer the volume gave"
+        );
+
+        let previous = finding_with("Email not sent", "src/EMAIL/SEND.rs", FindingStatus::Open);
+        let current = finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open);
+        let update = reconcile(
+            LifecycleInputs {
+                previous_open: std::slice::from_ref(&previous),
+                current_findings: std::slice::from_ref(&current),
+                check_results: &[],
+                rechecks: &[],
+                case,
+            },
+            another_fingerprint(),
+        );
+
+        match case {
+            CaseSensitivity::Insensitive => {
+                assert_eq!(update.findings.len(), 1);
+                assert_eq!(update.kept_open[0].id, previous.id);
+            }
+            CaseSensitivity::Sensitive => {
+                assert_eq!(update.findings.len(), 2);
+                assert_ne!(update.kept_open[0].id, previous.id);
+            }
+        }
+    }
+
+    /// Two *different* files, not two spellings of one: a previous finding for
+    /// one path and a current finding for another.
+    ///
+    /// This is the shape the case-keeping answer takes: the same carry the
+    /// `Sensitive` arm of the volume test above asserts, reached with two paths
+    /// that differ by more than case. Written so that it holds on every
+    /// platform, which matters because it is the statement the machine this
+    /// repository is developed on cannot reach through its own volume. Here the
+    /// rule is passed in rather than observed, so that is no longer a limitation
+    /// of the test.
+    ///
+    /// What it pins is that a carry and a fresh finding are two entries and not
+    /// one: the previous finding is neither matched nor resolvable, so it is
+    /// reported open *and* counted as kept open.
     #[test]
     fn a_previous_finding_that_did_not_reappear_is_carried_beside_the_current_ones() {
         let previous = finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open);
@@ -692,6 +899,7 @@ mod tests {
                 current_findings: std::slice::from_ref(&current),
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -746,6 +954,7 @@ mod tests {
                 current_findings: &[note.clone(), must_fix.clone()],
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -766,6 +975,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -800,6 +1010,7 @@ mod tests {
                 current_findings: &[],
                 check_results: &[],
                 rechecks: &[],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -825,6 +1036,7 @@ mod tests {
                     another_fingerprint(),
                 )],
                 rechecks: &[(previous.id.clone(), vec![recheck])],
+                case: CaseSensitivity::Sensitive,
             },
             another_fingerprint(),
         );
@@ -882,11 +1094,12 @@ mod tests {
         ));
         store_run(&store, project, &fingerprint(), &second, &[]).expect("the second run is stored");
 
-        let mut open: Vec<String> = previous_open_findings(&store, project)
-            .expect("the history reads")
-            .into_iter()
-            .map(|finding| finding.title)
-            .collect();
+        let mut open: Vec<String> =
+            previous_open_findings(&store, project, CaseSensitivity::Sensitive)
+                .expect("the history reads")
+                .into_iter()
+                .map(|finding| finding.title)
+                .collect();
         open.sort();
         assert_eq!(
             open,
@@ -912,15 +1125,69 @@ mod tests {
             &[],
         )
         .expect("the other project's run is stored");
-        let mut after: Vec<String> = previous_open_findings(&store, project)
-            .expect("the history reads")
-            .into_iter()
-            .map(|finding| finding.title)
-            .collect();
+        let mut after: Vec<String> =
+            previous_open_findings(&store, project, CaseSensitivity::Sensitive)
+                .expect("the history reads")
+                .into_iter()
+                .map(|finding| finding.title)
+                .collect();
         after.sort();
         assert_eq!(
             after, open,
             "another project's findings are not this project's open list"
         );
+    }
+
+    /// The other half of the third clause, and the one that reaches the store:
+    /// a history that holds both spellings of one file must not hand back two
+    /// findings for one problem.
+    ///
+    /// The `seen` guard above is what does this — a run stores every finding it
+    /// produced, so two runs that spelt one path two ways leave two rows in the
+    /// store. On a volume that folds case those rows are one finding and the
+    /// reader gets one; on a volume that keeps case they are two files and the
+    /// reader gets two. **Measured here, both rules, one store: `1` and `2`.**
+    ///
+    /// What the shipped build did, before this change: its rule was
+    /// `trimmed.to_lowercase()` under `#[cfg(windows)]` — the same expression
+    /// [`CaseSensitivity::Insensitive`] selects, read from the source rather than
+    /// measured — so this read answered one on Windows and two on the Unix
+    /// branch, which is the premise `P15-T016` measured on CI. On Windows the
+    /// answer is therefore unchanged; what changes is that the answer now comes
+    /// from the volume instead of from a platform name, and macOS — whose volume
+    /// CI run `35544579833` measured as folding — stops taking the Unix branch's
+    /// answer.
+    #[test]
+    fn a_history_holding_both_spelling_of_one_file_hands_back_one_finding() {
+        let store = store_in("recheck-lifecycle-case");
+        let project = "C:/projects/sendmail";
+        store_run(
+            &store,
+            project,
+            &fingerprint(),
+            &[
+                finding_with("Email not sent", "src/EMAIL/SEND.rs", FindingStatus::Open),
+                finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open),
+            ],
+            &[],
+        )
+        .expect("the run is stored");
+
+        let folding = previous_open_findings(&store, project, CaseSensitivity::Insensitive)
+            .expect("the history reads");
+        assert_eq!(
+            folding.len(),
+            1,
+            "two rows for one file came back as two findings"
+        );
+
+        let keeping = previous_open_findings(&store, project, CaseSensitivity::Sensitive)
+            .expect("the history reads");
+        assert_eq!(
+            keeping.len(),
+            2,
+            "two files' findings were deduplicated into one"
+        );
+        assert_eq!(keeping[0].title, keeping[1].title);
     }
 }

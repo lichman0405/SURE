@@ -40,7 +40,7 @@ pub enum CaseSensitivity {
 }
 
 impl CaseSensitivity {
-    /// What this platform does.
+    /// What this platform's *shipped* file systems do.
     ///
     /// Windows is case-insensitive. macOS is included with it because the
     /// default volume is, and a case-sensitive macOS volume is rare enough that
@@ -48,6 +48,15 @@ impl CaseSensitivity {
     /// wrong in the *other* direction — calling a case-insensitive platform
     /// sensitive — is what lets a path escape the check, so the assumption is
     /// made on the side of the answer that refuses.
+    ///
+    /// **This is the operating system's answer, from a `const fn`, and it is not
+    /// the volume's.** Where the question is *are these two spellings one file in
+    /// this project*, ask the volume: [`super::volume::case_rule_of_volume`],
+    /// whose callers include [`crate::recheck_lifecycle`]. CI run `35544579833`
+    /// measured macOS folding case and Linux keeping it in one workflow, which is
+    /// a difference this gate — or a `cfg(target_os = "macos")` — cannot express.
+    /// The two answers agree on the machines this repository runs on; they part
+    /// company on a volume that is not its platform's default.
     #[must_use]
     pub const fn platform() -> Self {
         if cfg!(any(windows, target_os = "macos")) {

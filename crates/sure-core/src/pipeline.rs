@@ -1120,20 +1120,30 @@ impl Pipeline<'_> {
             );
         };
 
-        let previous = match recheck_lifecycle::previous_open_findings(store, &run.project_root) {
-            Ok(previous) => previous,
-            Err(error) => {
-                return (
-                    None,
-                    StageOutcome::NotRun {
-                        reason: Some(NotCheckedReason::UnknownReason),
-                        detail: format!(
-                            "SURE could not read what an earlier run left open: {error}"
-                        ),
-                    },
-                );
-            }
-        };
+        // The volume is asked once, here, and the one answer decides every key
+        // this stage builds — the keys the earlier findings are looked up by and
+        // the keys this run's findings are matched by. Asking twice would be two
+        // answers to one question, and the two places a finding could then
+        // differ are the two this stage exists to keep apart: a finding dropped
+        // from history as a duplicate of its own other spelling, and a finding
+        // carried open beside this run's copy of it.
+        let case = recheck_lifecycle::case_rule_for(&run.project_root);
+
+        let previous =
+            match recheck_lifecycle::previous_open_findings(store, &run.project_root, case) {
+                Ok(previous) => previous,
+                Err(error) => {
+                    return (
+                        None,
+                        StageOutcome::NotRun {
+                            reason: Some(NotCheckedReason::UnknownReason),
+                            detail: format!(
+                                "SURE could not read what an earlier run left open: {error}"
+                            ),
+                        },
+                    );
+                }
+            };
 
         // Which checks have to pass before an earlier finding may close. The list
         // is `repair_impact::select_impacted_checks`'s answer, asked of each
@@ -1160,6 +1170,7 @@ impl Pipeline<'_> {
                 current_findings: &run.verdict.findings,
                 check_results: run.report.results(),
                 rechecks: &rechecks,
+                case,
             },
             run.project_state.id.clone(),
         );

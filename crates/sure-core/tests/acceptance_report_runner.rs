@@ -68,6 +68,7 @@ use sure_core::checks::node::NodeChecks;
 use sure_core::discover::node::{MANIFEST, NodeProject, ScriptRole};
 use sure_core::discover::{DiscoverOptions, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, content_fingerprint, project_fingerprint};
+use sure_core::paths::CaseSensitivity;
 use sure_core::process::{
     Cancellation, Environment, Limits, Outcome, ProcessRequest, Termination, run,
 };
@@ -1559,6 +1560,7 @@ fn half(finding: &Finding, repair: Repair) -> Half {
             current_findings: &[],
             check_results: &after.results,
             rechecks: &[(finding.id.clone(), selected.clone())],
+            case: CaseSensitivity::Sensitive,
         },
         after.state.clone(),
     );

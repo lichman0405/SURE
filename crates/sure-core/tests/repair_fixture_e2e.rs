@@ -90,6 +90,7 @@ use sure_core::checks::node::NodeChecks;
 use sure_core::discover::node::{MANIFEST, NodeProject, ScriptRole};
 use sure_core::discover::{DiscoverOptions, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, content_fingerprint, project_fingerprint};
+use sure_core::paths::CaseSensitivity;
 use sure_core::process::{
     Cancellation, Environment, Limits, Outcome, ProcessRequest, Termination, run,
 };
@@ -894,6 +895,7 @@ fn a_careless_repair_that_breaks_the_other_member_cannot_close_the_finding() {
             current_findings: &[],
             check_results: &after.results,
             rechecks: &[(finding.id.clone(), selected)],
+            case: CaseSensitivity::Sensitive,
         },
         after.state.clone(),
     );
@@ -1000,6 +1002,7 @@ fn a_complete_repair_closes_the_finding_on_new_passing_evidence() {
             current_findings: &[],
             check_results: &after.results,
             rechecks: &[(finding.id.clone(), selected)],
+            case: CaseSensitivity::Sensitive,
         },
         after.state.clone(),
     );
@@ -1018,8 +1021,8 @@ fn a_complete_repair_closes_the_finding_on_new_passing_evidence() {
     // `FindingId` is minted per run by design, so comparing ids here would be
     // asserting something `recheck_lifecycle` states it does not do.
     assert_eq!(
-        FindingKey::from_finding(closed),
-        FindingKey::from_finding(&finding),
+        FindingKey::from_finding(closed, CaseSensitivity::Sensitive),
+        FindingKey::from_finding(&finding, CaseSensitivity::Sensitive),
         "the finding that closed is not the finding that was open"
     );
     assert_eq!(closed.title, finding.title);

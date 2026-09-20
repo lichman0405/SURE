@@ -22,6 +22,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use sure_core::paths::CaseSensitivity;
 use sure_core::recheck_lifecycle::{LifecycleInputs, reconcile};
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
@@ -195,6 +196,7 @@ fn a_repair_with_failing_regression_check_cannot_turn_green() {
             current_findings: &[],
             check_results: &results,
             rechecks: &[(previous.id.clone(), selected.clone())],
+            case: CaseSensitivity::Sensitive,
         },
         next_fingerprint(),
     );
@@ -265,6 +267,7 @@ fn a_repair_with_all_selected_checks_passing_can_resolve() {
             current_findings: &[],
             check_results: &results,
             rechecks: &[(previous.id.clone(), selected)],
+            case: CaseSensitivity::Sensitive,
         },
         next_fingerprint(),
     );

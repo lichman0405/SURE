@@ -66,8 +66,10 @@
 //! do the same two jobs for the settings file.
 
 pub mod compare;
+pub mod volume;
 
 pub use compare::{CaseSensitivity, is_within, is_within_case, same_path, same_path_case};
+pub use volume::{case_rule_of_volume, case_rule_of_volume_or_sensitive};
 
 use std::fmt;
 use std::path::{Path, PathBuf};

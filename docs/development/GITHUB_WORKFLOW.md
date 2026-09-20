@@ -113,3 +113,22 @@ Two consequences worth knowing when reading a run:
   saying it.
 - **A green `windows-latest` job says nothing about the other two.** The
   platform that is easiest to satisfy is the one this repository is developed on.
+
+## The release workflow, which is not part of CI
+
+`.github/workflows/release-dry-run.yml` is the one workflow that produces
+release *artifacts*, and it is `workflow_dispatch`-only. It is deliberately not
+in `ci.yml`: a release build plus a package plus the acceptance corpus's release
+gate in front of every push would make the branch's red or green signal depend
+on a release decision rather than on the code. The two answer different
+questions.
+
+```
+gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
+```
+
+It has to exist on the default branch for `workflow_dispatch` to accept a ref at
+all, and it does. Its `validate` job is the three-platform test-and-build matrix;
+its `package-macos` job (`P15-T005`) builds, packages, checksums and reads back
+the macOS Apple Silicon artifact with `scripts/Build-Release.sh`.
+`docs/development/RELEASE_PROCESS.md` states what that artifact is.

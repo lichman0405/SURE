@@ -354,9 +354,16 @@ for entry in $ARTIFACTS; do
             '64' "$name_length" >&2
         printf 'One byte more is the commonest failure this repository has seen: a CR\n' >&2
         printf 'before the LF, written by a tool that ends lines the Windows way. Every\n' >&2
-        printf 'Windows program reads that file happily and `sha256sum` does not, because\n' >&2
+        printf 'Windows program reads that file happily and sha256sum does not, because\n' >&2
         printf 'the CR becomes part of the file name it looks for. One byte less is a\n' >&2
         printf 'final newline that is not there. Nothing was written.\n' >&2
+        # No backticks around the program name above, and that is a decision
+        # rather than an oversight. Inside single quotes a backtick is literal,
+        # so shellcheck reads it as an expansion the author did not intend and
+        # fails the job on SC2016 (info). The `usage` text near the top keeps
+        # its backticks because a `<<'EOF'` body is literal and the same lint
+        # says nothing about it; the difference between the two sites is the
+        # quoting, not a preference about prose.
         exit 1
     fi
 

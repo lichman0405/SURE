@@ -63,12 +63,66 @@ pub struct JsonAggregate {
 }
 
 /// Capability and support level summary.
+///
+/// # Why the tier is never alone here
+///
+/// A number is the one form of this answer that cannot carry a limitation, and
+/// `tier: 1` on its own reads as "SURE saw the session" — with nothing beside it
+/// saying which parts of the session it did not see, or whether it counted any
+/// events at all. So the blind spots travel with it as data (the wire names of
+/// [`sure_core::capability::BlindSpotKind`], which
+/// `crates/sure-domain/tests/wire_contract.rs` freezes), and the account of what
+/// was counted travels with it in
+/// [`summary`](Self::summary), in the same sentence the human report prints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JsonCapability {
     /// Numeric capability tier: 0 snapshot, 1 observed, 2 protected.
     pub tier: u8,
-    /// Plain-language description of what the user actually gets.
+    /// Plain-language description of what the user actually gets, including
+    /// what was counted and what this tier still does not cover.
     pub summary: String,
+    /// What SURE could not see, as the wire names of `BlindSpotKind`.
+    ///
+    /// A list rather than prose: a script deciding whether a verdict is usable
+    /// for its purpose is asking whether a *named* gap is present, and parsing
+    /// sentences to find out is how a script breaks when a sentence is improved.
+    pub blind_spots: Vec<String>,
+    /// What the tier was counted from, when it came from recorded events.
+    ///
+    /// `None` when SURE counted nothing — the report is the command line's own,
+    /// which has no session to count. The distinction is the field: a project
+    /// with no recorded events and a project whose events belong to a different
+    /// directory both report tier 0, and only this says which is which.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<JsonCapabilityEvidence>,
+}
+
+/// What a capability tier was counted from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JsonCapabilityEvidence {
+    /// The harnesses the counted events came from, sorted and deduplicated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<String>,
+    /// How many session events were counted for this project.
+    pub events: usize,
+    /// The earliest and latest counted event, as the envelopes carried them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<JsonCapabilityWindow>,
+    /// Session events the read found that are about other projects.
+    pub elsewhere: usize,
+    /// Whether the read stopped at its own limit before reading everything.
+    pub truncated: bool,
+    /// Whether SURE could not read the events its store holds at all.
+    pub unreadable: bool,
+}
+
+/// The span the counted events cover, as the envelopes wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JsonCapabilityWindow {
+    /// The earliest counted event, RFC 3339.
+    pub oldest: String,
+    /// The latest counted event, RFC 3339.
+    pub newest: String,
 }
 
 /// One finding rendered for a machine-readable report.
@@ -262,6 +316,27 @@ pub fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
         capability: JsonCapability {
             tier: verdict.capability.tier_number(),
             summary: verdict.capability.summary(),
+            blind_spots: verdict
+                .capability
+                .blind_spots
+                .iter()
+                .map(|spot| spot.kind.as_str().to_owned())
+                .collect(),
+            evidence: verdict
+                .capability
+                .evidence
+                .as_ref()
+                .map(|evidence| JsonCapabilityEvidence {
+                    harnesses: evidence.harnesses.clone(),
+                    events: evidence.events,
+                    window: evidence.window.as_ref().map(|window| JsonCapabilityWindow {
+                        oldest: window.oldest.clone(),
+                        newest: window.newest.clone(),
+                    }),
+                    elsewhere: evidence.elsewhere,
+                    truncated: evidence.truncated,
+                    unreadable: evidence.unreadable,
+                }),
         },
         findings,
         not_checked,
@@ -279,7 +354,9 @@ pub fn build_json_report(verdict: &ProjectVerdict) -> JsonReport {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use sure_core::capability::CapabilityReport;
+    use sure_core::capability::{
+        BlindSpot, BlindSpotKind, CapabilityEvidence, CapabilityReport, CapabilityTier, EventWindow,
+    };
     use sure_core::evidence::{
         AnchorSubject, ClaimAssessment, Evidence, EvidenceAnchor, EvidenceClass,
     };
@@ -543,6 +620,97 @@ mod tests {
         assert_eq!(report.findings.len(), 1);
         assert!(report.findings[0].is_model_only);
         assert!(report.findings[0].evidence_anchors.is_empty());
+    }
+
+    #[test]
+    fn the_machine_form_names_the_gaps_and_what_the_tier_was_counted_from() {
+        // Criterion 3 for a machine reader: `tier: 1` on its own is the one form
+        // of this answer that cannot carry a limitation. The blind spots travel
+        // as their wire names — so a script asks whether a *named* gap is
+        // present rather than parsing the sentence — and the count says which
+        // harnesses the events came from and over what window, which is what
+        // separates "nothing was recorded" from "events exist and were not
+        // counted".
+        let mut verdict = build_verdict(green_aggregate(), Vec::new(), Vec::new());
+        verdict.capability = CapabilityReport {
+            adapter: "codex".to_owned(),
+            tier: CapabilityTier::Observed,
+            blind_spots: vec![BlindSpot {
+                kind: BlindSpotKind::NoPreActionControl,
+                explanation: BlindSpotKind::NoPreActionControl
+                    .plain_explanation()
+                    .to_owned(),
+            }],
+            pre_action_control: false,
+            hook_failure: sure_core::capability::HookFailureBehaviour::NotApplicable,
+            evidence: Some(CapabilityEvidence {
+                harnesses: vec!["codex".to_owned()],
+                events: 3,
+                window: Some(EventWindow {
+                    oldest: "2026-09-14T09:10:56.827Z".to_owned(),
+                    newest: "2026-09-14T09:11:30.000Z".to_owned(),
+                }),
+                elsewhere: 1,
+                truncated: false,
+                unreadable: false,
+            }),
+        };
+
+        let json = render_json_report(&verdict);
+        let report = parse_report(&json);
+        assert_eq!(report.capability.tier, 1);
+        assert_eq!(report.capability.blind_spots, vec!["no_pre_action_control"]);
+        let evidence = report
+            .capability
+            .evidence
+            .expect("a counted tier carries its count");
+        assert_eq!(evidence.events, 3);
+        assert_eq!(evidence.harnesses, vec!["codex".to_owned()]);
+        assert_eq!(evidence.elsewhere, 1);
+        assert_eq!(
+            evidence.window.map(|window| (window.oldest, window.newest)),
+            Some((
+                "2026-09-14T09:10:56.827Z".to_owned(),
+                "2026-09-14T09:11:30.000Z".to_owned()
+            ))
+        );
+        assert!(!evidence.truncated);
+        assert!(!evidence.unreadable);
+        // The sentence beside it is the same one the human report prints, so a
+        // reader of either form has the same account of the same run.
+        assert_eq!(report.capability.summary, verdict.capability.summary());
+
+        let schema_text = include_str!("../../../schemas/report.schema.json");
+        let schema = sure_protocol::schema::Schema::parse("report.schema.json", schema_text)
+            .expect("schema is enforceable");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let violations = schema.validate(&value);
+        assert!(
+            violations.is_empty(),
+            "a report with a counted tier violates the schema it ships with: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn a_report_that_counted_nothing_carries_no_evidence_field() {
+        // The distinction is carried by the absence, so the absence has to be
+        // real: a project with no store must not read as a project whose events
+        // were counted and came to zero.
+        let verdict = build_verdict(green_aggregate(), Vec::new(), Vec::new());
+        let value: serde_json::Value =
+            serde_json::from_str(&render_json_report(&verdict)).expect("valid JSON");
+        assert!(
+            value["capability"].get("evidence").is_none(),
+            "a report that counted nothing claims a count: {}",
+            value["capability"]
+        );
+        // And the blind spots are there all the same: the field is unconditional
+        // because an empty list is an answer ("nothing was hidden from SURE at
+        // this tier"), while a missing key would be a question.
+        assert_eq!(
+            value["capability"]["blind_spots"],
+            serde_json::json!(["no_session_visibility", "no_pre_action_control"])
+        );
     }
 
     #[test]

@@ -61,7 +61,6 @@
 
 use std::path::Path;
 
-use sure_domain::capability::CapabilityReport;
 use sure_domain::evidence::ClaimAssessment;
 use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
 use sure_domain::ids::{CheckId, ClaimId, FingerprintId};
@@ -73,6 +72,7 @@ use sure_domain::vocabulary::{Claim, ProjectFingerprint, ProjectSupport, Project
 use crate::aggregation::{RunReport, aggregate_run};
 use crate::analysis_provider;
 use crate::candidate_scanner::CandidateScanner;
+use crate::capability_report;
 use crate::checks::{self, check_id};
 use crate::claim_checker::{self, CheckedClaim};
 use crate::components::ComponentGraph;
@@ -778,7 +778,20 @@ impl Pipeline<'_> {
                 );
             }
         };
-        let capability = CapabilityReport::cli();
+        // The tier comes from the project's own recorded events, not from the
+        // command line, and the store is the one this run was handed — never one
+        // opened here (see the module comment). What SURE may say about a session
+        // it recorded is a fact about the project being checked, and a report
+        // that answered "no session visibility" for a project with a week of
+        // events in the store would be SURE understating what it knows about the
+        // one thing this whole layer exists to know.
+        //
+        // The rule for what those events earn, and the account of what was
+        // counted, are `capability_report`'s: this stage passes the store and the
+        // project root and adds no rule of its own.
+        let project_root = discovery.root.to_string_lossy().into_owned();
+        let capability_of_project = capability_report::for_project(self.store, &project_root);
+        let capability = capability_of_project.report;
         let coverage = summarize(&schedule, &report, &capability);
         let not_checked: Vec<CheckResult> = report
             .results()
@@ -808,11 +821,23 @@ impl Pipeline<'_> {
             not_checked,
             claims.clone(),
         );
+        // A store whose events could not be read is not a project with no
+        // session, and the two must not read alike: the run reports the tier it
+        // can prove without those events and says here what stopped it. The
+        // error's own text is in this detail rather than in the capability line,
+        // which is a sentence SURE writes about itself.
+        let capability_failure = match capability_of_project.read_failure {
+            Some(detail) => format!(
+                " SURE could not read the events its store holds, so it reports the tier it can \
+                 prove without them: {detail}"
+            ),
+            None => String::new(),
+        };
         stages.push(
             Stage::Aggregate,
             StageOutcome::Ran {
                 detail: format!(
-                    "{} {} check(s) produced a result, {} did not run.",
+                    "{} {} check(s) produced a result, {} did not run.{capability_failure}",
                     verdict.aggregate.headline,
                     coverage.checked_count,
                     coverage.not_checked.len(),
@@ -822,7 +847,7 @@ impl Pipeline<'_> {
 
         // ---- 11 and 12, as far as this purpose asks --------------------------
         let mut run = RunOutcome {
-            project_root: discovery.root.to_string_lossy().into_owned(),
+            project_root,
             mode,
             permissions,
             project_state: state,

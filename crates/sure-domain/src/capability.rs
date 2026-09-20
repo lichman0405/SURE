@@ -114,6 +114,28 @@ variants!(BlindSpotKind {
 });
 
 impl BlindSpotKind {
+    /// The stable wire name, as a stored record spells it.
+    ///
+    /// For callers that carry a blind spot where a person will not read it — the
+    /// machine-readable report names them, so that a script asks whether a
+    /// *named* gap is present instead of parsing the sentence beside it.
+    /// `blind_spot_kind_as_str_matches_the_frozen_wire_names` in
+    /// `crates/sure-domain/tests/wire_contract.rs` pins this to the same
+    /// spellings `blind_spot_wire_names_are_frozen` pins serde to.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UserGoalNotExposed => "user_goal_not_exposed",
+            Self::CompletionClaimNotExposed => "completion_claim_not_exposed",
+            Self::ToolCallsNotExposed => "tool_calls_not_exposed",
+            Self::FailuresNotExposed => "failures_not_exposed",
+            Self::FileEditsNotExposed => "file_edits_not_exposed",
+            Self::GitActivityNotExposed => "git_activity_not_exposed",
+            Self::NoPreActionControl => "no_pre_action_control",
+            Self::NoSessionVisibility => "no_session_visibility",
+        }
+    }
+
     /// Plain-language explanation, used when a caller has nothing more specific.
     #[must_use]
     pub const fn plain_explanation(self) -> &'static str {
@@ -144,6 +166,142 @@ impl BlindSpotKind {
     }
 }
 
+/// The window the events a report counted cover.
+///
+/// The two ends as the envelopes carried them (RFC 3339), not reformatted: a
+/// reader comparing this line with what a harness wrote is comparing strings,
+/// and a second rendering of one instant is a second thing to be wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventWindow {
+    /// The earliest event counted.
+    pub oldest: String,
+    /// The latest event counted.
+    pub newest: String,
+}
+
+/// What a capability report counted, and where it looked.
+///
+/// Present exactly when the tier was derived from the events a store holds for
+/// the project. [`CapabilityReport::evidence`] is `None` when SURE counted
+/// nothing at all — the report then describes the command line, which has no
+/// session visibility to count — and in that case the report says nothing about
+/// counting rather than saying it counted none.
+///
+/// # Why the counted facts are here rather than in a caller's log
+///
+/// Because a tier with no account of itself is the shape this product exists to
+/// prevent. "Tier 1" alone cannot be told from an adapter's own claim, and
+/// "tier 0" alone cannot be told from "events exist and were not counted" —
+/// which is the difference between a project nobody recorded a session for and a
+/// store whose sessions belong to a different project, or a read that stopped
+/// early. Every field below exists to make one of those distinctions readable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityEvidence {
+    /// The harnesses the counted events came from, deduplicated and sorted.
+    ///
+    /// Empty when nothing was counted for this project, and empty when the store
+    /// could not be read at all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<String>,
+    /// How many session events were counted for this project.
+    pub events: usize,
+    /// The window the counted events cover.
+    ///
+    /// `None` when nothing was counted, and `None` when some counted event's
+    /// time is not a timestamp SURE can read — the sentence that uses this
+    /// states a span, and a span over the events that happened to parse would
+    /// leave the others outside it while still reading as the whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<EventWindow>,
+    /// Session events the read found that are about other projects.
+    ///
+    /// The count is of events that were **read** and not counted towards this
+    /// project, which is exactly the sentence the report writes. A store with
+    /// session events for a different project is not a project with a session,
+    /// and the two must not read alike.
+    pub elsewhere: usize,
+    /// Whether the read stopped at its own limit before reading everything.
+    ///
+    /// True means older events than the ones counted may exist; the report says
+    /// so rather than presenting the newest page as the whole history.
+    pub truncated: bool,
+    /// Whether SURE could not read the events its store holds at all.
+    ///
+    /// The safe direction, and the reason it is a field rather than a silent
+    /// empty: an unreadable store reports the snapshot tier with no events
+    /// counted, and a reader is told that this is what happened rather than
+    /// being left to conclude that no session was ever recorded here.
+    pub unreadable: bool,
+}
+
+impl CapabilityEvidence {
+    /// One sentence (or two) saying what was counted, in a reader's own terms.
+    ///
+    /// Every branch is a statement about what SURE read and counted, so none of
+    /// them can be true of the wrong case: "counted no session events" and
+    /// "read events recorded for other projects" are different sentences, and a
+    /// reader who sees the first without the second knows the difference.
+    #[must_use]
+    pub fn counted(&self) -> String {
+        let mut sentence = if self.unreadable {
+            "SURE could not read the events its store holds, so it counted none for this project."
+                .to_owned()
+        } else if self.events == 0 {
+            "SURE counted no session events for this project: SURE's store holds none for it."
+                .to_owned()
+        } else {
+            let harnesses = join_list(&self.harnesses);
+            let by = if harnesses.is_empty() {
+                String::new()
+            } else {
+                format!(" by {harnesses}")
+            };
+            let window = match &self.window {
+                Some(window) if window.oldest == window.newest => {
+                    format!(", at {}", window.oldest)
+                }
+                Some(window) => format!(", between {} and {}", window.oldest, window.newest),
+                None => ", at times SURE could not read".to_owned(),
+            };
+            format!(
+                "SURE counted {} session event{} recorded for this project{by}{window}.",
+                self.events,
+                if self.events == 1 { "" } else { "s" },
+            )
+        };
+
+        if self.elsewhere > 0 {
+            sentence.push_str(&format!(
+                " SURE also read {} session event{} recorded for other projects; they are not \
+                 part of this project's tier and were not counted.",
+                self.elsewhere,
+                if self.elsewhere == 1 { "" } else { "s" },
+            ));
+        }
+        if self.truncated {
+            sentence.push_str(
+                " SURE stopped before it had read every event the store holds, so anything older \
+                 than the events it read is not counted here.",
+            );
+        }
+        sentence
+    }
+}
+
+/// A list of names as a sentence: `a`, `a and b`, `a, b and c`.
+///
+/// The same shape [`BlindSpotKind::plain_explanation`]'s callers use for lists a
+/// person reads, written once so that "a and b and c" cannot appear in one
+/// sentence of a report and "a, b and c" in the next.
+fn join_list(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// What an integration can actually do, reported by the adapter itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityReport {
@@ -158,6 +316,13 @@ pub struct CapabilityReport {
     pub pre_action_control: bool,
     /// Whether a hook failure leaves the harness running (`fail_open`) or stops it (`fail_closed`).
     pub hook_failure: HookFailureBehaviour,
+    /// What the tier was counted from, when it came from recorded events.
+    ///
+    /// `None` means SURE counted nothing: the report is the command line's own,
+    /// which has no session to count. A reader must be able to tell the two
+    /// apart, so the absence is a field rather than an empty count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<CapabilityEvidence>,
 }
 
 impl CapabilityReport {
@@ -183,6 +348,10 @@ impl CapabilityReport {
             ],
             pre_action_control: false,
             hook_failure: HookFailureBehaviour::NotApplicable,
+            // The command line did not count anything: there is no session for it
+            // to count, and a report that carried an empty count would read as a
+            // session it looked for and did not find.
+            evidence: None,
         }
     }
 
@@ -204,14 +373,54 @@ impl CapabilityReport {
     }
 
     /// Plain-language description of what the user actually gets.
+    ///
+    /// # What one line has to carry
+    ///
+    /// The tier, then — when the tier was counted from recorded events — what
+    /// was counted, and then what the tier still does not cover. Three things
+    /// and not one, because each is a way for this line to be wrong on its own:
+    ///
+    /// - A tier with no account of itself cannot be told from an adapter's own
+    ///   claim, and "tier 0" cannot be told from "events exist and were not
+    ///   counted" ([`CapabilityEvidence::counted`] is where that distinction is
+    ///   written).
+    /// - A tier with no blind spots beside it reads as completeness, which is
+    ///   the one thing a tier is not: [`CapabilityTier::Observed`] means SURE
+    ///   saw what happened, not that it saw all of it, and
+    ///   [`CapabilityTier::Snapshot`] means SURE saw none of it.
+    ///
+    /// The blind spots are written exactly as
+    /// [`BlindSpotKind::plain_explanation`] returns them — this method is a
+    /// rendering, not a second wording, and a caller that paraphrases them here
+    /// has created a copy free to drift from the one the report renders
+    /// elsewhere.
+    ///
+    /// The two halves appear together or not at all: a report with no evidence
+    /// counted nothing, and its summary is the tier line and nothing else, which
+    /// is what every report written before this field existed said.
     #[must_use]
     pub fn summary(&self) -> String {
-        format!(
+        let mut line = format!(
             "{} (capability tier {}, {})",
             self.tier.plain_description(),
             self.tier.number(),
             self.tier.as_str()
-        )
+        );
+        let Some(evidence) = &self.evidence else {
+            return line;
+        };
+        line.push(' ');
+        line.push_str(&evidence.counted());
+        if !self.blind_spots.is_empty() {
+            line.push_str(" What SURE still cannot see: ");
+            let explanations: Vec<&str> = self
+                .blind_spots
+                .iter()
+                .map(|spot| spot.explanation.as_str())
+                .collect();
+            line.push_str(&explanations.join(" "));
+        }
+        line
     }
 
     /// Whether SURE can honestly claim to have seen the user's request.
@@ -331,6 +540,7 @@ mod tests {
             blind_spots: Vec::new(),
             pre_action_control: true,
             hook_failure: HookFailureBehaviour::FailOpen,
+            evidence: None,
         };
         assert!(report.is_self_consistent());
         assert!(report.saw_user_request());
@@ -368,6 +578,175 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The evidence a project with a session produces, with the parts a test
+    /// does not care about left neutral.
+    fn counted(events: usize, harnesses: &[&str]) -> CapabilityEvidence {
+        CapabilityEvidence {
+            harnesses: harnesses.iter().map(|name| (*name).to_owned()).collect(),
+            events,
+            window: None,
+            elsewhere: 0,
+            truncated: false,
+            unreadable: false,
+        }
+    }
+
+    #[test]
+    fn a_report_that_counted_nothing_is_the_line_it_always_was() {
+        // Every run without a store, and every report written before the
+        // evidence field existed. The two halves are the point: no count is
+        // claimed, and no blind spot is named, because the tier line already
+        // says SURE sees nothing of the session.
+        let line = CapabilityReport::cli().summary();
+        assert_eq!(
+            line,
+            "SURE can look at the project as it is now. It cannot see what the AI did while it \
+             worked. (capability tier 0, snapshot)"
+        );
+    }
+
+    #[test]
+    fn a_counted_line_names_the_harnesses_and_the_window() {
+        // Criterion 4: a reader must be able to tell "nothing was recorded" from
+        // "events exist and were not counted", and neither from "SURE counted
+        // them". What makes the third readable is this sentence.
+        let evidence = CapabilityEvidence {
+            harnesses: vec!["claude-code".to_owned(), "codex".to_owned()],
+            events: 2,
+            window: Some(EventWindow {
+                oldest: "2026-09-14T09:10:56.827Z".to_owned(),
+                newest: "2026-09-14T10:22:01.000Z".to_owned(),
+            }),
+            elsewhere: 0,
+            truncated: false,
+            unreadable: false,
+        };
+        let line = evidence.counted();
+        assert_eq!(
+            line,
+            "SURE counted 2 session events recorded for this project by claude-code and codex, \
+             between 2026-09-14T09:10:56.827Z and 2026-09-14T10:22:01.000Z."
+        );
+    }
+
+    #[test]
+    fn one_event_is_a_span_of_one_instant_and_one_harness_is_not_a_list() {
+        let evidence = CapabilityEvidence {
+            harnesses: vec!["codex".to_owned()],
+            events: 1,
+            window: Some(EventWindow {
+                oldest: "2026-09-14T09:10:56.827Z".to_owned(),
+                newest: "2026-09-14T09:10:56.827Z".to_owned(),
+            }),
+            elsewhere: 0,
+            truncated: false,
+            unreadable: false,
+        };
+        assert_eq!(
+            evidence.counted(),
+            "SURE counted 1 session event recorded for this project by codex, at \
+             2026-09-14T09:10:56.827Z."
+        );
+    }
+
+    #[test]
+    fn an_empty_count_says_the_store_holds_none_and_not_that_none_exist() {
+        // "SURE counted none" is a statement about the read, and the sentence
+        // must not become a statement about the project: a store that holds a
+        // session for a different directory is exactly the case this wording
+        // exists for.
+        let mut evidence = counted(0, &[]);
+        evidence.elsewhere = 3;
+        assert_eq!(
+            evidence.counted(),
+            "SURE counted no session events for this project: SURE's store holds none for it. \
+             SURE also read 3 session events recorded for other projects; they are not part of \
+             this project's tier and were not counted."
+        );
+    }
+
+    #[test]
+    fn an_unreadable_store_does_not_report_the_project_as_having_no_session() {
+        let evidence = CapabilityEvidence {
+            harnesses: Vec::new(),
+            events: 0,
+            window: None,
+            elsewhere: 0,
+            truncated: false,
+            unreadable: true,
+        };
+        assert_eq!(
+            evidence.counted(),
+            "SURE could not read the events its store holds, so it counted none for this project."
+        );
+    }
+
+    #[test]
+    fn a_read_that_stopped_early_says_so_rather_than_presenting_the_page_as_the_whole() {
+        let mut evidence = counted(4, &["claude-code"]);
+        evidence.window = Some(EventWindow {
+            oldest: "2026-09-14T09:10:56.827Z".to_owned(),
+            newest: "2026-09-14T09:10:57.827Z".to_owned(),
+        });
+        evidence.truncated = true;
+        let line = evidence.counted();
+        assert!(
+            line.ends_with(
+                "SURE stopped before it had read every event the store holds, so anything older \
+                 than the events it read is not counted here."
+            ),
+            "{line}"
+        );
+        assert!(line.contains("counted 4 session events"), "{line}");
+    }
+
+    #[test]
+    fn a_counted_summary_carries_the_tier_the_count_and_the_blind_spots() {
+        // The three parts in one line, in the order a reader needs them: what
+        // SURE can do, what it counted that lets it say so, and what it still
+        // cannot see. Blind spots are the explanations the report uses
+        // everywhere, not a second wording of them.
+        let report = CapabilityReport {
+            adapter: "codex".to_owned(),
+            tier: CapabilityTier::Observed,
+            blind_spots: vec![
+                BlindSpot {
+                    kind: BlindSpotKind::FailuresNotExposed,
+                    explanation: BlindSpotKind::FailuresNotExposed
+                        .plain_explanation()
+                        .to_owned(),
+                },
+                BlindSpot {
+                    kind: BlindSpotKind::NoPreActionControl,
+                    explanation: BlindSpotKind::NoPreActionControl
+                        .plain_explanation()
+                        .to_owned(),
+                },
+            ],
+            pre_action_control: false,
+            hook_failure: HookFailureBehaviour::NotApplicable,
+            evidence: Some(counted(1, &["codex"])),
+        };
+        let line = report.summary();
+        assert!(
+            line.starts_with(CapabilityTier::Observed.plain_description()),
+            "{line}"
+        );
+        assert!(line.contains("(capability tier 1, observed)"), "{line}");
+        assert!(
+            line.contains("SURE counted 1 session event recorded for this project by codex"),
+            "{line}"
+        );
+        assert!(
+            line.contains("What SURE still cannot see: "),
+            "the blind spots are not named: {line}"
+        );
+        assert!(
+            line.contains(BlindSpotKind::NoPreActionControl.plain_explanation()),
+            "{line}"
+        );
     }
 
     #[test]

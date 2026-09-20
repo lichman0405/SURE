@@ -2,6 +2,12 @@
 
 Priority: first-class; target Tier 2 where current Claude Code hooks permit.
 
+The tier a `sure check` reports for a project is the one its **recorded events**
+earn, not this line and not the adapter's own claim: Tier 1 for a project whose
+store holds a session's events, and Tier 0 for a project with none — and never
+Tier 2 from events alone, because events prove what happened rather than that
+SURE could have stopped it.
+
 The bootstrap package is **Windows-first**. Its current hook template uses PowerShell, which Claude Code officially supports for Windows command hooks. Release tasks must validate the installed/current hook schema and generate/package appropriate launchers for secondary macOS/Linux support.
 
 The hook is intentionally thin: it forwards stdin JSON to the local SURE core. Core checking/protection logic does not live in the script.

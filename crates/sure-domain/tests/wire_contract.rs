@@ -308,6 +308,27 @@ frozen!(FindingStatus, test: finding_status_wire_names_are_frozen, {
     CannotConfirm => "cannot_confirm",
 });
 
+#[test]
+fn blind_spot_kind_as_str_matches_the_frozen_wire_names() {
+    // `as_str` is hand-written — `variants!` generates `ALL` and nothing else —
+    // so it is a second spelling of a name that is already frozen, and a second
+    // spelling is a thing that can drift. The machine-readable report writes
+    // these strings (see `JsonCapability::blind_spots`), so a script reading it
+    // would see a name no other part of the product uses.
+    //
+    // Compared against serde rather than against a table copied here: the table
+    // above is already the pinned literal, and this ties the hand-written
+    // spelling to it transitively.
+    for kind in BlindSpotKind::ALL {
+        let json = serde_json::to_value(kind).expect("enum variant must serialize");
+        assert_eq!(
+            json,
+            Value::String(kind.as_str().to_owned()),
+            "BlindSpotKind::{kind:?} serializes as one name and answers `as_str` with another"
+        );
+    }
+}
+
 // --- enums the macro cannot cover ---------------------------------------
 
 #[test]
@@ -539,6 +560,14 @@ fn the_json_schemas_and_the_rust_enums_name_the_same_values() {
             AnchorSubject::ALL
                 .iter()
                 .map(|s| s.as_str().to_owned())
+                .collect(),
+        ),
+        (
+            "report.schema.json",
+            "/properties/capability/properties/blind_spots/items/enum",
+            BlindSpotKind::ALL
+                .iter()
+                .map(|k| k.as_str().to_owned())
                 .collect(),
         ),
     ];

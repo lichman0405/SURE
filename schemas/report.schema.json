@@ -62,10 +62,12 @@
       "type": "string"
     },
     "capability": {
+      "description": "What the harness integration could and could not see, and what the tier was counted from when it came from recorded events.",
       "type": "object",
       "required": [
         "tier",
-        "summary"
+        "summary",
+        "blind_spots"
       ],
       "properties": {
         "tier": {
@@ -75,6 +77,75 @@
         },
         "summary": {
           "type": "string"
+        },
+        "blind_spots": {
+          "description": "What SURE could not see, as the wire names of the blind-spot enum. A list rather than prose, so a script can ask whether a named gap is present without parsing the summary sentence.",
+          "type": "array",
+          "items": {
+            "enum": [
+              "user_goal_not_exposed",
+              "completion_claim_not_exposed",
+              "tool_calls_not_exposed",
+              "failures_not_exposed",
+              "file_edits_not_exposed",
+              "git_activity_not_exposed",
+              "no_pre_action_control",
+              "no_session_visibility"
+            ]
+          }
+        },
+        "evidence": {
+          "description": "What the tier was counted from, when it came from recorded events. Absent when SURE counted nothing at all: a project with no recorded events and a project whose events belong to a different directory both report tier 0, and only this says which is which.",
+          "type": "object",
+          "required": [
+            "events",
+            "elsewhere",
+            "truncated",
+            "unreadable"
+          ],
+          "properties": {
+            "harnesses": {
+              "description": "The harnesses the counted events came from, sorted and deduplicated. Empty when nothing was counted.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events": {
+              "description": "How many session events were counted for this project.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "window": {
+              "description": "The earliest and latest counted event, as the envelopes carried them. Absent when some counted event's time is not a timestamp SURE can read.",
+              "type": "object",
+              "required": [
+                "oldest",
+                "newest"
+              ],
+              "properties": {
+                "oldest": {
+                  "type": "string"
+                },
+                "newest": {
+                  "type": "string"
+                }
+              }
+            },
+            "elsewhere": {
+              "description": "How many session events the read found that are about other projects.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "description": "Whether the read stopped at its own limit before reading everything, so older events may exist that are not counted.",
+              "type": "boolean"
+            },
+            "unreadable": {
+              "description": "Whether SURE could not read the events its store holds at all. The report then states the snapshot tier it can prove without them.",
+              "type": "boolean"
+            }
+          }
         }
       }
     },

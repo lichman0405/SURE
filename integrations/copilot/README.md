@@ -148,6 +148,11 @@ A Copilot adapter is **Observed (Tier 1)** until Copilot's hook contract guarant
 - `crates/sure-core/src/hook_protection.rs` documents that Cursor and Claude Code are Observed because the manifest does not confirm the harness interprets the response.
 - `crates/sure-domain/src/capability.rs` defines the tiers: `0` snapshot, `1` observed, `2` protected.
 - The event envelope must set `"capability_tier": 1`.
+- The tier a `sure check` reports is derived from the events SURE actually
+  received, not from this field: a project whose store holds a session's events
+  reports Observed, an envelope claiming Protected never raises it, and a project
+  with no recorded events still reports Snapshot. The envelope's field is what
+  the adapter says about itself; the report is what SURE can prove.
 
 Claiming Protected (Tier 2) without an enforceable pre-action hook would be a false green: SURE would appear to block dangerous actions while Copilot might still run them.
 

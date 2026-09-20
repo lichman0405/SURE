@@ -36,7 +36,7 @@ installed. Tier 2 is deliberately not claimed.**
 | Tier | State | Why |
 | --- | --- | --- |
 | Tier 0 — snapshot | What an install without the hooks gives you | The skills, prompts and MCP server all run `sure check`, which sees the project on disk. Nothing forwards session events. |
-| Tier 1 — observed | **Achieved by this package, with the hooks installed** | Four documented Codex events (`SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`) are normalised, validated and stored, so SURE can say which tools Codex asked for, what it asked them to do, what they answered and when the session started and ended. |
+| Tier 1 — observed | **Achieved by this package, with the hooks installed** | Four documented Codex events (`SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`) are normalised, validated and stored, so SURE can say which tools Codex asked for, what it asked them to do, what they answered and when the session started and ended. A `sure check` of that project reads the tier back out of those stored events and says how many it counted. |
 | Tier 2 — protected | **not claimed** | See below. |
 
 The Tier 1 evidence, on **2026-09-18**, from this repository:
@@ -51,6 +51,18 @@ The Tier 1 evidence, on **2026-09-18**, from this repository:
   session, four events, in order, for four payloads sharing one `session_id`.
 - The one unmapped fixture is refused with `exit 5` and a sentence naming the
   reason, and leaves the store as it was.
+- The round trip now runs end to end. On **2026-09-20**, four Codex fixtures
+  were ingested into a scratch store under `target\tmp`, and
+  `target\debug\sure.exe check <project> --store-dir <that store>` then reported
+  `(capability tier 1, observed)` with
+  `SURE counted 4 session events recorded for this project by codex, between
+  2026-09-20T09:14:30.803Z and 2026-09-20T09:14:30.988Z.` The same command
+  against a store with no store file reported only `(capability tier 0,
+  snapshot)`; against a store holding another project's events it reported
+  `(capability tier 0, snapshot)` followed by
+  `SURE counted no session events for this project: SURE's store holds none for
+  it. SURE also read 1 session event recorded for other projects; they are not
+  part of this project's tier and were not counted.`
 
 **What Tier 1 still cannot say.** SURE cannot confirm that Codex invoked the
 hook. Nothing in this repository watched a Codex process call it: the payload
@@ -127,7 +139,7 @@ empty.
 
 | Command | What this build answers |
 | --- | --- |
-| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." 0 of 18 planned checks produced a result: the 14 static checks "read your project's files and run nothing" and this build has no runner for them, so each is recorded as unknown rather than passed, and the 4 dynamic ones were stopped by `inspect_only`. The report's capability line is still "capability tier 0, snapshot". |
+| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." 0 of 18 planned checks produced a result: the 14 static checks "read your project's files and run nothing" and this build has no runner for them, so each is recorded as unknown rather than passed, and the 4 dynamic ones were stopped by `inspect_only`. The report's capability line is "capability tier 0, snapshot", which is what a run whose `--store-dir` holds no store yet reports; with a store in place the same line says what it counted (see "What a recorded session changes" below). |
 | `sure repair <abs>` | Exit 1, `not_green`. Stage 11 ran and answered "no check produced a finding, so there is nothing to write instructions for." No repair contract was produced. |
 | `sure recheck <abs>` | Exit 1, `not_green`. Stage 12 ran and answered "SURE has no recorded history for this machine, so there is no earlier run to compare this one with." — which is what an empty store produces; with history in the store the sentence names what the earlier run left open. |
 | `sure mcp serve` | Runs and answers, and says nothing on stdout until it is asked something. With stdin closed at once: **0 bytes on stdout**, the session summary on stderr — one `{"command":"mcp",…,"answered":0,…}` frame under `--format json`, the same summary in words under the default format — and exit 0. |
@@ -138,13 +150,49 @@ Every artifact here resolves the binary, invokes the command, and reports a
 refusal as a refusal; none of them turns one into a result. `docs/architecture/CLI.md`
 is the authority for which commands a given build carries out.
 
-One consequence worth stating plainly: recording Codex events does **not**
-change what `sure check` says about a project yet. The capability line in the
-check report still says tier 0 even with a session's events in the store, because
-the check pipeline reads the tier from the command line rather than from the
-project's recorded events (`crates/sure-core/src/capability_report.rs` has a
-function that would do it, and no caller). That is a gap in SURE, not in this
-package, and it needs its own task.
+## What a recorded session changes
+
+Recording Codex events changes what `sure check` says about the project, and it
+changed on **2026-09-20**: the check pipeline now reads the capability tier from
+the project's own recorded events
+(`crates/sure-core/src/capability_report.rs::for_project`, reached at stage 10 of
+the pipeline) instead of from the command line. Until that task, the line said
+tier 0 even with a session's events in the store; the paragraph that said so is
+gone because the behaviour it described is gone.
+
+Four cases, and they read differently on purpose — the point is that a reader can
+tell them apart:
+
+| The store | What the capability line says |
+| --- | --- |
+| No store at all (a bare `sure check`, or `--store-dir` naming a directory with no store file) | `(capability tier 0, snapshot)` and nothing about counting: nothing was counted, so the report does not claim it looked. |
+| A store that holds no events for this project | `(capability tier 0, snapshot) SURE counted no session events for this project: SURE's store holds none for it.` |
+| A store that holds events for *other* projects | The same, followed by `SURE also read N session events recorded for other projects; they are not part of this project's tier and were not counted.` |
+| A store that holds this project's session events | `(capability tier 1, observed) SURE counted N session events recorded for this project by codex, between <oldest> and <newest>.` — which is Tier 1, from the events rather than from a claim. |
+
+Three things this deliberately does **not** do:
+
+- **It does not raise the tier to Tier 2.** Events prove what happened, never
+  that SURE could have stopped it, so a report derived from events says it cannot
+  ask before a dangerous action whatever `capability_tier` the adapter put on its
+  own envelopes. Tier 2 stays [not claimed](#capability-tier).
+- **It does not borrow another project's session.** The events are matched to the
+  project directory they were recorded for, so a sibling checkout's session never
+  becomes this project's tier.
+- **It does not report a failed read as an empty one.** A store SURE could not
+  read reports the tier it can prove without those events and says, in the run's
+  own stage log, what stopped it — rather than reporting "no session" about a
+  store it never managed to look inside.
+
+A session's events also name the gaps that remain, and they are not the same gaps
+as at tier 0. At tier 0 the honest statement is the single "SURE only sees the
+project as it is now"; at Tier 1 SURE says which kinds of event it did **not**
+get, and for the four events this package maps those are: the user's request, the
+agent's completion claim, command failures, file edits and Git activity. They are
+gaps by construction rather than by accident — the Codex events that would carry
+them are in the "Refused, by name" table above, and a `PostToolUse` becomes a
+`tool.completed` whatever tool it describes — and the report names them on every
+run. More gaps, named more sharply, is what knowing more looks like here.
 
 ## Install (Windows, no administrator rights)
 

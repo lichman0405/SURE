@@ -2213,6 +2213,174 @@ privacy:
         }
     }
 
+    // --- the capability tier comes from the project's own events ----------
+
+    /// The finished run a check report is about, or a panic naming what stopped it.
+    fn run_of(report: &Report) -> &sure_core::pipeline::RunOutcome {
+        checked(report)
+            .run
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run did not finish: {:?}", checked(report).run))
+    }
+
+    /// The capability line this run reports, the same sentence the machine form
+    /// carries.
+    fn capability_line(report: &Report) -> String {
+        run_of(report).verdict.capability.summary()
+    }
+
+    fn tier_of(report: &Report) -> u8 {
+        run_of(report).verdict.capability.tier_number()
+    }
+
+    /// Record one session's worth of events for `project_root`.
+    ///
+    /// Through the same two steps a harness hook takes: the document is ingested
+    /// from the harness's own JSON, then persisted against the project. A test
+    /// that wrote the row directly would be testing the reader against a shape
+    /// this crate invented rather than the shape an adapter sends.
+    fn record_session(store: &Store, project_root: &str, event_types: &[&str]) {
+        use sure_core::harness_event::ingest_event_str;
+        use sure_core::ids::{EventId, FingerprintId};
+        use sure_core::session_event_store::SessionEventStore;
+
+        let sessions = SessionEventStore::new(store);
+        for (index, event_type) in event_types.iter().enumerate() {
+            let document = json!({
+                "schema_version": sure_core::PROTOCOL_VERSION,
+                "source": "codex",
+                "event_type": event_type,
+                "timestamp": format!("2026-09-14T09:10:{:02}.000Z", index + 1),
+                "session_id": "session-42",
+                "project_root": project_root,
+            })
+            .to_string();
+            let ingested = ingest_event_str(&document)
+                .unwrap_or_else(|error| panic!("the harness document is refused: {error}"));
+            sessions
+                .persist(
+                    &ingested,
+                    project_root,
+                    &FingerprintId::generate(),
+                    &EventId::generate(),
+                )
+                .expect("the event is stored");
+        }
+    }
+
+    #[test]
+    fn the_tier_in_a_check_report_is_the_one_the_projects_events_earn() {
+        // Criterion 1, through the command's own entry point: the same command
+        // over the same project, before and after a session is recorded for it,
+        // and over a directory nothing was ever recorded for. The store is the
+        // only thing that changed between the first two runs.
+        let fixture = Fixture::new("capability-recorded-events");
+        a_project(&fixture);
+        let paths = fixture.paths();
+        let project = fixture.project();
+        let root = project.to_str().expect("the fixture path is text");
+
+        // Nothing recorded, and no store: the tier this command has always
+        // reported, in the words it has always used.
+        let before = run_with(Purpose::Check, &paths, &project, None);
+        assert_eq!(tier_of(&before), 0);
+        assert_eq!(
+            capability_line(&before),
+            "SURE can look at the project as it is now. It cannot see what the AI did while it \
+             worked. (capability tier 0, snapshot)",
+            "a run with no store reports something other than the command line's own tier"
+        );
+        assert!(
+            !paths.store_file().exists(),
+            "a bare `sure check` created the store, so the run below is not about a project \
+             with a recorded session but about a store this test made"
+        );
+
+        // A session recorded for this project, exactly as a hook would leave it.
+        // One event of every kind SURE derives a capability from: the request,
+        // the completion claim, a tool call, a failure, a file edit and Git
+        // activity. A session that covers all of them is the case where the
+        // derived report has no blind spots at all — which is what makes the
+        // assertion below about the one that must survive it mean something.
+        let store = Store::open(&paths, &project).expect("the store opens");
+        record_session(
+            &store,
+            root,
+            &[
+                "user.request",
+                "agent.claim",
+                "tool.completed",
+                "command.failed",
+                "file.write",
+                "git.commit",
+            ],
+        );
+        drop(store);
+
+        let after = run_with(Purpose::Check, &paths, &project, None);
+        assert_eq!(
+            tier_of(&after),
+            1,
+            "a project with a recorded session is reported at the tier that session earns: {}",
+            capability_line(&after)
+        );
+        let line = capability_line(&after);
+        assert!(
+            line.contains(
+                "SURE counted 6 session events recorded for this project by codex, between \
+                 2026-09-14T09:10:01.000Z and 2026-09-14T09:10:06.000Z."
+            ),
+            "the line does not say what it counted: {line}"
+        );
+        assert!(
+            line.contains("What SURE still cannot see: "),
+            "the tier is reported with nothing beside it: {line}"
+        );
+
+        // And the machine form carries the same two things as data rather than
+        // only as part of that sentence.
+        let details = machine_of(&after);
+        assert_eq!(details["report"]["capability"]["tier"], json!(1));
+        assert_eq!(
+            details["report"]["capability"]["blind_spots"],
+            json!(["no_pre_action_control"]),
+            "a session that covers every kind of event SURE reads still cannot be stopped \
+             before it happens, and the machine form must not read as completeness"
+        );
+        assert_eq!(
+            details["report"]["capability"]["evidence"]["events"],
+            json!(6)
+        );
+        assert_eq!(
+            details["report"]["capability"]["evidence"]["harnesses"],
+            json!(["codex"])
+        );
+        assert_eq!(
+            details["report"]["capability"]["evidence"]["elsewhere"],
+            json!(0)
+        );
+
+        // A project nothing was recorded for, while the store holds this
+        // project's session: the tier does not rise, and the line says why rather
+        // than leaving a reader to conclude that nothing was ever recorded.
+        let other = fixture.root.join("never-recorded");
+        std::fs::create_dir_all(&other).expect("a project directory");
+        std::fs::write(other.join("main.py"), "print('hello')\n").expect("a project file");
+        let elsewhere = run_with(Purpose::Check, &paths, &other, None);
+        assert_eq!(tier_of(&elsewhere), 0);
+        let line = capability_line(&elsewhere);
+        assert!(
+            line.contains(
+                "SURE counted no session events for this project: SURE's store holds none for \
+                 it. SURE also read 6 session events recorded for other projects; they are not \
+                 part of this project's tier and were not counted."
+            ),
+            "a project with no session reads like a project with one, or like a store nobody \
+             ever wrote to: {line}"
+        );
+    }
+
     #[test]
     fn a_check_with_no_path_is_about_the_directory_sure_was_run_from() {
         // The documented default, resolved rather than handed on as `.`. A run

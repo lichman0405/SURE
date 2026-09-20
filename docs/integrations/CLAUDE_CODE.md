@@ -2,6 +2,12 @@
 
 Priority: first-class, target Tier 2 where current hooks permit.
 
+The tier a `sure check` reports for a project is the one its **recorded events**
+earn, not this line and not the adapter's own claim: Tier 1 for a project whose
+store holds a session's events, and Tier 0 for a project with none — and never
+Tier 2 from events alone, because events prove what happened rather than that
+SURE could have stopped it.
+
 Package root: `integrations/claude-code/`
 
 Current bootstrap structure follows Claude Code plugin conventions:

@@ -266,8 +266,11 @@
 #   stopped at the mode check for the host reason below. **That is what found the
 #   `_` defect named above**: before the pattern was widened, this run failed at
 #   the checksum-shape check with a message about the archive's own name. What
-#   the stand-in does not do is compile anything, so this says the packaging is
-#   right and says nothing about whether a real Intel build succeeds.
+#   the stand-in does not do is compile anything, so the stand-in alone says
+#   nothing about whether a real Intel build succeeds; that half is measured
+#   instead by `35514769749`, whose `package-macos-intel` job ran the real
+#   `cargo build --workspace --release --locked --target x86_64-apple-darwin`
+#   and exited 0.
 #
 # **One line the arm64 path does execute was changed, and it is named here
 # rather than left in the diff.** The checksum-shape pattern below was
@@ -300,17 +303,22 @@
 #   fail with the same message shape; and a path reached through a Windows
 #   directory junction passes after folding, which is the macOS
 #   `/var` -> `/private/var` shape made with a real reparse point. What that
-#   reading does **not** cover is the comparison running inside a whole macOS
-#   job: nothing in this change has been run on a Mac.
+#   reading did not cover *by itself* was the comparison running inside a whole
+#   macOS job — and that gap is now closed rather than left open: `35514769749`
+#   ran this file end to end on macOS, `package-macos-intel` reaching the
+#   extraction and the Run step with the comparison inside it.
 #
 # What this host cannot exercise at all, named rather than glossed over:
 #
-# * **The Run step over a correct artifact.** That host is MSYS/Cygwin, where
-#   `chmod` is a no-op: an extracted `sure` comes out `-rw-r--r--` even from a
-#   tar that records 755, so the mode check below fails for a *correct* archive
-#   and nothing after it runs without the mutation above. That is a property of
-#   the host. On macOS, where `chmod` is real, the step after that check is the
-#   one that says the bytes execute — and that step has not run here.
+# * **The Run step over a correct artifact, here.** That host is MSYS/Cygwin,
+#   where `chmod` is a no-op: an extracted `sure` comes out `-rw-r--r--` even
+#   from a tar that records 755, so the mode check below fails for a *correct*
+#   archive and nothing after it runs without the mutation above. That is a
+#   property of the host, and `35514769749` is what says so rather than assuming
+#   it: that job's `== Extract` step printed `same as the sure cargo built` on
+#   macOS, so the recorded mode does survive packaging and extraction where
+#   `chmod` is real, and the local stop was MSYS and not a packaging defect
+#   hiding behind it.
 # * **Building an arm64 artifact here.** There is no `aarch64-apple-darwin` `std`
 #   on that machine, so the header patch `P15-T005` used to reach the accept case
 #   is still the only way to *build* one locally. It is no longer the only way to
@@ -321,22 +329,25 @@
 # * **The `Authority=` failure branch of the Signature step**, which needs a
 #   signature chain to refuse and a `codesign` to read one with.
 # * **Anything about Gatekeeper**, which nothing in this repository has observed.
-# * **The Intel artifact's Run step, on any machine.** No x86_64 macOS artifact
-#   has been produced by any machine in this repository's history, so no x86_64
-#   macOS binary has been executed either. Locally the same two host limits
-#   apply at once: MSYS cannot set the extract mode, and a Mach-O cannot execute
-#   on Windows at all. Whether an Intel runner can build and run one is the
-#   question `.github/workflows/release-dry-run.yml`'s `package-macos-intel` job
-#   exists to answer, and **that job has never run**.
-# * **Whether an Intel Mac can run anything this project ships today.** The
-#   aarch64 artifact is the only macOS artifact that exists, and an Intel Mac
-#   cannot execute an arm64 Mach-O. `docs/development/RELEASE_PROCESS.md` states
-#   that as the current boundary; it is a statement about which artifacts exist
-#   rather than a measurement on an Intel Mac, because there is none here.
+#
+# What no machine had exercised, and what changed. **The Intel artifact's Run
+# step** used to be listed here, and it is no longer a gap of that kind: run
+# `35514769749`'s `package-macos-intel` job, `106088732392`, produced
+# `sure-0.0.0-bootstrap-x86_64-apple-darwin.tar.gz` on a native Intel host,
+# checksummed it, extracted it, and ran the extracted `sure doctor` **from the
+# extraction directory**, which exited 0 and ended `the bytes that are
+# checksummed are the bytes that were run`. So an Intel Mac can build and run
+# what this project produces for it, and the aarch64 artifact is no longer the
+# only macOS artifact that exists — there are two. What stays true is narrower
+# than the sentences this block used to carry: nothing is published for either
+# architecture, the binary is unsigned and unnotarized, and no second build of
+# the same commit has been measured.
 #
 # A comment claiming the whole file is measured would be the defect this
-# repository exists to prevent. So: the build half was not run; the check half
-# was; and the Run step has not been run over a genuine artifact.
+# repository exists to prevent. So: the build half was not run *here*; the check
+# half was; the Run step over a genuine artifact is measured on macOS in CI and
+# is still not reachable on this host; and the `Authority=` branch, Gatekeeper
+# and reproducibility remain unmeasured on every machine.
 
 set -euo pipefail
 

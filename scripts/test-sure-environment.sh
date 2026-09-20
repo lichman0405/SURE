@@ -36,17 +36,24 @@ fi
 
 ARCH="$(uname -m 2>/dev/null || echo unknown)"
 case "$ARCH" in
-  arm64) add_check "CPU architecture" "PASS" "core" "Apple Silicon (arm64)" ;;
   # PASS is about this machine as a *development host*, and it is deserved on
-  # Intel: `cargo build` here is a native build for x86_64-apple-darwin and the
-  # workspace compiles. It is deliberately not a statement that a release
-  # artifact exists for it. **No x86_64 macOS artifact is published**, so an
-  # Intel Mac can develop SURE and cannot run a SURE release; the two are
-  # different claims and this checker makes only the first. The boundary is
-  # written down in docs/development/RELEASE_PROCESS.md, "What the macOS Intel
-  # archive is, and why none exists yet".
-  x86_64) add_check "CPU architecture" "PASS" "core" "Intel (x86_64) - builds SURE from source; no Intel release artifact is published" ;;
-  *) add_check "CPU architecture" "WARN" "core" "$ARCH" "SURE builds from source on arm64 and x86_64 macOS; the published artifact is arm64 only" ;;
+  # both architectures: `cargo build` here is a native build and the workspace
+  # compiles. It is deliberately not a statement that a release artifact exists
+  # for the machine.
+  #
+  # SURE produces a macOS archive for each of arm64 and x86_64, and
+  # `.github/workflows/release-dry-run.yml` builds, checksums and runs each of
+  # them -- the x86_64 one on a native Intel runner, run 35514769749 job
+  # 106088732392. Neither is published: this repository has no GitHub Releases,
+  # and both archives are workflow artifacts retained on the run page. So the
+  # two architectures are in the same position, and neither is a reason to grade
+  # a development host differently. What is true of both is the narrow thing:
+  # nothing is published as a release for either. The boundary is written down
+  # in docs/development/RELEASE_PROCESS.md, "What the macOS Intel archive is,
+  # concretely".
+  arm64) add_check "CPU architecture" "PASS" "core" "Apple Silicon (arm64) - builds SURE from source; the arm64 release archive is not published" ;;
+  x86_64) add_check "CPU architecture" "PASS" "core" "Intel (x86_64) - builds SURE from source; the x86_64 release archive is not published" ;;
+  *) add_check "CPU architecture" "WARN" "core" "$ARCH" "SURE builds from source on arm64 and x86_64 macOS; the release archive for each is not published" ;;
 esac
 
 if xcode-select -p >/dev/null 2>&1; then

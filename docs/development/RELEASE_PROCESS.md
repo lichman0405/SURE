@@ -62,10 +62,9 @@ A future user-friendly installer may use MSIX/WiX or another appropriate Windows
 
 Also produce/document:
 - macOS Apple Silicon CLI archive — see `### What the macOS Apple Silicon archive is, concretely`, below;
-- macOS Intel CLI archive — **not produced, and not claimed.** See
-  `### What the macOS Intel archive is, and why none exists yet` below for the
-  measurement, the exact boundary of what is therefore true, and the one
-  dispatch that would settle it;
+- macOS Intel CLI archive — **produced and run, not published.** See
+  `### What the macOS Intel archive is, concretely` below for the run that does
+  it, the exact boundary of what is therefore true, and how to reproduce it;
 - Linux x64 CLI archive;
 - SHA-256 checksums;
 - Claude Code plugin package/instructions;
@@ -114,9 +113,12 @@ reader can see whether "and it ran" was possible on that machine at all.
 
 `P15-T006` extended the same script to a second target, `x86_64-apple-darwin`,
 so the pair above is the arm64 row of a two-row table rather than a constant.
-**That extension produced no artifact** — see
-`### What the macOS Intel archive is, and why none exists yet`, which is also
-where the four-direction measurement of this check is written down.
+**That extension produces its own artifact**, built, checksummed and run by
+`.github/workflows/release-dry-run.yml`'s `package-macos-intel` job — see
+`### What the macOS Intel archive is, concretely`, which is also where the
+four-direction measurement of this check is written down. Both macOS archives
+are `actions/upload-artifact` workflow artifacts and **neither is published**;
+that section says what that does and does not mean.
 
 **What "builds/tests" means here is two things.** The workspace's tests are
 `cargo test --workspace --no-fail-fast` in the workflow's own step, on the same
@@ -150,20 +152,95 @@ that. Nothing in this repository has observed what Gatekeeper does with the
 result on a Mac, and `RELEASE.txt` inside the archive says so rather than
 guessing.
 
-### What the macOS Intel archive is, and why none exists yet
+### What the macOS Intel archive is, concretely
 
-Decided by `P15-T006`. The short form is the one a reader should leave with:
+Decided by `P15-T006`, and produced and run by `.github/workflows/release-dry-run.yml`'s
+`package-macos-intel` job. The short form is the one a reader should leave with:
 
-> **No Intel (`x86_64-apple-darwin`) macOS artifact is produced, published or
-> claimed. An Intel Mac cannot run the artifact this project does produce. If
-> you are on an Intel Mac, there is nothing here for you yet, and that is a
-> measured limitation rather than a roadmap item.**
+> **This project produces and runs a `x86_64-apple-darwin` macOS artifact, on a
+> native Intel host, whenever that job runs. It is not published, signed or
+> notarized. No release carries it, and the same is true of the Apple Silicon
+> artifact.**
 
 The rest of this section is what that sentence rests on, and what it does not.
 
-**What was measured, and where the run stopped.** The build was attempted on the
-machine that wrote this — Windows 11, native Rust MSVC — with the target
-installed:
+**What was measured, and where.** Run `35514769749`, dispatched
+2026-09-20T13:52:17Z against head SHA
+`a009f57afcb23522afd594a86690bf46763fc4aa`, concluded `success` with all five jobs
+green. The job that builds this artifact is `106088732392`. Its *"What this
+runner is"* step prints the runner's identity rather than leaving the label to be
+believed:
+
+| reading | value |
+| --- | --- |
+| `uname -s` | `Darwin` |
+| `uname -m` | **`x86_64`** |
+| `RUNNER_ARCH` | **`X64`** |
+| `rustc host` | **`x86_64-apple-darwin`** |
+| `rustc release` | `1.98.1` |
+| `targets installed` | `x86_64-apple-darwin` |
+| `cc` | **`/usr/bin/cc`** |
+| `clang` | `/usr/bin/clang` |
+| runner image | `macos-26`, version `20260824.0517.1`; macOS 26.6.1 (25G76) |
+
+This is a **native Intel host**. It is not an arm64 runner, and nothing here ran
+under Rosetta. Note `cc` in particular: that is the exact tool whose absence
+stopped the local Windows-host attempt recorded below.
+
+**What was built, and what was run.** `cargo build --workspace --release --locked
+--target x86_64-apple-darwin` exited 0 with `Finished release profile [optimized]
+target(s) in 2m 41s`. The staged binary was 10443320 bytes, SHA-256
+`c6da9be42e232fd56146b4dfd33e840d63db7c318daafb1f3c2e076ed304e7ed`. The archive
+`sure-0.0.0-bootstrap-x86_64-apple-darwin.tar.gz` was 4307011 bytes, and its
+`.sha256` was 114 bytes (expected 114), 1 LF, 0 CR, digest
+`5b6c6ecc30840c2a0d807ff3e9b6d533e3cf336e4ee26732d48a0ac04ee00ec5`. The layout
+was 4 entries, exactly the promised set. Verification read `expected` == `actual`,
+`shasum -a 256 -c` agreed, and the archive on disk was the archive the checksum
+file names. Extraction produced `same as the sure cargo built`. The extracted
+binary's header bytes were `cffaedfe07000001`, which the reader returned as
+`Mach-O 64-bit, x86_64`, and `/usr/bin/file` said `Mach-O 64-bit executable
+x86_64`. The job then invoked `<extracted>/sure doctor`, which exited 0,
+reporting `SURE 0.0.0-bootstrap (harness protocol 1), built for macos x86_64, C
+library none`, and reporting `from` its own extracted path. The gate read
+`permitted`. The verdict line was:
+
+```
+OK  the bytes that are checksummed are the bytes that were run
+```
+
+The Apple Silicon job in the same run, `106088732521`, also succeeded and also
+printed that verdict line.
+
+**Produced and run — not published.** The job uploads the archive and its
+`.sha256` with `actions/upload-artifact@v4` as the workflow artifact
+`sure-x86_64-apple-darwin`, retained for 14 days. That is what both macOS
+archives are: retained by GitHub, downloadable from the run page by someone with
+access to this repository, attached to no release and reachable by no public URL.
+`gh release list` on this repository returns nothing and
+`gh api repos/lichman0405/SURE/releases --jq length` returns 0, so this repository
+has no GitHub Releases. Neither macOS archive has been signed, notarized,
+published or downloaded by anyone, and nothing here should be read as saying
+otherwise.
+
+**The signature boundary is the same as the Apple Silicon artifact's.** The job's
+*Signature* step read `code object is not signed at all` from `codesign -d`, exit
+1, authority `none`. The archive is not signed and not notarized, and nothing in
+this repository has observed what Gatekeeper does with it on a Mac. That is the
+boundary `## Signing` records, and the same one the Apple Silicon section above
+states.
+
+**Why the Apple Silicon artifact does not cover Intel Macs.** They are different
+architectures and that artifact is a thin `aarch64` binary; an Apple Silicon
+translation layer runs x86_64 code on arm64 hardware, not the reverse. That is
+the shape of the two architectures rather than a measurement of one Mac, and it
+is why the Intel target is a separate job producing a separate archive rather
+than a reason to expect the arm64 one to be usable on an Intel host. What an
+Intel Mac can use is the artifact this section describes, subject to the
+publication, signature and Gatekeeper boundaries it records.
+
+**What was measured here, and what that does and does not buy.** The build was
+attempted on the machine that wrote this — Windows 11, native Rust MSVC — with
+the target installed:
 
 ```
 $ cargo build --workspace --release --locked --target x86_64-apple-darwin
@@ -180,14 +257,16 @@ The `x86_64-apple-darwin` `std` **is** installed there, so the run got past the
 target's own absence and stopped at the C dependency: `rusqlite`'s `bundled`
 feature compiles SQLite from its own C source through `libsqlite3-sys`, whose
 `build.rs` invokes `cc`, and a Windows host has no C compiler that emits x86_64
-Mach-O objects. **This is a fact about the host, not about the target**, and it
-is the same fact `docs/development/GITHUB_WORKFLOW.md` records about
-cross-target `clippy`. It is not evidence that the artifact cannot be built; it
-is evidence that it cannot be built *here*.
+Mach-O objects. **This was always a fact about the host, not about the target**,
+and the CI log is what settles it: job `106088732392` found `/usr/bin/cc`, and
+the same build there exited 0. It is the same fact
+`docs/development/GITHUB_WORKFLOW.md` records about cross-target `clippy` — not
+evidence that the artifact cannot be built, only that it could not be built
+*here*.
 
-**What was verified here, and what that does and does not buy.** The architecture
-check in `scripts/Build-Release.sh` was extended to serve both macOS targets and
-is a discriminating check, in four directions, over real Mach-O bytes:
+**The architecture check discriminates, in four directions, over real Mach-O
+bytes.** The check in `scripts/Build-Release.sh` was extended to serve both macOS
+targets and refuses a wrong reading by name:
 
 | archive name | `sure`'s first eight bytes | Architecture step |
 | --- | --- | --- |
@@ -196,55 +275,58 @@ is a discriminating check, in four directions, over real Mach-O bytes:
 | `...-x86_64-apple-darwin.tar.gz` | `cffaedfe0c000001` | refused, *not* `Mach-O 64-bit, x86_64` |
 | `...-aarch64-apple-darwin.tar.gz` | `cffaedfe07000001` | refused, *not* `Mach-O 64-bit, arm64` |
 
-The arm64 bytes are the ones `P15-T005`'s CI run shipped; the x86_64 bytes are
-genuine linker-produced Mach-O bytes. The arm64 path was also compared against
-itself before and after the Intel target was added, over the artifact CI actually
-uploaded, and the two outputs are byte-identical. **What this buys is that the
-packaging and checking half is ready and known to discriminate. What it does not
-buy is an artifact**: no `x86_64-apple-darwin` archive exists, so no checksum of
-one exists, and no x86_64 macOS binary has ever been executed by this project.
+**Both accepted rows are now read off archives this project's own workflow
+built.** The arm64 bytes are the ones `P15-T005`'s CI run built and uploaded; the x86_64
+bytes are the ones job `106088732392` read off a real linker-produced binary. An
+x86_64 little-endian Mach-O beginning `cffaedfe07000001` was believed but not yet
+measured when `P15-T006` was first briefed; that is no longer a belief — the job
+printed exactly those bytes from the artifact it had just built, so this constant
+is read off real bytes in the same way the arm64 one is. The arm64 path was also
+compared against itself before and after the Intel target was added, over the
+artifact CI actually uploaded, and the two outputs are byte-identical.
 
-**What is not measured, stated plainly.**
+**The Intel archive is not byte-for-byte reproducible** either, by the mechanism
+the Apple Silicon archive has rather than the Windows ZIP's: a gzip stream
+records a modification time in its header and a tar records one per entry. The
+`.sha256` is an integrity check over the bytes that were built and uploaded and is
+not a claim that a rebuild would produce them again. One Intel build has been measured,
+so for this artifact that follows from the format rather than from a second
+observation of it.
 
-- **Whether the Intel artifact can be built at all.** The job that would build it
-  is in `.github/workflows/release-dry-run.yml` and **has never run**. Its
-  existence is not evidence; a green log would be.
-- **Whether the runner label queues for this repository.** `macos-26-intel` is
-  the x64 label according to `actions/runner-images`' own image table, but
-  whether a dispatch on this account obtains one is a property of the repository
-  and not of the image. Nothing here has measured it.
-- **Anything about running an Intel artifact**, on any machine. No x86_64 macOS
-  binary has been executed, so the standard `P15-T005` set for the arm64 artifact
-  — *the bytes that are checksummed are the bytes that were run* — is **not met
-  for Intel by anything in this repository**, and nothing here should be read as
-  if it were.
+**What is still not measured, stated plainly.**
 
-**The one command that would settle it**, and the reason it has not been run: the
-workflow is `workflow_dispatch`-only and needs the commit on the remote, and
-dispatching is the supervisor's step rather than a packaging task's.
+- **Whether a second build of the same commit produces the same archive.** One
+  Intel build has been measured; the reproducibility statement above rests on the
+  archive format's mechanism, not on a repeat.
+- **Whether the uploaded workflow artifact survives a download intact.** The job
+  built, checksummed and ran the archive on its own runner, and then uploaded it.
+  Nobody has downloaded that artifact and re-checked it against its `.sha256`, so
+  that round trip is unmeasured — and a 14-day retention window is not a
+  distribution channel.
+- **What Gatekeeper does with it on a Mac.** The job's own `codesign` reading says
+  the binary is unsigned. No launch through Gatekeeper has been observed here; a
+  CI runner executing a binary from its own scratch directory is not that
+  observation.
+- **Whether this artifact behaves the same on an Intel Mac that is not this
+  runner image.** The machine was hosted image `macos-26`, version
+  `20260824.0517.1`. Nothing here has run the artifact on any other Intel Mac.
+
+**How to reproduce this.** The workflow is still `workflow_dispatch`-only, so the
+measurement is reproduced by dispatching it and reading the `package-macos-intel`
+job's log:
 
 ```
 gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
 ```
 
-That dispatch answers three questions at once, in one log. The job's first step
-prints `uname -m`, `RUNNER_ARCH` and `rustc -vV`'s host, so the log says which
-machine actually ran rather than leaving the label to be believed. It prints
-`command -v cc`, which is the specific tool whose absence stopped the local
-attempt. And `scripts/Build-Release.sh --target x86_64-apple-darwin` runs the
-extracted binary **from the directory it was extracted into** and compares the
-`running from` it reports, so an x64 runner turns "and it ran" from an assumption
-into a reading. If that job lands on an arm64 host instead, `uname -m` says so
-and a Rosetta run is visibly weaker than a native one; the log distinguishes them
-rather than the reader having to assume.
-
-**Why the arm64 artifact does not cover Intel Macs.** They are different
-architectures and the artifact is a thin `aarch64` binary; an Apple Silicon
-translation layer runs x86_64 code on arm64 hardware, not the reverse. This is
-stated as the shape of the two architectures rather than as a measurement, for
-the reason the rest of this section gives: no Intel Mac has been used anywhere in
-this repository, so the honest statement is about which artifacts exist, not
-about what one machine did.
+That job's *"What this runner is"* step prints `uname -m`, `RUNNER_ARCH` and
+`rustc -vV`'s host, so the log says which machine actually ran rather than leaving
+the label to be believed; it prints `command -v cc`, the specific tool whose
+absence stopped the local attempt above; and `scripts/Build-Release.sh --target
+x86_64-apple-darwin` runs the extracted binary **from the directory it was
+extracted into** and compares the `running from` it reports. If a future dispatch
+lands on an arm64 host instead, `uname -m` says so, and the log distinguishes a
+native run from a Rosetta one rather than the reader having to assume.
 
 ## Package managers
 

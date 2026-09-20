@@ -133,15 +133,17 @@ its `package-macos` job (`P15-T005`) builds, packages, checksums and reads back
 the macOS Apple Silicon artifact with `scripts/Build-Release.sh`.
 `docs/development/RELEASE_PROCESS.md` states what that artifact is.
 
-**Its `package-macos-intel` job has never run.** `P15-T006` added it so that one
-dispatch answers whether an `x86_64-apple-darwin` artifact can be built and run,
-and nothing in this repository may be read as if that had happened: there is no
-Intel artifact, no checksum of one, and no execution of an x86_64 macOS binary
-anywhere in this project's history. The job runs on `macos-26-intel`, which is
-the x64 label in `actions/runner-images`' own image table — as against
-`macos-latest`, which that table lists under macOS 26 **Arm64**, and which is why
-the arm64 job is on an arm64 machine. Whether that label queues for this
-repository is unmeasured, and the job's first step prints `uname -m`,
-`RUNNER_ARCH` and `rustc -vV`'s host precisely so its log says which machine ran.
-The boundary this leaves is written down in `docs/development/RELEASE_PROCESS.md`,
-`### What the macOS Intel archive is, and why none exists yet`.
+**Its `package-macos-intel` job has run, and it built and ran the Intel artifact.**
+`P15-T006` added it so that one dispatch answers whether an `x86_64-apple-darwin`
+artifact can be built and run, and run `35514769749` answered it: job
+`106088732392` concluded `success` on a native Intel host, and the Apple Silicon
+job in the same run succeeded too. The job runs on `macos-26-intel`, which is the
+x64 label in `actions/runner-images`' own image table — as against `macos-latest`,
+which that table lists under macOS 26 **Arm64**, and which is why the arm64 job is
+on an arm64 machine. The job prints `uname -m`, `RUNNER_ARCH` and `rustc -vV`'s
+host rather than leaving the label to be believed, and that step is what says the
+machine was `x86_64`. **This is not a release**: both macOS archives are
+`actions/upload-artifact` workflow artifacts and neither is published. The
+boundary, and the command that reproduces the measurement, are written down in
+`docs/development/RELEASE_PROCESS.md`,
+`### What the macOS Intel archive is, concretely`.

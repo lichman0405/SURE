@@ -207,15 +207,22 @@ jobs:
           retention-days: 14
 
   # ===========================================================================
-  # The macOS Intel artifact — P15-T006. **THIS JOB HAS NEVER RUN.**
+  # The macOS Intel artifact — P15-T006. **THIS JOB HAS RUN, AND IT BUILT AND
+  # RAN THE ARTIFACT.** Run 35514769749, job 106088732392, conclusion success.
   # ===========================================================================
   #
-  # It is written and not dispatched. Nothing below has produced an artifact,
-  # nothing below has executed an x86_64 macOS binary, and no reading in this
-  # repository comes from it. `P15-T006`'s acceptance is an **or** — build the
-  # artifact, or document the exact limitation — and this job is the half that
-  # cannot be finished from a Windows host: it needs the commit on the remote
-  # and a dispatch, which the supervisor owns.
+  # This job was the half that could not be finished from a Windows host: it
+  # needed the commit on the remote and a dispatch. It got one. Job 106088732392
+  # produced `sure-0.0.0-bootstrap-x86_64-apple-darwin.tar.gz`, checked its
+  # checksum, extracted it, and ran the extracted `sure doctor` from the
+  # extraction directory; that exited 0 reporting
+  # `SURE 0.0.0-bootstrap (harness protocol 1), built for macos x86_64`, and the
+  # job's verdict line was `the bytes that are checksummed are the bytes that
+  # were run`.
+  #
+  # What that is not: a release. The archive is an `actions/upload-artifact`
+  # workflow artifact with `retention-days: 14`, exactly as the arm64 job's is,
+  # and the binary is unsigned and unnotarized.
   #
   # **Why `macos-26-intel` and not a guess.** `actions/runner-images`' own
   # table is the authority on what a label means, and it reads:
@@ -235,9 +242,11 @@ jobs:
   #
   # What that table does **not** say is that this account can obtain the runner.
   # Availability, queueing and billing are properties of the repository and not
-  # of the image, and nothing here has measured them. **The dispatch is the
-  # measurement**, and the first step below exists so that its log answers the
-  # question even if the answer is no.
+  # of the image. **The dispatch was the measurement**, and job 106088732392 is
+  # the answer: this account obtained `macos-26-intel`, and `uname -m` printed
+  # `x86_64` there, so the run below was a native execution rather than a Rosetta
+  # one. The first step below still exists so that its log says which machine ran
+  # rather than leaving the label to be believed.
   #
   # **What makes this job evidence rather than a claim.** It is the same script
   # as the arm64 job, with `--target x86_64-apple-darwin`, so the architecture is
@@ -328,8 +337,9 @@ jobs:
           echo "the modified copy failed the check, as it must"
 
       # The evidence first, and unconditionally: a run that failed is the run
-      # whose logs someone needs — and this job has never had a successful run,
-      # so its first log is the one that matters most.
+      # whose logs someone needs. This job's first dispatch, 35514769749,
+      # succeeded; the upload stays unconditional so that a future failure is
+      # readable too.
       - name: Upload the run's logs
         if: always()
         uses: actions/upload-artifact@v4

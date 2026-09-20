@@ -385,29 +385,59 @@ jobs:
           retention-days: 14
 
   # ===========================================================================
-  # The Linux x64 artifact — P15-T007. **THIS JOB HAS RUN ONCE, AND IT HAS NOT
-  # PRODUCED AN ARTIFACT.** Run `35524124026`, attempt 1, on commit `70ef6dd`, is
-  # the only run that has reached it. Five of that run's six jobs are green; this
-  # one is the failure, and it failed in the step below named *"Build, package,
-  # checksum and check the artifact"*, 9 ms after that step started, before the
-  # release gate was read and before anything was staged, built or written:
+  # The Linux x64 artifact — P15-T007. **THIS JOB HAS RUN TWICE, AND THE SECOND
+  # RUN BUILT, CHECKSUMMED AND RAN THE ARTIFACT.** Run `35526723850`, attempt 1,
+  # on commit `f727d5f`: all six of that run's jobs are green, and this one
+  # produced `sure-0.0.0-bootstrap-x86_64-unknown-linux-gnu.tar.gz` — 4599814
+  # bytes, sha256
+  # `44cd8357478cd2dbafaead10d71a4e56ff10ec86620cb9c8c26650e491c9bb2a` — in 4
+  # entries, exactly the promised set. Its `.sha256` was 119 bytes (expected 119),
+  # 1 LF, 0 CR; the archive re-read from disk matched it; the extracted `sure` ran
+  # from the directory it was extracted into, exited 0 and reported
+  # `SURE 0.0.0-bootstrap (harness protocol 1), built for linux x86_64, C library
+  # gnu`; and the verdict line was `the bytes that are checksummed are the bytes
+  # that were run`. The extracted binary's first twenty bytes were
+  # `7f454c4602010100000000000000000003003e00`, and the *Signature* step reported
+  # `not read` — an ELF carries no signature field and no step of this build
+  # applies one, so that is a measurement that did not happen and not a pass.
+  #
+  # **What the artifact therefore asks of the machine it runs on: glibc 2.39 or
+  # newer.** The *"What this archive asks of its glibc, read off the binary"* step
+  # below read `GLIBC_2.30`, `GLIBC_2.32`, `GLIBC_2.33`, `GLIBC_2.34` and
+  # `GLIBC_2.39` off the packaged `sure`, and the highest of them is the oldest
+  # glibc that can run it. That is the runner's own libc rather than a choice:
+  # the identity step printed `Ubuntu 24.04.5 LTS` and `ldd (Ubuntu GLIBC
+  # 2.39-0ubuntu8.8) 2.39`. So this artifact does not run on Ubuntu 22.04 (glibc
+  # 2.35) or Debian 12 (glibc 2.36), and lowering the floor means building inside
+  # an older container — a follow-up this repository owes and has not done.
+  #
+  # **The run before it failed, and that record stays.** Run `35524124026`,
+  # attempt 1, on commit `70ef6dd`, is the other run that has reached this job.
+  # Five of that run's six jobs are green; this one is the failure, and it failed
+  # in the step below named *"Build, package, checksum and check the artifact"*,
+  # 9 ms after that step started, before the release gate was read and before
+  # anything was staged, built or written:
   #
   #   scripts/Build-Release.sh: 530: set: Illegal option -o pipefail
   #   ##[error]Process completed with exit code 2.
   #
   # Exit 2. The step after it, *"What this archive asks of its glibc, read off the
   # binary"*, the checksum re-read step and *"Upload the artifact and its
-  # checksum"* were all `skipped`. `sure-*-x86_64-unknown-linux-gnu.tar.gz` and
-  # its `.sha256` do not exist on any machine, and nothing below may be read as
-  # saying that they do.
+  # checksum"* were all `skipped` on that run: no archive existed anywhere until
+  # the run above produced one. The defect was not this task's — both the `set`
+  # line and the shebang, as `70ef6dd` carried them, are `c522699`'s (verified by
+  # `git blame` at that commit), and they had been correct on every machine that
+  # had run the file before, because no earlier target ran this script where `sh`
+  # is not bash.
   #
   # **What that run did establish, and it stays.** In this same job, on this same
   # runner, the step *"The workspace's tests, on this runner"* concluded
-  # `success`: 81 `test result:` lines, **2648 passed, 0 failed, 12 ignored**.
-  # The tests half of the acceptance sentence below was earned on the runner the
-  # artifact half is meant to run on. What failed was the script's first executed
-  # line — and the same log shows the step's own `shell: /usr/bin/bash -e {0}`,
-  # which is the measurement behind the comment at the invocation below.
+  # `success`: 81 `test result:` lines, **2648 passed, 0 failed, 12 ignored** —
+  # the same counts the green run's tests step reports. The tests half of the
+  # acceptance sentence below was earned on the runner the artifact half is meant
+  # to run on. What failed was the script's first executed line — and the same log
+  # shows the step's own `shell: /usr/bin/bash -e {0}`, which is the measurement
+  # behind the comment at the invocation below.
   # ===========================================================================
   #
   # Its acceptance is
@@ -422,16 +452,22 @@ jobs:
   # --target x86_64-unknown-linux-gnu`, the same script the two macOS jobs run,
   # which packages, checksums and then reads the artifact back.
   #
-  # **What is not here yet: the artifact.** Everything below is written to be run
-  # and has been exercised on a Windows host only up to the point that host can
-  # reach — the architecture read over real ELF bytes, the package, the
-  # `.sha256` and the extraction — with the mode check, the signature step, the
-  # run of the extracted binary and the verdict line unreached there; and the one
-  # run that reached a Linux runner stopped before the first of those steps, for
-  # the reason recorded above. So the tests half of the acceptance sentence is
-  # earned and the artifact half is not: this job is what measures the rest, and
-  # until a run of it reaches the verdict line, the accepted sentence above is
-  # not earned for Linux.
+  # **What the artifact is, and what is still not measured.** Everything below is
+  # written to be run and has been exercised on a Windows host only up to the
+  # point that host can reach — the architecture read over real ELF bytes, the
+  # package, the `.sha256` and the extraction — with the mode check, the signature
+  # step, the run of the extracted binary and the verdict line unreached there;
+  # the first Linux run stopped before the first of those steps, for the reason
+  # recorded above; and the second one reached all of them. So both halves of the
+  # acceptance sentence above are now earned for Linux, by the run recorded at the
+  # top of this header. What is *not* measured: whether a rebuild would produce the
+  # same archive bytes (it would not — a gzip stream records a modification time in
+  # its header and a tar records one per entry, so this one follows from the format;
+  # only one Linux build has been made), whether any distribution with an older
+  # glibc can run the binary (it cannot — see the floor above), and where this
+  # artifact sits in a distribution channel (nowhere: it is an
+  # `actions/upload-artifact` artifact with `retention-days: 14`, and nothing is
+  # tagged or released).
   #
   # **Why the architecture cannot come from the label.** `ubuntu-latest` being
   # x86_64 is a belief about a label, and this repository does not read beliefs
@@ -495,7 +531,10 @@ jobs:
           # shell had to be inferred from the shape of an error message — which is
           # the kind of answer this repository does not accept when a reading is
           # available. dash cannot report a version in one call, so the version
-          # comes from the package that owns it when `sh` will not say it.
+          # comes from the package that owns it when `sh` will not say it. Run
+          # `35526723850` is the same reading taken with the lines in place: it
+          # printed `/usr/bin/sh -> /usr/bin/dash` and `sh version 0.5.12-6ubuntu5`,
+          # so that run's shell is named in its own log instead of inferred.
           echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
           sh_version="$(sh -c 'printf "%s" "${BASH_VERSION:-}"')"
           [ -n "$sh_version" ] || sh_version="$(dpkg-query -W -f='${Version}' dash 2>/dev/null)"
@@ -532,7 +571,9 @@ jobs:
       # belongs here: the step was not what was wrong. What was wrong was a
       # script claiming POSIX in one comment and using a bash extension in the
       # next line, which is fixed in the script and checked as `sh` by
-      # `ci.yml`'s lint job.
+      # `ci.yml`'s lint job. **The fix is measured, not argued:** run
+      # `35526723850` ran this same invocation under this same `/usr/bin/sh` and
+      # the script went on to build, package, check and run the artifact.
       - name: Build, package, checksum and check the artifact
         run: sh scripts/Build-Release.sh --phase all --target x86_64-unknown-linux-gnu --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
 
@@ -548,6 +589,16 @@ jobs:
       # threshold asserted here would be a rule this repository has not decided
       # anything must satisfy. `package-linux` needs no such rule — the artifact
       # is either correct for its target or the step above already said so.
+      #
+      # **The first run to reach this step printed the answer, and it is a real
+      # restriction.** Run `35526723850` read `GLIBC_2.30`, `GLIBC_2.32`,
+      # `GLIBC_2.33`, `GLIBC_2.34` and `GLIBC_2.39` off the packaged binary, so
+      # this artifact requires glibc 2.39 or newer and will not run on Ubuntu
+      # 22.04 (glibc 2.35) or Debian 12 (glibc 2.36). That number is the runner
+      # image's own libc, which is why the identity step above prints it too, and
+      # lowering the floor means building inside an older container — a follow-up
+      # this repository owes and has not done. It stays a reading rather than a
+      # threshold, for the reason above.
       - name: What this archive asks of its glibc, read off the binary
         working-directory: ${{ github.workspace }}/target/tmp/release
         run: |

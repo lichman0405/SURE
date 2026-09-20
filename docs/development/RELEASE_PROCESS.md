@@ -65,9 +65,10 @@ Also produce/document:
 - macOS Intel CLI archive — **produced and run, not published.** See
   `### What the macOS Intel archive is, concretely` below for the run that does
   it, the exact boundary of what is therefore true, and how to reproduce it;
-- Linux x64 CLI archive — **build path in place, not yet produced by any run.**
-  See `### What the Linux x64 archive is, concretely` below for what the path
-  is, what has been verified and where, and what is still unmeasured;
+- Linux x64 CLI archive — **produced and run, not published.** See
+  `### What the Linux x64 archive is, concretely` below for the run that does
+  it, the glibc floor the artifact carries, the exact boundary of what is
+  therefore true, and how to reproduce it;
 - SHA-256 checksums;
 - Claude Code plugin package/instructions;
 - Cursor Plugin package/instructions;
@@ -346,22 +347,95 @@ native run from a Rosetta one rather than the reader having to assume.
 
 ### What the Linux x64 archive is, concretely
 
-Decided and written by `P15-T007`. It is produced by the same
-`scripts/Build-Release.sh` as the two macOS archives — one script, three targets,
-because the version read, the stage, the three files inside the archive, the
-`.sha256` format, the extraction and the run of the extracted binary are the same
-for all three and two scripts holding one archive contract are two places for it
-to drift — and by a third job in the same workflow, `package-linux`, on an
-`ubuntu-latest` runner.
+Decided and written by `P15-T007`, and produced and run by
+`.github/workflows/release-dry-run.yml`'s `package-linux` job. The short form is
+the one a reader should leave with:
 
-**No run of that job has happened.** The workflow is `workflow_dispatch`-only and
-the job was written by a task that could not dispatch it, so the artifact does not
-exist. That is a statement about this job's history and not about this job, and
-the sentence a reader should leave this section with is:
+> **This project produces and runs a `x86_64-unknown-linux-gnu` Linux artifact,
+> on a native x86_64 Linux host, whenever that job runs. It is not published,
+> signed or notarized. No release carries it.**
 
-> **This project's Linux x64 artifact is built, tested, packaged, checksummed and
-> run by the `package-linux` job whenever it is dispatched. Until that has
-> happened, no Linux archive exists and none is claimed here.**
+The rest of this section is what that sentence rests on, and what it does not.
+
+It is produced by the same `scripts/Build-Release.sh` as the two macOS archives —
+one script, three targets, because the version read, the stage, the three files
+inside the archive, the `.sha256` format, the extraction and the run of the
+extracted binary are the same for all three and two scripts holding one archive
+contract are two places for it to drift — and by a third job in the same workflow,
+`package-linux`, on an `ubuntu-latest` runner.
+
+**What was measured, and where.** Run `35526723850`, attempt 1, on commit
+`f727d5f`, concluded `success` with all six jobs green: `validate` on ubuntu,
+windows and macos, and the three artifact jobs. `package-linux` is job
+`106120068667`. Its *"What this runner is"* step prints the runner's identity
+rather than leaving the label to be believed:
+
+| reading | value |
+| --- | --- |
+| `uname -s` | `Linux` |
+| `uname -m` | **`x86_64`** |
+| `RUNNER_ARCH` | **`X64`** |
+| `rustc host` | **`x86_64-unknown-linux-gnu`** |
+| `rustc release` | `1.98.1` |
+| `targets installed` | `x86_64-unknown-linux-gnu` |
+| `cc` | **`/usr/bin/cc`** |
+| `sh` | **`/usr/bin/sh -> /usr/bin/dash`**, version `0.5.12-6ubuntu5` |
+| `objdump` | `/usr/bin/objdump` |
+| runner image | `Ubuntu 24.04.5 LTS` (`24.04.5 LTS (Noble Numbat)`), `ldd (Ubuntu GLIBC 2.39-0ubuntu8.8) 2.39` |
+
+This is a **native x86_64 Linux host**, which is what the artifact's architecture
+requires; and `cc` is present, which is the exact tool whose absence stopped the
+local Windows-host attempt recorded below.
+
+**What was built, and what was run.** `cargo build --workspace --release --locked
+--target x86_64-unknown-linux-gnu` exited 0 with `Finished release profile
+[optimized] target(s) in 1m 35s`. The staged binary was 12025344 bytes, SHA-256
+`5db5bf085f8a45aa039af0943134036dc70b792945921dbe579a4f4ea3281144`. The archive
+`sure-0.0.0-bootstrap-x86_64-unknown-linux-gnu.tar.gz` was 4599814 bytes, and its
+`.sha256` was 119 bytes (expected 119), 1 LF, 0 CR, digest
+`44cd8357478cd2dbafaead10d71a4e56ff10ec86620cb9c8c26650e491c9bb2a`. The layout
+was 4 entries, exactly the promised set. Verification read `expected` == `actual`,
+the second tool agreed, and the archive on disk was the archive the checksum file
+names. Extraction produced `same as the sure cargo built`. The extracted binary's
+header bytes were `7f454c4602010100000000000000000003003e00`, which the reader
+returned as `ELF 64-bit, little-endian, x86_64`, and `/usr/bin/file` said `ELF
+64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked,
+interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0,
+BuildID[sha1]=4bf7a014c7f016887cf6cf67aa9d873ef64b56f1, not stripped`. The job
+then invoked `<extracted>/sure doctor`, which exited 0, reporting `SURE
+0.0.0-bootstrap (harness protocol 1), built for linux x86_64, C library gnu`, and
+reporting `from` its own extracted path. The gate read `permitted`. The platform's
+own `sha256sum -c` was asked the same question from the directory the file was
+written into and answered `OK`, and the same command was required to refuse a copy
+modified after it was written, which it did. The verdict line was:
+
+```
+OK  the bytes that are checksummed are the bytes that were run
+```
+
+**The signature step reports `not read`, and that stays as it is.** Its reason is
+that an ELF carries no signature field and no step of this build applies one, so
+the run measured nothing about whether the binary is signed. That is a measurement
+that did not happen and not a pass, and nothing here should be read as saying the
+artifact is signed.
+
+**The job's first attempt failed, and that record stays.** Run `35524124026`,
+attempt 1, on commit `70ef6dd`, reached this job and died before the release gate
+was read and before anything was staged, built or written, with
+
+```
+scripts/Build-Release.sh: 530: set: Illegal option -o pipefail
+##[error]Process completed with exit code 2.
+```
+
+The step's shell is `/usr/bin/bash`, where the option is legal; the thing that
+refused it is the `sh` the step handed the script to, which on that runner does
+not implement `pipefail`. The fix is `f727d5f`, the run above is its measurement,
+and `.github/workflows/release-dry-run.yml`'s `package-linux` header keeps the
+whole account, including that both the `set` line and the shebang, as `70ef6dd`
+carried them, are `c522699`'s and had been correct on every machine that had run
+the file before, because no earlier target ran this script on a machine where
+`sh` is not bash.
 
 | | |
 | --- | --- |
@@ -413,9 +487,24 @@ and points at the two readings that give it — `objdump -p` on the extracted
 `sure`, and `ldd --version` on the reader's own machine. The `package-linux`
 job prints the runner's own `ldd --version` and `/etc/os-release` in its
 *"What this runner is"* step, and reads the `GLIBC_` versions off the packaged
-binary in a later step, so the log carries both ends of that number. **The floor
-itself is not stated here because no artifact has been built to read it off**;
-stating a version now would be a guess dressed as a measurement.
+binary in a later step, so the log carries both ends of that number.
+
+**The floor is now measured, and it is a real restriction on who can run this.**
+The `GLIBC_` symbol versions the packaged binary requires, highest last, are
+`GLIBC_2.30`, `GLIBC_2.32`, `GLIBC_2.33`, `GLIBC_2.34`, `GLIBC_2.39`, read in the
+job's *"What this archive asks of its glibc, read off the binary"* step. The
+highest of them is the oldest glibc that can run the binary, so **this artifact
+requires glibc 2.39 or newer**. That is the runner's own libc — `Ubuntu 24.04.5
+LTS` carrying `ldd (Ubuntu GLIBC 2.39-0ubuntu8.8) 2.39` — because the build ran on
+that image; it is the mechanism above and not a choice this repository made.
+**So this artifact does not run on Ubuntu 22.04 (glibc 2.35) or on Debian 12
+(glibc 2.36)**, nor on any other distribution whose glibc is older than 2.39. It
+does run on the image that built it: the extracted binary was run there and exited
+0. The floor belongs to the artifact rather than to the target, so a future
+dispatch on a different image would carry that image's floor and the step above
+would print it. **Lowering the floor is a follow-up that is owed and not done**: it
+means building inside a container older than the runner image, and no step of this
+build does that today. Until one does, 2.39 is what this artifact asks for.
 
 **What has been verified, and where.** The build path cannot be finished on the
 machine that wrote it — Windows 11, native Rust MSVC — for the reason the Intel
@@ -440,8 +529,10 @@ are its lines 56 and 72, with line 67 repeating line 56. Those numbers are named
 for the reason the Intel excerpt above names its own.)
 
 That is a fact about the host and not about the target: `package-linux`'s runner
-has that compiler. What **was** verified locally is the half that does not need a
-Linux compiler — the reader, against real ELF bytes rather than invented ones:
+has that compiler, and run `35526723850` settles it — job `106120068667`'s identity
+step printed `/usr/bin/cc` on its `cc` line and the same build there exited 0.
+What **was** verified locally is the half that does not need a Linux compiler —
+the reader, against real ELF bytes rather than invented ones:
 
 | archive name | `sure`'s first twenty bytes | Architecture step | bytes |
 | --- | --- | --- | --- |
@@ -463,12 +554,16 @@ objects that were shipped by someone else.
 
 **What the local runs cannot reach, stated plainly.** The Windows host cannot make
 an extracted file executable, so the mode check stops every local run of the
-script and the steps after it are unreachable here: the *Signature* step, the
-*Run the extracted binary* step and the final verdict line have never run for a
-Linux target on any machine. `package-linux` is what runs them. Until it does,
-"the extracted `sure` runs on Linux and reports itself built for Linux" is
-**unmeasured**, and the acceptance sentence at the top of this section is not yet
-earned.
+script and the steps after it are unreachable *here*: the *Signature* step, the
+*Run the extracted binary* step and the final verdict line. That is a boundary of
+this host and not of the artifact. Run `35526723850` reached all of them: the mode
+check passed, which is the first time the `755` mode this archive records has been
+checked against a real extraction on a Linux filesystem for a Linux target; the
+*Signature* step reported `not read` and measured nothing, as it must; the
+extracted `sure doctor` ran from its extracted directory and exited 0; and the
+verdict line was printed. So "the extracted `sure` runs on Linux and reports
+itself built for Linux" is no longer unmeasured, and the claim at the top of this
+section is earned by the log above rather than asserted.
 
 **How to reproduce this.** Dispatch the workflow and read the `package-linux`
 job's log:
@@ -477,18 +572,30 @@ job's log:
 gh workflow run release-dry-run.yml --ref claude/v0.1-autonomous
 ```
 
-The job's *"What this runner is"* step prints `uname -m`, `RUNNER_ARCH`,
-`rustc -vV`'s host, the image's `/etc/os-release` and its `ldd --version`, so the
-log says which machine and which C library produced the artifact rather than
-leaving the label to be believed; a later step reads the `GLIBC_` versions out of
-the packaged binary; and `scripts/Build-Release.sh --target
-x86_64-unknown-linux-gnu` extracts the archive to a fresh directory and runs the
-extracted `sure` **from the directory it was extracted into**, comparing the
-`running from` it reports with its own path — so *the bytes that are checksummed
-are the bytes that were run* is established by the order of the steps and not
-asserted. The job uploads the archive and its `.sha256` as the workflow artifact
-`sure-x86_64-unknown-linux-gnu`, retained for 14 days, like the two macOS ones:
-**not published, attached to no release and reachable by no public URL.**
+Run `35526723850` is that dispatch, so its job log is the worked example of the
+paragraph above. The job's *"What this runner is"* step prints `uname -m`,
+`RUNNER_ARCH`, `rustc -vV`'s host, the image's `/etc/os-release` and its
+`ldd --version`, so the log says which machine and which C library produced the
+artifact rather than leaving the label to be believed; a later step reads the
+`GLIBC_` versions out of the packaged binary; and `scripts/Build-Release.sh
+--target x86_64-unknown-linux-gnu` extracts the archive to a fresh directory and
+runs the extracted `sure` **from the directory it was extracted into**, comparing
+the `running from` it reports with its own path — so *the bytes that are
+checksummed are the bytes that were run* is established by the order of the steps
+and not asserted. The job uploads the archive and its `.sha256` as the workflow
+artifact `sure-x86_64-unknown-linux-gnu`, retained for 14 days, like the two macOS
+ones: **not published, attached to no release and reachable by no public URL.**
+
+**The upload has been downloaded back, once, and it agreed.** After run
+`35526723850`, the uploaded artifact was downloaded from the run page and checked
+by hand: the digest recomputed from the downloaded bytes matched the one above on
+both of two independent hashes, `sha256sum -c` against the `.sha256` downloaded
+beside it returned `OK`, the entry list was the four entries above, and the twenty
+header bytes read out of the downloaded copy were the ones the job printed. That
+is the upload-download-rehash round trip the macOS Intel section above reports as
+not measured *for its own artifact*: it is now measured for this one, once, on one
+machine. That entry stands unchanged for both macOS archives, and a 14-day
+`actions/upload-artifact` artifact is still not a distribution channel.
 
 ## Package managers
 
@@ -508,3 +615,5 @@ not own, and no package exists there.
 Authenticode/code-signing credentials are external. If unavailable, document the unsigned state and expected Windows warnings. Do not fake signing.
 
 Apple Developer ID signing/notarization is likewise an optional external credential-dependent enhancement for macOS artifacts.
+
+For Linux there is no field to sign into and none to read: a signature over an ELF is a detached file beside it, never a field inside the image. So `package-linux`'s *Signature* step reports `not read` and gives that as its reason rather than letting the absence of a value read as a pass.

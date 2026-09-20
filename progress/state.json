@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P15",
-  "last_updated": "2026-09-20T23:11:41.858Z",
+  "last_updated": "2026-09-20T23:26:41Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2978,6 +2978,24 @@
         "the worker's sandbox limitation, reported rather than worked around, for the fourth consecutive task: a subagent environment cannot load Microsoft.PowerShell.Security, so every test that spawns Windows PowerShell with -File returns UnauthorizedAccess and the worker's run of this file was 7 passed / 2 failed, both failures at the .ps1 staging step. From native PowerShell on the same tree the file is 9 passed / 0 failed, and CI on a fresh Windows runner is 9 passed / 0 failed",
         "CANNOT CONFIRM: nothing. Both things that were unexplained when this task was picked up are settled above -- whether the store directory moving meant the store had been written (it did not; WAL sidecars, measured on a copy) and whether the hole the supervisor's probe found was real (it was, and the probe now fails)"
       ],
+      "notes": ""
+    },
+    "P15-T033": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P15-T034": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
       "notes": ""
     }
   },

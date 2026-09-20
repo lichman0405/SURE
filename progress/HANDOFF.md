@@ -3,6 +3,22 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T009` is accepted at `a301e6004850fbf64c10e0d12c183f15789f6862`, and "documented PowerShell commands" now has something to point at for Claude rather than a route named in a table.** The acceptance is *"Windows user can install/remove Claude/Cursor integration packages with documented PowerShell commands"* and *"normal per-user install does not require symlink privileges or administrator rights."* The Cursor half already existed and was tested; the Claude half did not exist at all — `find integrations -name 'install.ps1' -o -name 'uninstall.ps1'` returned four files, none of them in `integrations/claude-code/`, whose `scripts/` held only launchers.
+
+**The decision: a per-user copy installer that mirrors Cursor's, with the plugin workflow documented as documentation rather than presented as a run.** `INSTALLATION_MATRIX.md` already named the plugin route for Claude Code — *"documented plugin package/marketplace route as appropriate"* — and that route is real, but it installs **from a marketplace**, and this repository ships no `marketplace.json` anywhere, so there is nothing for a user to install from yet. A command that cannot be run is weaker than a copy installer that has nine tests, so the installer is what shipped; the plugin mechanisms are documented beside it, marked as documented, and named as release-packaging work. The argument against the route not taken is in the matrix rather than implied.
+
+**Both acceptance lines are earned, and the second one is a run rather than a claim.** The per-user install was executed on this machine, which has no Developer Mode, from a process that returned `False` for `WindowsPrincipal.IsInRole(Administrator)`: the symlink probe threw `UnauthorizedAccessException` — *this operation requires administrator privileges* — and the installer completed anyway with exit 0 and `Installed (copy)`. That is the interesting half of line 2, because it is the case where the convenient mechanism is **refused** and the fallback carries the install.
+
+**The honesty line the repository already draws is held in the new README section, and the supervisor verified the provenance instead of trusting it.** `scripts/install.ps1` places the package; it does not register it with Claude Code, and no plugin from this repository has been loaded into a running session — so the three loading mechanisms are labelled **documented behaviour, not something SURE observed**, in bold, in the same shape `README.md:49` already used for the MCP server. The matrix goes further and names its sources and the day they were read. Since the worker's brief forbade network access, that provenance was a claim the supervisor could not take on report; it was checked first-hand, and both pages were reached on 2026-09-21 and say what the two documents say they say — including, verbatim, *"Any folder under a skills directory that contains a `.claude-plugin/plugin.json` manifest is loaded as a plugin named `<name>@skills-dir` on the next session, with no marketplace and no install step."* The claim is substantiated rather than softened, and the fact that it was checked is in the evidence.
+
+**The hand-back reported five pre-existing failures; there are none, and the cause is the same sandbox that produced twenty-seven of them one task ago.** `integration_thinness` runs **54 passed; 0 failed** from a real PowerShell session — 45 before this task plus the 9 it adds — and the gate over this tree returns `failed=0`. Two consecutive workers have now measured a large green tree as red because their environments cannot load `Microsoft.PowerShell.Security`, so `Get-ExecutionPolicy` fails and every test that spawns Windows PowerShell 5.1 returns `UnauthorizedAccess`. Both hand-backs compared against the baseline honestly **inside** that environment, which cannot reveal that the environment is the variable. It is recorded here as a property of that sandbox and not of this repository.
+
+**A false sentence in `scripts/Install-Sure.ps1` was corrected by the supervisor, and the worker's edit had made it look freshly verified.** The comment said `grep -rn LOCALAPPDATA integrations/` *"returns these eight files"*. It returns **26** — the eight launcher scripts are a true subset of the result, not the whole of it. The sentence predated this task (it said "seven" before), and the 7 → 8 count edit propagated it while reading like a re-measurement. The claim now states the search, its result count, and that the launchers in its output are what the list enumerates — and a second pass caught the **replacement's own** imprecision, because it attributed the whole surplus to READMEs and command files while two of the extra `.ps1` hits are the `uninstall.ps1` pair, which name the directory to remove from rather than the binary to resolve. `grep -rln LOCALAPPDATA integrations --include='*.ps1'` returns ten; the comment now says so and says which eight of them the list is. The eight are right, and were never in doubt — but a sentence that explains a surplus wrongly is the same defect one size down.
+
+**The first gate over this tree was red, and the submission was not accepted on it.** `fmt` exited 1 on three line-wrapping diffs in the new test code — `cargo fmt` wanted `std::fs::read_to_string(claude_code_script("install.ps1")).expect(…)` on one line and `installed.join(".claude-plugin").join("plugin.json").is_file()` split across four. The hand-back had not run `cargo fmt`, and nothing else in the tree was unformatted: applying it changed one file and no other. That change made the manifest stale again — it hashes this file — and the regeneration named exactly one moved digest and nothing else, which is the manifest's own check working rather than a claim about it. The gate was then run a second time over the corrected tree, because a gate run is evidence for the tree it started on and not for one edited afterwards.
+
+**The acceptance-carrying test was mutation-checked rather than taken on report.** Changing the destination in `uninstall.ps1` from `'claude-plugins'` to `'claude-plugins-old'` fails `the_claude_code_install_and_uninstall_scripts_agree_on_where_the_package_goes` at `integration_thinness.rs:1807` — the pair-drift the test exists to catch — and the file was restored and verified by SHA-256 (`d22e8897…`). The worker also reported catching a false green **in its own test** and fixing it: a `contains` check passed while the README said `sure-old`, because the assertion was a substring of the wrong string, and its first attempt to falsify it failed too because `replace(…, 1)` hit only the first of two occurrences. That is the failure mode this task's tests are most exposed to, and it is why the README assertions name the backticked token.
+
 **`P15-T008` is accepted at `0b8736ad5aa5c6d2817801557ded174950035970`, and "included as supported" now means something because the task had to define it.** The acceptance is *"Installable/local-test packages have version aligned with release"* and *"Windows launchers are tested; secondary platform launchers/configs are included as supported."* The word the second line turns on carried no definition anywhere in this repository, and the task note said so explicitly — *"What 'supported' has to mean is this task's decision, not this note's."* It is now three clauses, each with a test that fails if it stops holding: the launcher is in the package and names its interpreter on line 1, the git index records it executable, and a manifest naming it by path is checked beside it.
 
 **The version was already aligned, and nothing was checking it — which is the whole of the first acceptance line.** All three `plugin.json` files said `0.0.0-bootstrap` and that matched `sure_domain::VERSION`, so the property held by coincidence of two edits rather than by anything that would notice them drifting apart. `integration_thinness.rs:1112` asserted only that the `version` **key was present**. The new test takes the release version from `sure_domain::VERSION` — the value `sure` reports for itself and the value the release archive is named after, so it cannot drift from a re-parsed `Cargo.toml` — and it pins the **set** of manifests as well as their contents, because a test that sweeps whatever it finds gets greener the less there is to find.
@@ -3027,6 +3043,150 @@ after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
 **The next task is `P15-T019`, not `P15-T007`.** Its own re-open condition — *"if this one fails a tree that cannot be its cause twice more, the ordering decision is to be reopened rather than defended"* — is met: three trees that changed no Rust have now failed on the ETXTBSY flake (`0b0af1d`, `8342764`, `6226ce8`), against two that came back green (`f6706d4`, `a009f57`), and each occurrence was read to its test name, line and errno before it was counted. The old argument's second half still holds — this task's verification is a number of clean ubuntu runs, and those arrive one push at a time whatever the order — but the first half does not, and a leading indicator exists so that the reopening happens *before* a failure is hidden rather than after. Two things moved besides the count. The task's own criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the fourth occurrence of the class, `crates/sure-core/src/analysis_provider/mod.rs:591`, is a site that command cannot reach — so the criterion has been widened from the mechanism to the property, and criterion 2 has gained the reverse direction that occurrence measured. And three of this window's ubuntu runs were red on trees the flake cannot be caused by, so every later acceptance pays a re-run to separate signal from noise.
+
+## What `P15-T009` added
+
+**`integrations/claude-code/scripts/install.ps1`** (new, 36 lines) is
+`integrations/cursor/scripts/install.ps1` (38 lines) with six differences, and
+two of them are decisions rather than renames. The renames are the header
+comment, a comment's wording on line 4, the destination keys
+(`CURSOR_PLUGIN_DIR` / `%APPDATA%\Cursor\plugins` ->
+`CLAUDE_PLUGIN_DIR` / `%LOCALAPPDATA%\claude-plugins`), and the temp-probe name.
+The two that are not: a comment recording that the copy path is the one that
+always works on Windows without Developer Mode, and **the replacement of
+Cursor's five-line MCP `PATH` warning**. That warning is redundant here —
+`sure-mcp.ps1:22` already tells the user at run time where it looked (`SURE_BIN`,
+then `sure` on `PATH`, then `%LOCALAPPDATA%\SURE\bin\sure.exe`) and exits 3
+rather than serving an empty tool list, which is a better moment for the message
+than an install log the user may never re-read. It resolves `SURE_BIN`
+from the environment, then `Get-Command sure`, then
+`%LOCALAPPDATA%\SURE\bin\sure.exe`; probes symlink capability by attempting one
+into `$env:TEMP` inside `try`/`catch`; and falls back to `Copy-Item -Recurse`
+unless `-ForceCopy` is passed — so the copy path is the default-safe one, which
+is what acceptance line 2 requires. It renders `{{SURE_BIN}}` and
+`{{PLUGIN_ROOT}}` on the way in.
+
+**`integrations/claude-code/scripts/uninstall.ps1`** (new, 20 lines) removes
+`<CLAUDE_PLUGIN_DIR or %LOCALAPPDATA%\claude-plugins>\sure`, prints which
+outcome occurred, and exits 0 whether or not there was anything to remove. Its
+comment records a measured reparse-point result and says plainly that a real
+symlink is **not** measured.
+
+**The destination is a decision, not an echo of Cursor's.** `$env:CLAUDE_PLUGIN_DIR`
+else `%LOCALAPPDATA%\claude-plugins` is the same *shape* the Cursor and
+agent-plugin installers use, and it is what makes the skills-directory route
+reachable by setting one variable rather than by editing the script.
+
+**`integrations/claude-code/README.md`** (+94) gains `## Installation (Windows)`
+with the two commands a person types, a scoping note that
+`-ExecutionPolicy Bypass` is a per-invocation choice made by the person typing
+it rather than a machine-wide weakening, and
+`### Loading the plugin is Claude Code's step, and this repository did not watch
+it`, which marks **every** loading mechanism as documented-not-observed and
+explains why the skills directory is deliberately not the installer's default:
+this package carries hooks, personal skills load into every project on the
+machine, and that is a choice for the person to make rather than one for an
+installer to make quietly.
+
+**`docs/integrations/INSTALLATION_MATRIX.md`** (+104) gains
+`## What installing the Claude Code package means`, including the option not
+taken and the argument against it, what is measured and by what, and a
+`### Cannot confirm` list that names its two open items — that Claude Code loads
+a plugin by any mechanism, and that a real symlink installs and uninstalls
+cleanly.
+
+**`crates/sure-testkit/tests/integration_thinness.rs`** (+422, 9 tests) adds a
+section at `:1683` with helpers `claude_code_readme()` and
+`claude_code_script()`. The tests cover the installer's contract and the
+install/remove pair agreeing on one destination; that the README documents both
+commands; that the installer does not require symlinks unconditionally; that it
+runs into a temp directory; that it copies when a symlink is refused; that it
+refuses when SURE is not installed; and that uninstall removes what install
+placed. `the_claude_code_install_and_uninstall_scripts_agree_on_where_the_package_goes`
+is the one that makes the pair a **pair** rather than two independent scripts
+that happen to agree today.
+
+**Three count edits are one set** — `install_flow.rs` (6 lines),
+`winget_manifest.rs` (2) and `scripts/Install-Sure.ps1` (15) — carrying the
+launcher census from seven to eight after `claude-code/scripts/install.ps1`
+joined the list. `scripts/Install-Sure.ps1` additionally has a false sentence
+corrected by the supervisor (see the lead block).
+
+**`SHA256SUMS.txt`** was regenerated for the three files this task changes, and
+**the two new scripts were deliberately not added to it.** The manifest is a
+*representative selection, not an exhaustive manifest* — that is its own
+generator's header — and the generator never adds a path, because deciding what
+belongs in the selection is not a script's call. Cursor's installers are absent
+from it and agent-plugin's are present, so no consistent rule would be served by
+adding these two; the decision is recorded rather than silently made either way.
+
+## Validation of `P15-T009`
+
+**The gate over the work tree, `target/tmp/gates.ps1 -Label p15t009-accept`, at
+`e9dec56` with the nine files uncommitted:**
+
+    exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0
+    result-lines=81 passed=2690 failed=0 ignored=12 not-ok=0
+    headers (case-sensitive): 71
+    bootstrap:  SURE bootstrap validation OK: 17 phases, 191 tasks.
+    taskctl:    state OK: 191 tasks
+    store before/after: D1717556...7853, 348160 bytes, mtime unchanged
+    worktree at start == worktree: the nine files this task carries
+
+`passed` rises from 2681 at `P15-T008` by exactly nine, which is the nine tests
+this task adds — none of them is `#[cfg(unix)]`, so all nine run on Windows.
+
+**The first gate over this tree was red and is recorded rather than replaced.**
+`fmt` exited 1 on three line-wrapping diffs in the new test code. `cargo fmt
+--all` changed `crates/sure-testkit/tests/integration_thinness.rs` and no other
+file; that made its `SHA256SUMS.txt` digest stale, and the regeneration reported
+`195 listed, 194 unchanged, 1 stale, 0 absent` — naming exactly that one file,
+which is the manifest's own check working rather than a claim about it. The gate
+was then re-run, because a gate run is evidence for the tree it started on and
+not for a tree edited afterwards.
+
+**Both acceptance lines were established independently of the hand-back.** Line
+1 by reading the README's commands and confirming the two scripts they name
+exist and are the pair the tests exercise, plus the `#execution-policy` anchor
+resolving to a real heading at `README.md:213`. Line 2 by the by-hand run
+recorded in `INSTALLATION_MATRIX.md:100-105`, whose load-bearing detail is that
+the symlink probe **failed** and the install completed anyway.
+
+**Mutation checks, run by the supervisor.** `uninstall.ps1`'s destination
+`'claude-plugins'` -> `'claude-plugins-old'` fails
+`the_claude_code_install_and_uninstall_scripts_agree_on_where_the_package_goes`
+at `integration_thinness.rs:1807`; the file was restored and verified by
+SHA-256. The README test was read rather than mutated, and it pins the whole
+backticked path with a comment explaining that a substring check for
+`…\claude-plugins\sure` is satisfied by `…\claude-plugins\sure-old` — the false
+green the worker reported catching in its own work before hand-back.
+
+**Claims that did not survive measurement.** The hand-back's "five pre-existing
+test failures": `integration_thinness` is **54 passed; 0 failed** from a real
+PowerShell session (45 + 9). The hand-back's description of the new installer as
+a statement-for-statement mirror of Cursor's: `diff` shows six differences, four
+renames and two decisions. And the supervisor's own replacement sentence about
+the `LOCALAPPDATA` grep, which blamed the surplus on READMEs and command files
+when the narrower `--include='*.ps1'` search returns ten and two of those are the
+`uninstall.ps1` pair.
+
+**What was not measured, and is not claimed.** A real symlink install and
+uninstall: no host here will create one, so that branch has never run — measured
+in its place, a reparse point at the same path is removed as a link with its
+target left whole. Claude Code loading the package by any mechanism: no plugin
+was installed into a running session. And the installer's behaviour under a
+machine policy that refuses the documented command: the one execution that
+happened ran through the command as documented, typed by a person, and is
+recorded in the matrix rather than generalised from.
+
+**One investigation that found nothing, recorded so it is not repeated.**
+Normalising the two new `.ps1` files to CRLF, to match `.gitattributes`' `*.ps1
+text eol=crlf`, was tried and **reverted**: under `core.autocrlf=true` it turned
+`git status` from `A ` to `AM` and would have invalidated the gate run.
+`git ls-files --eol` then showed the concern was unfounded — every `.ps1` blob
+is `i/lf`, and `sure-hook.ps1` and `cursor/scripts/install.ps1` are `w/lf` in
+the worktree too, so the two new files match existing ones rather than being the
+outliers.
 
 ## What `P15-T008` added
 
@@ -23488,6 +23648,7 @@ absent text.
 | `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
+
 
 
 

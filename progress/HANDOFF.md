@@ -3,15 +3,18 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
-**`P7-T013` is accepted and delivered in the two worker commits this record accompanies — `4e1097d` and
-`3beebbd`, on base `f810ffc` — and the worktree is clean.** It is the task the Codex package's README
-said needed its own task: `sure check` now reads the capability tier from the project's own recorded
-events, at stage 10 of the pipeline, instead of from the command line. `progress/state.json` carries 190
-records and `P7-T013` is accepted with ten evidence entries; `tasks/tasks.json` carries 190 tasks, with
-`P15-T030` minted from a defect found while accepting this one; `SHA256SUMS.txt` was stale for **four**
-digests and is regenerated with all three of its invariants intact (195 entries, 19199 bytes, no
-trailing newline). The task's own account is in "What `P7-T013` added" and "Validation of `P7-T013`"
-below.
+**`P7-T013` is accepted and delivered at `4bff01c`, which was the tip of this branch when this paragraph
+was written — this record commit supersedes it.** The tip is named as a dated fact and not restated as a
+standing one, which is the correction the paragraph below records for its own predecessor; the acceptance
+commit itself is `4bff01c3640b09f1676569ba36d26c7a4bbdf0e7`, carrying the two worker commits `4e1097d` and
+`3beebbd` on base `f810ffc`. The task is the one the Codex package's README said needed its own task:
+`sure check` now reads the capability tier from the project's own recorded events, at stage 10 of the
+pipeline, instead of from the command line. `progress/state.json` carries 190 records and `P7-T013` is
+accepted with **eleven** evidence entries; `tasks/tasks.json` carries 190 tasks, with `P15-T030` minted
+from a defect found while accepting this one; `SHA256SUMS.txt` was stale for **four** digests and is
+regenerated with all three of its invariants intact (195 entries, 19199 bytes, no trailing newline).
+**`P15-T003` is dispatched from this commit.** The task's own account is in "What `P7-T013` added" and
+"Validation of `P7-T013`" below.
 
 **`P7-T012` is still accepted at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which was
 `origin/claude/v0.1-autonomous` when that sentence was written and has since been superseded twice.**
@@ -34,18 +37,60 @@ acceptance section below.
 
 **CI run `35501495428` on `f810ffc` — the commit that recorded that acceptance and dispatched
 `P7-T013` — is also SUCCESS on all five jobs**, with `headSha` read back from the API as
-`f810ffc539570bedef103f426abfd9270e24c709`. All three supervisor record commits on this thread now carry
-their own reading, and the two worker commits carry the runs their pushes earned.
+`f810ffc539570bedef103f426abfd9270e24c709`. It was the third supervisor record commit on this thread to
+carry its own reading, and the push it belongs to carried `a217882`, so the worker commit beside it earned
+a run of its own.
 
-**The next dispatch is `P15-T003`** — *"Create Windows per-user install/uninstall PowerShell flow"* —
-and §14 hands it there **by measurement rather than by the hook's truncated `ready=` line**: with
-`P7-T013` accepted, every task in the ready set is `P15`, and `P15-T003` is the lowest-numbered of them,
-so no DAG edge is being traded away for it. Its brief is written, and its landmine is confirmed on disk
-rather than assumed: `%LOCALAPPDATA%\SURE\sure.db` exists — 348,160 bytes, mtime 2026-09-18 — and there
-is **no `bin\` beside it yet**, so the install creates `bin\` directly alongside the user's evidence
-store, and an uninstaller that removes the directory recursively destroys it. Criterion 2 is not "ask a
-yes/no question"; it is that the uninstaller must be structurally incapable of removing data the install
-did not create.
+**CI run `35503133165` on `4bff01c` is SUCCESS on all five jobs** — `rust (windows-latest)`,
+`rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` — with
+`headSha` read back from the API as `4bff01c3640b09f1676569ba36d26c7a4bbdf0e7` rather than inferred from a
+queue state. **What that covers was measured rather than borrowed, because the sentence written for
+`f810ffc` does not transfer to this push:** `gh run list --commit <full sha>` returns run `35503133165`
+for `4bff01c` and **no run at all** for either worker commit, `4e1097d` or `3beebbd`. GitHub ran the
+workflow on the push tip, which is the supervisor's record commit, so the worker's bytes are covered
+because the tree that job checked out contains them — not because their own commits were tested. The two
+rows that carry the most weight are `rust (macos-latest)` and `rust (ubuntu-latest)`, because those are
+where the `runtime_start` flake and the ETXTBSY class have surfaced before and neither fired. They also
+**partly answer** the fifth limit recorded in the acceptance — that everything in that task had been
+observed on Windows 11, with the `nonwindows` gate a static check rather than a run. A commit that passes
+on three platforms is not the same thing as the task having been measured on three, and the difference is
+left standing rather than smoothed over.
+
+**`P15-T003` is dispatched from this commit** — *"Create Windows per-user install/uninstall PowerShell
+flow"* — and §14 hands it there **by measurement rather than by the hook's truncated `ready=` line**: the
+non-terminal set was counted rather than recalled, and it is `P15`'s 26 open tasks and `P16`'s nine, with
+every `P14` task accepted; the ready set is 20 tasks and all 20 are `P15`, so `P15-T003` is the
+lowest-numbered of them and no DAG edge is being traded away for it. Its brief is written, and its
+landmine is confirmed on disk rather than assumed: `%LOCALAPPDATA%\SURE\sure.db` exists — 348,160 bytes,
+mtime 2026-09-18 — and there is **no `bin\` beside it yet**, so the install creates `bin\` directly
+alongside the user's evidence store, and an uninstaller that removes the directory recursively destroys
+it. Criterion 2 is not "ask a yes/no question"; it is that the uninstaller must be structurally incapable
+of removing data the install did not create.
+
+**Two fields of the record that every session reads were stale, and no gate can see either.**
+`progress/state.json`'s `current_phase` said `P14` and its `last_updated` said
+`2026-09-19T12:05:00.939Z` while every `P14` task had been accepted and the lowest open phase was `P15` —
+so `scripts/dev-context.mjs` has opened every session since with `phase=P14 status=in_progress`, and
+`scripts/taskctl.mjs` prints the same line on demand. The mechanism is that `taskctl start` is what writes
+`current_phase`, and this loop dispatches by editing `state.json` directly, so the field has not been
+written since the last time `taskctl` was used. Both are corrected here to `P15` and to this commit's own
+time. **Nothing reads either field in a gate**, measured rather than assumed:
+`grep -rn "current_phase\|last_updated" scripts/ crates/ .github/` returns only those two display sites,
+so `validate-bootstrap.mjs` and `taskctl validate` included, the repository could not have told anyone.
+That is the shape `P15-T020` exists to decide about — a field that reads as a fact, is printed to a
+reader, and has nothing that can falsify it — and it is recorded rather than minted as a task because,
+unlike the manifest, the fix is one line and this loop owns the only writer.
+
+**A scratch tool that a future dispatch depends on is left where it is, and the pointer is written here
+rather than only there.** `P15-T028`'s note still cites line numbers read at `96c490b` — `:1504`,
+`:1510-1513`, `:1516-1519`, `:969` — and the file has moved about eight lines since; the true positions at
+this commit are `:1512`, `:1518-1521`, `:1524-1527` and `:977`, verified by reading
+`crates/sure-core/src/acceptance_report.rs` directly rather than by trusting the locator, because that
+locator has already been wrong twice in this file. The re-pointer is `target/tmp/repoint-p15t028.mjs`: it
+re-derives every number from the source and refuses rather than writing one it could not find. It is
+**git-ignored**, which is the hazard `P15-T020` exists to decide, and it is deliberately **not applied
+yet** — the numbers only need to be right when `P15-T028` is dispatched, and applying it now would edit
+`tasks/tasks.json` while the CI for the acceptance was still running.
 
 **The trap `P7-T013` carried is now a measured result rather than a warning.** The obvious
 implementation **deletes a blind spot while keeping the same tier**: `CapabilityReport::cli()` reports

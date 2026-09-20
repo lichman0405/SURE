@@ -111,11 +111,13 @@ on that machine at all.
 **What "builds/tests" means here is two things.** The workspace's tests are
 `cargo test --workspace --no-fail-fast` in the workflow's own step, on the same
 runner. The artifact is separately exercised: the script extracts the archive to
-a fresh directory and runs the extracted `sure` **from there**, requiring it to
-report `running from` that directory and to describe itself as built for
-`macos aarch64`. The property that makes it falsifiable is the one the Windows
-script states — *the bytes that are checksummed are the bytes that were run* —
-and it is established by the order of the steps, not by a claim.
+a fresh directory and runs the extracted `sure` **from there**, by absolute
+path, requiring it to report `running from` **its own path** — that line is the
+path of the running executable, not of the directory holding it — and to
+describe itself as built for `macos aarch64`. The property that makes it
+falsifiable is the one the Windows script states — *the bytes that are
+checksummed are the bytes that were run* — and it is established by the order of
+the steps, not by a claim.
 
 The release gate applies here exactly as it does on Windows. The document is
 `target/tmp/release-gate.json`, written by

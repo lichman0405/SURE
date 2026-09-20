@@ -148,8 +148,10 @@
 #   the artifact is exercised  - this script extracts the archive to a fresh
 #                                 directory and runs `sure doctor` from **there**,
 #                                 by absolute path, requiring the binary to
-#                                 report `running from` the directory it was
-#                                 extracted into.
+#                                 report `running from` **its own path** — the
+#                                 executable the archive was extracted into,
+#                                 which is a file inside that directory and not
+#                                 the directory itself.
 #
 # The property that makes the second falsifiable is the one the Windows script
 # states: **the bytes that are checksummed are the bytes that were run.** It is
@@ -203,6 +205,15 @@
 #   reached with a Mach-O this host cannot execute and failed loudly and
 #   correctly — exit 126, `cannot execute binary file: Exec format error`, and a
 #   message attributing it to the host rather than to the artifact.
+# * The `running from` comparison, corrected here, exercised **directly** with
+#   planted inputs rather than through the Run step, which this host cannot
+#   reach at all: the extracted binary answering passes; a `sure` in another
+#   directory, and one with another name in the extraction directory, both
+#   fail with the same message shape; and a path reached through a Windows
+#   directory junction passes after folding, which is the macOS
+#   `/var` -> `/private/var` shape made with a real reparse point. What that
+#   reading does **not** cover is the comparison running inside a whole macOS
+#   job: nothing in this change has been run on a Mac.
 #
 # What this host cannot exercise at all, named rather than glossed over:
 #
@@ -878,7 +889,7 @@ this file says there is none.
 An arm64 binary can carry an ad-hoc signature, which the toolchain applies so
 that the kernel will load the image. That is not a certificate, it names no
 developer, and it does not contradict the paragraph above; if the reading says
-`Signature=adhoc` that is what it is.
+\`Signature=adhoc\` that is what it is.
 
 What macOS does with a program that carries no Developer ID signature is
 Apple's behaviour and not SURE's, and this project has not observed it on a Mac
@@ -962,7 +973,7 @@ EOF
     detail "file        $SHA_PATH"
     detail "bytes       $written_bytes (expected $expected_bytes), $written_lf LF, $written_cr CR"
     if [ "$written_cr" -ne 0 ]; then
-        fail "the checksum file holds $written_cr carriage returns. A CRLF line ending makes the file a different file from the one this repository documents, and a `sha256sum -c` that fails on it fails for a reason that has nothing to do with the artifact."
+        fail "the checksum file holds $written_cr carriage returns. A CRLF line ending makes the file a different file from the one this repository documents, and a \`sha256sum -c\` that fails on it fails for a reason that has nothing to do with the artifact."
     fi
     if [ "$written_lf" -ne 1 ]; then
         fail "the checksum file holds $written_lf newlines; this format is one line ending in one LF"
@@ -1261,7 +1272,7 @@ case "$first_line" in
 esac
 
 # `sure doctor` prints the path it is running from on the line after that one.
-# It is what the binary says about itself, and it has to be the directory the
+# It is what the binary says about itself, and it has to be the executable the
 # archive was just extracted into: a run that picked up some other `sure` — a
 # copy on PATH, one left by an earlier release — would still exit 0 and still
 # print a well-formed report.
@@ -1269,25 +1280,48 @@ reported_from="$(sed -n 's/^running from //p' "$run_out" | head -n 1)"
 if [ -z "$reported_from" ]; then
     fail "the extracted binary reported no 'running from' line, so which binary answered cannot be checked: $run_out"
 fi
-# Both sides through `pwd -P`, because macOS resolves `/var` to `/private/var`
-# and a comparison of two spellings of one directory would read as a mismatch.
-required_dir="$extract_dir"
-reported_dir=''
-if [ -d "$reported_from" ]; then
-    reported_dir="$(cd -P "$reported_from" && pwd -P)"
-else
-    reported_dir="$reported_from"
-fi
-if [ "$reported_dir" != "$required_dir" ]; then
+# What the field *is* decides what it may be compared with, so the reading comes
+# from the product rather than from this script's expectation: `running from`
+# prints `build.running_from`, `sure_core::doctor` fills it from
+# `std::env::current_exe()`, and that field is documented there as "Where the
+# running executable is." It is the path of the **file** on every platform. An
+# earlier version of this check compared it with `$extract_dir`, the directory,
+# which is one path component away from it — so the comparison could only ever
+# fail, and it reddened the macOS job over a correct artifact.
+#
+# `current_exe()` is not required to return a canonical path, and on macOS it
+# may not: a runner's `$TMPDIR` is under `/var`, which is a symlink to
+# `/private/var`, so two spellings of one file are expected. Both sides are
+# therefore folded the same way before they are compared — the directory
+# component through `cd -P ... && pwd -P`, exactly as the extraction directory
+# was already resolved above, and the basename as it is. Comparing the
+# spellings, or comparing a file with a directory, would read as a mismatch on
+# a machine where nothing is wrong.
+#
+# The check keeps its teeth: a `sure` from PATH, or one left by an earlier
+# release, reports a path in some other directory and still fails here.
+fold_binary_path() {
+    local dir
+    local base
+    dir="$(dirname "$1")"
+    base="$(basename "$1")"
+    if [ -d "$dir" ]; then
+        dir="$(cd -P "$dir" && pwd -P)"
+    fi
+    printf '%s/%s\n' "$dir" "$base"
+}
+required_binary="$(fold_binary_path "$extracted_binary")"
+reported_binary="$(fold_binary_path "$reported_from")"
+if [ "$reported_binary" != "$required_binary" ]; then
     fail "the binary that answered 'sure doctor' is not the one this script extracted:
 
-  required  $required_dir
-  reported  $reported_dir
+  required  $required_binary
+  reported  $reported_binary
 
-The archive was extracted to $extract_dir, so a running_from anywhere else
-means the run measured some other installation."
+The archive was extracted to $extract_dir, so a running_from that is not the
+sure inside it means the run measured some other installation."
 fi
-detail 'from        the directory this script extracted to'
+detail "from        $required_binary"
 
 # -----------------------------------------------------------------------------
 # 8. The result.

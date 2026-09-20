@@ -29,7 +29,34 @@ jobs:
         with:
           toolchain: 1.98.1
           components: rustfmt, clippy
-      - run: cargo test --workspace
+      # **The browser tests need a machine that can host a sandboxed Chromium,
+      # and Ubuntu 24.04 is not one by default.** This is the same runner state
+      # and the same step `ci.yml` documents and applies; the two workflows run
+      # the same command on the same matrix, so a difference here is one of the
+      # two logs saying something the other does not. Its absence was why
+      # `validate (ubuntu-latest)` reddened on `c522699`: `/usr/bin/chromium`
+      # aborted at `ZygoteHostImpl::Init` with *No usable sandbox!* and three
+      # `browser_driver` tests failed at `crates/sure-core/tests/browser_driver.rs:397`.
+      # The product never passes `--no-sandbox`: a browser without it would run
+      # the project's JavaScript without the boundary that exists to hold it, so
+      # what has to change is the *runner* and not the rule. This step is
+      # deliberately not made tolerant — if a future image drops the knob it
+      # fails, which is the honest outcome: the Linux browser tests are then
+      # visibly missing rather than quietly skipped.
+      - name: Let a sandboxed browser start on Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # `--no-fail-fast`, for the reason `ci.yml:50-53` gives and for a second
+      # one that is this job's alone. The first failing target otherwise aborts
+      # the rest, and the targets are where the platform-specific tests live: a
+      # failure in `sure-core --lib` would hide every integration target after
+      # it, on the run whose whole job is to say what this platform does. This
+      # job is dispatch-only and produces no artifact of its own, so a run that
+      # stops at the first red target costs a whole manual dispatch to learn
+      # what a single one would have shown. It does not weaken the gate: the job
+      # still fails if anything failed, and it fails after reporting everything
+      # rather than after reporting the first thing.
+      - run: cargo test --workspace --no-fail-fast
       - run: cargo build --workspace --release
 
   # ===========================================================================
@@ -56,8 +83,10 @@ jobs:
   # list is compared with the set the artifact promises, the extracted binary's
   # first eight bytes are required to be the Mach-O 64-bit magic and the arm64
   # `cputype`, and the extracted binary is **run from the directory it was
-  # extracted into**, with the `running from` it reports compared against that
-  # directory.
+  # extracted into**, with the `running from` it reports — which is the path of
+  # the running *executable*, `sure_core::doctor`'s `current_exe()` reading, not
+  # the directory holding it — compared against the path of the extracted
+  # `sure` itself.
   #
   # **Why the architecture is read from the file.** `macos-latest` is believed
   # to be an arm64 image, and a belief is not a measurement: the label's meaning

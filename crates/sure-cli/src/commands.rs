@@ -58,6 +58,41 @@ use std::path::Path;
 
 use sure_core::pipeline::Purpose;
 
+/// The two locations a caller can name on the command line, and nothing else.
+///
+/// A value rather than two arguments passed to every command, because the two
+/// are both `Option<&Path>` and a command that swapped them would compile: the
+/// settings file would be created as a store directory and the store's directory
+/// would be read as settings. Naming the fields is what makes a call site say
+/// which is which.
+///
+/// `None` in either field means the platform's own location, which is what a
+/// caller who names nothing gets. Both values come from the process's own
+/// argument vector — `--store-dir` and `--settings-file` — and from nowhere
+/// else; `sure_core::paths` says why there is no environment variable for
+/// either.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Named<'a> {
+    /// The directory this run's record store lives in.
+    pub store: Option<&'a Path>,
+    /// The file this run reads its user-level settings from.
+    ///
+    /// The file that may grant what the user's own settings file may grant, and
+    /// the one `crate::mcp` refuses outright: see [`Command::report`].
+    pub settings_file: Option<&'a Path>,
+}
+
+impl<'a> Named<'a> {
+    /// A run that named a store directory and no settings file.
+    #[must_use]
+    pub fn store(store: &'a Path) -> Self {
+        Self {
+            store: Some(store),
+            settings_file: None,
+        }
+    }
+}
+
 use crate::cli::Command;
 use crate::report::{NotYet, Report};
 
@@ -107,14 +142,21 @@ pub const NOT_ASKED_HERE: &[&str] = &["check", "recheck", "repair"];
 impl Command {
     /// What SURE does about this command, in this build.
     ///
-    /// `store` is the store directory the caller named on the command line, or
-    /// `None` for the platform's own per-user location. It comes from
-    /// [`crate::cli::Cli::store_dir`] and from nowhere else, it means what
-    /// [`sure_core::paths::Paths::discover_at`] says it means, and it is passed
-    /// down rather than discovered again here so that one run cannot read one
-    /// store and write another.
+    /// `named` is what the caller named on the command line — the store
+    /// directory and the settings file, each `None` for the platform's own
+    /// location. Both come from [`crate::cli::Cli`] and from nowhere else, they
+    /// mean what [`sure_core::paths::Paths::discover_with`] says they mean, and
+    /// they are passed down rather than discovered again here so that one run
+    /// cannot read one store and write another, or decide under one settings
+    /// file and record under another.
+    ///
+    /// **One command refuses the settings file outright, and this is where that
+    /// is said**: [`crate::mcp`], whose own documentation argues it. Every other
+    /// command reads it the way it reads the platform's own, and refuses it when
+    /// the project being judged could write it
+    /// ([`sure_core::paths::Paths::ensure_settings_outside`]).
     #[must_use]
-    pub fn report(&self, store: Option<&Path>) -> Report {
+    pub fn report(&self, named: Named<'_>) -> Report {
         match self {
             // The three this build can answer. All three are questions about
             // SURE or about this machine rather than about a project, which is
@@ -132,9 +174,10 @@ impl Command {
             // The examination happens here rather than in `Report`, so that the
             // report stays a value — something a test can build and a renderer
             // can read — instead of a thing that goes and looks.
-            Self::Doctor => {
-                Report::Doctor(Box::new(sure_core::doctor::examine_this_machine(store)))
-            }
+            Self::Doctor => Report::Doctor(Box::new(sure_core::doctor::examine_this_machine_with(
+                named.store,
+                named.settings_file,
+            ))),
 
             // The three commands that put a project through the check pipeline.
             // One arm each rather than one arm matching all three, because the
@@ -148,13 +191,13 @@ impl Command {
             // history before the check runs. That decision is `crate::check`'s,
             // and it is written down there.
             Self::Check { path, goal } => {
-                crate::check::run(Purpose::Check, path.as_deref(), goal.as_deref(), store)
+                crate::check::run(Purpose::Check, path.as_deref(), goal.as_deref(), named)
             }
             Self::Recheck { path } => {
-                crate::check::run(Purpose::Recheck, path.as_deref(), None, store)
+                crate::check::run(Purpose::Recheck, path.as_deref(), None, named)
             }
             Self::Repair { path } => {
-                crate::check::run(Purpose::Repair, path.as_deref(), None, store)
+                crate::check::run(Purpose::Repair, path.as_deref(), None, named)
             }
 
             // The whole inspect-and-delete surface. It goes through
@@ -164,13 +207,13 @@ impl Command {
             // means are all questions about the store rather than about the
             // command line, and the answers live in `sure_core` where the rest of
             // the store's callers can reach them too.
-            Self::History { action } => crate::history::run(action.as_ref(), store),
+            Self::History { action } => crate::history::run(action.as_ref(), named.store),
             Self::Config { .. } => not_yet(
                 self,
                 "show the settings in effect and which layer each one came from",
                 "No configuration was read.",
             ),
-            Self::Hook { action } => crate::hook::run(action, store),
+            Self::Hook { action } => crate::hook::run(action, named),
 
             // A command this build carries out, and the first one that runs for
             // as long as its caller wants it to rather than until it has an
@@ -190,7 +233,7 @@ impl Command {
             // [`Self::Doctor`]'s reason: the match holds a report, and the work
             // belongs one level in. What comes back is a summary of the session,
             // not a claim about any project.
-            Self::Mcp { action } => crate::mcp::run(action, store),
+            Self::Mcp { action } => crate::mcp::run(action, named),
             Self::Explain { .. } => not_yet(
                 self,
                 "explain one recorded result in plain language",
@@ -337,7 +380,7 @@ mod tests {
         // is the program that exists to find those.
         let store = a_store_of_our_own();
         for command in every_command() {
-            let report = command.report(Some(&store));
+            let report = command.report(Named::store(&store));
             match &report {
                 Report::Unavailable(not_yet) => {
                     assert_eq!(
@@ -435,7 +478,7 @@ mod tests {
             path: None,
             goal: Some(String::new()),
         }
-        .report(Some(&a_store_of_our_own()));
+        .report(Named::store(&a_store_of_our_own()));
 
         let failure = match &report {
             Report::Failed(failure) => failure,
@@ -475,7 +518,9 @@ mod tests {
         let store = a_store_of_our_own();
         let mut implemented: Vec<&str> = every_command()
             .iter()
-            .filter(|command| !matches!(command.report(Some(&store)), Report::Unavailable(_)))
+            .filter(|command| {
+                !matches!(command.report(Named::store(&store)), Report::Unavailable(_))
+            })
             .map(Command::name)
             .collect();
         implemented.sort_unstable();
@@ -575,7 +620,11 @@ mod tests {
         let store = a_store_of_our_own();
         for command in every_command() {
             assert_eq!(
-                command.report(Some(&store)).command().split(' ').next(),
+                command
+                    .report(Named::store(&store))
+                    .command()
+                    .split(' ')
+                    .next(),
                 Some(command.name()),
                 "{command:?} answers under a different name than it was asked by"
             );
@@ -589,7 +638,7 @@ mod tests {
         // turn one into a success on the way out. The store is one this test
         // names, so the answer does not depend on — and does not read — the
         // installation of whoever is running the suite.
-        let report = Command::Doctor.report(Some(&a_store_of_our_own()));
+        let report = Command::Doctor.report(Named::store(&a_store_of_our_own()));
         let Report::Doctor(doctor) = &report else {
             panic!("sure doctor is implemented");
         };
@@ -619,7 +668,7 @@ mod tests {
             let report = Command::Protocol {
                 speaks: Some(caller),
             }
-            .report(Some(&a_store_of_our_own()));
+            .report(Named::store(&a_store_of_our_own()));
             let Report::Handshake(handshake) = &report else {
                 panic!("`sure protocol --speaks {caller}` did not answer with a handshake");
             };
@@ -646,7 +695,7 @@ mod tests {
         // The two forms of one command: `--speaks` is what turns a statement
         // into a negotiation, and asking for neither must not become a
         // handshake against a version nobody named.
-        let report = Command::Protocol { speaks: None }.report(Some(&a_store_of_our_own()));
+        let report = Command::Protocol { speaks: None }.report(Named::store(&a_store_of_our_own()));
         assert_eq!(report, Report::Protocol);
         assert_eq!(report.exit_code(), crate::report::exit::OK);
     }
@@ -693,7 +742,7 @@ mod tests {
             let command = Command::History {
                 action: action.clone(),
             };
-            let report = command.report(Some(&store));
+            let report = command.report(Named::store(&store));
             assert_eq!(
                 report.command(),
                 expected,
@@ -716,7 +765,7 @@ mod tests {
         // answer in words, with status 0 and nothing on the way out that a script
         // would read as a failure.
         let store = a_store_of_our_own();
-        let report = Command::History { action: None }.report(Some(&store));
+        let report = Command::History { action: None }.report(Named::store(&store));
         assert!(
             matches!(&report, Report::History(_)),
             "a history that is empty was answered with {report:?}"
@@ -756,7 +805,7 @@ mod tests {
                 project: None,
             }),
         }
-        .report(Some(&store));
+        .report(Named::store(&store));
         let Report::History(history) = &report else {
             panic!("a delete that matched nothing was answered with {report:?}");
         };

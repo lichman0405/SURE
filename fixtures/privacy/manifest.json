@@ -2,7 +2,7 @@
   "schema_version": 1,
   "corpus": "privacy",
   "title": "The mandatory secret-redaction and protection corpus",
-  "note": "P13-T008's 'mandatory secret/protection fixtures'. Every entry is either a case this suite drives (kind: hook_ingest, check, full_recording_on_disk) or a pointer at the test that already drives it (kind: covered_by) -- and a pointer is checked to exist, so this list cannot decay into prose. Every entry's promised_by binds it to a sentence in docs/ (or in the code that asserts it); the suite fails if a sentence stops being there, so a withdrawn promise takes its fixture with it. What this corpus does NOT confirm is in not_confirmed, printed on every run. Run it with `cargo test -p sure-cli --test privacy_suite`.",
+  "note": "P13-T008's 'mandatory secret/protection fixtures'. Every entry is either a case this suite drives (kind: hook_ingest, check) or a pointer at the test that already drives it (kind: covered_by) -- and a pointer is checked to exist, so this list cannot decay into prose. Every entry's promised_by binds it to a sentence in docs/ (or in the code that asserts it); the suite fails if a sentence stops being there, so a withdrawn promise takes its fixture with it. What this corpus does NOT confirm is in not_confirmed, printed on every run. Run it with `cargo test -p sure-cli --test privacy_suite`.",
   "license_note": "Every secret in this file is invented and matches a detector's shape, not a real credential.",
   "cases": [
     {
@@ -258,12 +258,12 @@
     },
     {
       "id": "a-full-recording-written-under-consent-is-redacted-on-disk",
-      "kind": "full_recording_on_disk",
-      "layer": "store",
+      "kind": "hook_ingest",
+      "layer": "binary",
       "release_blocking": true,
-      "title": "With recording turned on, the recording on disk still holds no secret",
-      "why": "The consent-times-redaction seam, at the only layer that can reach it: `persist_full_recording` redacts the payload before it is written, so opting in changes what is kept and not whether it is redacted. Every byte under the store directory is read, because the claim is about the file and not about the value a reader is handed back.",
-      "layer_note": "In-process, and it has to be: the consent comes from the user's own settings file, which on Windows is `%APPDATA%\\SURE\\sure.yaml` -- no flag, no environment variable and no test may redirect or write it (`Paths::discover_at` moves the store and not the settings). The writes are the same two calls `sure hook ingest` makes, through the same normalizer. See not_confirmed[no-recording-through-the-binary].",
+      "title": "With recording turned on, the recording a real `sure` process writes still holds no secret",
+      "why": "The consent-times-redaction seam, driven through the binary: `persist_full_recording` redacts the payload before it is written, so opting in changes what is kept and not whether it is redacted. The consent is a settings file named on this run's command line -- the user-level file the mechanism exists for, pointed at a file this suite wrote rather than at the file of the person running it. The case requires the recording row to be there, because a store holding none would satisfy every absence below by holding nothing, and every byte under the store directory is read, because the claim is about the file and not about the value a reader is handed back.",
+      "preconditions": ["a_named_settings_file_that_grants_full_recording"],
       "promised_by": [
         {
           "doc": "docs/security/SECRET_REDACTION.md",
@@ -274,16 +274,78 @@
           "says": "full terminal output;"
         }
       ],
-      "payload": {
-        "command": "curl https://user:ghp_0123456789abcdefghij@example.com/upload",
-        "env": { "SURE_DEMO_KEY": "api_key=sk-live0123456789abcdefghijklmnop" },
-        "note": "the recording keeps the event and not the credential"
+      "project": {
+        "files": {
+          "README.md": "# a project a recording is about\n"
+        }
+      },
+      "settings": {
+        "file": "consent/sure.yaml",
+        "yaml": "privacy:\n  full_recording: true\n"
+      },
+      "ingest": {
+        "argv": ["--source", "cursor"],
+        "harness": "cursor",
+        "harness_session_id": "p15t025-consented-recording",
+        "event": {
+          "event": "postToolUse",
+          "command": "curl https://user:ghp_0123456789abcdefghij@example.com/upload",
+          "env": { "SURE_DEMO_KEY": "api_key=sk-live0123456789abcdefghijklmnop" },
+          "note": "the recording keeps the event and not the credential",
+          "timestamp_utc": "2026-09-19T09:05:00Z"
+        }
       },
       "expect": {
+        "status": 0,
+        "event_rows_at_least": 1,
         "recordings": 1,
         "payload_absent": ["ghp_0123456789abcdefghij", "sk-live0123456789abcdefghijklmnop"],
         "store_absent": ["ghp_0123456789abcdefghij", "sk-live0123456789abcdefghijklmnop"],
         "store_present": ["full_recording"]
+      }
+    },
+    {
+      "id": "a-settings-file-the-project-could-write-grants-nothing",
+      "kind": "hook_ingest",
+      "layer": "binary",
+      "release_blocking": true,
+      "title": "A settings file inside the project is refused before it can grant full recording",
+      "why": "The escalation this mechanism would otherwise open, attempted rather than promised: a settings file is the user's own word about what SURE may do, and the project being judged is the one thing that must not be able to write it. The case puts a *granting* file inside the project and names it, which is what a harness configuration in that project could do with `--settings-file`, and requires the run to stop without reading it -- status 5, nothing recorded, no store. If the refusal were removed, this case would turn green under a full recording written from a file the project wrote, so the assertion is the refusal and not the flag's absence.",
+      "preconditions": ["a_project_that_tries_to_grant_itself_recording"],
+      "promised_by": [
+        {
+          "doc": "docs/architecture/CONFIG_AUTHORITY.md",
+          "says": "A lower-authority source cannot weaken a higher-authority safety/privacy restriction."
+        },
+        {
+          "doc": "docs/architecture/CONFIG_AUTHORITY.md",
+          "says": "enable full transcript recording;"
+        }
+      ],
+      "project": {
+        "files": {
+          "README.md": "# a project that tries to turn recording on for itself\n"
+        }
+      },
+      "settings": {
+        "file": "project/sure.yaml",
+        "yaml": "privacy:\n  full_recording: true\n"
+      },
+      "ingest": {
+        "argv": ["--source", "cursor"],
+        "harness": "cursor",
+        "harness_session_id": "p15t025-inside-project-settings",
+        "event": {
+          "event": "postToolUse",
+          "command": "curl https://user:ghp_0123456789abcdefghij@example.com/upload",
+          "timestamp_utc": "2026-09-19T09:06:00Z"
+        }
+      },
+      "expect": {
+        "status": 5,
+        "frame_contains": ["did not read the settings", "SURE stopped rather than"],
+        "store_exists": false,
+        "recordings": 0
       }
     },
     {
@@ -382,7 +444,7 @@
       "layer": "test",
       "release_blocking": true,
       "title": "`persist_full_recording` refuses without consent and writes the payload redacted with it",
-      "why": "The function this corpus's `full_recording_on_disk` case drives, checked here for the half a process cannot reach: that it refuses rather than writing something partial, and that the redaction happens before storage rather than on the way out. Both are asserted against an in-memory payload by these tests, and against every byte on disk by the case above.",
+      "why": "The function the corpus's consented-recording case reaches through a process, checked here for the half a process cannot reach: that it refuses rather than writing something partial, and that the redaction happens before storage rather than on the way out. Both are asserted against an in-memory payload by these tests, and against every byte on disk by the case above.",
       "promised_by": [
         {
           "doc": "docs/security/PRIVACY.md",
@@ -655,14 +717,6 @@
       "what": "`sure check --goal \"...\"` prints the goal verbatim under 'Your goal was written to the history as record N', and the history holds the redacted form. The sentence is about the record, so it describes a record that is not the one that was written.",
       "evidence": "The case `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` asserts the store half and passes: every byte under the store directory holds `deploy using token *** please` and no byte holds the credential. The report half is asserted by nothing, because the honest expectation is not settled. The two surfaces are `crates/sure-cli/src/check.rs` (`what_was_recorded`, the sentence and the verbatim text) and `crates/sure-core/src/store/mod.rs` (`redact_document`, applied to every document a write accepts).",
       "would_settle_it": "A decision about which of the two rules wins for the goal: PROJECT_INTENT.md says the text is stored verbatim -- 'minus nothing' -- and the store redacts every document it accepts. Either the report prints what the store holds, or the goal is exempted from the store's redaction and the document says so. The corpus entry above should then become an assertion about the report as well as the store."
-    },
-    {
-      "id": "no-recording-through-the-binary",
-      "kind": "gap",
-      "owner": "unassigned",
-      "what": "No case here opens a full recording through the real `sure` process. The consent is read from the user's own settings file alone (`Authority::full_recording`), that file is not redirectable on Windows, and no test may write the machine's own settings.",
-      "evidence": "`a-full-recording-written-under-consent-is-redacted-on-disk` is `layer: store` for exactly this reason, and its expectations are about the file the store wrote rather than about what a process decided. `crates/sure-cli/tests/cli_contract.rs` says the same thing in `a_project_that_asks_for_full_recording_does_not_get_one`, whose retention number 'is not observable from here'.",
-      "would_settle_it": "A caller-named settings location -- a flag or a documented test hook that moves the user's settings the way `--store-dir` moves the store -- after which this case can be driven by a process and asserted at the binary layer like the others."
     },
     {
       "id": "the-dangerous-action-scenarios-are-p14-t008s",

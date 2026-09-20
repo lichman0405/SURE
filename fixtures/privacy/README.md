@@ -26,11 +26,22 @@ Every entry carries six things a reader can enumerate:
 | field | what it is |
 | --- | --- |
 | `id` | the name the suite fails by |
-| `kind` | `hook_ingest`, `check`, `full_recording_on_disk`, or `covered_by` |
+| `kind` | `hook_ingest`, `check`, or `covered_by` |
 | `layer` | where the claim is observed: `binary`, `store`, or `test` |
 | `release_blocking` | whether a failure of it blocks a release |
 | `why` | why this entry is here rather than somewhere else |
 | `promised_by` | the documents that promise it, and the sentence in each |
+
+A driven case may also carry a `settings` block: a file the suite writes under
+the case's own scratch directory and names on the run's command line with
+`--settings-file`. That is how a case observes the consented half of the
+recording rule at all — the consent is the user's own word and comes from no
+other layer, and the file of the person running the suite is one no test may
+write. `a-full-recording-written-under-consent-is-redacted-on-disk` is the case
+that does it, and `a-settings-file-the-project-could-write-grants-nothing` is the
+one that puts the file *inside* the project and requires the refusal. What the
+flag is, what it may grant and why it is a testing surface rather than a user's is
+`docs/architecture/CLI.md`.
 
 `release_blocking` is `true` on every entry, and
 `every_case_carries_what_the_corpus_promises_a_reader_can_find` asserts it: an entry
@@ -105,9 +116,17 @@ machine whose owner has turned full recording on cannot answer "what does SURE d
 by default", and the suite fails there rather than passing on a premise that is
 not true.
 
+It also asserts that the run which named no settings file is reported as reading
+the **platform's own** file (`details.places.settings_location` is `"platform"`),
+which is what tells the default cases here apart from the one case that supplies a
+file. Without that, an implementation that quietly defaulted to the last named
+settings file — or to one this suite had written — would satisfy every other
+assertion on this page, and "the test moved the location and forgot" would look
+exactly like a pass.
+
 ## What could not be confirmed
 
-Printed on every run. Two gaps and one seam:
+Printed on every run. One gap and one seam:
 
 - **`the-report-shows-a-goal-the-history-does-not-hold`** — `sure check --goal`
   prints the goal verbatim under a sentence about the record, and the record holds
@@ -115,24 +134,29 @@ Printed on every run. Two gaps and one seam:
   half, because the honest expectation is not settled: `PROJECT_INTENT.md` says
   the text is stored minus nothing, and the store redacts every document it
   accepts. One of the two rules has to win, and that is a product decision.
-- **`no-recording-through-the-binary`** — no case here opens a full recording
-  through a real process. The consent comes only from the user's own settings
-  file, which on Windows is `%APPDATA%\SURE\sure.yaml` and is not redirectable:
-  `--store-dir` moves the store and not the settings, and no test may write the
-  settings of the person running the suite. The recording case is therefore at the
-  `store` layer, through the same two calls the hook makes.
 - **`the-dangerous-action-scenarios-are-p14-t008s`** — the seam with that task.
+
+There was a second gap here until P15-T025, `no-recording-through-the-binary`: no
+case could open a full recording through a real process, because the consent comes
+only from the user's own settings file and nothing could move which file that was.
+`--settings-file` is what closed it, the recording case above is driven at the
+`binary` layer, and the flag's own refusal — a file inside the project is not the
+user's word — is the entry that keeps the closure from being an escalation.
 
 ## Adding an entry
 
-1. Add it to `manifest.json` with an `id`, one of the four kinds, a `layer`,
+1. Add it to `manifest.json` with an `id`, one of the three kinds, a `layer`,
    `release_blocking`, a `title`, a `why`, and at least one `promised_by`.
 2. If it is `covered_by`, name the `file` and the `tests`. Nothing else is needed:
    the suite checks the pointer.
 3. If it is driven, write its `expect`, and make sure the expectation is about
    something the binary can be observed to do. A case whose premise is a user
-   settings file this machine does not have is a case that cannot run — put it in
-   `not_confirmed` instead, or drive it in-process and say so in `layer_note`.
+   settings file this machine does not have is a case that cannot run: put it in
+   `not_confirmed` instead, or give it a `settings` block naming a file it wrote
+   under its own scratch directory, or drive it in-process and say so in
+   `layer_note`. A `settings` block that names a file inside the project is the
+   escalation the flag refuses, so a case that carries one is a case about that
+   refusal and not about the setting it holds.
 4. Run the suite. `every_case_carries_what_the_corpus_promises_a_reader_can_find`
    rejects an entry whose expectations are missing, so an entry added
    half-finished fails rather than passing quietly.

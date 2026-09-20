@@ -31,6 +31,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use sure_cli::cli::Cli;
+use sure_cli::commands::Named;
 use sure_cli::report::exit;
 
 fn main() -> ExitCode {
@@ -48,11 +49,16 @@ fn main() -> ExitCode {
 
 /// Run the parsed command and return the status to exit with.
 fn run(cli: &Cli) -> u8 {
-    // The one place the store's location is read out of the command line, and
-    // the only thing passed down with a command. It is a value in this process's
-    // argument vector: no file the checked project can write and no environment
-    // variable can reach it — see `sure_core::paths`.
-    let report = cli.command.report(cli.store_dir.as_deref());
+    // The one place the two locations a caller can name are read out of the
+    // command line, and the only things passed down with a command. They are
+    // values in this process's argument vector: no file the checked project can
+    // write and no environment variable can reach either — see
+    // `sure_core::paths`.
+    let named = Named {
+        store: cli.store_dir.as_deref(),
+        settings_file: cli.settings_file.as_deref(),
+    };
+    let report = cli.command.report(named);
     match cli.format.emit(&report) {
         Ok(()) => report.exit_code(),
         Err(error) => {

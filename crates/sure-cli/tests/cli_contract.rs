@@ -54,6 +54,7 @@ use sure_core::paths::Paths;
 use sure_core::protection_history;
 use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::{HistoryFilter, RecordKind, Store, StoredRecord};
+use sure_protocol::documents::DocumentKind;
 
 /// The binary this package builds, as cargo hands it to its integration tests.
 const SURE: &str = env!("CARGO_BIN_EXE_sure");
@@ -844,6 +845,133 @@ fn record_one_event(store: &Path, project: &Path, harness_session: &str) {
     );
 }
 
+/// A settings file of this test's own, under the same scratch root as the stores
+/// and projects.
+///
+/// Written where the run that reads it will *not* be refused it: a settings file
+/// inside the project a run is told about is refused by
+/// `Paths::ensure_settings_outside`, which is the rule
+/// `a_project_cannot_set_a_settings_file_through_the_environment` and the
+/// privacy corpus's own case exercise. A test about what a settings file grants
+/// needs one the run will read, so the file goes beside the store and the project
+/// rather than inside either.
+///
+/// The name is the platform's own file name because that is the name the flag
+/// stands in for; the *directory* is this test's, and it is never
+/// `%APPDATA%\SURE`. Nothing in this file writes there: the file the person
+/// running the suite may have is read by `Authority::load` and by nothing else,
+/// and no test asserts anything about its contents.
+fn a_settings_file_of_our_own(yaml: &str) -> PathBuf {
+    let file = a_directory_of_our_own("settings").join("sure.yaml");
+    std::fs::write(&file, yaml)
+        .unwrap_or_else(|error| panic!("cannot write {}: {error}", file.display()));
+    file
+}
+
+/// One real `sure hook ingest`, in a store and project the caller named, with an
+/// optional settings file named on the command line.
+///
+/// `afterFileEdit` is not a `pre-tool-use` event, so the run records and allows —
+/// the decision path is not what these tests are about. The event carries no
+/// secret: these tests read back whether a recording was written, and a payload
+/// with a credential in it would make that about redaction instead.
+///
+/// The settings path goes into the argument vector, beside `--store-dir`, and
+/// nothing here sets an environment variable: see
+/// `ingest_one_event_through_the_environment` for the one test that does, and for
+/// why it expects the variable to be ignored.
+fn ingest_one_event(
+    store: &Path,
+    project: &Path,
+    settings: Option<&Path>,
+    harness_session: &str,
+) -> Run {
+    let mut command = sure_in_a_store(store);
+    if let Some(file) = settings {
+        command.arg("--settings-file").arg(file);
+    }
+    ingest_with(store, project, harness_session, command)
+}
+
+/// The same, with the settings file named through the environment instead.
+///
+/// The surface a checked project's harness configuration can reach and the
+/// argument vector is not. A test that used this and got a recording would have
+/// proved that a project can choose the file that decides whether it is
+/// recorded.
+fn ingest_one_event_through_the_environment(
+    store: &Path,
+    project: &Path,
+    variable: &str,
+    settings: &Path,
+    harness_session: &str,
+) -> Run {
+    let mut command = sure_in_a_store(store);
+    command.env(variable, settings);
+    ingest_with(store, project, harness_session, command)
+}
+
+/// The event, the pipe and the wait the three callers above share.
+fn ingest_with(_store: &Path, project: &Path, harness_session: &str, mut command: Command) -> Run {
+    let payload = serde_json::json!({
+        "event": "afterFileEdit",
+        "harness_session_id": harness_session,
+        "project_root": project.to_str().expect("this test's paths are utf-8"),
+        "timestamp_utc": "2026-09-19T12:02:00Z",
+        "source": "cursor",
+        "path": "src/lib.rs",
+    })
+    .to_string();
+
+    command.args(["hook", "ingest", "--source", "cursor"]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a child process");
+    let mut stdin = child.stdin.take().expect("the pipe");
+    stdin.write_all(payload.as_bytes()).expect("write to stdin");
+    drop(stdin);
+
+    Run::of(&child.wait_with_output().expect("the child exits"))
+}
+
+/// How many full recordings a store holds, and how many events.
+///
+/// Read from the file the child wrote rather than from what it said, and zero
+/// for a store that was never created: "no recording" and "no store" are the
+/// same answer to the question these tests ask, and only one of them means the
+/// run happened.
+fn recordings_in(store: &Path) -> usize {
+    records_of_kind(store, RecordKind::Recording)
+}
+
+fn events_in(store: &Path) -> usize {
+    records_of_kind(store, RecordKind::Document(DocumentKind::Event))
+}
+
+/// Rows of one kind, recordings included so that the counting is by the same
+/// filter either way: a helper that hid recordings from one call and not the
+/// other would make the two counts incomparable.
+fn records_of_kind(store: &Path, kind: RecordKind) -> usize {
+    if !store_file(store).is_file() {
+        return 0;
+    }
+    open_the_store(store)
+        .history(
+            &HistoryFilter {
+                include_recordings: true,
+                ..HistoryFilter::default()
+            },
+            100,
+        )
+        .expect("a store this suite's own process wrote")
+        .iter()
+        .filter(|row| row.kind == kind)
+        .count()
+}
+
 /// The store, opened by this process.
 ///
 /// Read back rather than taken on trust: `sure history` says what it removed,
@@ -1319,14 +1447,17 @@ fn a_project_that_asks_for_full_recording_does_not_get_one() {
     // **The retention number is not observable from here**, and that is said
     // rather than left for a reader to assume. A recording is written only when
     // the user's own file asked for one; that file is
-    // `%APPDATA%\SURE\sure.yaml` on this machine, no flag and no environment
-    // variable can move it (`Paths::discover_at` moves the store and not the
-    // settings) and no test may write it — so no process on a machine without
-    // one can be made to write a recording at all, let alone read its
-    // `retained_until_ms` back. `hook.rs`'s
-    // `a_project_file_cannot_outlast_the_users_retention` covers the number
-    // in-process, through `Paths::from_roots`, with a user file it writes
-    // itself.
+    // `%APPDATA%\SURE\sure.yaml` on this machine and no test may write it. This
+    // case names no settings file at all, so what it asserts is the default: a
+    // project's `true` is refused and no recording is written. The consented
+    // half at the binary layer — a real run pointed at a granting file, and the
+    // recording it wrote read back byte by byte — is
+    // `crates/sure-cli/tests/privacy_suite.rs`'s
+    // `a-full-recording-written-under-consent-is-redacted-on-disk`, whose
+    // settings file that suite writes and names with `--settings-file`. The
+    // *number* is still not asserted by any process: `hook.rs`'s
+    // `a_project_file_cannot_outlast_the_users_retention` covers it in-process,
+    // through `Paths::from_roots`, with a user file it writes itself.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
     std::fs::write(
@@ -1370,6 +1501,196 @@ fn a_project_that_asks_for_full_recording_does_not_get_one() {
          {} recording(s) were written",
         recordings.len()
     );
+}
+
+#[test]
+fn a_named_settings_file_is_the_one_a_real_run_reads_and_no_other() {
+    // Acceptance line 1 of P15-T025, as a two-sided pair: one command, one
+    // event, one project, one store each, and two settings files that say
+    // opposite things about the same setting. The answer has to follow the file
+    // that was named, in both directions.
+    //
+    // Why it takes both directions rather than one. A named file that grants and
+    // produces a recording shows the file was read *if* the alternative —
+    // the platform's own file, which on this machine is not there — would have
+    // answered differently, and on this machine it would. But that is a fact
+    // about this machine. The pair is a fact about the code: the same run with
+    // the other file named writes nothing, so the flag is not being ignored in
+    // favour of a default that happens to agree, and the first file is not
+    // sticking for later runs.
+    //
+    // `privacy.full_recording` is the setting because it is the one whose answer
+    // is a file on disk rather than a sentence, and because it is the one only
+    // the user's layer can grant — see
+    // `a_project_that_asks_for_full_recording_does_not_get_one` next door, which
+    // is the same setting with a project's file doing the asking.
+    let granting = a_settings_file_of_our_own("privacy:\n  full_recording: true\n");
+    let refusing = a_settings_file_of_our_own("privacy:\n  full_recording: false\n");
+
+    let granted_store = a_store_of_our_own();
+    let granted_project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    let granted = ingest_one_event(
+        &granted_store,
+        &granted_project,
+        Some(&granting),
+        "p15t025-named-granting",
+    );
+    assert!(
+        granted.succeeded(),
+        "the run that named a granting settings file did not finish:\n{}",
+        granted.stderr
+    );
+    assert_eq!(
+        recordings_in(&granted_store),
+        1,
+        "the run named {} and wrote no full recording, so either the file it named was not read or \
+         the recording was refused for some other reason:\n{}",
+        granting.display(),
+        granted.stderr
+    );
+
+    let refused_store = a_store_of_our_own();
+    let refused_project = a_project_of_our_own();
+    let refused = ingest_one_event(
+        &refused_store,
+        &refused_project,
+        Some(&refusing),
+        "p15t025-named-refusing",
+    );
+    assert!(
+        refused.succeeded(),
+        "the run that named a refusing settings file did not finish:\n{}",
+        refused.stderr
+    );
+    assert_eq!(
+        recordings_in(&refused_store),
+        0,
+        "the run named {} and wrote a full recording anyway, so the file it named is not the file \
+         that answered: {} recording(s)",
+        refusing.display(),
+        recordings_in(&refused_store)
+    );
+
+    // The event is in both stores, so the pair is about the recording and not
+    // about one run having failed to record anything at all.
+    for store in [&granted_store, &refused_store] {
+        assert_eq!(
+            events_in(store),
+            1,
+            "a run recorded no event, so the assertions above are about a run that did not happen"
+        );
+    }
+
+    assert_untouched(&machine, "by a run that named a settings file");
+}
+
+#[test]
+fn a_project_cannot_set_a_settings_file_through_the_environment() {
+    // Acceptance line 2's other half, attempted rather than promised. The flag
+    // is a value in the child's own argument vector; the other surface a checked
+    // project *can* reach is the environment of the processes it starts, because
+    // a harness configuration in the project names the command a hook is run as
+    // and can set that command's environment with it.
+    //
+    // So this test sets the variable the flag would have if it were one, points
+    // it at a file the run would *accept* on a command line — outside the
+    // project, granting full recording — and requires the run to ignore it.
+    // That is the strongest form of the attempt: not a file SURE would refuse,
+    // and not a name it would refuse, but a file and a name that would both be
+    // honoured if the variable existed. It is the same rule `--store-dir` states
+    // about `SURE_STORE_DIR`, and the same reason one step out.
+    //
+    // The scan in `nothing_a_project_can_write_decides_where_the_store_goes`
+    // covers the structural half — a `var` call in a module that decides a
+    // location fails there, whatever the variable is called. This is the
+    // behavioural half, and it is about the name a reader of the documentation
+    // would try.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    let granting = a_settings_file_of_our_own("privacy:\n  full_recording: true\n");
+
+    let run = ingest_one_event_through_the_environment(
+        &store,
+        &project,
+        "SURE_SETTINGS_FILE",
+        &granting,
+        "p15t025-environment",
+    );
+    assert!(
+        run.succeeded(),
+        "the run did not finish, and a variable nothing reads should not be able to stop it:\n{}",
+        run.stderr
+    );
+    assert_eq!(
+        events_in(&store),
+        1,
+        "the run recorded no event, so the assertion below is about a run that did not happen"
+    );
+    assert_eq!(
+        recordings_in(&store),
+        0,
+        "SURE_SETTINGS_FILE named {} and the run obeyed it. A settings file's location that a \
+         variable can set is a location the harness configuration of a checked project can set, \
+         and the file that decides whether a recording is kept is then a file the judged project \
+         can write.",
+        granting.display()
+    );
+
+    assert_untouched(
+        &machine,
+        "by a run that named a settings file through the environment",
+    );
+}
+
+#[test]
+fn an_mcp_session_refuses_a_settings_file_named_on_its_command_line() {
+    // The one command that refuses the flag outright. `sure mcp serve` answers
+    // tool calls for a session a harness is driving, and every command it runs
+    // goes through the store that session was started with; there is no consent
+    // question in it that a settings file answers, so a name given there is not
+    // accepted-and-ignored — it is refused, with a status, before the session
+    // starts.
+    //
+    // The distinction matters for a session in particular. A session lives for
+    // as long as a harness keeps talking to it, so a settings file taken at
+    // start-up would be in force for every call in it, long after the command
+    // line that named it was read — the shape of a grant nobody can see the end
+    // of. Refusing keeps the answer to one run of one command.
+    let store = a_store_of_our_own();
+    let machine = the_store_on_this_machine();
+    let granting = a_settings_file_of_our_own("privacy:\n  full_recording: true\n");
+
+    let run = run_in_a_store(
+        &store,
+        &[
+            "--settings-file",
+            granting.to_str().expect("this test's paths are utf-8"),
+            "mcp",
+            "serve",
+        ],
+    );
+    assert_eq!(
+        run.status, 5,
+        "`sure mcp serve --settings-file X` answered with status {} rather than 5. A session that \
+         ignored the name would serve every tool call under a settings file its caller chose, and \
+         a session that accepted it would do the same without saying so:\n{}",
+        run.status, run.stderr
+    );
+    assert!(
+        run.stdout.is_empty(),
+        "the refused session wrote to standard output, which is the stream a protocol session \
+         speaks on:\n{}",
+        run.stdout
+    );
+    assert!(
+        run.stderr.contains("does not accept a settings file"),
+        "the refusal does not say what it refused:\n{}",
+        run.stderr
+    );
+
+    assert_untouched(&machine, "by a session that refused a settings file");
 }
 
 #[test]
@@ -2306,10 +2627,13 @@ fn a_decision_a_harness_was_given_is_recorded_where_a_user_can_read_it_and_delet
     // no danger by design (`hook_protection::assess_request`), and the mode that
     // would hold a shell request for consent is `host_confirmed`, which since
     // P13-T009 only the user's own file can name. The user's file is at
-    // `%APPDATA%\SURE\sure.yaml` on this machine, which no test may write and
-    // which no flag or environment variable can redirect
-    // (`Paths::discover_at`). So the danger here is the one a project *can*
-    // raise: `protection: mode: strict` holds a read of a secret, and
+    // `%APPDATA%\SURE\sure.yaml` on this machine, which no test may write; a
+    // test may point a run at a different one with `--settings-file`
+    // (`Paths::discover_with`), and this case does not, because what it asserts
+    // is the branch a machine with no settings file of its own takes — and it
+    // names the branch it is not taking rather than assuming it. So the danger
+    // here is the one a project *can* raise: `protection: mode: strict` holds a
+    // read of a secret, and
     // `danger_of` names that a `sensitive_read`.
     let store = a_store_of_our_own();
     let project = a_project_of_our_own();
@@ -2430,8 +2754,11 @@ fn an_allowance_that_was_spent_is_what_tells_one_allow_from_another() {
     // The danger this project can raise is the one strict mode holds, because
     // the mode that holds a shell request for consent is `host_confirmed` and
     // since P13-T009 only the user's own settings file can name it — a file at
-    // `%APPDATA%\SURE\sure.yaml` on this machine that no test may write and no
-    // flag can redirect. `protection: mode: strict` is a project's own file
+    // `%APPDATA%\SURE\sure.yaml` on this machine that no test may write. A test
+    // can point a run at a file of its own with `--settings-file`, and this case
+    // does not: the mode it asserts is the one a project's own file can reach on
+    // a machine that has named none. `protection: mode: strict` is a project's
+    // own file
     // answering, and `danger_of` names a read of a secret a `sensitive_read`,
     // which is one of the three an allowance may be spent on.
     let store = a_store_of_our_own();
@@ -2615,10 +2942,9 @@ fn a_change_is_refused_with_the_setting_that_would_let_it_through() {
     // assertion that is true of it, and the sentence is now held to *which*
     // setting it names and *which layer* may set it.
     //
-    // **Which branch this machine is in is not a choice the test makes.** No
-    // flag names the user's settings file (`Paths::discover_at` moves the store
-    // and deliberately not the settings) and no test may write the file the
-    // person running the suite uses, so the state of the answer is read from the
+    // **Which branch this machine is in is not a choice the test makes.** The
+    // flag that names a settings file is `--settings-file`, and this case names
+    // none of its own, so the state of the answer is read from the
     // reader SURE reads it with, and every branch is asserted in full. On a
     // machine with no settings file — which is this one, and every machine until
     // a person writes one — that is the third branch below.
@@ -2829,8 +3155,10 @@ fn an_allowance_the_settings_cannot_spend_is_refused_and_the_store_stays_empty()
     //
     // **Which branch this machine is in is not a choice the test makes.** The
     // only file that can name a mode that runs project code is the user's own
-    // (`P13-T009`), no flag moves it (`Paths::discover_at` moves the store and
-    // deliberately not the settings), and no test may write it. So the test asks
+    // (`P13-T009`), no test may write that file (`--settings-file` points a run
+    // at a file of the test's own; it cannot make the machine's own say
+    // anything, and a named file the project could have written is refused
+    // outright), and this case names none. So the test asks
     // the same reader SURE asks, and asserts what follows from the answer. On a
     // machine with no settings file — which is this one, and every machine until
     // a person writes one — that is the refusal below. On a machine where
@@ -3442,6 +3770,98 @@ fn a_doctor_report_says_which_store_location_the_run_is_using() {
 }
 
 #[test]
+fn a_doctor_report_says_which_settings_file_the_run_read() {
+    // Acceptance line 5's second half of P15-T025, in both directions for the
+    // same reason the store's is: the report is where a named file that was read
+    // and one that was ignored are told apart, and a field that always answered
+    // "platform" would satisfy a one-sided test while being wrong half the time.
+    //
+    // The two runs differ in one argument and agree about the store, which is
+    // also the proof that the two locations are independent — `--store-dir`
+    // names the store and not the settings, and `--settings-file` names the
+    // settings and not the store. A report that answered "caller" for both
+    // whenever either was named would pass a test that checked them one at a
+    // time.
+    let store = a_store_of_our_own();
+    let settings = a_settings_file_of_our_own("privacy:\n  full_recording: false\n");
+
+    let named = run_in_a_store(
+        &store,
+        &[
+            "--settings-file",
+            settings.to_str().expect("this test's paths are utf-8"),
+            "--format",
+            "json",
+            "doctor",
+        ],
+    );
+    assert!(
+        matches!(named.status, 0 | 1),
+        "`sure doctor` exited {}:\n{}",
+        named.status,
+        named.stderr
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(named.stdout.trim()).unwrap_or_else(|error| {
+            panic!(
+                "`sure --format json doctor` is not JSON: {error}\n{}",
+                named.stdout
+            )
+        });
+    assert_eq!(
+        frame["details"]["places"]["settings_location"], "caller",
+        "the report does not say the settings file's location was the caller's, so a script cannot \
+         tell a run that read the file it named from one that read the platform's: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["places"]["settings_file"]["path"],
+        serde_json::json!(settings.display().to_string()),
+        "the report names a settings file other than the one the caller named: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["places"]["store_location"], "caller",
+        "naming a settings file moved the store's location, which is the one thing it must not do: \
+         {frame}"
+    );
+    let human = run_in_a_store(
+        &store,
+        &[
+            "--settings-file",
+            settings.to_str().expect("this test's paths are utf-8"),
+            "doctor",
+        ],
+    );
+    assert!(
+        human.stdout.contains("settings location"),
+        "the human form has no line saying which settings file the run read:\n{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains(&settings.display().to_string()),
+        "the human form does not print the settings file it is using:\n{}",
+        human.stdout
+    );
+
+    // The half that makes the first half mean something: the same command with
+    // no settings file named is about the platform's own file, and says so. Both
+    // runs name the same store, so nothing here is explained by the store moving.
+    let default = run_in_a_store(&store, &["--format", "json", "doctor"]);
+    let frame: serde_json::Value = serde_json::from_str(default.stdout.trim())
+        .unwrap_or_else(|error| panic!("`sure doctor` is not JSON: {error}\n{}", default.stdout));
+    assert_eq!(
+        frame["details"]["places"]["settings_location"], "platform",
+        "a run that named no settings file was reported as having named one, so either the default \
+         has moved or the report cannot tell the two apart: {frame}"
+    );
+    let platform = Paths::discover().expect("this machine reports per-user locations");
+    assert_eq!(
+        frame["details"]["places"]["settings_file"]["path"],
+        serde_json::json!(platform.user_config_file().display().to_string()),
+        "a run that named no settings file did not report the platform's own: {frame}"
+    );
+}
+
+#[test]
 fn every_harness_the_doctor_report_offers_is_one_sure_will_take_an_event_from() {
     // `P15-T001` put a list of harnesses in the report. A list of names in a
     // document is a claim, and this is the measurement under it: each name the
@@ -3812,9 +4232,11 @@ fn a_projects_execution_settings_do_not_move_a_hook_decision() {
     //
     // **What this cannot show on this machine, and does not claim.** The other
     // half of the rule is that the *user's* own file can put the hook in
-    // host-confirmed mode. That file is `%APPDATA%\SURE\sure.yaml` here, and
-    // `Paths::discover_at` moves the store and never the settings, so a test
-    // cannot write it and no flag can point at one — the same limit
+    // host-confirmed mode. That file is `%APPDATA%\SURE\sure.yaml` here, and no
+    // test may write it; this case could point the run at a file of its own with
+    // `--settings-file`, and it deliberately does not, because what it is about
+    // is the pair of frames a machine that has named no settings file produces —
+    // the same limit
     // `the_two_paths_disagree_about_nothing_that_matters` records for the data
     // and config directories. So the sentence below is asserted to be *the same
     // in both frames* and never to be a particular sentence: on a machine whose
@@ -4398,11 +4820,23 @@ fn nothing_a_project_can_write_decides_where_the_store_goes() {
     // is read by the analysis provider and `PATH` by the tool search; neither is
     // a path SURE keeps anything in, and a scan over the whole workspace would
     // have to allow them and would then allow the thing it exists to catch.
+    //
+    // P15-T025 added a second nameable location — `--settings-file`, the
+    // user-level settings file a run reads — so the list grew by the modules
+    // that decide *it*: `check.rs` and `hook.rs` resolve both locations through
+    // `Paths::discover_with` and refuse a settings file the project could have
+    // written, and `mcp.rs` refuses the flag outright. None of them reads the
+    // environment either, and this is what keeps that true: a variable would be
+    // a way in for exactly the project the refusal exists to stop, and its name
+    // would not have to be the one a behavioural test happens to try.
     const DECIDES_THE_LOCATION: &[&str] = &[
         "crates/sure-core/src/paths/mod.rs",
         "crates/sure-cli/src/cli.rs",
         "crates/sure-cli/src/main.rs",
         "crates/sure-cli/src/commands.rs",
+        "crates/sure-cli/src/check.rs",
+        "crates/sure-cli/src/hook.rs",
+        "crates/sure-cli/src/mcp.rs",
     ];
     const READS_THE_ENVIRONMENT: &[&str] = &["env::var", "env::vars", "var_os", "vars_os"];
 
@@ -4416,10 +4850,13 @@ fn nothing_a_project_can_write_decides_where_the_store_goes() {
         for token in READS_THE_ENVIRONMENT {
             assert!(
                 !text.contains(token),
-                "{} reads the environment with `{token}`. A store's location that a variable can \
-                 set is a location the harness configuration of a checked project can set, which \
-                 is a store the judged thing chooses. The location is `--store-dir` and nothing \
-                 else.",
+                "{} reads the environment with `{token}`. A location that a variable can set is a \
+                 location the harness configuration of a checked project can set, which is a \
+                 location the judged thing chooses — and the two locations this module list \
+                 decides are the store's (`--store-dir`) and the user-level settings file's \
+                 (`--settings-file`). For the store that is a store the project writes the \
+                 history from; for the settings file it is a file the project writes SURE's \
+                 authority from, which is worse. Neither is named by anything but its flag.",
                 path.display()
             );
         }

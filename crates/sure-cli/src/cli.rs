@@ -66,6 +66,31 @@ pub struct Cli {
     #[arg(long, value_name = "DIR", global = true, value_parser = a_store_directory)]
     pub store_dir: Option<PathBuf>,
 
+    /// Read this run's user-level settings from FILE instead of the platform's
+    /// per-user location. FILE must be an absolute path.
+    ///
+    /// A **testing and automation** surface rather than something a user needs:
+    /// the settings file is `%APPDATA%\SURE\sure.yaml` on Windows and the
+    /// equivalent per-user configuration directory elsewhere, and a person who
+    /// wants to change a setting edits that file. This option exists so that a
+    /// test, a script or a harness can run SURE under settings it wrote, without
+    /// touching the file of whoever is running it — which is how the privacy
+    /// corpus drives a full recording through a real process
+    /// (`fixtures/privacy/manifest.json`), and how a suite can drive both the
+    /// default answer and a consented one on one machine.
+    ///
+    /// It grants nothing the user's own file could not: the file is read at the
+    /// same layer, by the same reader (`sure_core::config::authority`), so a
+    /// project's `sure.yaml` still cannot turn recording on or let SURE run
+    /// project code through it. Like `--store-dir` it comes from this process's
+    /// argument vector and from nowhere else — there is no environment variable
+    /// for either, because a checked project's harness configuration can set the
+    /// environment of the processes it starts. And it cannot be used to take
+    /// authority from the project: a file inside the project being judged is
+    /// refused before a run reads it, and `docs/architecture/CLI.md` says so.
+    #[arg(long, value_name = "FILE", global = true, value_parser = a_settings_file)]
+    pub settings_file: Option<PathBuf>,
+
     /// The command to run.
     #[command(subcommand)]
     pub command: Command,
@@ -84,6 +109,20 @@ pub struct Cli {
 /// tried something.
 fn a_store_directory(text: &str) -> Result<PathBuf, String> {
     sure_core::paths::store_directory(Path::new(text)).map_err(|error| error.to_string())
+}
+
+/// A settings file as a caller names it: absolute, or refused here.
+///
+/// The same rule and the same reasoning as [`a_store_directory`], from the same
+/// module: a relative settings file would be resolved against the current
+/// directory, so whether it was inside the project being judged would depend on
+/// where SURE happened to be started — and this is the file that decides what the
+/// run may do, so "inside the project" is the one answer that must not be a
+/// matter of chance. The check that the file is not inside the project is *not*
+/// here: the project is not known until a command knows it, and it is
+/// [`sure_core::paths::Paths::ensure_settings_outside`]'s, called where it is.
+fn a_settings_file(text: &str) -> Result<PathBuf, String> {
+    sure_core::paths::settings_file(Path::new(text)).map_err(|error| error.to_string())
 }
 
 /// Every command SURE accepts.

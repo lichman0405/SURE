@@ -52,17 +52,30 @@ use sure_core::session_event_store::SessionEventStore;
 use sure_core::store::Store;
 
 use crate::cli::HookAction;
+use crate::commands::Named;
 use crate::report::{Failed, HookAllowance, Report};
 
 /// Run a hook action and produce a report.
 ///
-/// `store` is the store directory the caller named on the command line, or
-/// `None` for the platform's own per-user location — see
-/// [`sure_core::paths::Paths::discover_at`]. A harness launcher that wants a
+/// `named` is what the caller named on the command line — the store directory
+/// and the settings file, each `None` for the platform's own location. See
+/// [`sure_core::paths::Paths::discover_with`]. A harness launcher that wants a
 /// hook's events to land somewhere other than the user's own store names it
 /// there, in the command it runs; nothing in the project can.
+///
+/// **This is the one command that reads a settings file the caller named**, and
+/// it does so for the reason the rest of this module exists: it is the only
+/// process that opens a full recording, so it is the only process by which the
+/// consent path can be driven at all — `fixtures/privacy/manifest.json`'s
+/// recording case is a real `sure hook ingest` pointed at a settings file that
+/// grants one. What that file may grant is exactly what the user's own file may
+/// grant, because the same reader reads it at the same layer; and it is refused
+/// outright, before any decision, when the project being judged could have
+/// written it ([`sure_core::paths::Paths::ensure_settings_outside`]), because a
+/// hook's command line is a line a project's own harness configuration can
+/// write.
 #[must_use]
-pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
+pub fn run(action: &HookAction, named: Named<'_>) -> Report {
     match action {
         HookAction::Ingest { source, event_kind } => {
             let mut stdin = String::new();
@@ -78,7 +91,7 @@ pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
                 );
             }
 
-            run_ingest(source.as_deref(), event_kind.as_deref(), event_text, store)
+            run_ingest(source.as_deref(), event_kind.as_deref(), event_text, named)
         }
         HookAction::AllowOnce {
             tool,
@@ -92,7 +105,7 @@ pub fn run(action: &HookAction, store: Option<&Path>) -> Report {
             path.as_deref(),
             project.as_deref(),
             *minutes,
-            store,
+            named,
         ),
     }
 }
@@ -152,7 +165,7 @@ fn run_allow_once(
     path: Option<&str>,
     project: Option<&Path>,
     minutes: u32,
-    store: Option<&Path>,
+    named: Named<'_>,
 ) -> Report {
     let Some(subject) = command.or(path) else {
         // clap asks for exactly one of `--command` and `--path`, so this is
@@ -179,7 +192,7 @@ fn run_allow_once(
         },
     };
 
-    let paths = match Paths::discover_at(store) {
+    let paths = match Paths::discover_with(named.store, named.settings_file) {
         Ok(paths) => paths,
         Err(error) => {
             return failed(
@@ -234,6 +247,19 @@ fn run_allow_once_with_paths(
     // to read it against; the tool is not the subject, it is the name the
     // harness will send back.
     //
+    // Where the settings come from, refused if the project they are about could
+    // write them — the same question `run_ingest_with_paths` asks, asked here
+    // because this command names its project on the command line rather than
+    // reading one out of an event. Before `load_execution_config`, which is the
+    // read that would otherwise obey the file: a grant recorded under settings
+    // the project wrote is a grant the project wrote.
+    if let Err(error) = paths.ensure_settings_outside(Path::new(project_root)) {
+        return failed(
+            "SURE did not read the settings it was pointed at.",
+            error.to_string(),
+        );
+    }
+
     // The window is checked first so that a duration SURE does not record is
     // answered as that, whatever the project says: it is the one refusal a user
     // can fix without looking at anything but the command line they typed.
@@ -311,9 +337,9 @@ fn run_ingest(
     source: Option<&str>,
     event_kind: Option<&str>,
     stdin: &str,
-    store: Option<&Path>,
+    named: Named<'_>,
 ) -> Report {
-    let paths = match Paths::discover_at(store) {
+    let paths = match Paths::discover_with(named.store, named.settings_file) {
         Ok(p) => p,
         Err(error) => {
             return failed(
@@ -387,6 +413,32 @@ fn run_ingest_with_paths(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| String::from("."))
     });
+
+    // The settings this event is about to be decided and recorded under, refused
+    // if the project that sent it could have written them. Here, before the
+    // event is written and before any decision, because both of those read the
+    // file: the recording's consent and the permissions a request is judged
+    // against are the user's own word, and a file inside the project is the
+    // judged thing's word wearing the user's name.
+    //
+    // A hook's command line is written in a project's harness configuration —
+    // Claude Code's `.claude/settings.json` and Cursor's hooks file both name
+    // the command SURE is run as, in the project's own directory — so a hook is
+    // exactly the agent-facing path where `--settings-file` could be pointed at
+    // a file the project wrote. The refusal is what makes it not a way to
+    // escalate, and it is the same rule `sure check` asks before it records a
+    // goal: `PathError::SettingsInsideProject`'s own words, in both.
+    //
+    // The project root comes from the event, so it is the harness's claim about
+    // which project this is. That is the right root to hold the file to: a
+    // settings file inside the project the event says it is about is a file that
+    // project can write, whoever sent the event.
+    if let Err(error) = paths.ensure_settings_outside(Path::new(&project_root)) {
+        return failed(
+            "SURE did not read the settings it was pointed at.",
+            error.to_string(),
+        );
+    }
 
     // Best-effort persistence. The harness cares most about the decision for
     // pre-tool-use; a store failure should not block the operation.
@@ -839,7 +891,7 @@ mod tests {
         // there is nothing to read, nothing to normalise, nothing to record — so
         // they name none, which is also the honest statement that the store is
         // not what they are about.
-        let report = run_ingest(None, Some("pre-tool-use"), "{}", None);
+        let report = run_ingest(None, Some("pre-tool-use"), "{}", Named::default());
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -848,7 +900,12 @@ mod tests {
 
     #[test]
     fn unsupported_source_fails() {
-        let report = run_ingest(Some("unknown"), Some("pre-tool-use"), "{}", None);
+        let report = run_ingest(
+            Some("unknown"),
+            Some("pre-tool-use"),
+            "{}",
+            Named::default(),
+        );
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -857,7 +914,12 @@ mod tests {
 
     #[test]
     fn invalid_json_fails() {
-        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "{not json", None);
+        let report = run_ingest(
+            Some("cursor"),
+            Some("pre-tool-use"),
+            "{not json",
+            Named::default(),
+        );
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -866,7 +928,7 @@ mod tests {
 
     #[test]
     fn empty_stdin_fails() {
-        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "", None);
+        let report = run_ingest(Some("cursor"), Some("pre-tool-use"), "", Named::default());
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -922,7 +984,12 @@ mod tests {
 
     #[test]
     fn claude_code_invalid_json_fails() {
-        let report = run_ingest(Some("claude-code"), Some("pre-tool-use"), "{not json", None);
+        let report = run_ingest(
+            Some("claude-code"),
+            Some("pre-tool-use"),
+            "{not json",
+            Named::default(),
+        );
         assert!(
             matches!(report, Report::Failed(_)),
             "expected Failed, got {report:?}"
@@ -1563,13 +1630,20 @@ mod tests {
     fn codex_session_start_allows_without_a_decision() {
         let tmp = scratch_hook_dir("codex-session-start");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("create scratch");
+        // The project is a directory of its own beside the roots rather than the
+        // scratch root itself, because a settings file the project could have
+        // written is refused before the event is recorded
+        // (`Paths::ensure_settings_outside`, P15-T025) — with the config root
+        // inside the project, this test would assert about that refusal instead
+        // of about the decision.
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
         let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
 
         let report = run_ingest_with_paths(
             Some("codex"),
             None,
-            &codex_event_at("session-start.json", &tmp.to_string_lossy()),
+            &codex_event_at("session-start.json", &project.to_string_lossy()),
             &paths,
         );
         let decision = match &report {
@@ -1583,7 +1657,10 @@ mod tests {
     fn codex_pre_tool_use_gets_a_protection_decision() {
         let tmp = scratch_hook_dir("codex-pre-tool-use");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("create scratch");
+        // Beside the roots, not the scratch root itself: see
+        // `codex_session_start_allows_without_a_decision`.
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
         let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
 
         // Codex's documented shell tool name is `Bash`, which the shared
@@ -1592,7 +1669,7 @@ mod tests {
         let report = run_ingest_with_paths(
             Some("codex"),
             None,
-            &codex_event_at("pre-tool-use.json", &tmp.to_string_lossy()),
+            &codex_event_at("pre-tool-use.json", &project.to_string_lossy()),
             &paths,
         );
         let decision = match &report {
@@ -1607,14 +1684,17 @@ mod tests {
     fn codex_tool_name_outside_the_classifier_vocabulary_fails_closed() {
         let tmp = scratch_hook_dir("codex-unknown-tool");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("create scratch");
+        // Beside the roots, not the scratch root itself: see
+        // `codex_session_start_allows_without_a_decision`.
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create project");
         let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
 
         // A Codex local function tool, not one of the names the classifier was
         // written for. It must not read as "nothing to object to".
         let mut value: serde_json::Value =
             serde_json::from_str(&codex_fixture("pre-tool-use.json")).expect("fixture is JSON");
-        value["cwd"] = serde_json::Value::String(tmp.to_string_lossy().into_owned());
+        value["cwd"] = serde_json::Value::String(project.to_string_lossy().into_owned());
         value["tool_name"] = serde_json::Value::String("update_plan".to_owned());
 
         let report = run_ingest_with_paths(Some("codex"), None, &value.to_string(), &paths);
@@ -2502,12 +2582,15 @@ mod tests {
         let project = tmp.join("project");
         std::fs::create_dir_all(&project).expect("create project");
         std::fs::write(project.join("sure.yaml"), "").expect("write project config");
-        let paths = Paths::from_roots(project.join("data"), project.join("config"))
+        // The *store* is inside the project, so every store this path opens is
+        // refused; the user's own file is beside the project and not inside it,
+        // because since P15-T025 a settings file the project could have written
+        // is refused before the store is reached — which is a different failure
+        // than the one this test is about. The mode still has to be the user's,
+        // because a request that needs consent is the only kind an allowance can
+        // be recorded for.
+        let paths = Paths::from_roots(project.join("data"), tmp.join("config"))
             .expect("the roots are absolute");
-        // The user's own file, in the config root this test made a *part of the
-        // project* so that every store it opens is refused. The mode still has to
-        // be the user's, because a request that needs consent is the only kind an
-        // allowance can be recorded for.
         a_user_who_allowed_project_code(&paths);
 
         let (action, reason) = run_shell_request(&project, &paths, "Shell", "rm -rf build/");

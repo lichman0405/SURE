@@ -34,10 +34,15 @@ changes something the output does not contain, so it has its own section below �
 and since P7-T010 the recorded goal is also what the run resolves its intent
 from, so the run does not stop there.
 
-P1-T012 added the surface's one global option that changes where something is
+P1-T012 added the surface's first global option that changes where something is
 written: `--store-dir DIR` says which directory this run's record store lives in.
 Its section below is short because the design is: the value comes from the
-process's argument vector and from nowhere else.
+process's argument vector and from nowhere else. `--settings-file FILE`, added by
+P15-T025, is the second, and it is the same design one layer along: the file whose
+answer decides what SURE may do. It is documented as what it is — a testing and
+automation surface rather than something to hand a user — and it carries the
+refusal the first one does not need, because a settings file can grant and a
+store directory cannot.
 
 ## The commands
 
@@ -56,14 +61,15 @@ process's argument vector and from nowhere else.
 | `sure protocol [--speaks VERSION]` | say which harness protocol this build speaks, or whether it can talk to a caller that speaks one | works |
 | `sure version` | print the version of this build | works |
 
-Two options are global — accepted before or after the command name, because they
+Three options are global — accepted before or after the command name, because they
 describe the run rather than the command: `--format human|json`, which the last
-section of this document is about, and `--store-dir DIR`, which says where the
-run's record store goes. A command line may name a store location whether or not
-the command in it writes to the store: a location that is wrong is a wrong
-command line, and finding that out only when a command happens to write would
-make the same mistake a usage error in one invocation and a silent success in
-another.
+section of this document is about, `--store-dir DIR`, which says where the run's
+record store goes, and `--settings-file FILE`, which says which user-level
+settings file the run reads. A command line may name a store location or a
+settings file whether or not the command in it writes to the store: a location
+that is wrong is a wrong command line, and finding that out only when a command
+happens to write would make the same mistake a usage error in one invocation and
+a silent success in another.
 
 "Recognised, not implemented" is not a euphemism for a stub. The command parses
 its arguments, decides it cannot do its job, **exits with status 3**, and says in
@@ -104,21 +110,26 @@ place where the status carries news rather than the fact that SURE ran.
 
 It reports the four paths SURE uses on this machine — evidence and history, the
 settings directory, the settings file, and the record store — which of the two
-store locations this run is using, what is at each of them, what is in the store
-if there is one, whether `git` is on `PATH`, and everything wrong that it found.
-It also prints **what it did not check**, always, because a report that stops at
-what it found invites the reader to assume it looked everywhere.
+store locations this run is using and which of the two settings locations, what
+is at each of them, what is in the store if there is one, whether `git` is on
+`PATH`, and everything wrong that it found. It also prints **what it did not
+check**, always, because a report that stops at what it found invites the reader
+to assume it looked everywhere.
 
-The store location is one line, `store location`, because a path alone cannot say
-whether the run is using the platform's own location or one a caller named — and
-a caller who cannot tell a redirect that worked from one that was ignored will
-debug the wrong thing. The two sentences are "the platform's own location for
-this user" and "named for this run, not the platform's own"; the machine form
-carries `details.places.store_location` as `"platform"` or `"caller"` and puts the
-file itself in `details.places.store_file.path`. The other three paths are always
-the platform's; naming a store directory moves the store and nothing else,
-because a caller who points the store somewhere has not asked SURE to read a
-different configuration.
+Either location is one line, `store location` and `settings location`, because a
+path alone cannot say whether the run is using the platform's own location or one
+a caller named — and a caller who cannot tell a redirect that worked from one that
+was ignored will debug the wrong thing. The two sentences are "the platform's own
+location for this user" and "named for this run, not the platform's own"; the
+machine form carries `details.places.store_location` and
+`details.places.settings_location` as `"platform"` or `"caller"`, and puts the
+files themselves in `details.places.store_file.path` and
+`details.places.settings_file.path`. Naming a store directory moves the store and
+nothing else, because a caller who points the store somewhere has not asked SURE to
+read a different configuration; naming a settings file moves the settings and
+nothing else, for the same reason the other way round. The other two paths — the
+evidence directory and the settings directory — are always the platform's, because
+neither is a thing a caller can name at all.
 
 Three things it deliberately does not do, each of which is what makes the report
 safe to paste into a bug report:
@@ -402,6 +413,85 @@ leaves the machine as it found it.
 
 `sure doctor` says which of the two locations a run is using, so a caller who is
 not sure whether their redirect took effect can ask instead of guessing.
+
+## `--settings-file FILE`
+
+Which user-level settings file this run reads, as a file rather than a directory:
+the file that would otherwise be `<settings directory>/sure.yaml`, which on
+Windows is `%APPDATA%\SURE\sure.yaml`. It is global, so it is accepted before or
+after the command name.
+
+**It is a testing and automation surface, and it is not for users.** A user's
+settings file is found for them, once, at the location their platform reports
+(`sure_core::paths`, `SHGetKnownFolderPath` on Windows); a user who wanted a
+different file would be a user with two configurations and no way to know which
+one was in force. The flag exists because a suite has to be able to observe the
+consented case at all. The consent to keep a full recording is the user's own
+word and comes from no other layer (`Authority::full_recording`), so without a way
+to point a run at a file this program wrote, the only settings file a test could
+ever exercise would be the one belonging to the person running the suite — which
+no test may write, and which on a machine where it happens to grant recording
+would silently answer a different question. `crates/sure-cli/tests/privacy_suite.rs`
+drives both halves from the corpus: the case
+`a-full-recording-written-under-consent-is-redacted-on-disk` points a real `sure
+hook ingest` at a granting file it wrote and asserts the recording, and
+`no_settings_file_at_all_is_the_premise_the_binary_cases_run_under` asserts the
+default run is still about the platform's own path and not about a named one.
+
+**What it may grant: exactly what the user's own file could grant, and no more.**
+The named file stands where the user's file stands — the same layer, the same
+schema, the same reading (`Authority::load`) — so it can turn on full recording,
+lengthen a retention, and set the execution and protection rules a user's file can
+set. It can do nothing else. It changes no other location: the store, the evidence
+directory and the settings directory are the platform's or the caller's
+respectively, and naming this file moves none of them. It grants nothing to a
+project. And it is not an authority above the user's own file: a run that names
+one reads *that* file and not the platform's, so the worst a named file can do is
+what the user could have written in the file it stands in for.
+
+**A settings file inside the project is refused.** Before the file is read, and
+before anything is decided or recorded under it, the run asks
+`Paths::ensure_settings_outside` about the project it is about — for `sure check`,
+the project on the command line; for a hook, the project the harness event names,
+which is the harness's claim about which project this is. A file inside it is
+status 5, with a sentence saying SURE stopped rather than treat it as the user's
+own word, and nothing is recorded. This is the refusal that makes the flag not a
+way to escalate: a checked project's harness configuration can name the command a
+hook is run as (`.claude/settings.json`, Cursor's hooks file, both in the project's
+own directory), so it can put `--settings-file` on a command line it causes SURE to
+be started with. What it cannot do is read a file it wrote and have SURE obey it.
+The corpus drives the attempt —
+`a-settings-file-the-project-could-write-grants-nothing` in
+`fixtures/privacy/manifest.json` puts a *granting* file inside the project, names
+it, and requires the refusal rather than a recording.
+
+**The value comes from the process's argument vector and from nowhere else.** No
+environment variable, for the reason `--store-dir`'s section gives one step out:
+a checked project's harness configuration can set the environment of the processes
+it starts, so `SURE_SETTINGS_FILE` would be settable from inside the checked
+project, and the file that decides whether a recording is kept is not a value that
+may be set from inside the thing being recorded. Two tests in
+`crates/sure-cli/tests/cli_contract.rs` hold this rather than state it:
+`nothing_a_project_can_write_decides_where_the_store_goes` fails if a module that
+decides a location reads the environment, and
+`a_project_cannot_set_a_settings_file_through_the_environment` sets the variable a
+project would have to use and requires the run to ignore it.
+
+**One command refuses the flag outright.** `sure mcp serve` answers tool calls on
+behalf of a session that a harness is driving, and it takes its store from the
+session it was started with; there is no consent question in it that a settings
+file would answer, so a name given there is refused with status 5 and the session
+is not started, rather than accepted and ignored.
+
+**What a wrong value does.** A path that is relative — including the empty string
+— is refused by the parser, status 2, for the reason `--store-dir`'s section
+gives: a relative path resolves against whatever directory SURE happened to be
+started in, and whether it was inside the project would then depend on that. A
+file that is not there is not an error: SURE reads the defaults and records the
+refused requests, exactly as it does on a machine that has no settings file at
+all. A file that is there and will not parse is a run whose settings SURE does not
+know, and the answer is the same one the default gives: the lesser setting, never
+the more permissive one.
 
 ## Two output paths, and no third
 

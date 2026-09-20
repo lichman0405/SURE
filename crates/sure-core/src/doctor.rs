@@ -291,6 +291,14 @@ pub struct Locations {
     /// like one that worked until the location is asked for. See
     /// [`sure_core::paths::Origin`].
     pub store_origin: Origin,
+    /// Where the settings file's location came from.
+    ///
+    /// The same fact about the other file a caller can name, and reported for
+    /// the same reason: `--settings-file` and the platform's own settings file
+    /// both print a path, and a run has to be able to say which of the two it is
+    /// about to read — a caller who named one and got the other is the mistake
+    /// this answer exists to make visible. See [`sure_core::paths::Origin`].
+    pub settings_origin: Origin,
     /// Where a per-user installation of SURE puts its executable.
     ///
     /// `None` on a platform where SURE has no per-user install convention. This
@@ -549,12 +557,34 @@ impl DoctorReport {
 /// `--store-dir`, which is a value in this process's argument vector and not
 /// something a project can set.
 ///
-/// The location this run used is reported, with its [`Origin`], in `places` —
-/// a caller who cannot tell a named location from the platform's own will debug
-/// the wrong thing when a redirect appears to have been ignored.
+/// The locations this run used are reported, with their [`Origin`], in `places`
+/// — a caller who cannot tell a named location from the platform's own will
+/// debug the wrong thing when a redirect appears to have been ignored. Both of
+/// them can be named: [`examine_this_machine_with`] carries
+/// `--settings-file` as well, and this is that function with nothing named for
+/// the settings.
 #[must_use]
 pub fn examine_this_machine(store: Option<&Path>) -> DoctorReport {
-    examine(Paths::discover_at(store))
+    examine_this_machine_with(store, None)
+}
+
+/// The same, with the settings file named by the caller if they named one.
+///
+/// `settings_file` is [`Paths::discover_with`]'s second argument: the file this
+/// run reads its user-level settings from, or `None` for the platform's own. It
+/// is reported as the path of `places.settings_file` with its origin beside it,
+/// so that this command — the one a person runs to find out what a run is doing
+/// — says which settings file a run is about to read rather than which one this
+/// machine has.
+///
+/// Doctor reads no settings either way: it names the file and whether something
+/// is there. See the module documentation.
+#[must_use]
+pub fn examine_this_machine_with(
+    store: Option<&Path>,
+    settings_file: Option<&Path>,
+) -> DoctorReport {
+    examine(Paths::discover_with(store, settings_file))
 }
 
 /// Examine an installation whose locations are already decided.
@@ -602,6 +632,11 @@ pub fn examine_in(places: Result<Paths, PathError>, search_path: &OsStr) -> Doct
                     PathError::Unavailable { what } => what,
                     PathError::NotAbsolute { what, .. } => what,
                     PathError::InsideProject { .. } => "its evidence and history",
+                    // Reached the same way, and by a caller that pointed the
+                    // settings at a project rather than at a store. It says the
+                    // settings file and not the evidence, because those are the
+                    // two different things this command did not find.
+                    PathError::SettingsInsideProject { .. } => "its user-level settings",
                 },
                 detail: error.to_string(),
             }
@@ -686,6 +721,7 @@ fn locations(paths: &Paths) -> Locations {
         settings_file: place(paths.user_config_file()),
         store_file: place(paths.store_file()),
         store_origin: paths.origin(),
+        settings_origin: paths.settings_origin(),
         install_file: per_user_install(),
     }
 }

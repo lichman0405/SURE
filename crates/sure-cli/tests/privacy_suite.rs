@@ -32,20 +32,34 @@
 //!
 //! # What it cannot reach, and says so
 //!
-//! Two things a reader might expect are not here, and both are recorded in the
+//! One thing a reader might expect is not here, and it is recorded in the
 //! manifest's `not_confirmed` and printed by
 //! [`the_corpus_prints_what_it_could_not_confirm`]:
 //!
-//! - **a full recording opened by a process.** The consent is read from the
-//!   user's own settings file (`Authority::full_recording`), which on Windows is
-//!   `%APPDATA%\SURE\sure.yaml`; no flag and no environment variable moves it
-//!   (`Paths::discover_at` moves the store and not the settings), and no test may
-//!   write the file of the person running the suite. The recording is therefore
-//!   opened in-process, at the store layer, and the case says which layer it is
-//!   at.
 //! - **the `--goal` the report shows and the one the store holds.** They differ
 //!   today. The corpus asserts the half that is settled (the store redacts) and
 //!   records the half that is not.
+//!
+//! # The settings file a case supplies, and the one it must not
+//!
+//! A case may carry a `settings` block: a file this suite writes under the
+//! case's own scratch directory, named on the run's command line with
+//! `--settings-file`. That is the surface the user's own settings file is
+//! reached by, and it exists because the alternative is a suite that cannot
+//! observe consent at all — see `docs/architecture/CLI.md`, which says what the
+//! flag is for and what it may grant.
+//!
+//! **It is a testing and automation surface and it is not a way to escalate.** A
+//! settings file inside the project the run is told about is refused before it
+//! is read, whoever named it: the file that says what SURE may do is the user's
+//! own word, and the project being judged is the one thing that must not be able
+//! to write it. The case `a-settings-file-the-project-could-write-grants-nothing`
+//! attempts exactly that and asserts the refusal. The machine's own settings file
+//! is never written, named, or read for a decision by anything in this file: what
+//! the default would be is observed by
+//! [`no_settings_file_at_all_is_the_premise_the_binary_cases_run_under`], which
+//! is about the real path, and every case that supplies a settings file says so
+//! in its own `settings` block.
 //!
 //! # Where these runs keep their evidence
 //!
@@ -77,7 +91,7 @@ const SURE: &str = env!("CARGO_BIN_EXE_sure");
 const KIND_COVERED_BY: &str = "covered_by";
 
 /// The kinds this file knows how to drive.
-const DRIVEN_KINDS: &[&str] = &["hook_ingest", "check", "full_recording_on_disk"];
+const DRIVEN_KINDS: &[&str] = &["hook_ingest", "check"];
 
 /// What one entry in the corpus must carry, by name.
 ///
@@ -223,6 +237,25 @@ impl Scratch {
         std::fs::create_dir_all(&store)
             .unwrap_or_else(|error| panic!("cannot create {}: {error}", store.display()));
         store
+    }
+
+    /// A settings file this case supplies, written where the case says.
+    ///
+    /// The path is the case's own `settings.file`, resolved inside the case's
+    /// scratch directory and never against the repository or the user's
+    /// profile. A case that names `project/sure.yaml` is deliberately writing it
+    /// *inside* the project — that is the escalation one of them attempts, and
+    /// the point of that case is that the run refuses the file rather than
+    /// reading it. Every other case writes outside the project, because a
+    /// refused settings file would make its expectations about a recording
+    /// meaningless.
+    fn settings(&self, named: &str) -> PathBuf {
+        let file = self.path.join(named);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|error| panic!("cannot create {}: {error}", parent.display()));
+        }
+        file
     }
 }
 
@@ -453,7 +486,6 @@ fn check_case(case: &Value) -> Vec<String> {
     match case["kind"].as_str().unwrap_or_default() {
         "hook_ingest" => hook_ingest_case(case),
         "check" => check_command_case(case),
-        "full_recording_on_disk" => full_recording_case(case),
         KIND_COVERED_BY => Vec::new(),
         other => vec![format!("{}: unknown kind {other:?}", case_id(case))],
     }
@@ -514,6 +546,35 @@ fn strings_from(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
+/// The settings file a case supplies, written under its own scratch directory,
+/// or nothing.
+///
+/// `None` means the run reads whatever the platform reports — the real file, on
+/// this machine — and that is what the default cases need: they are about a
+/// machine with no settings file of any kind, which
+/// [`no_settings_file_at_all_is_the_premise_the_binary_cases_run_under`] observes
+/// rather than assumes. A case that supplies one gets *that* file and says so in
+/// its own manifest entry, so the two kinds of case cannot be confused for each
+/// other by a reader or by this file.
+///
+/// The path goes into the argument vector beside `--store-dir`, and nothing here
+/// sets an environment variable: the flag is the whole of the surface, which is
+/// what makes it a value a harness configuration cannot *set* — only put in a
+/// command line, where the inside-project refusal then judges it.
+fn settings_file_for(case: &Value, scratch: &Scratch) -> Option<PathBuf> {
+    let settings = case["settings"].as_object()?;
+    let named = settings["file"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{}: settings.file is not a path", case_id(case)));
+    let yaml = settings["yaml"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{}: settings.yaml is not text", case_id(case)));
+    let file = scratch.settings(named);
+    std::fs::write(&file, yaml)
+        .unwrap_or_else(|error| panic!("cannot write {}: {error}", file.display()));
+    Some(file)
+}
+
 fn hook_ingest_case(case: &Value) -> Vec<String> {
     let mut failures = Vec::new();
     let scratch = Scratch::new(case_id(case));
@@ -521,11 +582,17 @@ fn hook_ingest_case(case: &Value) -> Vec<String> {
     materialize(case, &project);
     let store_dir = scratch.store();
     let machine = the_store_on_this_machine();
+    let settings = settings_file_for(case, &scratch);
 
-    // The global flag and the verb first, then whatever the manifest names: this
-    // is the order a harness launcher uses and the order the contract tests the
-    // command line in.
-    let mut args = strings_from(&["--format", "json", "hook", "ingest"]);
+    // The global flags and the verb first, then whatever the manifest names:
+    // this is the order a harness launcher uses and the order the contract tests
+    // the command line in.
+    let mut args = Vec::new();
+    if let Some(file) = &settings {
+        args.push("--settings-file".to_owned());
+        args.push(file.to_string_lossy().into_owned());
+    }
+    args.extend(strings_from(&["--format", "json", "hook", "ingest"]));
     for argument in case["ingest"]["argv"]
         .as_array()
         .unwrap_or_else(|| panic!("{} has no ingest.argv", case_id(case)))
@@ -547,6 +614,16 @@ fn hook_ingest_case(case: &Value) -> Vec<String> {
         ));
     }
 
+    for wanted in strings(case, "expect", "stderr_contains") {
+        if !run.stderr.contains(&wanted) {
+            failures.push(format!(
+                "{}: stderr does not contain {wanted:?}:\n{}",
+                case_id(case),
+                run.stderr
+            ));
+        }
+    }
+
     let answer = frame(&run, case_id(case));
     if let Some(expected) = case["expect"]["decision"].as_str()
         && answer["decision"].as_str() != Some(expected)
@@ -566,8 +643,33 @@ fn hook_ingest_case(case: &Value) -> Vec<String> {
             ));
         }
     }
+    // Sentences the whole frame has to carry. A run that refuses answers with
+    // `--format json` on stdout and nothing on stderr — the human form is what
+    // goes to the error stream, and this suite never asks for it — so a case
+    // that has to read the refusal's own words reads them here, from the same
+    // frame a harness would.
+    for wanted in strings(case, "expect", "frame_contains") {
+        if !answer.to_string().contains(&wanted) {
+            failures.push(format!(
+                "{}: the frame does not contain {wanted:?}: {answer}",
+                case_id(case)
+            ));
+        }
+    }
 
-    if store_dir.join("sure.db").is_file() {
+    let exists = store_dir.join("sure.db").is_file();
+    if let Some(expected) = case["expect"]["store_exists"].as_bool()
+        && exists != expected
+    {
+        failures.push(format!(
+            "{}: the store {} exist after the run, and this case says it {}",
+            case_id(case),
+            if exists { "does" } else { "does not" },
+            if expected { "should" } else { "should not" }
+        ));
+    }
+
+    if exists {
         let store = open_store(&store_dir);
         if let Some(least) = number(case, "expect", "event_rows_at_least") {
             let events = rows_named(&store, "event");
@@ -597,6 +699,38 @@ fn hook_ingest_case(case: &Value) -> Vec<String> {
                 ));
             }
         }
+        // The redaction is asserted about the value the store hands back as well
+        // as about the bytes, for a case that names a value the recording must
+        // not hold: the two would diverge if a row were ever written twice, or
+        // read back through a path that redacted again. Read here rather than in
+        // a case of its own, because the row that has to be there is the row the
+        // process just wrote.
+        let forbidden = strings(case, "expect", "payload_absent");
+        if !forbidden.is_empty() {
+            match all_rows(&store)
+                .into_iter()
+                .find(|row| row.kind == RecordKind::Recording)
+            {
+                Some(row) => {
+                    let shown = row.document.to_string();
+                    for wanted in &forbidden {
+                        if shown.contains(wanted) {
+                            failures.push(format!(
+                                "{}: the recording the store handed back holds {wanted:?}, and \
+                                 this case says no recording holds it",
+                                case_id(case)
+                            ));
+                        }
+                    }
+                }
+                None => failures.push(format!(
+                    "{}: the store has no recording row to read back, so the values this case says \
+                     a recording must not hold were never at risk",
+                    case_id(case)
+                )),
+            }
+        }
+        drop(store);
     } else if number(case, "expect", "event_rows_at_least").unwrap_or(0) > 0 {
         failures.push(format!(
             "{}: the run wrote no store at all, so an assertion about what is not in one would \
@@ -700,121 +834,6 @@ fn check_command_case(case: &Value) -> Vec<String> {
 
     failures.extend(bytes_failures(case, &store_dir));
     assert_untouched(&machine, case);
-    failures
-}
-
-/// The in-process half of the corpus: a recording written under consent.
-///
-/// `layer: store` in the manifest, and the manifest says why a process cannot
-/// reach this: the consent comes from the user's own settings file and nothing
-/// may move it. What is built here is the same pair of writes `sure hook ingest`
-/// makes — the event, then the recording — through the same two functions, and
-/// then every byte of the directory the store wrote is read.
-fn full_recording_case(case: &Value) -> Vec<String> {
-    use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
-    use sure_core::full_recording::{FullRecordingConsent, persist_full_recording};
-    use sure_core::harness_event::ingest_event_str;
-    use sure_core::ids::EventId;
-    use sure_core::session_event_store::SessionEventStore;
-
-    let mut failures = Vec::new();
-    let scratch = Scratch::new(case_id(case));
-    let project = scratch.project();
-    std::fs::write(
-        project.join("README.md"),
-        "# a project this recording is about\n",
-    )
-    .expect("a file for the project to have");
-    let store_dir = scratch.store();
-
-    // Through the normalizer, not by hand: the payload that reaches the store is
-    // the one a harness event really produces, and a hand-built envelope would
-    // be this test's idea of what a harness sends rather than the normalizer's.
-    let mut event = Map::new();
-    event.insert("event".to_owned(), json!("postToolUse"));
-    event.insert("harness_session_id".to_owned(), json!("p13t008-recording"));
-    event.insert("project_root".to_owned(), json!(project.to_string_lossy()));
-    event.insert("source".to_owned(), json!("cursor"));
-    event.insert("timestamp_utc".to_owned(), json!("2026-09-19T09:05:00Z"));
-    for (key, value) in case["payload"]
-        .as_object()
-        .unwrap_or_else(|| panic!("{} has no payload", case_id(case)))
-    {
-        event.insert(key.clone(), value.clone());
-    }
-    let text = Value::Object(event).to_string();
-
-    let envelope = sure_core::normalizer::cursor::normalize(&text).unwrap_or_else(|error| {
-        panic!("{}: this event does not normalize: {error}", case_id(case))
-    });
-    let ingested = ingest_event_str(
-        &envelope
-            .to_json()
-            .expect("an envelope this build serialises"),
-    )
-    .expect("the normalizer produced something the event model accepts");
-
-    let store = open_store(&store_dir);
-    let project_root = project.to_string_lossy().into_owned();
-    let fingerprint = project_fingerprint(&project, &FingerprintOptions::default())
-        .expect("a project this build can fingerprint")
-        .id;
-    let event_id = EventId::generate();
-    SessionEventStore::new(&store)
-        .persist(&ingested, &project_root, &fingerprint, &event_id)
-        .expect("the event the recording hangs from");
-    persist_full_recording(
-        &store,
-        &ingested,
-        &event_id,
-        &project_root,
-        &fingerprint,
-        FullRecordingConsent::Full,
-        sure_core::full_recording::DEFAULT_FULL_RECORDING_RETENTION_DAYS,
-    )
-    .expect("a recording, since this case's whole point is that consent was given");
-    drop(store);
-
-    // The recording has to be there before its redaction is worth asserting: a
-    // store holding none would satisfy every absence below by holding nothing.
-    let store = open_store(&store_dir);
-    if let Some(exact) = number(case, "expect", "recordings") {
-        let recordings = rows_named(&store, RecordKind::Recording.as_str());
-        if recordings as i64 != exact {
-            failures.push(format!(
-                "{}: the store holds {recordings} recordings rather than {exact}, so this case \
-                 proves nothing about a recording that was never written",
-                case_id(case)
-            ));
-        }
-    }
-
-    // The redaction is asserted about the value the store hands back as well as
-    // about the bytes: the two would diverge if a row were ever written twice,
-    // or read back through a path that redacted again.
-    match all_rows(&store)
-        .into_iter()
-        .find(|row| row.kind == RecordKind::Recording)
-    {
-        Some(row) => {
-            let shown = row.document.to_string();
-            for forbidden in strings(case, "expect", "payload_absent") {
-                if shown.contains(&forbidden) {
-                    failures.push(format!(
-                        "{}: the recording the store handed back holds {forbidden:?}",
-                        case_id(case)
-                    ));
-                }
-            }
-        }
-        None => failures.push(format!(
-            "{}: the store has no recording row to read back",
-            case_id(case)
-        )),
-    }
-    drop(store);
-
-    failures.extend(bytes_failures(case, &store_dir));
     failures
 }
 
@@ -1038,9 +1057,13 @@ fn no_settings_file_at_all_is_the_premise_the_binary_cases_run_under() {
     // A machine whose owner has turned full recording on cannot answer the
     // question "what does SURE do by default", and this fails loudly rather than
     // passing on a premise that is not true. It is the same precondition
-    // `crates/sure-cli/tests/cli_contract.rs` states for the protection mode,
-    // for the same reason: the user's own file is one no test may write and no
-    // flag can move.
+    // `crates/sure-cli/tests/cli_contract.rs` states for the protection mode, for
+    // the same reason: the user's own file is one no test may write. `--settings-file`
+    // *can* move which file a run reads, which is how the consented case below
+    // runs at all (`a-full-recording-written-under-consent-is-redacted-on-disk`) —
+    // so the cases that do not name one are exactly the cases this premise is
+    // about, and the assertion at the end of this test is what keeps the two
+    // apart rather than the absence of a mechanism for moving it.
     let settings = user_settings_file();
     assert!(
         !settings.is_file(),
@@ -1078,6 +1101,18 @@ fn no_settings_file_at_all_is_the_premise_the_binary_cases_run_under() {
         Some("caller"),
         "the run did not use the store this test named, so the cases that name one are not the \
          mechanism they say they are: {answer}"
+    );
+    // And the settings half of the same fact: this run named a store and no
+    // settings file, so the file it is about to read has to be reported as the
+    // platform's own. That is what tells the default cases here apart from the
+    // case that supplies one — an implementation that quietly defaulted to the
+    // last named settings file, or to a file this suite had written, would still
+    // satisfy every assertion above, and fails this one.
+    assert_eq!(
+        answer["details"]["places"]["settings_location"].as_str(),
+        Some("platform"),
+        "the run that named no settings file is reported as reading a file a caller named, so \
+         either the default has moved or the report cannot tell the two apart: {answer}"
     );
 }
 

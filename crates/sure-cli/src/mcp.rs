@@ -95,6 +95,14 @@
 //! with a relative, missing or unreadable path is what the tool does with it,
 //! and the answer arrives as the same refusal.
 //!
+//! The same rule reaches the process's own command line: **`sure mcp serve`
+//! refuses `--settings-file` outright** rather than serving with a settings file
+//! the bridge was pointed at. [`run`] argues it in full — a session answers for
+//! many projects and the line that launches it is a project's to write — and the
+//! refusal is a statement rather than an ignore, so a harness that tried is told
+//! the bridge did not start and why. Nothing else in this module can reach a
+//! settings file: the session holds a store and no settings path at all.
+//!
 //! # Why nothing here names a stream
 //!
 //! `crates/sure-cli/tests/cli_contract.rs` scans the sources and fails if any
@@ -121,6 +129,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{Command, HistoryAction, McpAction};
+use crate::commands::Named;
 use crate::output::Format;
 use crate::report::{Failed, McpMessage, McpSession, Report};
 
@@ -203,15 +212,65 @@ const POLICY: &str = "Execution mode, privacy settings and protection policy com
 /// `sure mcp` is a wrong command line, refused by the grammar before this is
 /// reached.
 ///
-/// `store` is the store directory the caller named on the command line, or
+/// `named.store` is the store directory the caller named on the command line, or
 /// `None` for the platform's own per-user location. A session is long-lived and
 /// answers many tool calls, so the location is resolved once, here, and every
 /// command in the session goes through the dispatch with that one value: a
 /// bridge that let one tool call read a store and the next write another would
 /// be answering about two different histories.
-pub fn run(action: &McpAction, store: Option<&Path>) -> Report {
+///
+/// # Why a named settings file is refused outright
+///
+/// `--settings-file` is a testing and automation surface, and every other
+/// command reads it — the file grants exactly what the user's own settings file
+/// grants, and a project cannot write it without the run refusing it. The bridge
+/// refuses it *as a command line*, before it serves anything, and it is the only
+/// command that does. The argument is the one the module documentation above
+/// makes about tool arguments, applied to the process's own argument vector:
+///
+/// - **A session is not one project.** Every other command is about one project
+///   for the length of one process, so a settings file named for that run is a
+///   file named for that project. A bridge answers tool calls about whatever
+///   projects the agent names, one after another, for as long as the caller keeps
+///   it open — and one settings file for a whole session is one settings file for
+///   every project the session is asked about, including the ones whose files the
+///   user never opened.
+/// - **The command line is the project's to write.** A project's own `.mcp.json`
+///   declares how the harness launches an MCP server, so a project can put
+///   `--settings-file` in SURE's own command line. A hook is in the same
+///   position and cannot refuse — it is the only process that opens a full
+///   recording, so it is the only one by which the consent path can be driven at
+///   all (`fixtures/privacy/manifest.json`). The bridge is not in that position:
+///   nothing about serving a session needs a settings file named on the command
+///   line, so it does not accept one rather than accepting one it has no use for.
+///   A surface that accepts an argument it does not need is a surface that
+///   accepts an argument it will one day use.
+/// - **A refusal is not a silent ignore.** The caller is told, in the session
+///   summary, that the bridge did not start and why. A bridge that started and
+///   quietly used a different file than the one it was pointed at would be a
+///   redirect that was ignored, which is the failure `sure doctor` exists to
+///   make visible for the store.
+pub fn run(action: &McpAction, named: Named<'_>) -> Report {
     match action {
-        McpAction::Serve => serve(store),
+        McpAction::Serve => match named.settings_file {
+            Some(file) => Report::Failed(Box::new(Failed {
+                command: "mcp",
+                what: "Nothing was served, and no tool call was answered.",
+                detail: format!(
+                    "`sure mcp serve` does not accept a settings file named on its command line, \
+                     so the session was not started with {}.\n\nA session answers tool calls \
+                     about whatever projects the agent names, one after another, so one settings \
+                     file for a session would be the settings of every project it was asked \
+                     about — including the projects of the user who opened none of them. The \
+                     command line is also the project's to write: a project's own `.mcp.json` \
+                     declares how the harness launches this server.\n\nThe bridge reads the \
+                     settings of the user running it — the platform's own file, and no other — \
+                     and `sure doctor` reports which file that is.",
+                    file.display()
+                ),
+            })),
+            None => serve(named.store),
+        },
     }
 }
 
@@ -407,6 +466,21 @@ impl Session {
         Self {
             store: store.map(Path::to_path_buf),
             ..Self::default()
+        }
+    }
+
+    /// What a tool call's command is dispatched with.
+    ///
+    /// The store and **no settings file**, because the session never gets as far
+    /// as one: [`run`] refuses a named settings file before this exists, so the
+    /// only value a session can hold is the store from the caller's own argument
+    /// vector. A session that could carry one would be a session whose settings
+    /// were the settings of whatever launched the bridge, for every project it
+    /// was later asked about.
+    fn named(&self) -> Named<'_> {
+        match &self.store {
+            Some(store) => Named::store(store),
+            None => Named::default(),
         }
     }
 
@@ -724,7 +798,7 @@ impl Session {
         // command the caller's request corresponds to goes through the same
         // dispatch a person's command line goes through, with the store this
         // session was started with and no way for the request to change it.
-        let report = (tool.command)(project).report(self.store.as_deref());
+        let report = (tool.command)(project).report(self.named());
         Self::reply(id, tool_result(&tool, &report))
     }
 
@@ -1608,7 +1682,7 @@ mod tests {
         }
         // The same store the session is using, because the frame is what the
         // command answered and a store the session named is part of that.
-        .report(session.store.as_deref())
+        .report(session.named())
         .frame();
         assert_eq!(&message["result"]["structuredContent"]["sure"], &expected);
     }

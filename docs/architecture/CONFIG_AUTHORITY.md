@@ -13,6 +13,16 @@ Highest authority:
 
 A lower-authority source cannot weaken a higher-authority safety/privacy restriction.
 
+**Which file rank 2 is.** The user's own file, at the location the platform
+reports — `%APPDATA%\SURE\sure.yaml` on Windows, read through
+`Paths::discover_with`. A caller may name a different one with `--settings-file`
+(`docs/architecture/CLI.md`), which is a testing and automation surface: the
+named file is read at rank 2, by the same reader, so it can grant what rank 2 can
+grant and nothing above it, and a file the checked project could have written is
+refused before it is read. Nothing a project writes — its `sure.yaml`, its
+harness configuration, the environment of a process it starts — is a way to
+choose it.
+
 ## Project config may
 
 - select/disable noncritical checks;

@@ -80,6 +80,7 @@ use sure_core::status::NotCheckedReason;
 use sure_core::store::{Store, StoreError};
 use sure_core::vocabulary::{ProjectFingerprint, ProjectVerdict};
 
+use crate::commands::Named;
 use crate::human_report::{HumanReportSettings, write_verdict};
 use crate::report::{CheckReport, Failed, GoalRecorded, Report, exit};
 
@@ -118,9 +119,9 @@ const FOUND_AND_NOT_RECORDED: &str =
 /// `sure check`, `sure recheck` or `sure repair`, resolving where SURE keeps
 /// its files.
 ///
-/// `store` is the store directory the caller named on the command line, or
-/// `None` for the platform's own per-user location. See
-/// [`sure_core::paths::Paths::discover_at`].
+/// `named` is what the caller named on the command line — the store directory
+/// and the settings file, each `None` for the platform's own location. See
+/// [`sure_core::paths::Paths::discover_with`].
 ///
 /// # Errors
 ///
@@ -131,13 +132,13 @@ pub fn run(
     purpose: Purpose,
     project: Option<&Path>,
     goal: Option<&str>,
-    store: Option<&Path>,
+    named: Named<'_>,
 ) -> Report {
     let project = match project_of(project) {
         Ok(project) => project,
         Err(detail) => return failed(purpose, NOTHING_RECORDED, detail),
     };
-    match Paths::discover_at(store) {
+    match Paths::discover_with(named.store, named.settings_file) {
         Ok(paths) => run_with(purpose, &paths, &project, goal),
         // Not `Unavailable`: SURE has somewhere to keep its files or it does
         // not, and a machine where it does not is a machine to fix rather than a
@@ -187,6 +188,19 @@ fn project_of(project: Option<&Path>) -> Result<PathBuf, String> {
 /// own. Nothing about a project is consulted either way.
 #[must_use]
 pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&str>) -> Report {
+    // Where this run's settings come from, refused if the project could write
+    // it. First, before the goal goes into the history and before any settings
+    // are read, because both of those would be a run that acted on a file the
+    // thing being judged can edit — the goal is a record about the user, and the
+    // settings decide what SURE records and what it may run. The refusal's own
+    // words are `PathError::SettingsInsideProject`'s, which is where the rule
+    // lives; `crate::hook` asks the same question about the same file before it
+    // decides anything, and `docs/architecture/CLI.md` says which file is read
+    // and why it may not be this one.
+    if let Err(error) = paths.ensure_settings_outside(project) {
+        return failed(purpose, NOTHING_RECORDED, error.to_string());
+    }
+
     // The goal first, and in one piece: the words, the project path, the state
     // it is about, the store, the row. Every step of it can refuse without
     // having written anything.

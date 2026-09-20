@@ -198,6 +198,17 @@ fn places_in_words(places: &Places, out: &mut impl Write) -> io::Result<()> {
                 "settings file",
                 &locations.settings_file.path.display().to_string(),
             )?;
+            // The other location a caller can name, and the same line about it
+            // for the same reason: `sure --settings-file X doctor` and
+            // `sure doctor` print the same *shape* of report, and which file the
+            // run is about to read is a fact a path can only half carry. This is
+            // where a named file that was honoured and a named file that was
+            // ignored are told apart.
+            row(
+                out,
+                "settings location",
+                &origin_in_words(locations.settings_origin),
+            )?;
             row(
                 out,
                 "record store",
@@ -244,7 +255,12 @@ fn places_in_words(places: &Places, out: &mut impl Write) -> io::Result<()> {
     writeln!(out)
 }
 
-/// Where the store's location came from, in the words a person reads.
+/// Where a location a caller can name came from, in the words a person reads.
+///
+/// The same sentences for both of them — the store and the settings file —
+/// because the question and the answers are the same: this location is the one
+/// the platform reported for this user, or this location is the one the caller
+/// named for this run.
 ///
 /// A path alone cannot say this, and the two cases are the two things a caller
 /// debugging a redirect needs told apart: a location they named that was
@@ -390,6 +406,13 @@ fn places_machine(places: &Places) -> Value {
             // store it is about to read is the one its caller meant must not
             // have to compare paths to find out.
             "store_location": origin_name(locations.store_origin),
+            // The same fact about the settings file, because it is the same
+            // question: whether the file this run will read is the one the
+            // platform reported or the one its caller named with
+            // `--settings-file`. A script that has to know whether the settings
+            // about to be in force are the user's own must not have to guess it
+            // from a path.
+            "settings_location": origin_name(locations.settings_origin),
         }),
         Places::Unknown { what, detail } => json!({
             "state": "unknown",
@@ -566,6 +589,7 @@ mod tests {
                 ),
                 store_file: a_place(r"C:\Users\a\AppData\Local\SURE\sure.db", Presence::Present),
                 store_origin: Origin::Platform,
+                settings_origin: Origin::Platform,
                 install_file: Some(a_place(
                     r"C:\Users\a\AppData\Local\SURE\bin\sure.exe",
                     Presence::Present,

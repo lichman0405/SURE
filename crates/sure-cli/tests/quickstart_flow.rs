@@ -44,10 +44,13 @@
 //! is given a `LOCALAPPDATA` under this repository's git-ignored `target/tmp`.
 //! The two PowerShell scripts read that variable themselves, so the install
 //! lands in a directory this test made and the integration installer resolves
-//! the binary there. **`sure check` does not.** Its store and settings locations
+//! the binary there. **`sure check` does not.** The run below names no
+//! `--store-dir` and no `--settings-file`, so its store and settings locations
 //! come from the platform's own known folders — `crates/sure-core/src/paths/
 //! mod.rs` says why, and it is deliberate: there is no environment variable a
-//! checked project could set to decide where the store goes. Measured on a
+//! checked project could set to decide where the store goes. (A caller may name
+//! either with a flag, which is why this journey names neither; that is still
+//! not the environment.) Measured on a
 //! machine with a store, `sure check` given a scratch `LOCALAPPDATA` and
 //! `APPDATA` still opened the real `%LOCALAPPDATA%\SURE\sure.db` and left the
 //! scratch directory empty. That is why the number of stages the run marks

@@ -3,6 +3,8 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T014` is accepted at `974550a30519ba3a607cf491e6b716b4bd5a4b5f`, and the Windows quickstart opens by saying there is nothing to download.** The acceptance is *"Nontechnical Windows user can install CLI + one harness integration and run first check."* There was no quickstart, and there is no published archive: `gh release list`, the releases API and the tags API all return empty, `git tag` returns nothing, `release.yml` runs `gh release create "$TAG" … --draft` with no `--draft=false` and no `gh release edit`, **and that file is not on `origin/main` at all**, so it cannot even be dispatched from here. The document therefore states the gap in its own words — *"A nontechnical Windows user cannot install SURE today: the step between a bare machine and an archive in your hand runs through a Rust toolchain"* — and gives the one path that does work, labelled honestly as a developer's step, rather than inventing a download link. Each of those facts is held by a rule in `crates/sure-cli/tests/quickstart_flow.rs` (1465 lines, 22 `BREAKS` rows) instead of by the paragraph that states it, and the walk itself is a *measured* journey rather than described one: nine tests pass from native PowerShell, including `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check`, which installs a real archive, installs the Claude Code integration into a scratch directory and answers a check. The same task extended `P15-T012`'s guard rather than working around it — `STATEMENTS` 5 → 6 and `SCANNED_FOR_PHRASING` 3 → 4, adding the new document to the set the signing-phrase rules read. **The worker corrected a factual error in the supervisor's own brief** (it claimed `INSTALL_WINDOWS.md` is in `SHA256SUMS.txt`; it is not) and reported it instead of acting on it.
+
 **`P15-T013` is accepted at `957324790bdf0fd6a19f5d83177bf93ae5fa21e6`, and the macOS half of the signing claim is now measured instead of merely written down.** The acceptance is *"If Apple credentials are unavailable, mark external limitation honestly"* and *"Do not fake signing/notarization."* Before this task, `signing_status.rs` mentioned "notariz" **zero** times, and the word "stapl" in any spelling appeared **nowhere in the tracked tree** — so the notarization half of *"nothing here is signed or notarized"* was carried by prose that nothing checked, while the signing half had rules behind it. The repair is a statement and a check over it: `docs/development/RELEASE_PROCESS.md` gains *`### macOS: no Developer ID, no notarization and no staple`* naming the three missing things and who would have to provide them, plus *`### What must not be claimed about macOS`* holding four families of overclaim; `crates/sure-testkit/tests/notarization_status.rs` (1409 lines, 7 tests, 37 `BREAKS` rows) measures both directions over eight files. **The load-bearing distinction is that `codesign -d`'s `Authority=` is a *signing* field and notarization "is not read by that step at all"** — the ticket Apple holds and the staple `xcrun stapler` attaches are not lines `codesign` can be asked for, so the notarization sentence rests on there being no notarization step in the build rather than on that reading. Nothing was added to the build: no step notarizes, no Apple credential exists, and neither archive has been launched on a Mac, which the statement says. Verified independently by injecting two edits the author did not write — `xcrun notarytool submit` into `scripts/Build-Release.sh` (4 of 7 tests red) and *"This archive has been notarized by Apple."* into `MACOS.md` (3 of 7 red) — with both files restored byte-identical.
 
 **`ci` was red for eight consecutive runs and this file recorded none of them; the run that ends the streak is `35535737108`.** `P15-T016`'s first criterion is *"a run of the `ci` workflow on this branch has all five jobs green ... and the run id is named in the hand-back so the claim can be checked rather than believed."* The green half went false at `f727d5f` and stayed false for eight runs. Seven of them failed `shellcheck-secondary` alone on the same `SC3013` at `scripts/Build-Release.sh:1509` — a non-POSIX `-nt` that `P15-T005` wrote and `P15-T007`'s dialect pin correctly reported. The eighth is the repair's own run, and it failed for a different reason: fixing step one let step two execute for the first time since the pin, and step two immediately found `SC2016` in `P15-T011`'s `scripts/Assemble-Release.sh`. So the repair did not end the streak; it moved the red from one step to the next, which is the case for repairing a red build rather than silencing it. The recording half had stopped earlier still — the newest run id in any table here is `35426296617`, and `grep -c` returns **0** for all ten run ids involved, including the failing half of a pair where the successful half was written down — so the failure the 75-run section below was written to end had already happened a second time, because what that section built was a reading and not a guard. The detail is in *The second red streak* below.
@@ -2790,6 +2792,188 @@ twice more, this placement is to be reconsidered rather than defended. `P7-T010`
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
+
+## What `P15-T014` added
+
+The acceptance is *"Nontechnical Windows user can install CLI + one harness
+integration and run first check."* Before this task there was no quickstart —
+`grep -rln 'quickstart\|Quickstart\|QUICKSTART' docs/ README.md` returned nothing —
+and `docs/development/INSTALL_WINDOWS.md` documented the installer while assuming
+the reader **already had an archive in hand**. `crates/sure-cli/tests/install_flow.rs`
+had 13 tests, every one about the CLI install or uninstall: nothing installed an
+integration and nothing ran a check.
+
+**The gap the task had to state rather than paper over.** Measured 2026-09-21:
+
+    gh release list                          -> nothing
+    gh api repos/lichman0405/SURE/releases   -> []
+    gh api repos/lichman0405/SURE/tags       -> []
+    git tag                                  -> nothing
+    git ls-tree --name-only origin/main .github/workflows/
+                                             -> ci.yml, release-dry-run.yml
+
+Three facts follow, and each is held by a rule rather than by the prose that
+states it:
+
+- `release.yml` creates a **draft** (`gh release create "$TAG" … --draft`) and
+  runs no `--draft=false`, no `gh release edit`, no `gh release delete`.
+- **`release.yml` is not on `origin/main`**, so it is not offered for dispatch
+  from this repository at all.
+- No workflow that can run today packages a Windows archive: `ci` uploads no
+  artifact, and `release-dry-run.yml`'s four jobs are macOS, macOS-Intel, Linux
+  and a validator — `x86_64-pc-windows-msvc` appears on no line it runs.
+
+So the only path to an archive today is a local build: Rust 1.98.1 plus Visual
+Studio Build Tools, the release gate, and `Build-Release.ps1 -Phase All`. The
+quickstart says that in those words, names it a developer's step, and never sends
+a reader to a download. *"This is the gap, stated rather than papered over"* is
+the document's own sentence, and the 22 `BREAKS` rows include one for each way
+the claim could quietly become false — *"a reader is sent to a download that does
+not exist"*, *"the release workflow gains a dispatch input"*, *"a step edits the
+draft into a release"*, *"the dry run gains a Windows packaging job"*. The rows
+were read one at a time rather than counted from the author's summary of them.
+
+**The journey is measured, not described.** That is the difference between this
+document and a plausible one:
+
+    $ cargo test -p sure-cli --test quickstart_flow      (native PowerShell)
+    test the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check ... ok
+    test the_integration_installer_finds_the_cli_this_document_installed ... ok
+    test every_rule_is_turned_red_by_an_edit_that_breaks_it ... ok
+    test the_windows_quickstart_satisfies_every_rule ... ok
+    test a_check_leaves_the_store_of_the_person_running_it_byte_identical ... ok
+    test result: ok. 9 passed; 0 failed; 0 ignored
+
+The first two are the journey itself — install a real archive, install the Claude
+Code integration, run a check — and the third is the mutation table that proves
+the other rules react. One test asserts the run leaves the runner's own store
+**byte-identical**, which is the privacy property this repository exists to keep.
+
+**The author could not run either journey test and said so.** Both died at
+staging in its environment on `UnauthorizedAccess` — PowerShell script execution
+disabled — which is the sandbox trap, and it asked the supervisor to settle them
+rather than reporting them as failures or weakening the assertion. Run from
+native PowerShell on the same tree, both pass. *"The worker could not run it"* and
+*"it does not pass"* are different facts, and this is the second task in a row
+where the difference mattered.
+
+**The guard was extended, not worked around.** `signing_status.rs` is P15-T012's
+file and an accepted artifact. The change adds `QUICKSTART_WINDOWS` to
+`STATEMENTS` (5 → 6) and to `SCANNED_FOR_PHRASING` (3 → 4), so the new document
+is held to the same four signing-phrase families as the packager, the installer
+and `INSTALL_WINDOWS.md`. That makes the check **stronger**; a task that had
+wanted an easier path would have left the new file out of the set.
+
+**Three defects the author found in its own work, and how much of each can be
+checked from here.** Two are **reported and not measured**: a draft that called
+`release.yml`'s dispatch "five inputs" and a table that named three *rule*
+functions as `#[test]` functions both describe text that no longer exists, so
+they are carried as the author's account and nothing in this record rests on
+them. What *is* checkable is the count they were about — `release.yml:204-212`
+declares `workflow_dispatch:` with exactly **one** input, `tag:`, so the count
+the author says it corrected is right in the tree it left. The third is a defect
+in a *rule*, and it is visible: the rule holding *"the release workflow still
+creates a release"* originally keyed on `contains("gh release create")`, and
+`release.yml:587` is an `echo` printing that exact string, so the mutation did
+not fire. A rule a message can satisfy is a check on the message. The anchor is
+now the invocation, and that line is quoted here because it is the whole reason
+the anchor moved.
+
+**An error in the supervisor's own brief, corrected by the worker.** The brief
+said `docs/development/INSTALL_WINDOWS.md` is one of the files in
+`SHA256SUMS.txt`. It is not — `grep -c INSTALL_WINDOWS SHA256SUMS.txt` returns
+`0`; the manifest holds `README.md:33`, `WINDOWS_QUICKSTART.md:38`,
+`docs/development/MACOS.md:75`, `docs/development/RELEASE_PROCESS.md:76` and
+`progress/*`. The worker verified the claim rather than acting on it, edited the
+file, and reported the discrepancy. The other half of that brief item was right —
+the file *is* in `SCANNED_FOR_PHRASING` — and is why the extension above was
+needed.
+
+**This task moved a number that the next task is written against, and that is
+recorded rather than left for the next worker to discover.** `P15-T015` is
+*"Stop the contract tests running out of scratch directories"*, and its fifth
+criterion fixes the population **by search**: nineteen copies of one allocator
+shape across twenty-two pools. `crates/sure-cli/tests/quickstart_flow.rs:101-117`
+is a **twentieth** copy, matching on every element the search keys on — `fn
+a_directory_of_our_own`, `for _ in 0..1_000`, `Err(error) if error.kind() ==
+std::io::ErrorKind::AlreadyExists => continue`,
+`panic!("no free directory under {}", base.display())` — with a base name of its
+own, which makes the population **twenty-three** pools. Measured on 2026-09-21:
+`target/tmp/sure quickstart flow é中文 and spaces` exists and already holds
+`store-N` entries, so the pool is live and not hypothetical.
+
+**No magnitude is quoted for any pool here, and that is a decision rather than an
+omission.** `target/tmp` is scratch space the suite writes to *while a census is
+taken*; the reading above was itself taken with a gate run in flight; two
+readings minutes apart differ by hundreds of entries; and `P15-T015`'s own note
+refuses to give a total for exactly this reason and says so in a paragraph of its
+own. What is a property of the repository is the source, and the source is what
+the search reads — **twenty** sites, **twenty-three** pools, one of them new.
+The one number in this paragraph that is a property is the one the search
+returns, and it moved.
+
+*Copied* rather than introduced, and the distinction is why it is not counted
+against the task: the allocator is this repository's house pattern, every test
+file that needs a scratch directory uses it, and a new one that skipped it would
+be the file that stands out. It is written down because the count is
+load-bearing for another task's criterion and because a search for that shape now
+returns twenty where it returned nineteen. One thing about it is deliberate and
+must survive whatever replaces the allocator: the base name is
+`sure quickstart flow é中文 and spaces`, which carries both a space and non-ASCII
+characters on purpose — it is `CLAUDE.md`'s *"test paths with spaces, Unicode and
+long path pressure"* made runnable rather than asserted.
+
+**Found and not fixed, named.** `WINDOWS_QUICKSTART.md` already exists at the
+repository root and is a different document: it bootstraps this repository's own
+autonomous-development loop, is a developer's file, and carries a
+`Set-ExecutionPolicy -Scope Process Bypass` line. The new document is
+`docs/development/QUICKSTART_WINDOWS.md` and says so in its own opening. Renaming
+the root file is outside this task. Also reported: `README.md` is in the manifest,
+so linking the quickstart from it would stale a curated digest this task is not
+allowed to regenerate — the walk is linked from
+`docs/development/INSTALL_WINDOWS.md:12-15` instead, and the manifest's lack of a
+reader is `P15-T020`'s question.
+
+## Validation of `P15-T014`
+
+The gate is recorded in this acceptance's commit message rather than reproduced
+here, which is where `P15-T013` moved it and why: a block printed into this file
+describes a run taken over a tree that did not yet contain the block. It was
+taken from native PowerShell over the record tree, `worktree at start:`
+identical to `worktree:`.
+
+**What was checked independently of the author.** The 22-row `BREAKS` table is
+proved by the task's own test, which is a weaker claim than it looks because the
+author chose both the edit and the assertion. What the supervisor added is the
+two runs the author could not make and the two facts the document stands on:
+
+| claim | how it was settled |
+| --- | --- |
+| nine tests pass, both journey tests among them | `cargo test -p sure-cli --test quickstart_flow` from **native PowerShell**: 9 passed / 0 failed. The author's `UnauthorizedAccess` at staging is its environment, not the test |
+| `the_integration_installer_finds_the_cli_this_document_installed` | passes in that run — the assertion that couples the installer to the CLI the walk installed |
+| the new document has no download in it | `gh release list` empty, releases API `[]`, tags API `[]`, `git tag` empty, all four read on **2026-09-21** |
+| `release.yml` is not offered from here | `git ls-tree --name-only origin/main .github/workflows/` lists `ci.yml` and `release-dry-run.yml`, and nothing else |
+
+**Chain-rule backfill.** `60606dd`'s own push started a run that did not exist
+when `60606dd` was written, so it had no row anywhere. Read from the API at this
+acceptance, job by job:
+
+| run | commit | workflow | result |
+| --- | --- | --- | --- |
+| `35537111750` | `60606dd` | `ci` | `completed / success`, all five jobs |
+
+It is the third consecutive green run — `35535737108` (`b5c0176`),
+`35536191597` (`6308b4a`), `35537111750` (`60606dd`) — after eight red ones, and
+like the two before it, it is green on a commit that touches no shell script, so
+what it establishes is narrow on purpose: the workflow stays green across a push
+that does not itself make it green. One thing the reading settled that had been
+assumed: a task's work commit and its acceptance are pushed **together**, so
+`974550a` and `9573247` have **no runs of their own** — only the commit at the
+tip of a push starts one. That is why the chain has one row per task and not
+two, and it is now measured rather than inferred from the pattern.
+`release-dry-run` did not trigger for that push, which is expected
+(`workflow_dispatch`-only) and is recorded so a later reader comparing run counts
+does not read the difference as a gap.
 
 ## What `P15-T013` added
 

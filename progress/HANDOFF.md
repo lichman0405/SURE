@@ -3,8 +3,26 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T004` is accepted at `2c82f91acbd5953cba55dcb9a5931f5e3ee5570e`, over a single worker commit on
+base `7f53dcf`, with no supervisor correction to any file it delivered — the first task in this phase
+accepted as handed back.** The task is *"Create WinGet manifest/template"*: `packaging/winget/template/`
+holds the three files a WinGet manifest is, `scripts/New-WingetManifest.ps1` renders them from a release
+archive and refuses any value it cannot derive from those bytes, and `docs/development/INSTALL_WINGET.md`
+records what the package would install, where each value comes from, which of the launchers' three
+resolution steps finds such an install, what an uninstall removes and leaves, and what none of it covers.
+8 files, +2755. **The hazard was that a manifest is confident claims about a file that is not in this
+repository** — a `PackageVersion`, an `InstallerUrl` and an `InstallerSha256` nobody in the checkout can
+check — and it is handled by spelling the two placeholders so the schema *rejects* them rather than
+reading them as plausible: a 64-hex search over the whole diff returns one hit, a test fixture written
+into a rendered copy under `target/tmp`. Nothing is published and no WinGet install was run anywhere.
+`progress/state.json` now carries 191 records and `P15-T004` **twelve** evidence entries;
+`SHA256SUMS.txt` had exactly **one** digest left stale by this commit,
+`docs/development/RELEASE_PROCESS.md`, and is regenerated with its invariants intact (195 entries, 19199
+bytes, no trailing newline). The task's own account is in "What `P15-T004` added" and "Validation of
+`P15-T004`" below.
+
 **`P15-T003` is accepted, and delivered at `c494909`, which was the tip of the worker's work when this
-paragraph was written — this record commit supersedes it and also corrects three of its files on top.**
+paragraph was written — the record commit that superseded it also corrected three of its files on top.**
 The task is *"Create Windows per-user install/uninstall PowerShell flow"*: `scripts/Install-Sure.ps1`
 installs the release archive into `%LOCALAPPDATA%\SURE\bin` per user at exit 0, with no PATH write, no
 service and no elevation, and `scripts/Uninstall-Sure.ps1` removes only what its own manifest records and
@@ -16,8 +34,9 @@ direction, one visible to the person running the installer, and a measurement ci
 not contain it. `progress/state.json` now carries 191 records and `P15-T003` **nine** evidence entries;
 `tasks/tasks.json` carries 191 tasks, with `P15-T031` minted from a limit the acceptance measured;
 `SHA256SUMS.txt` was stale for **four** digests and is regenerated with its invariants intact (195
-entries, 19199 bytes, no trailing newline). **`P15-T004` is dispatched from this commit.** The task's own
-account is in "What `P15-T003` added" and "Validation of `P15-T003`" below.
+entries, 19199 bytes, no trailing newline). **`P15-T004` was dispatched from this commit**, and is
+accepted — see the lead paragraph. The task's own account is in "What `P15-T003` added" and "Validation
+of `P15-T003`" below.
 
 **`P7-T012` is still accepted at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which was
 `origin/claude/v0.1-autonomous` when that sentence was written and has since been superseded twice.**
@@ -29,6 +48,14 @@ instead of restated. The acceptance commit it describes is records plus one corr
 `crates/sure-core/src/recheck_lifecycle.rs` (one sentence that claimed a symmetry with
 `allowance::SCAN_LIMIT` the code does not have), this file, and `SHA256SUMS.txt` — whose dry run found
 **seven** digests stale.
+
+**CI run `35505458707` on `7f53dcf` is SUCCESS on all five jobs** — `rust (windows-latest)`,
+`rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` —
+with `headSha` read back from the API as `7f53dcf528679a6d6c18d04c1dfdbe3ec842026e`. That push carried
+`ee20ce7` and `c494909` (the `P15-T003` worker's two commits) as well as the acceptance, so the worker's
+bytes are covered because the tree the job checked out contains them, not because their own commits were
+tested. It was read while `P15-T004`'s worker held the tree, so the reading sat in
+`target/tmp/ci-7f53dcf.txt` until this record commit could carry it.
 
 **CI run `35501183734` on `ad5368e` is SUCCESS on all five jobs** — `rust (windows-latest)`,
 `rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` —
@@ -2792,6 +2819,86 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P15-T004` added
+
+`packaging/winget/` is a template, not a package, and the tree says so in every file that could be
+mistaken for one. Three YAML files under `template/` carry `PackageIdentifier: lichman0405.SURE` and two
+placeholders — `<version>` and `<sha256-of-the-archive>` — and **deliberately no digest**. That is the
+whole design: a 64-hex constant in a committed YAML is a claim about bytes no build of these sources ever
+produced, which is the artefact this project exists to refuse, so the digest field holds an angle-bracket
+placeholder that fails the schema's `^[A-Fa-f0-9]{64}$`, which makes `winget validate` refuse an
+unsubstituted installer rather than read it as a plausible manifest.
+
+`scripts/New-WingetManifest.ps1` is what turns an archive into a manifest, and it derives every value
+rather than accepting one: it parses the `sha256sum` line beside the archive, recomputes the digest from
+the bytes, extracts the ZIP and requires exactly one top-level directory holding `sure.exe`, **runs that
+`sure.exe`** and refuses when the version it reports is not the version in the archive's own name, checks
+the identifier, the URLs and the license against `Cargo.toml`, renders, then re-derives every value from
+the archive a second time and has `winget validate --manifest` accept the result. Its two non-success
+exits are distinct: `Fail` exits **1**, and a missing `winget` exits **3** after a `--- NOT CHECKED ---`
+block, because a skipped dynamic check is not a pass.
+
+Two findings in it are worth more than the template. **The launcher question is answered by measurement
+with a falsifier beside it**: a WinGet install is found by the **second** of the launchers' three
+resolution steps, `Get-Command sure`, because WinGet surfaces a portable package through its own `Links`
+directory on `PATH` and never writes into `%LOCALAPPDATA%\SURE\bin` — and the same file that shows the
+planted link being found also shows the run failing closed with the link deleted. **The uninstall story
+is stated as observed rather than run**: `winget uninstall` would remove one package directory and one
+link and would leave the evidence store and the settings file, and the sentence saying so is in the
+manifest's own `Description`, which is what `winget show` prints before an install, rather than only in a
+document a user may never open.
+
+## Validation of `P15-T004`
+
+The six gates were run by the supervisor over the worker's tree at `2c82f91` under the label
+`p15t004-verify` — six exits 0, `passed=2676 failed=0 ignored=12 not-ok=0`, 71 headers, `state OK: 191
+tasks` and a store digest identical at both ends — and they reproduce the worker's own run line for
+line. **2676 is 2664 + 12**, the count at `P15-T003`'s acceptance plus exactly the twelve tests this task
+adds, which is the arithmetic that makes the number mean something. As with `P15-T003`, the literal
+reading lives in the acceptance commit's message rather than in `progress/state.json`, so that the
+committed file does not differ from the gated one by the sentence describing the run.
+
+Four things were re-derived rather than read, and the reason is the same in each: a hand-back is model
+output, and the acceptance is the supervisor's.
+
+- **The renderer was driven end to end against the real archive**, not the staged one the suite builds:
+  `Build-Release.ps1`'s `sure-0.0.0-bootstrap-x86_64-pc-windows-msvc.zip`, 4045010 bytes, checksum
+  re-derived as `2fb0d05f…`, the binary inside reporting the version in the archive's name, and `winget
+  validate --manifest` answering `Manifest validation succeeded.` at exit 0.
+- **Two negative fixtures were built by the supervisor, not borrowed from the worker**: one byte appended
+  to the archive → `FAILED: the archive does not match its checksum file…` naming both digests, exit 1,
+  nothing written; and the same archive renamed `sure-9.9.9-…` with a correctly recomputed checksum → the
+  checksum step passed and extraction ran, and the version check then refused with `a user who installed
+  9.9.9 would have 0.0.0-bootstrap. Nothing was written.` Exit 1 in both cases.
+- **All eleven `file:line` citations in the new material were checked against their targets.** They all
+  resolve to a line that says what the citation claims, including `Cargo.toml:16` and `:15` and the two
+  `Get-Command winget` lines in `Install-DevDeps-Windows.ps1` and `Test-SureEnvironment.ps1`. This is the
+  class that failed three times at `P15-T003`, so it is checked every time now rather than when it looks
+  suspicious.
+- **One claim was quoted at an evidence file that does not contain it, and re-measuring is what settled
+  it.** `INSTALL_WINGET.md:378` and `New-WingetManifest.ps1:159` both assert that `ManifestVersion`
+  1.11.0 and 1.13.0 draw the warning `The schema header URL does not match the expected pattern` at exit
+  `-1978335192`; the captured file the hand-back rests on holds only summary lines, and the warning text
+  appears in no captured output at all. Running `winget validate --manifest` over the committed 1.11.0
+  directory reproduced the three warning lines verbatim, one per file, each with `Line: 1, Column: 25`.
+  **The claim was true and the committed text is accurate** — the capture was a summary, not the full
+  output — and the committed text is now backed by a run rather than by a line inside one.
+
+The lesson this acceptance adds is the mirror of `P15-T003`'s, and it is worth stating on its own because
+the two pull in opposite directions. `P15-T003` taught: *when the thing being checked is a fact about the
+environment a process runs in, a probe is evidence only if it spawns that process the way the code does*.
+This one teaches: **a true claim resting on a capture that does not contain it is still not evidence, and
+the fix is to re-measure the claim rather than to weigh how confident the sentence sounds.** Re-reading
+would have found nothing wrong here — the sentence was right. Only running it could show that the
+sentence was right *for a reason the capture did not record*, which is the difference between a record
+and a coincidence.
+
+One defect was reported by the worker rather than hidden, and this record commit corrects it: editing
+`docs/development/RELEASE_PROCESS.md` left its `SHA256SUMS.txt` entry at line 76 stale (`c85a74a4…`
+against the file's new `77c7f82d…`), and it was the only entry this commit staled. The worker measured it
+to the digit and said whose question it is instead of regenerating a file it does not own — which is the
+behaviour the ownership rule exists to produce.
 
 ## What `P15-T003` added
 

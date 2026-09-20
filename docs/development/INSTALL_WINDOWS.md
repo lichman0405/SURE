@@ -21,18 +21,28 @@ copies files and one that removes them.
     sure.db                 the user's evidence, which the install never writes
 ```
 
-`%LOCALAPPDATA%\SURE\bin\sure.exe` is not a preference chosen here. Three
-launchers already in this repository resolve exactly that path, and a different
-destination would be a binary those integrations cannot find:
+`%LOCALAPPDATA%\SURE\bin\sure.exe` is not a preference chosen here. Seven
+launcher scripts, across six integration packages, already resolve exactly that
+path, and a different destination would be a binary those integrations cannot
+find. `Grep` over `integrations/` for `LOCALAPPDATA` returns these and no others
+(the `.sh` launchers beside them resolve `$SURE_BIN` and `PATH` instead, which is
+correct for Unix):
 
 | file | line | what it does |
 | --- | --- | --- |
 | `integrations/agent-plugin/scripts/install.ps1` | 7 | `Join-Path $env:LOCALAPPDATA 'SURE\bin\sure.exe'`, third in the order `$env:SURE_BIN` → `Get-Command sure` → here |
 | `integrations/claude-code/scripts/sure-hook.ps1` | 14 | the same candidate, third in the same order |
 | `integrations/claude-code/scripts/sure-mcp.ps1` | 16 | the same path, with `[Environment]::GetFolderPath('LocalApplicationData')` as a fallback when `%LOCALAPPDATA%` is unset |
+| `integrations/codex/scripts/sure-hook.ps1` | 24 | the same candidate |
+| `integrations/copilot/scripts/sure-hook.ps1` | 14 | the same candidate |
+| `integrations/cursor/scripts/install.ps1` | 7 | the same candidate |
+| `integrations/cursor/scripts/sure-hook.ps1` | 14 | the same candidate |
 
-`Grep` over `integrations/` for `LOCALAPPDATA` returns those three and nothing
-else; `crates/sure-cli/tests/install_flow.rs` drives the third of them end to end
+Seven rather than three is worth stating because the brief that dispatched this
+task named three; the search is what is authoritative, and it is what a change to
+the install location would have to satisfy.
+
+`crates/sure-cli/tests/install_flow.rs` drives the third of them end to end
 against a real install.
 
 The known-folder lookup is not hand-rolled. `crates/sure-core/src/paths/mod.rs`
@@ -119,7 +129,7 @@ The program is reachable three ways without any `PATH` entry:
 
 1. by its full path, `%LOCALAPPDATA%\SURE\bin\sure.exe`;
 2. by `$env:SURE_BIN`, if you set it;
-3. by the three launchers above, which resolve the per-user path directly.
+3. by the seven launcher scripts above, which resolve the per-user path directly.
 
 If you want `sure` on `PATH` for your own shells, that is a change to your user
 environment and it is yours to make. The installer prints the line and does not

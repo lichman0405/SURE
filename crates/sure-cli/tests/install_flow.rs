@@ -10,13 +10,13 @@
 //! # What it is really guarding
 //!
 //! `scripts/Install-Sure.ps1` installs into `%LOCALAPPDATA%\SURE\bin`, which is
-//! where three launchers in this tree already resolve `sure.exe` — and which is
-//! **also** where `crates/sure-core/src/paths/mod.rs` puts the user's evidence,
-//! `sure.db`. So an uninstall that walks the install directory would destroy the
-//! history SURE exists to keep. The tests below are written so that the failure
-//! they exist to catch is not "a file was left behind" but "a file that was not
-//! the install's was removed": every case plants something of the user's first
-//! and checks it byte for byte afterwards.
+//! where seven launcher scripts across six integration packages already resolve
+//! `sure.exe` — and which is **also** where `crates/sure-core/src/paths/mod.rs`
+//! puts the user's evidence, `sure.db`. So an uninstall that walks the install
+//! directory would destroy the history SURE exists to keep. The tests below are
+//! written so that the failure they exist to catch is not "a file was left
+//! behind" but "a file that was not the install's was removed": every case
+//! plants something of the user's first and checks it byte for byte afterwards.
 //!
 //! Nothing here touches the real `%LOCALAPPDATA%\SURE`. The flow is always given
 //! an `-InstallRoot` under this repository's git-ignored `target/tmp`, and the
@@ -83,10 +83,11 @@ fn uninstall_script() -> PathBuf {
 /// The launcher `integrations/claude-code/.mcp.json` names as its MCP server.
 ///
 /// It is the one launcher whose third resolution step carries
-/// `[Environment]::GetFolderPath('LocalApplicationData')` as a fallback, so it is
-/// the launcher the brief's table calls out — and the one a test can drive
-/// end to end, because a handshake and a tool list run no command and open no
-/// store, while a hook ingest would write one.
+/// `[Environment]::GetFolderPath('LocalApplicationData')` as a fallback — the
+/// tree's own precedent for not hand-rolling the known-folder lookup, which is
+/// what both scripts' `Get-PerUserDataRoot` follows — and the one a test can
+/// drive end to end, because a handshake and a tool list run no command and open
+/// no store, while a hook ingest would write one.
 fn claude_code_mcp_launcher() -> PathBuf {
     repository_root()
         .join("integrations")
@@ -106,7 +107,7 @@ fn claude_code_mcp_launcher() -> PathBuf {
 /// `CLAUDE.md` says to test paths with spaces and Unicode and this flow carries
 /// one path through PowerShell's argument parsing, a ZIP, a JSON manifest and
 /// back out. The install *root* below it still ends in `SURE`, because that leaf
-/// is what the three launchers resolve and what `sure-core`'s `APP_DIR` names.
+/// is what the launcher scripts resolve and what `sure-core`'s `APP_DIR` names.
 fn a_directory_of_our_own(what: &str) -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let base = repository_root()
@@ -318,9 +319,10 @@ fn an_archive_installs_where_the_launchers_already_look_for_it() {
     let run = install(&host, &archive, &root, &[]);
     assert_eq!(run.status, 0, "the install failed:\n{}", run.everything());
 
-    // The path is the one three launchers resolve, and it is not a choice made
-    // here: `integrations/claude-code/scripts/sure-mcp.ps1:16` and its two
-    // siblings join this same name. Asserting the exact location is what keeps a
+    // The path is the one seven launcher scripts resolve, and it is not a choice
+    // made here: `integrations/claude-code/scripts/sure-mcp.ps1:16` and the six
+    // beside it join this same name, and `grep -rn LOCALAPPDATA integrations/`
+    // is the search that says so. Asserting the exact location is what keeps a
     // later change from quietly installing somewhere nothing looks.
     let installed = root.join("bin").join("sure.exe");
     assert!(

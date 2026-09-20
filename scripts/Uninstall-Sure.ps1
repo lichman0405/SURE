@@ -9,7 +9,8 @@
 # =============================================================================
 #
 # `scripts/Install-Sure.ps1` installs into `%LOCALAPPDATA%\SURE\bin` because
-# three launchers in this tree already resolve `%LOCALAPPDATA%\SURE\bin\sure.exe`.
+# seven launcher scripts in this tree already resolve
+# `%LOCALAPPDATA%\SURE\bin\sure.exe`.
 # `crates/sure-core/src/paths/mod.rs` puts the user's durable evidence — `sure.db`,
 # the history a verdict is read from — at `<per-user data>\SURE`, which on Windows
 # is **the same directory**. So the normal state of that directory is:

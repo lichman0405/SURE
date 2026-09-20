@@ -11,18 +11,26 @@
 # Where this installs, and why that is not a free choice
 # =============================================================================
 #
-# `%LOCALAPPDATA%\SURE\bin\sure.exe`. The destination is already in use by three
-# launchers that this task does not own, and all three resolve it in the order
-# `$env:SURE_BIN` -> `PATH` -> here:
+# `%LOCALAPPDATA%\SURE\bin\sure.exe`. The destination is already in use by seven
+# launcher scripts in six integration packages that this task does not own, and
+# all of them resolve it in the order `$env:SURE_BIN` -> `PATH` -> here:
 #
 #   integrations/agent-plugin/scripts/install.ps1   (line 7)
 #   integrations/claude-code/scripts/sure-hook.ps1  (line 14)
 #   integrations/claude-code/scripts/sure-mcp.ps1   (line 16, and with a
 #       `[Environment]::GetFolderPath('LocalApplicationData')` fallback when
 #       `%LOCALAPPDATA%` is unset)
+#   integrations/codex/scripts/sure-hook.ps1        (line 24)
+#   integrations/copilot/scripts/sure-hook.ps1      (line 14)
+#   integrations/cursor/scripts/install.ps1         (line 7)
+#   integrations/cursor/scripts/sure-hook.ps1       (line 14)
 #
 # A different destination would be a binary those integrations cannot find, so
 # this is a place the tree already agreed on rather than one chosen here.
+# `grep -rn LOCALAPPDATA integrations/` is what says so, and it is the search to
+# repeat before moving this. The `.sh` launchers beside these resolve
+# `$SURE_BIN` and `PATH` instead, which is right for Unix and is not a seventh
+# opinion about the Windows location.
 #
 # The known-folder lookup is not hand-rolled, and the reason is written down in
 # `crates/sure-core/src/paths/mod.rs:1-14`: a bare read of `%LOCALAPPDATA%`

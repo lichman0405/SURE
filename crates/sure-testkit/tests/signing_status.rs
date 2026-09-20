@@ -61,9 +61,9 @@
 //!   like a check. The same limit, and the same remedy, as `FORBIDDEN_ACTS` in
 //!   `crates/sure-testkit/tests/ci_workflow.rs`.
 //!
-//! # Why the phrase rules do not scan all five files
+//! # Why the phrase rules do not scan all six files
 //!
-//! Two of the five are exempt, each for a reason that is a *finding* rather than
+//! Two of the six are exempt, each for a reason that is a *finding* rather than
 //! a convenience, and `the_two_exemptions_are_still_earning_their_place` fails if
 //! either stops being true — so an exemption cannot quietly become permanent.
 //!
@@ -109,22 +109,33 @@ const RELEASE_PROCESS: &str = "docs/development/RELEASE_PROCESS.md";
 /// The statement a person installing meets in the documentation.
 const INSTALL_WINDOWS: &str = "docs/development/INSTALL_WINDOWS.md";
 
+/// The walk a person starting from nothing follows, which states it too.
+///
+/// `P15-T014`'s file. It says in its own words that there is no published archive
+/// and that the only path to one today needs a Rust toolchain, and it says what
+/// the state the archive records means for the person who runs the program — so
+/// it is a sixth place the Windows signing limitation is stated, and the four
+/// phrase families are rules about it for the same reason they are rules about
+/// the other three.
+const QUICKSTART_WINDOWS: &str = "docs/development/QUICKSTART_WINDOWS.md";
+
 /// The release notes — `P15-T011`'s file, which this task may not edit.
 const RELEASE_WORKFLOW: &str = ".github/workflows/release.yml";
 
 /// Every file that states the Windows signing limitation.
-const STATEMENTS: [&str; 5] = [
+const STATEMENTS: [&str; 6] = [
     PACKAGER,
     INSTALLER,
     RELEASE_PROCESS,
     INSTALL_WINDOWS,
+    QUICKSTART_WINDOWS,
     RELEASE_WORKFLOW,
 ];
 
-/// The three files a phrase rule can read without reading a quotation.
+/// The four files a phrase rule can read without reading a quotation.
 ///
-/// See "Why the phrase rules do not scan all five files" in this file's header.
-const SCANNED_FOR_PHRASING: [&str; 3] = [PACKAGER, INSTALLER, INSTALL_WINDOWS];
+/// See "Why the phrase rules do not scan all six files" in this file's header.
+const SCANNED_FOR_PHRASING: [&str; 4] = [PACKAGER, INSTALLER, INSTALL_WINDOWS, QUICKSTART_WINDOWS];
 
 /// What the packager has to keep saying for the claim to be measured.
 ///
@@ -507,7 +518,7 @@ fn read(relative: &str) -> String {
         .replace("\r\n", "\n")
 }
 
-/// The five files, as text, in the order `STATEMENTS` names them.
+/// The six files, as text, in the order `STATEMENTS` names them.
 fn statements() -> Vec<(&'static str, String)> {
     STATEMENTS.iter().map(|path| (*path, read(path))).collect()
 }
@@ -605,7 +616,7 @@ fn forbidden_in(path: &str, text: &str, forbidden: &[(&str, &str)]) -> Vec<Strin
         .collect()
 }
 
-/// Every rule, over the five files.
+/// Every rule, over the six files.
 ///
 /// Empty means the files still carry what the two acceptance clauses ask of
 /// them. It is a function of the texts so that the ways each rule could go false
@@ -1012,6 +1023,13 @@ const BREAKS: &[Break] = &[
         from: "Write-Step 'Done'",
         to: "Write-Step 'Done'\nWrite-Detail 'note         the signature state does not affect anything'",
         wanted: "does not affect anything",
+    },
+    Break {
+        what: "the quickstart commits to a definite SmartScreen outcome",
+        file: QUICKSTART_WINDOWS,
+        from: "When it says `not-signed`, Windows may show a",
+        to: "When it says `not-signed`, Windows will warn about an",
+        wanted: "will warn",
     },
 ];
 

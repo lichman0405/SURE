@@ -9,6 +9,11 @@ copies files and one that removes them.
 & .\scripts\Uninstall-Sure.ps1
 ```
 
+This page is the reference for those two commands. If you are starting from nothing,
+`docs/development/QUICKSTART_WINDOWS.md` is the walk: where an archive can and cannot
+come from today, the install above, one harness integration, and the first check
+afterwards.
+
 ## Where it installs
 
 ```text

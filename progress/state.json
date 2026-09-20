@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P15",
-  "last_updated": "2026-09-20T22:21:51.605Z",
+  "last_updated": "2026-09-20T22:26:28.224Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2815,8 +2815,8 @@
       "notes": ""
     },
     "P15-T025": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-20T22:26:28.224Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,

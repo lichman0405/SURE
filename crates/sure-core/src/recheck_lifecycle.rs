@@ -232,8 +232,20 @@ fn clone_for_state(
 /// older runs, which is the same failure as `0` with a quieter symptom. The
 /// number is therefore chosen against the store rather than against a project —
 /// far more runs than any project accumulates between two checks, and a store
-/// that reaches it has something wrong with it, which is exactly what
-/// `allowance::SCAN_LIMIT` says about its own.
+/// that reaches it has something wrong with it.
+///
+/// **That is where the resemblance to `allowance::SCAN_LIMIT` ends, and this
+/// paragraph used to claim otherwise.** `Store::spend_allowance` reads its bound
+/// and then acts on it — `store/mod.rs:583` returns `None` when the scan
+/// saturates, and `None` means spend nothing, so an exhausted allowance fails
+/// **closed**. [`previous_open_findings`] has no equivalent check and returns
+/// `Ok` whether or not the scan saturated, so an empty list here means "nothing
+/// was left open" and "I did not read far enough to know" at the same time. The
+/// number is the same and the failure direction is opposite: a bound that fails
+/// in `spend_allowance` makes SURE *do* less, and a bound that fails here makes
+/// SURE *claim* less is wrong, which is a false green rather than a refusal. The
+/// 4096 is a judgement about scale and no fixture or test was found that reaches
+/// it; the direction is owned by `P15-T029`.
 pub const HISTORY_SCAN_LIMIT: usize = 4096;
 
 /// Read every open finding for `project_root` from earlier runs.

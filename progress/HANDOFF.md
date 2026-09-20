@@ -1,18 +1,46 @@
 # Autonomous handoff
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
-**In flight, uncommitted, and paused on a red gate.** A record amendment for `P15-T002` is complete in
-the worktree and **not committed**: it moves `P15-T002`'s `head_sha` to the repair commit, adds the
-repair, both CI readings and the three named gaps to its evidence, corrects a stale note in
-`tasks/tasks.json`, and regenerates `SHA256SUMS.txt`. Four files are modified — `progress/state.json`,
-`progress/HANDOFF.md`, `tasks/tasks.json`, `SHA256SUMS.txt` — and they are mutually consistent, the
-manifest's three changed digests matching the three files on disk. **`HEAD` is `d819d57` and equals
-`origin/claude/v0.1-autonomous`; nothing about this amendment is committed or pushed. Do not
-`git checkout --` those four files: they are the work.** It is held back rather than committed because
-the six gates are red at this tree, and a commit whose gate is known-red becomes a false green the
-moment someone reads the log as a pass.
+**In flight: the `P7-T012` acceptance, uncommitted.** `HEAD` is
+`a21788265c2bfb08e2c449728fcdeb62815a22bd` — `P7-T012`'s own commit, **ahead 1 of
+`origin/claude/v0.1-autonomous` and unpushed**. On top of it sit the supervisor's record edits:
+`tasks/tasks.json` (189 tasks; `P15-T028` and `P15-T029` minted, `P15-T015`'s note corrected),
+`progress/state.json` (189 records; `P7-T012` queued → accepted),
+`crates/sure-core/src/recheck_lifecycle.rs` (one doc sentence that claimed a symmetry with
+`allowance::SCAN_LIMIT` the code does not have), this file, and `SHA256SUMS.txt` — whose dry run found
+**seven** digests stale, being the four `a217882` altered, the `recheck_lifecycle.rs` edit above, and
+this file and `progress/state.json`; it was regenerated with all three of its invariants intact (195
+entries, 19199 bytes, no trailing newline). Both validators pass on this `tasks`/`state.json` pair:
+`state OK: 189 tasks` and `SURE bootstrap validation OK: 17 phases, 189 tasks.`
+
+**The first gate run on this tree is red, and the red is the known flake rather than this change.**
+`& .\target\tmp\gates.ps1 -Label p7t012-accept` → `fmt=0 clippy=0 test=101 bootstrap=0 taskctl=0
+nonwindows=0`, `passed=2631 failed=1 not-ok=1`, with the worktree list **identical at the start and at
+the end of the run**, so the run is attributable and is not the straddling failure recorded below. The
+failure is `runtime_start.rs::a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named`
+at `:1184:5` — the load-sensitive site already on record from `P14-T006`, `P14-T007` and `P14-T008` —
+where the first assertion (the run names the service's own budget) passes and the second (SURE asked
+`GET /health`) does not, because under a full-suite load the probe does not land its request before the
+3.5-second budget expires. **It passes 4 of 4 in isolation** (3.63s, then 3.61s three times). The change
+set is one doc comment and four records and cannot reach a process-spawning budget test, so this is a
+measurement of the flake and not a rate; both readings are kept in the acceptance section below and
+neither is withdrawn.
+
+**The dispatch after it is `P7-T013`**, on §14's ordering; the paragraph further down works that out
+from the ready set rather than from the hook's truncated `ready=` line.
+
+**One hazard is cleared and worth knowing about anyway.** A gate run at this tree cannot reproduce the
+false red recorded below — the `sure commands` scratch pool held **1_122** directories then and holds
+**126** now, against the allocator's 1_000-attempt ceiling — but the pool grows with every test run and
+nothing prunes it, so a future session that sees `test=101` with *"no free store directory"* should read
+the paragraph below before believing it. The fix still has one owner, `P15-T015`, and it is still a
+symptom being managed rather than repaired.
+
+**The paragraph that stood here described the `P15-T002` record amendment as in flight and paused on a
+red gate; it was committed at `d2e7888` and is superseded.** Its analysis is kept below rather than
+deleted, because the pool it describes is the one measured above.
 
 **The red gate is a false red whose cause is understood, and it is not this change.**
 `& .\target\tmp\gates.ps1 -Label p15t002-record` gave `fmt=0 clippy=0 test=101 bootstrap=0 taskctl=0
@@ -132,8 +160,14 @@ own rule (line 6, reproduced rather than estimated). `P7-T012` sits **18th** of 
 the ready set and not the set — a reader who takes it as the set will work the tail of the file forever.
 **The deviation is recorded rather than left silent:** the run drifted onto the `P14`/`P15` thread for a
 day while two lower-numbered tasks sat dispatchable, and the standing correction is to read the whole
-ready set rather than the hook's first eight. `P15-T003` is next after `P7-T012`, and its brief has to
-carry the `-Phase Verify` gate limitation above.
+ready set rather than the hook's first eight. **`P7-T013` is next after `P7-T012`, and this sentence
+said `P15-T003` — which is the same partial-read error, made in the paragraph that warns about it.**
+Both are `P7`, the lowest-numbered READY phase, so §14 hands the dispatch to `P7-T013` and `P15-T003`
+follows the pair; the ready set was re-read from `taskctl ready` rather than recalled, and `P7-T013`
+depends on `P7-T010` and `P12-T007`, both `accepted`. One more thing the re-read showed: `taskctl
+ready` sorts its output as text, so `P15` prints before `P7` — neither that list nor the hook's
+`ready=` line presents §14's order, and the phase numbers have to be compared as numbers.
+`P15-T003`'s brief still has to carry the `-Phase Verify` gate limitation above, whenever it goes.
 
 **Before it,** `P15-T001` — *"Finalize `sure doctor` for
 Windows developer/user environment"* — is **accepted as `7720202` and repaired at `072ac9ee`**, over
@@ -2673,6 +2707,172 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P7-T012` added
+
+`P7-T012` — *"carry a check result through a repair contract and a re-check"* — is
+**accepted at `a21788265c2bfb08e2c449728fcdeb62815a22bd`**, 19 files, +1861/−168,
+from base `96c490b3720d1c8301a19b89860b67336f3eff04` (the dispatch commit).
+
+**The defect it fixes made one of the product's two headline promises
+unobservable.** Stage 12 exists to answer *what did an earlier run leave open, and
+did the repair close it* — the re-check half of "repair/re-check loop". It read
+that by calling `Store::history(&filter, 0)`, and `0` is not "no limit":
+`crates/sure-core/src/store/mod.rs:613-618` says so in terms — *"`limit` is the
+maximum number of records to return, and `0` returns none. It is not treated as
+'no limit'"* — and the implementation at `:627-639` ends
+`ORDER BY written_at_ms DESC, id DESC LIMIT ?`. So the call could only ever return
+nothing, and stage 12 could only ever print *"no earlier run left anything open
+for this project."* It was not wrong about any project it ever saw. It was
+incapable of being wrong.
+
+**The fix is a bound, not a special case.** `recheck_lifecycle.rs:300` now reads
+`store.history(&filter, HISTORY_SCAN_LIMIT)?` with `HISTORY_SCAN_LIMIT: usize = 4096`
+at `:249`. `recheck_lifecycle::store_run` gained a caller (`crates/sure-cli/src/check.rs:260`),
+so a second run's stage 12 compares against a real earlier run.
+
+**Those numbers, and every other `recheck_lifecycle.rs` anchor in this acceptance, are the
+tree's after the acceptance commit — which is twelve lines further down than the same anchors
+were read at `a217882`.** The supervisor's correction to the doc comment above the constant
+replaced one clause with thirteen lines, and everything below it moved by that much: the
+constant `237` → `249`, the `store.history` call `288` → `300`, `previous_open_findings`
+`277` → `289`, and the two test lines the mutation table cites `874`/`879` → `886`/`891`. The
+worker's hand-back and the state record as first written quoted the `a217882` numbers, because
+that is the tree they were read on; they are quoted here as measured on the tree being
+committed, and the shift is the acceptance's own doing rather than drift.
+
+**Criterion 2 was graded on ownership rather than on behaviour, and it passes.**
+The rule that says which checks a repair contract impacts already existed in
+`repair_impact::seed_rechecks` (`repair_impact.rs:75`), which reads the failing
+check off the finding's own anchor and filters it to the run's schedule; the
+change adopts it rather than deriving a second copy, calling it from
+`pipeline.rs:1128`. `select_impacted_checks` is called from
+`crates/sure-cli/src/check.rs:545` and `:861` as well, so it is no longer a
+test-only function — a claim this document stated the opposite of in
+`P14-T009`'s note, and which `P14-T009` now records as falsified. The new module
+`crates/sure-core/src/findings_from_checks.rs` is the single place a check's
+result becomes a `Finding`, and it takes the check's own severity rather than
+choosing one.
+
+## Validation of `P7-T012`
+
+**The six gates, run by the supervisor on the committed bytes, clean at both ends
+of the run** — `& .\target\tmp\gates.ps1 -Label p7t012-verify2`, summary
+`target/tmp/gates-p7t012-verify2.txt`: `worktree at start: []`, `worktree: []`,
+`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`,
+`passed=2632 failed=0 ignored=12 not-ok=0`, and the store byte-identical before
+and after.
+
+**A second run covers the supervisor's own record edits, and it is the one that
+flaked.** `& .\target\tmp\gates.ps1 -Label p7t012-accept` ran on `a217882` **plus this acceptance
+commit's edits** — the same five files in the worktree list at the start of the run and at its end —
+and returned `fmt=0 clippy=0 test=101 bootstrap=0 taskctl=0 nonwindows=0`,
+`passed=2631 failed=1 ignored=12 not-ok=1`, store identical. The single failure is the
+`runtime_start.rs:1184:5` flake described at the top of this file, and the shape of the numbers says so:
+`passed` moved 2632 → 2631 and `failed` 0 → 1, which is **one test changing side, not a new failure
+appearing**, and the test passes 4 of 4 in isolation. `& .\target\tmp\gates.ps1 -Label p7t012-accept2`, run on the same change set with the same identical
+worktree list, returned `fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`,
+`passed=2632 failed=0 ignored=12 not-ok=0`, store identical — **all six green, which is what makes the
+first run a measurement of the flake rather than the first sign of a regression.**
+
+**Three runs, and they are not interchangeable.** `p7t012-verify2` is the run that says the worker's bytes
+are green, and it ran on a clean tree at the commit that holds them. `p7t012-accept2` is the run that says
+the supervisor's record edits broke nothing. `p7t012-accept` is kept beside them because a red run that is
+quietly replaced by a green one is how re-running until the answer is pleasant becomes a habit.
+
+**What was edited after `p7t012-accept2` went green, and why that does not withdraw it.** Two of the three
+edits are the anchor corrections described above — `progress/state.json` and `tasks/tasks.json`, whose
+`recheck_lifecycle.rs` line numbers this acceptance commit's own doc edit had moved. Those files are read
+for content by exactly two of the six gates, and **both were re-run on the corrected bytes and are green**:
+`SURE bootstrap validation OK: 17 phases, 189 tasks.` and `state OK: 189 tasks`. The third edit is this
+file. That the remaining four gates are blind to all three is measured rather than assumed: no Rust code
+reads `tasks/tasks.json`, `progress/state.json` or `progress/HANDOFF.md` at runtime — grep over
+`crates/*/src` and `crates/*/tests` returns nothing — and gate 4 checks `HANDOFF.md` with `fs.existsSync`
+(`scripts/validate-bootstrap.mjs:14`) and never opens it. `SHA256SUMS.txt` is read by no gate at all.
+
+### An earlier gate run at the same commit looked green and is not evidence
+
+`target/tmp/gates-p7t012-verify.txt` shows all six gates exiting 0. It also shows
+`worktree at start: [ M crates/sure-core/src/pipeline.rs]` against `worktree: []`
+at the end. The worker's mutation harness applied a mutation to a tracked file,
+ran one targeted test and reverted it, and the supervisor's run straddled the
+window. **A run over a tree that changes while it runs measures a state that never
+existed**, and its zeroes are not attributable to this commit. It is recorded in
+`target/tmp/p7t012-verify-round1-INVALID.md` and in the task's evidence so that a
+reader who finds the log cannot cite it. The gate script writing the worktree
+state **at the start** as well as at the end is the only reason this was caught;
+a script that printed only the end state would have shown a clean run. The
+worker's own second pass is weaker for the same reason — its timestamps interleave
+with the invalid run — which is why the replacement run, not the worker's, is the
+one recorded.
+
+### The mutations, including the one that reddened nothing
+
+Eight mutations were run and reverted by the worker and reported with literal
+output rather than paraphrased; M1–M4, M6, H1, H2 and H2b each redden. **M5
+reddened nothing** — `severity_of` → `Note` exits 0, `1 passed`, because
+`finding_for` does not call that function — and the worker reported it that way
+and corrected its own test comment instead of dropping it. A mutation that fails
+to redden is the most useful thing a mutation run can report, and it is recorded
+here for that reason.
+
+**The `history(…, 0)` shape specifically, since that is criterion 3.** H1 sets
+`HISTORY_SCAN_LIMIT` back to `0` — the value the call carried before this task —
+and reddens twice: `cli_contract.rs:1875:5`, *"the repair run recorded 3 finding(s)
+and the re-check reports 0 as still open, so the two runs do not agree about what
+the project has open"*, `left: 0` / `right: 3`, with stage 12's own line reading
+*"no earlier run left anything open for this project."* in the same frame that
+holds `"open_findings":3`; and `recheck_lifecycle.rs:891:9`. H2 sets the bound to
+`2` — the tempting "big enough" repair — and reddens both as well. **The bound is
+not fixed by enlarging it**, which is the property that distinguishes a limit from
+a guess.
+
+### The false green the supervisor found, and the task it produced
+
+**`previous_open_findings` returns `Ok` whether or not its scan saturated, so an
+empty list means both "nothing was left open" and "I did not read far enough to
+know".** The precedent the code cites does the opposite: `Store::spend_allowance`
+reads its bound and then acts on it — `store/mod.rs:582-585` returns `None` when
+the scan saturates, and `None` means spend nothing, so an exhausted allowance fails
+**closed**. The same number, the same-looking citation, and the opposite failure
+direction: a bound that fails in `spend_allowance` makes SURE *do* less, and a
+bound that fails here makes SURE *claim* less is wrong. The worker's own doc
+comment at `recheck_lifecycle.rs:225-248` asserted the resemblance; asked about it,
+the worker answered that it had not considered detecting the bound and that its
+comment overclaimed. **The claim is corrected in the acceptance commit and the
+direction is owned by `P15-T029`**, minted for it. Nothing consumes
+`LifecycleUpdate::findings` today, so a saturated read understates stage 12's line
+rather than the verdict — bounded, and unmeasured, because no fixture reaches 4096.
+Both facts are written into `P15-T029` rather than used to shrink it.
+
+### The two adversarial fixtures the change made false, and how they were amended
+
+`dynamic-not-authorized` and `intent-mismatch` each declared `No open findings.`
+and each forbade "a `Finding` rather than a candidate". The commit that made those
+sentences false amended them in the same commit, and **the amendment was reviewed
+rather than accepted**: both narrowed to forbid a finding *that blames the
+project* — for the first, a `must_fix` that says the code is wrong; for the
+second, a finding that says the project is wrong. The worker named the
+substitution in the fixture text itself rather than smuggling it, and the
+prohibitions each fixture exists for survive and are asserted.
+
+**One tension is recorded rather than waved through.** `dynamic-not-authorized` now
+carries a `must_fix`-severity finding while its `evaluation/acceptance-manifest.json`
+row asks for `note`. The reading is that the finding takes the *check's* weight —
+the rule in `findings_from_checks` is that the weight is taken and never chosen —
+while the manifest's `note` is what SURE says about the *project*. Both readings are
+defensible and the fixture's declared severity is unchanged, so
+`every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking` still
+passes. It is flagged because *"Open findings: 1 Must fix."* on a project where
+nothing is wrong may not read to a person the way the code means it.
+
+### One integrity drift no gate checks
+
+`a217882` changed four files listed in `SHA256SUMS.txt` without updating it:
+`crates/sure-core/src/lib.rs`, `docs/architecture/CHECK_PIPELINE.md`, and both
+amended fixtures. The worker reported two; the supervisor's dry run found four. No
+gate reads that file, which is why it can drift unnoticed, and it is regenerated by
+the acceptance commit.
 
 ## What `P15-T002` added
 

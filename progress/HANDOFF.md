@@ -3,6 +3,8 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`ci` was red for eight consecutive runs and this file recorded none of them; the run that ends the streak is `35535737108`.** `P15-T016`'s first criterion is *"a run of the `ci` workflow on this branch has all five jobs green ... and the run id is named in the hand-back so the claim can be checked rather than believed."* The green half went false at `f727d5f` and stayed false for eight runs. Seven of them failed `shellcheck-secondary` alone on the same `SC3013` at `scripts/Build-Release.sh:1509` — a non-POSIX `-nt` that `P15-T005` wrote and `P15-T007`'s dialect pin correctly reported. The eighth is the repair's own run, and it failed for a different reason: fixing step one let step two execute for the first time since the pin, and step two immediately found `SC2016` in `P15-T011`'s `scripts/Assemble-Release.sh`. So the repair did not end the streak; it moved the red from one step to the next, which is the case for repairing a red build rather than silencing it. The recording half had stopped earlier still — the newest run id in any table here is `35426296617`, and `grep -c` returns **0** for all ten run ids involved, including the failing half of a pair where the successful half was written down — so the failure the 75-run section below was written to end had already happened a second time, because what that section built was a reading and not a guard. The detail is in *The second red streak* below.
+
 **`P15-T012` is accepted at `29098ab719f7ce74583055f666b11f6c5cad0506`, and the Windows build no longer *says* it is unsigned — it asks, and records the answer.** The acceptance is *"If Authenticode/code-signing credentials are unavailable, mark external limitation honestly"* and *"Do not fake signing or claim SmartScreen reputation."* Five places in this repository asserted the build carried no signature and **not one of them had read the signature**: `scripts/Build-Release.ps1` wrote an unconditional `THIS BUILD IS UNSIGNED` paragraph into the archive's own `RELEASE.txt` without ever opening the file it described, while `scripts/Build-Release.sh` had been reading the macOS artifact with `codesign -d` all along and its Linux branch reports `not read` *with its reason*. Windows was the platform that asserted where the other two measured or explained. Measured against `HEAD` before the commit, `git grep -i -E 'UNSIGNED|authenticode' HEAD -- 'crates/*/tests/*.rs'` returned **nothing**, so all five sentences could have been deleted with every gate staying green.
 
 **The packager now asks Windows its own question before it writes the sentence.** `Get-AuthenticodeSignature` is called on the staged `sure.exe` before `RELEASE.txt` is written, and the archive's paragraph is **selected by that reading** rather than written beside it — so the file a user reads cannot say something the run did not read. Three states exist and there is no fourth: `not-signed` packages; `signed` **fails the run before anything is packaged**, naming the four files a signed binary would contradict, because the failure mode is not a bad artifact but four documents becoming false at the moment a user reads them; and `cannot-confirm` packages with the state recorded as *not read* and the reason named beside it, printed as a limitation and never as a pass. **A reader that failed is not an observation of absence**, which is the whole reason the third state exists rather than a two-way branch on `NotSigned`.
@@ -2786,6 +2788,159 @@ twice more, this placement is to be reconsidered rather than defended. `P7-T010`
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
+
+## The second red streak: eight runs across two findings, and ten run ids this file does not contain
+
+The section below records a 75-run red streak and exists because *"a red streak
+that no table records is how 75 runs went by unread."* This is a second one of
+the same shape, and it went unrecorded in the same way.
+
+**The run table stops before it, and that is a count rather than an impression.**
+The newest run id in any row of any table in this file is `35426296617`. The
+streak begins at `35526724155`, so no table row reaches it, and `grep -c` returns
+**0** for every one of the ten run ids involved — the last green run, the eight
+red ones, and the run that ends the streak. All ten are named below, which is the
+whole of what this section does about it: the reading was taken, and taking it
+once does not make the next one automatic.
+
+**The sharpest form of it is two runs dispatched at the same commit and the same
+moment, one named and one not.** `f727d5f` was pushed once and started two
+workflows: `35526723850` (`release-dry-run`) and `35526724155` (`ci`). The first
+is the highest run id appearing anywhere in this file — once, at line 3589, in
+`P15-T007`'s own validation section, recorded as `success`. The second appears
+**nowhere**: a `grep -c` of 0, and it is the run that was red. The successful one
+was written down and the failing one was not, on the same commit at the same
+moment, which is what makes this a gap in the reading rather than a gap in the
+habit of writing things down.
+
+**What went red, and what did not.** `ci` was green at `70ef6dd6`
+(`35524115847`, 2026-09-20T16:53Z) and red at every run after it. Eight
+consecutive runs, each read job by job from the API and then log by log, rather
+than inferred from a red mark:
+
+| run | commit | failed jobs | finding, read out of the log |
+| --- | --- | --- | --- |
+| `35526724155` | `f727d5f` | `shellcheck-secondary` | `SC3013` at `scripts/Build-Release.sh:1509` |
+| `35528224797` | `608fd564` | `shellcheck-secondary` | the same |
+| `35529657468` | `e9dec565` | `shellcheck-secondary` | the same |
+| `35530914576` | `9b5e6ac1` | `shellcheck-secondary` | the same |
+| `35531758845` | `73262eff` | `shellcheck-secondary` | the same |
+| `35533636268` | `ea00b151` | `shellcheck-secondary` | the same |
+| `35535072220` | `f31cbb4` | `shellcheck-secondary` | the same |
+| `35535523601` | `473181e` | `shellcheck-secondary` | `SC2016` (info) at `scripts/Assemble-Release.sh:357` |
+
+**One job failed in each of the eight, and no other job failed in any of them.**
+`rust (windows-latest)`, `rust (ubuntu-latest)`, `rust (macos-latest)` and
+`bootstrap-validate-windows` were `success` in all eight. So `P15-T016`'s first
+criterion was false in exactly one of its five parts, and the substance the task
+was about — the clippy gate that had been hiding two Unix platforms, and the
+tests behind it — held for the whole streak.
+
+**The eighth row is the one that makes this a sequence rather than a repeat.** The
+first seven are one finding on one line, but the run at `473181e` is the repair's
+own run, and it is red for a different reason. `shellcheck-secondary` carries two
+steps; step one was red in all seven, so step two never ran. Fixing step one let
+step two run for the first time, and it immediately reported something that had
+been sitting in the tree, unreachable, the whole while. **Repairing the first
+finding did not end the streak — it moved the red from the first step to the
+second.** Both findings were real, they were on opposite sides of the same
+blockage, and neither could be seen until the one in front of it was cleared.
+That is why the table has eight rows and not seven, and it is the argument for
+fixing a red build rather than silencing it: a suppressed `SC3013` would have
+left step two's finding invisible indefinitely.
+
+**The cause, attributed by blame rather than by guess.** The condition is
+`c522699`'s (`P15-T005`). The two things that exposed it are both `f727d5f`'s
+(`P15-T007`): the file's shebang became `#!/bin/sh`, and `ci.yml` gained
+`shellcheck -s sh` so the dialect is pinned at the invocation rather than left to
+a first line a later edit could change back. **The pin is correct and the line is
+what moves.** `-nt` is not in POSIX; the construct *worked* on the runner's own
+`dash`, so what the pin found was a portability gap and not a live breakage, and
+both halves of that sentence are true and have different urgency.
+
+**What the failure was hiding is the larger half.** `ci.yml:126` is the first of
+two shellcheck steps, and every one of the first seven runs died inside it — so
+step two did not execute once in any of them. The step itself has run before: it
+completed at `70ef6dd6`, under the two-package glob it carried then. What has
+never executed is **the glob it carries now**, `shellcheck scripts/*.sh
+integrations/*/scripts/*.sh`, which arrived at `0b8736a` (`P15-T008`) and
+therefore after the pin. That glob covers ten files, and at `473181e` — the
+commit whose push let it run — **eight of the ten are byte-identical to what they
+were at `70ef6dd6`**: one changed (`scripts/Build-Release.sh`, the repair below)
+and one did not exist yet (`scripts/Assemble-Release.sh`, which arrived with
+`P15-T011`). So the reading the glob produced was, for eight of its ten files, a
+reading of bytes that had already been read.
+
+**Two statements in the commit for `473181e` are corrected here, and neither was
+load-bearing.** It says the second step *"had never executed"*; the step had, at
+`70ef6dd6`, and what had never executed is the glob it carries now — the precise
+form is the one above. It says *"Nine are byte-identical to what they were at
+`70ef6dd6`"*; the count is **eight**, and the two it is not are named here. Both
+were written from a reading taken before `Assemble-Release.sh` was counted as a
+file that did not exist, which is the arithmetic error of counting ten files as
+nine-plus-changes rather than as eight-plus-one-plus-one. The count is a count,
+and it is stated here correctly.
+
+**Repair one, `473181e`: the line moves, the check does not.** `-nt` is replaced
+by `find "$MANIFEST_PATH" -newer "$GATE_PATH"`, which is POSIX and asks the
+identical question. The three cases were measured under `dash` in
+`target/tmp/probe-find-newer.sh` rather than assumed, including the one a bare
+boolean hides — a missing reference file prints nothing rather than reading as
+older — and the same three questions were asked of `-nt` on the same bytes so the
+two constructs are compared rather than argued about. `# shellcheck
+disable=SC3013` was the alternative and was not taken: it would have left the
+file carrying one disable per lint it has ever met and taught a reader nothing
+about what the second one hides.
+
+**Repair two, `b5c0176`: what the newly-runnable step found.** With step one
+passing, the glob executed for the first time — in run `35535523601`, the eighth
+red run above — and reported exactly one thing across all ten files: `SC2016`
+(info) at `scripts/Assemble-Release.sh:357`, where a message written by
+`P15-T011` (`52a1b1fb`) carries backticks inside a single-quoted `printf`. Inside
+single quotes a backtick is literal, so the message prints what the source says
+and nothing is wrong with what it does; the lint cannot know the author knew
+that. **An `info` fails the job, and that is not a defect in the job**: the step
+runs bare `shellcheck`, whose default severity is `style`. Raising the threshold
+would be making a check narrower so a tree could pass it, which is the act this
+task's own fifth criterion forbids by name, so the marker came out instead — the
+same choice, for the same reason, as `SC3013` one commit earlier. The `usage`
+heredoc near the top keeps its backticks because a `<<'EOF'` body is literal and
+the same lint is silent about it; measured, not argued, from the run that
+reported line 357 and did not report line 181. A comment now sits under the
+paragraph saying so, because the change is invisible in the rendered message and
+a later reader tidying the prose is how the backticks would come back.
+
+Gates, both from native PowerShell, both with `worktree at start` identical to
+`worktree`:
+
+    gates [p15t016-nt-fix] at 473181e   exits 0/0/0/0/0/0   passed=2708 failed=0 ignored=12
+    gates [p15t011-sc2016] at 473181e   exits 0/0/0/0/0/0   passed=2708 failed=0 ignored=12
+
+`passed=2708` is `P15-T012`'s number exactly, which is what two changes to shell
+scripts must read as. `crates/sure-testkit/tests/ci_workflow.rs` does read
+`scripts/Assemble-Release.sh` — its `ASSEMBLER` constant names it and nine rules
+anchor on it — so its eleven tests were run against the edit rather than around
+it, and all eleven pass.
+
+**The run, read rather than owed.** `35535737108` on `b5c0176`: **completed /
+success**, all five jobs — `rust (windows-latest)`, `rust (ubuntu-latest)`,
+`rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary`,
+the last of which is the job that had been red in all eight runs above. Both of
+its steps executed and neither reported a finding. This is the run id
+`P15-T016`'s first criterion asks to be named "in the hand-back so the claim can
+be checked rather than believed", and it is named here **after** the run finished
+rather than while it was in flight, so unlike the acceptance runs below there is
+no row for a later commit to backfill under the chain rule. The streak is eight
+runs long, it ended on 2026-09-21, and the id above is where it ended.
+
+**The debt this leaves, stated rather than implied.** Nothing enforces the run
+table. The 75-run section was rendered once by a script in `target/tmp` that no
+longer exists, and `P15-T016`'s notes assign the record-keeping half to the
+supervisor — a person-shaped owner with no mechanism behind it. That is why the
+same failure recurred, and it will recur again unless the reading becomes
+something a command runs. The eight-row table above is itself the evidence: it
+took a person reading eight run ids out of the API to produce, and the next push
+that goes red will not produce a ninth row on its own.
 
 ## The 75-run red streak, read from the API on 2026-09-19
 

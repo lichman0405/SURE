@@ -209,9 +209,17 @@ the portable agent plugin, Codex and Copilot — and what each of them installs.
 purpose: a relative path resolves against whatever directory SURE happened to be
 started in, and whether it was inside the project would then depend on that.
 
-What follows is a real run of that command against a project holding a
+What follows is a real run of that command, against a project holding a
 `package.json` and one JavaScript file, cut to its own headings. A line holding
-three dots is where text was left out:
+three dots is where text was left out.
+
+**It is a run of a machine that has never used SURE**, which is the machine this
+walk is written for: nothing has been recorded for it, so stage 9 has no history
+to read and is one of the two stages marked as not checked below. If your machine
+has already been used with SURE, that is the one line that changes — stage 9
+reads what your history holds and is marked as run, so the summary underneath
+reads one lower. A machine with no analysis provider configured is the other half
+of the count, and section 5's status table says why stage 8 is always marked.
 
 ```text
 SURE checked C:\path\to\your\project.
@@ -225,8 +233,10 @@ What the run did, stage by stage
   ...
   8/12. Ask a model to assess the project: No analysis provider is configured, so SURE assessed nothing with a model. This is a scope limit and not a failure: the deterministic checks are unaffected. (NOT CHECKED)
   ...
+  9/12. Check what was claimed against the evidence: SURE has no recorded history for this machine, so there are no agent claims to check against evidence. (NOT CHECKED)
+  ...
 
-1 of the 12 stages did not run, and each is marked NOT CHECKED above. A run with
+2 of the 12 stages did not run, and each is marked NOT CHECKED above. A run with
 a stage that did not run is never reported as clean.
 
 SURE exited with status 1. That is what it returns when it checked the project
@@ -318,6 +328,7 @@ the real files. Each rule's own doc comment in that file says what it is about.
 | Section 4's claim that the installer resolves the binary section 3 wrote, and stops when it is not there | `the_integration_installer_finds_the_cli_this_document_installed` — the same run, then the installed `bin\sure.exe` is removed and the same command is required to fail with `SURE not found`, so the passing run cannot have been measuring something else |
 | Section 5's claim that a check writes nothing | `a_check_leaves_the_store_of_the_person_running_it_byte_identical` — the digest of this machine's own per-user store, taken across a real run |
 | Section 5's status table, and that a check of a readable project is `1` and never `3` | `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check`, on the exit status of the real run |
+| Section 5's quoted run: the number it prints of the stages that did not run | `the_windows_quickstart_satisfies_every_rule`, through the rule `quoted_run_violations`, and `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check` — the number in the run's own summary sentence is required to equal the number of lines in the same run carrying the `(NOT CHECKED)` marker, in the transcript below and in the live run alike. The number itself belongs to the machine — 2 on a machine with no history and 1 on a machine with a store — so what the rule holds is that the sentence counts its own lines, on whichever machine it was made |
 | Section 1: there is no published archive, and the release workflow cannot publish one | `the_windows_quickstart_satisfies_every_rule`, through the rule `release_workflow_violations` — reads the lines `release.yml` runs and requires the invocation `gh release create "$TAG"` with `--draft`, no `--draft=false`, `gh release edit` or `gh release delete`, and a read of the workflow's own `workflow_dispatch` input list, which is required to be exactly `tag` |
 | Section 1: no workflow packages a Windows archive | `the_windows_quickstart_satisfies_every_rule`, through the rule `dry_run_violations` — requires the Windows target triple and the `.zip` extension to appear on no line `release-dry-run.yml` runs, and the job list to be the four jobs named above |
 | Section 1 does not send the reader to a download that does not exist | `the_windows_quickstart_satisfies_every_rule`, through `forbidden_in` over `DOWNLOAD_PROMISES` — four families of phrasing, each one a sentence a quickstart would really carry |

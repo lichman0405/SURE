@@ -40,15 +40,25 @@
 //! `install_flow.rs`'s own copy of the staging script out of its bytes and
 //! requires the copy here to be character for character the same.
 //!
-//! Nothing here touches the real `%LOCALAPPDATA%\SURE`. Every process is given a
-//! `LOCALAPPDATA` under this repository's git-ignored `target/tmp`, so what the
-//! installer writes, what the integration installer resolves and what the check
-//! would record all land in a directory this test made — with one deliberate
-//! exception, `a_check_leaves_the_store_of_the_person_running_it_byte_identical`,
-//! which runs the documented command the documented way and asserts the bytes of
-//! that person's own store are unchanged. That test is where the claim "a check
-//! writes nothing" is measured against a real machine rather than a scratch one,
-//! and it is the shape `crates/sure-cli/tests/cli_contract.rs` already uses.
+//! **What the environment override does and does not move.** Every process here
+//! is given a `LOCALAPPDATA` under this repository's git-ignored `target/tmp`.
+//! The two PowerShell scripts read that variable themselves, so the install
+//! lands in a directory this test made and the integration installer resolves
+//! the binary there. **`sure check` does not.** Its store and settings locations
+//! come from the platform's own known folders — `crates/sure-core/src/paths/
+//! mod.rs` says why, and it is deliberate: there is no environment variable a
+//! checked project could set to decide where the store goes. Measured on a
+//! machine with a store, `sure check` given a scratch `LOCALAPPDATA` and
+//! `APPDATA` still opened the real `%LOCALAPPDATA%\SURE\sure.db` and left the
+//! scratch directory empty. That is why the number of stages the run marks
+//! `(NOT CHECKED)` is 1 on this machine and 2 on a fresh runner: stage 8 is not
+//! run wherever no analysis provider is configured, and stage 9 is not run where
+//! there is no recorded history. The rules below therefore hold the run's
+//! sentence to the markers in that same run rather than to a number, and
+//! `a_check_leaves_the_store_of_the_person_running_it_byte_identical` — the one
+//! process started with no override at all, the shape
+//! `crates/sure-cli/tests/cli_contract.rs` already uses — is where the claim "a
+//! check writes nothing" is measured against the person's own store.
 
 // Windows-only: a per-user `%LOCALAPPDATA%` install, two PowerShell scripts, and
 // a plugin destination under the same directory. `CLAUDE.md`'s portability
@@ -335,10 +345,13 @@ fn a_project_of_our_own(scratch: &Path) -> PathBuf {
 
 /// `sure check <absolute path>` with the binary the install wrote, section 5.
 ///
-/// `per_user` is what `%LOCALAPPDATA%` and `%APPDATA%` are set to. Passing the
-/// scratch directory is what keeps this hermetic; passing `None` inherits the
-/// real ones, which is what the documented command does on a real machine and
-/// what `a_check_leaves_the_store_of_the_person_running_it_byte_identical` needs.
+/// `per_user` is what `%LOCALAPPDATA%` and `%APPDATA%` are set to. **It does not
+/// move `sure check`'s store, and was measured not to** — see the note at the top
+/// of this file; the run below a scratch override is still a run against the store
+/// the person running it really has, which is the machine-dependence this task is
+/// about. Passing `None` is the shape the documented command has on a real machine,
+/// and is what `a_check_leaves_the_store_of_the_person_running_it_byte_identical`
+/// needs.
 fn run_check(installed: &Path, project: &Path, per_user: Option<&Path>) -> Run {
     assert!(
         installed.is_file(),
@@ -348,9 +361,10 @@ fn run_check(installed: &Path, project: &Path, per_user: Option<&Path>) -> Run {
     let mut command = Command::new(installed);
     command.arg("check").arg(project);
     if let Some(per_user) = per_user {
-        // `APPDATA` too: the settings file lives there, and a check that read the
-        // real one would be measured against somebody's configuration rather than
-        // against what this document promises.
+        // `APPDATA` too, because the two scripts and the installer resolve their
+        // destinations from the environment even though `sure check` does not: the
+        // variable is the boundary this walk can name, and it is still what the
+        // assertion below — about the directory this walk made — is about.
         command
             .env("LOCALAPPDATA", per_user)
             .env("APPDATA", per_user);
@@ -486,8 +500,6 @@ fn the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_ch
         for sentence in [
             "SURE checked ",
             "No open findings.",
-            "1 of the 12 stages did not run",
-            "A run with a stage that did not run is never reported as clean.",
             "SURE exited with status 1.",
         ] {
             assert!(
@@ -498,9 +510,28 @@ fn the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_ch
             );
         }
 
+        // The count this run prints about itself, against the markers in the same
+        // run. What is checked is the relation and not the number, because the
+        // number is the machine's: stage 8 is not run wherever no analysis
+        // provider is configured, and stage 9 is not run on a machine that has
+        // never used SURE, so a bare machine counts 2 and a machine with a store
+        // counts 1. `1 of the 12` was the assertion here, and it could only be
+        // satisfied on the machine the document's quote was taken from.
+        if let Some(disagreement) = not_checked_disagreement(
+            &format!("{label}: the run this walk just made"),
+            &check.stdout,
+        ) {
+            panic!("{disagreement}\n{}", check.everything());
+        }
+
         // And the claim the document makes about a first check: it creates no
         // store. The scratch directory is left behind on purpose, so the run that
-        // was measured can be read back.
+        // was measured can be read back. What this can see is the directory this
+        // walk named, and no more than that: `sure check` does not read
+        // `LOCALAPPDATA`, so the claim about the store the person running it
+        // really has is the other test's business —
+        // `a_check_leaves_the_store_of_the_person_running_it_byte_identical`,
+        // which takes that store's digest across a real run.
         let store = walked.per_user.join("SURE").join("sure.db");
         assert!(
             !store.exists(),
@@ -682,6 +713,28 @@ const QUICKSTART_REQUIRED: &[(&str, &str)] = &[
         "SURE exited with status 1.",
         "the quoted run stops saying what it returned, and a status is the whole answer a check \
          gives",
+    ),
+    (
+        // Deliberately without a number in it: the count is the machine's, and the
+        // rule `quoted_run_violations` is what holds the sentence to the markers
+        // above it. What this anchor holds is that the sentence is there at all —
+        // a quote that dropped it would otherwise satisfy a rule about a
+        // disagreement by having nothing to disagree with.
+        "stages did not run, and each is marked NOT CHECKED above. A run with a stage that did not \
+         run is never reported as clean.",
+        "the quoted run stops saying how many stages did not run and that a run with such a stage \
+         is never reported as clean, which is the sentence the whole of section 5's reading of a \
+         status rests on",
+    ),
+    (
+        // The two marked lines the sentence counts are required **inside the
+        // quoted run** rather than here, so that a line moved out of the fence is
+        // a complaint: `BARE_MACHINE_LINES` below is where they are named, and it
+        // is also where the document's decision — that its quote is a run of a
+        // machine that has never used SURE — became a fact a rule reads.
+        "It is a run of a machine that has never used SURE",
+        "the paragraph that says which machine the quoted run is a run of is gone, and a reader \
+         with a store would take the numbers above it for their own",
     ),
     (
         "## How \"documented and tested\" is satisfied here",
@@ -984,6 +1037,218 @@ fn forbidden_in(path: &str, text: &str, forbidden: &[(&str, &str)]) -> Vec<Strin
         .collect()
 }
 
+// --- The count a run prints about the stages it did not run -----------------
+
+/// The marker a run puts on a stage it did not run.
+///
+/// With the parentheses, because the sentence that counts them names the marker
+/// without them: `marked NOT CHECKED above` is part of the sentence and is not a
+/// stage line, and a count that included it would be counting the count.
+const NOT_CHECKED_MARKER: &str = "(NOT CHECKED)";
+
+/// The rest of the sentence, with **both** numbers left out of it.
+///
+/// The numbers are the run's own and nothing here fixes either one: what the
+/// rule is about is that the first agrees with the marked lines beside it. The
+/// words around them are a literal, so a rewrite that keeps the sentence's shape
+/// and changes what it counts — `did not run` becoming `did not finish`, the
+/// marker renamed — stops being read as this sentence at all, which is a
+/// complaint from the rule rather than a quiet pass.
+const NOT_RUN_TAIL: &str = " stages did not run, and each is marked NOT CHECKED above. A run with a \
+                            stage that did not run is never reported as clean.";
+
+/// The two numbers of that sentence: the count, then the number of stages.
+///
+/// `None` when the text carries no such sentence, which is what a run in which
+/// every stage ran prints. Matched on the squashed text, because a Markdown
+/// paragraph is reflowed by every editor that touches it and a rule about a
+/// sentence must not be a rule about where its line breaks fell.
+fn gap_counts(text: &str) -> Option<(usize, usize)> {
+    let squashed_text = squashed(text);
+    let at = squashed_text.find(NOT_RUN_TAIL)?;
+    // The sentence reads `N of the M stages …`, so reading it backwards from the
+    // tail yields the stage count, then `the`, then `of`, then the count of the
+    // stages that did not run. A number that is not a number, or a word out of
+    // place, is `None`: a rewritten sentence is not this sentence.
+    let mut words = squashed_text[..at].rsplit(' ');
+    let stages = words.next()?.parse::<usize>().ok()?;
+    if words.next()? != "the" {
+        return None;
+    }
+    if words.next()? != "of" {
+        return None;
+    }
+    let gaps = words.next()?.parse::<usize>().ok()?;
+    Some((gaps, stages))
+}
+
+/// What is wrong with a text whose own count of the stages it did not run
+/// disagrees with the markers in it, or `None` when the two are one fact.
+///
+/// The rule is a relation and not a number. A run prints how many of its stages
+/// did not run and marks each of them in the stage log above that sentence, so
+/// the number in the sentence and the number of marked lines in the same text
+/// are one fact about one run — **on a machine with a store and on a machine
+/// without one, at whatever count each of them produces.** `1 of the 12` cannot
+/// be the assertion: it is a reading of one machine, and a check that fails
+/// because the reader's machine differs from the author's is worse than no check.
+///
+/// `what` names the text, because this is applied to two of them: the output the
+/// journey just produced here, and the transcript the document quotes.
+fn not_checked_disagreement(what: &str, text: &str) -> Option<String> {
+    let marked = text.matches(NOT_CHECKED_MARKER).count();
+    let Some((gaps, stages)) = gap_counts(text) else {
+        if marked == 0 {
+            // A run in which every stage ran prints no such sentence and marks
+            // nothing, and there is nothing here to disagree with.
+            return None;
+        }
+        return Some(format!(
+            "{what}: {marked} line(s) carry the {NOT_CHECKED_MARKER} marker and nothing in it says \
+             how many stages did not run, so a reader is shown a list of gaps with no count beside \
+             it — which is what a deleted number looks like."
+        ));
+    };
+    if gaps == marked {
+        return None;
+    }
+    Some(format!(
+        "{what}: the run says {gaps} of the {stages} stages did not run, and {marked} line(s) in \
+         the same text carry the {NOT_CHECKED_MARKER} marker. The sentence counts the marked lines \
+         above it, so this text says two different things about one run: the number was edited, or \
+         a line was. Both machines satisfy the rule at their own count — 2 on a machine that has \
+         never used SURE and 1 on a machine with a store — and what no machine satisfies is a \
+         number that disagrees with its own markers."
+    ))
+}
+
+/// The two stage lines that make a quoted run a run of a machine that has never
+/// used SURE — the document's decision, held as a fact its rules read.
+///
+/// A relation rule alone can be satisfied by editing both sides at once: drop
+/// stage 9's line and lower the count to match, and the sentence still agrees
+/// with the markers in front of it while the document has gone back to being the
+/// transcript of a machine that has used SURE, under a paragraph that says the
+/// opposite. That is the shape this pins shut.
+///
+/// Stage 8 is not run wherever no analysis provider is configured, and stage 9 is
+/// not run where nothing has been recorded — so a run of a machine that has never
+/// used SURE marks both, and **both lines are required inside the quoted run**,
+/// not anywhere in the file: a line that moved out of the fence stopped being
+/// part of the transcript a reader copies from. With the two lines held, `2` is
+/// the only count the sentence under them can honestly carry: any other number
+/// either disagrees with the markers (the relation rule) or counts a run this
+/// document does not quote (this one).
+///
+/// It is a fact about the file and not about the machine reading it, which is why
+/// it is safe to require on every runner: nothing here reads a store, an
+/// environment variable or a provider. The live run keeps only the relation
+/// rule — on a machine with a store the command really does mark one stage and
+/// print `1`, and that is a measurement of the machine rather than a claim about
+/// the document.
+const BARE_MACHINE_LINES: &[(&str, &str)] = &[
+    (
+        "This is a scope limit and not a failure: the deterministic checks are unaffected. (NOT CHECKED)",
+        "stage 8 is not run on any machine this document is written for, so a run that stopped \
+         showing it stopped showing the first line the count is counting",
+    ),
+    (
+        "Check what was claimed against the evidence: SURE has no recorded history for this \
+         machine, so there are no agent claims to check against evidence. (NOT CHECKED)",
+        "stage 9 is the one line a reader who has already used SURE sees differently, and the \
+         document's decision is that its quote is the bare-machine run: without this line the \
+         transcript is a with-store run and the paragraph above it says the opposite, which is a \
+         document contradicting itself with no rule to notice",
+    ),
+];
+
+/// The lines a quoted run must show, looked for inside the run itself.
+///
+/// Squashed, for the same reason the sentence is: a Markdown paragraph is
+/// reflowed by every editor that touches it, and this is a rule about a line the
+/// product printed rather than about where a document broke it.
+fn bare_machine_disagreements(what: &str, run: &str) -> Vec<String> {
+    let squashed_run = squashed(run);
+    BARE_MACHINE_LINES
+        .iter()
+        .filter(|(line, _)| !squashed_run.contains(&squashed(line)))
+        .map(|(line, why)| format!("{what} does not carry {line:?}, and {why}"))
+        .collect()
+}
+
+/// The fenced blocks of a Markdown document that hold a run of `sure check`.
+///
+/// A run opens with the line the command prints about the project it read, and
+/// that is what is looked for rather than a particular fence or heading: a
+/// document that moved its transcript, or grew a second one, is a document whose
+/// runs are all held to this rule rather than one whose run is no longer read at
+/// all.
+fn quoted_runs(text: &str) -> Vec<String> {
+    let mut runs = Vec::new();
+    let mut inside = false;
+    let mut block = String::new();
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            if inside && block.contains("SURE checked ") {
+                runs.push(block.clone());
+            }
+            block.clear();
+            inside = !inside;
+            continue;
+        }
+        if inside {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    runs
+}
+
+/// Every run a document quotes, held to what it is a run of and to the count it
+/// prints about itself.
+///
+/// The document is what a reader follows, so the transcript in it is held to the
+/// same rule the live run is held to. A document whose quote says one number
+/// while marking another is a document describing a run that did not happen,
+/// whether or not the machine it was taken on is the machine you are reading it
+/// on.
+///
+/// And the quoted run is held to being **the run this document decided to quote**
+/// — the bare-machine one — because the relation alone is satisfiable by editing
+/// the number and the lines together. Two rules, because they fail differently:
+/// `bare_machine_disagreements` says which run this is not, and
+/// `not_checked_disagreement` says the run it is does not agree with itself.
+fn quoted_run_violations(path: &str, text: &str) -> Vec<String> {
+    if text.trim().is_empty() {
+        return vec![format!(
+            "{path} was read as empty, so nothing here says whether the run it quotes still counts \
+             the stages it did not run"
+        )];
+    }
+    let runs = quoted_runs(text);
+    if runs.is_empty() {
+        return vec![format!(
+            "{path} quotes no run of `sure check`, so the walk a reader follows ends in a command \
+             whose output the document no longer shows them, and the rule that holds a quoted \
+             count to the quoted markers has nothing to read"
+        )];
+    }
+    let mut out: Vec<String> = Vec::new();
+    for (index, run) in runs.iter().enumerate() {
+        let what = if runs.len() == 1 {
+            format!("the run {path} quotes")
+        } else {
+            format!("run {} of the runs {path} quotes", index + 1)
+        };
+        // Which run this is, before what it counts: a transcript that stopped
+        // being the bare-machine run is a different run rather than a wrong sum.
+        out.extend(bare_machine_disagreements(&what, run));
+        out.extend(not_checked_disagreement(&what, run));
+    }
+    out.dedup();
+    out
+}
+
 /// A tracked file of the checkout, with its line endings normalized to LF.
 fn read(relative: &str) -> String {
     let path = repository_root().join(relative);
@@ -1026,6 +1291,7 @@ fn quickstart_violations(files: &[(&str, String)]) -> Vec<String> {
     if let Some(text) = text_of(QUICKSTART) {
         out.extend(required_in(QUICKSTART, text, QUICKSTART_REQUIRED));
         out.extend(forbidden_in(QUICKSTART, text, DOWNLOAD_PROMISES));
+        out.extend(quoted_run_violations(QUICKSTART, text));
     }
     if let Some(text) = text_of(INSTALL_WINDOWS) {
         out.extend(required_in(INSTALL_WINDOWS, text, INSTALL_WINDOWS_REQUIRED));
@@ -1294,6 +1560,62 @@ const BREAKS: &[Break] = &[
         from: "SURE exited with status 1. That is what it returns when it checked the project",
         to: "SURE finished. That is what it returns when it checked the project",
         wanted: "SURE exited with status 1.",
+    },
+    Break {
+        // The edit this task exists for, from the other side: the sentence keeps
+        // the shape it had and the number in it stops being the number of lines
+        // above it. A rule that accepted any digit would call this a pass.
+        what: "the quoted run's count stops counting the lines it sits under",
+        file: QUICKSTART,
+        from: "2 of the 12 stages did not run",
+        to: "3 of the 12 stages did not run",
+        wanted: "says two different things about one run",
+    },
+    Break {
+        // The same substitution from the other direction: the number is left
+        // alone and one of the lines it counts stops being marked. A rule that
+        // read only the sentence would call this a pass.
+        what: "a stage the quoted run did not run stops being marked as one",
+        file: QUICKSTART,
+        from: "so there are no agent claims to check against evidence. (NOT CHECKED)",
+        to: "so there are no agent claims to check against evidence.",
+        wanted: "says two different things about one run",
+    },
+    Break {
+        what: "the quoted run stops saying how many stages did not run",
+        file: QUICKSTART,
+        from: "2 of the 12 stages did not run, and each is marked NOT CHECKED above.",
+        to: "Some of the stages above did not run.",
+        wanted: "nothing in it says how many stages did not run",
+    },
+    Break {
+        // The supervisor's probe of this task's acceptance, kept as a row: the
+        // number and the lines it counts are edited **together**, so the sentence
+        // still agrees with the markers in front of it and a rule that only
+        // compares the two calls this a pass. That is the joint edit a
+        // self-consistency rule cannot see, and it puts the document back where
+        // this task found it — quoting a machine that has a store, under a
+        // paragraph that says the quote is a bare machine's. What catches it is
+        // the run-scoped anchor: the transcript stopped being a run of the
+        // machine this document says it is a run of.
+        what: "the quoted run goes back to a machine with a store, and its number goes back with it",
+        file: QUICKSTART,
+        from: "  9/12. Check what was claimed against the evidence: SURE has no recorded history for \
+               this machine, so there are no agent claims to check against evidence. (NOT CHECKED)\n  \
+               ...\n\n2 of the 12 stages did not run",
+        to: "1 of the 12 stages did not run",
+        wanted: "Check what was claimed against the evidence",
+    },
+    Break {
+        // The same decision from the other side: the transcript is left as the
+        // bare-machine run and the paragraph saying so is reworded to claim the
+        // opposite. A claim in the document with no reader is the defect this
+        // task is about, so the paragraph that names the machine is an anchor.
+        what: "the paragraph says the quoted run came from a machine that has used SURE",
+        file: QUICKSTART,
+        from: "It is a run of a machine that has never used SURE",
+        to: "It is a run of a machine that has used SURE before",
+        wanted: "It is a run of a machine that has never used SURE",
     },
     Break {
         what: "the section naming the tests behind these claims is retitled out of existence",

@@ -3,9 +3,38 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
+**CI caught what the acceptance could not: `P15-T004`'s `ManifestVersion` is now `1.4.0`, not the
+`1.12.0` it was delivered and accepted with.** CI run `35507591835` on `171dc21` — the acceptance
+commit — is **FAILURE on `rust (windows-latest)` alone**, the other four jobs green, and every failure
+is the same one: the `windows-2025-vs2026` runner image's `winget`, which is older than this machine's
+`v1.29.290`, answers the committed `1.12.0` with `Manifest validation succeeded with warnings`,
+`The schema header URL does not match the expected pattern`, exit `-1978335192`, inside four
+`driven_by_powershell` tests that assert exit `0`. **The tests were right to fail** — a warning is not a
+pass here, and that design is exactly what turned a portability limit into a visible red instead of a
+manifest that only validates on one machine. `winget` recognises a fixed set of schema versions and
+which set is *that build's*, so a version that is merely newer is not more correct, only more fragile.
+`1.4.0` is the oldest schema that can express this manifest: the published
+`aka.ms/winget-manifest.installer.1.4.0.schema.json`, fetched and searched on 2026-09-20, carries
+`InstallerType: zip`, `NestedInstallerType: portable`, `NestedInstallerFiles` and
+`PortableCommandAlias` — every field the templates use — and `1.0.0`'s does not, answering a manifest
+that uses them with `Unknown field. [NestedInstallerType]`. **The acceptance missed this because it
+measured on one machine and generalised from it**: the six gates pass on this host whichever version is
+pinned, so no local run could have caught it, and only the runner's own `winget` could. Two things were
+fixed besides the pin. The script's refusal now names the `winget` that judged the manifest and the
+`ManifestVersion` it checked — the old message named only the exit code, which is why the runner's build
+had to be *inferred* from its warning text rather than read. And a sentence in `INSTALL_WINGET.md` that
+said this WinGet `compares the version in that URL against the one it expects` was **wrong**, and is
+corrected: measured one change at a time on the rendered files, a header URL naming a version the build
+does not recognise is *inert* — a `1.13.0` header over a `1.4.0` property is accepted at exit `0` — so
+lowering the header alone would have changed nothing, and the version that draws the warning is the
+`ManifestVersion` property. Three templates, the script and that document are the correction; the
+worker's own account of what it built stands, and is the paragraph below.
+
 **`P15-T004` is accepted at `2c82f91acbd5953cba55dcb9a5931f5e3ee5570e`, over a single worker commit on
 base `7f53dcf`, with no supervisor correction to any file it delivered — the first task in this phase
-accepted as handed back.** The task is *"Create WinGet manifest/template"*: `packaging/winget/template/`
+accepted as handed back.** A later commit corrected three of its templates, its script and one document
+it delivered, for the reason in the paragraph above: what the worker delivered was right for the machine
+it was measured on, and did not survive CI. The task is *"Create WinGet manifest/template"*: `packaging/winget/template/`
 holds the three files a WinGet manifest is, `scripts/New-WingetManifest.ps1` renders them from a release
 archive and refuses any value it cannot derive from those bytes, and `docs/development/INSTALL_WINGET.md`
 records what the package would install, where each value comes from, which of the launchers' three
@@ -48,6 +77,16 @@ instead of restated. The acceptance commit it describes is records plus one corr
 `crates/sure-core/src/recheck_lifecycle.rs` (one sentence that claimed a symmetry with
 `allowance::SCAN_LIMIT` the code does not have), this file, and `SHA256SUMS.txt` — whose dry run found
 **seven** digests stale.
+
+**CI run `35507591835` on `171dc21` is FAILURE on `rust (windows-latest)` and SUCCESS on the other four
+jobs** — `rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`,
+`shellcheck-secondary` — with `headSha` read back from the API as
+`171dc21813fb71c0dc5b697678e7b52a22241102`. The failing step is `cargo test`, and the failures are four
+`driven_by_powershell` tests in `crates/sure-cli/tests/winget_manifest.rs`, each panicking at `:697` on
+the script's exit status. The runner is `windows-2025-vs2026`, image version `20260907.229.1`, and its
+`winget` named the schema header URL of each of the three rendered files at `Line: 1, Column: 25`. This
+is the reading that made the version a portability question rather than a preference, and it is why the
+correction moved the `ManifestVersion` property rather than the header URL.
 
 **CI run `35505458707` on `7f53dcf` is SUCCESS on all five jobs** — `rust (windows-latest)`,
 `rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` —
@@ -2899,6 +2938,18 @@ One defect was reported by the worker rather than hidden, and this record commit
 against the file's new `77c7f82d…`), and it was the only entry this commit staled. The worker measured it
 to the digit and said whose question it is instead of regenerating a file it does not own — which is the
 behaviour the ownership rule exists to produce.
+
+**The acceptance was incomplete in one way this section did not foresee, and CI is what said so.** Every
+measurement above was taken on this machine, whose `winget` is `v1.29.290`; the runner's is older, and it
+answers `ManifestVersion: 1.12.0` — the value all of those measurements agreed on — with the very warning
+the 1.11.0 directory was checked for. The bullet above is therefore right about what those two files
+asserted at `INSTALL_WINGET.md:378` and `New-WingetManifest.ps1:159` **at the time it was written**; both
+files have since been rewritten by the correction this record opens with, so those two citations no longer
+resolve to the sentences they name. What the re-measurement established still stands, and the correction
+narrows it rather than overturning it: the warning is drawn by the `ManifestVersion` property, and the
+header URL that the warning quotes is inert. The general lesson is the one `P15-T003` already taught,
+arriving from the other side — a measurement is evidence about *the machine it was taken on*, and this
+acceptance wrote four of them down without saying which machine.
 
 ## What `P15-T003` added
 

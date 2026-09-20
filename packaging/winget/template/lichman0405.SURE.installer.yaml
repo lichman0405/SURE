@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.4.0.schema.json
 
 # >>> template notes: removed when this file is rendered
 # =============================================================================
@@ -72,4 +72,4 @@ Installers:
     InstallerUrl: https://github.com/lichman0405/SURE/releases/download/v<version>/sure-<version>-x86_64-pc-windows-msvc.zip
     InstallerSha256: <sha256-of-the-archive>
 ManifestType: installer
-ManifestVersion: 1.12.0
+ManifestVersion: 1.4.0

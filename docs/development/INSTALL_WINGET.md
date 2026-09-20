@@ -194,7 +194,7 @@ rendered manifest is carried over from the template on trust.
 | `PublisherUrl`, `PackageUrl` | `Cargo.toml:16` | compared with the repository URL read from `Cargo.toml` |
 | `License: Apache-2.0` | `Cargo.toml:15` | compared with the `license` field, and `LICENSE` is at the repository root |
 | `LicenseUrl` | the template, spelling out the repository URL plus `/blob/main/LICENSE` | **no check.** The renderer compares `License`, `PackageUrl` and `PublisherUrl` with `Cargo.toml` and does not read this field; it is not fetched either, so nothing confirms the path resolves |
-| `ManifestVersion: 1.12.0` | the schema version the renderer writes | the templates and the script's `$SchemaVersion` are compared by a test, so a bump on one side reddens rather than producing files the script then refuses |
+| `ManifestVersion: 1.4.0` | the schema version the renderer writes — the **oldest** whose published schema carries every field in this table | the templates and the script's `$SchemaVersion` are compared by a test, so a bump on one side reddens rather than producing files the script then refuses |
 | `ShortDescription`, `Description`, `Moniker`, `Tags` | written for a reader of `winget show` | no check; `Description` is where a `winget show` reader is told what this package does **not** do, because a `zip` package that copies one executable has nowhere else to say it |
 
 `PublisherSupportUrl` is deliberately absent: this repository has no support
@@ -368,23 +368,47 @@ Named as limits rather than left to be assumed:
   scripts are written for both — .NET hashing rather than `Get-FileHash`, typed
   arguments rather than a command line — and that is reasoning, not a
   measurement.
-* **`ManifestVersion: 1.12.0` is one machine's answer, and it is not a
-  preference.** Measured against winget `v1.29.290` on 2026-09-20, with the
-  rendered files and only that value changed:
+* **`ManifestVersion: 1.4.0`, and the version is a compatibility choice rather
+  than a preference.** It is the oldest schema that can express this manifest:
+  `https://aka.ms/winget-manifest.installer.1.4.0.schema.json`, fetched and
+  searched on 2026-09-20, carries `InstallerType: zip`, `NestedInstallerType:
+  portable`, `NestedInstallerFiles` and `PortableCommandAlias`, and `1.0.0`'s does
+  not — it answers a manifest that uses them with `Unknown field.
+  [NestedInstallerType]`. Nothing here needs anything newer, so the oldest schema
+  that can say it is the one the widest range of `winget` builds accept.
+
+  That last clause is measured, and it is why this is `1.4.0` rather than the
+  `1.12.0` it was. `winget` recognises a fixed set of schema versions, and which
+  set is *that build's*: measured against `v1.29.290` on 2026-09-20, changing only
+  this value in the rendered files:
 
   | `ManifestVersion` | what `winget validate` said | exit |
   | --- | --- | --- |
-  | `1.10.0` | `Manifest validation succeeded.` | `0` |
-  | `1.11.0` | `succeeded with warnings`: `The schema header URL does not match the expected pattern` | `-1978335192` |
-  | `1.12.0` | `Manifest validation succeeded.` | `0` |
-  | `1.13.0` | `succeeded with warnings`: the same warning | `-1978335192` |
+  | `1.4.0`, `1.5.0`, `1.6.0`, `1.7.0`, `1.9.0`, `1.10.0`, `1.12.0` | `Manifest validation succeeded.` | `0` |
+  | `1.8.0`, `1.11.0`, `1.13.0`, `1.14.0` | `succeeded with warnings`: `The schema header URL does not match the expected pattern` | `-1978335192` |
 
-  The warning names the `# yaml-language-server: $schema=…` header of each of the
-  three files: this WinGet compares the version in that URL against the one it
-  expects, and a mismatch is a warning with a non-zero exit. It is the same
-  "warning is not a pass" rule that keeps `Scope: user` out of the installer
-  manifest (`## What the package installs`). A different WinGet may expect a
-  different version; what this repository can state is that the three templates
-  and the script's `$SchemaVersion` carry one value and a test compares them, so
-  a bump on one side reddens rather than producing files that then fail for a
+  The warning is drawn by the `ManifestVersion` **property**, not by the version
+  written in the header URL. Measured one change at a time on the rendered files,
+  with the other two files left agreeing:
+
+  | header URL | `ManifestVersion` | what `winget validate` said |
+  | --- | --- | --- |
+  | `1.4.0` | `1.4.0` | `Manifest validation succeeded.` |
+  | `1.13.0` | `1.4.0` | `Manifest validation succeeded.` — the header URL alone is inert |
+  | `1.13.0` | `1.13.0` | the pattern warning |
+  | `1.4.0` | `1.13.0` | the pattern warning, and `The manifest version in the schema header does not match the ManifestVersion property value in the manifest. Value: 1.4.0` |
+
+  So lowering the header URL alone would have changed nothing, and a version that
+  is merely newer is not more correct — only more fragile. **These measurements
+  come from one `winget` on one machine, and CI showed that machine was the
+  permissive one**: the `windows-2025-vs2026` runner image's older `winget`
+  answered `1.12.0` with that same warning, and `rust (windows-latest)` went red
+  on the commit that carried it. A warning is not a pass here — the same rule that
+  keeps `Scope: user` out of the installer manifest (`## What the package
+  installs`). The three files must also agree with one another: one file's
+  `ManifestVersion` moved on its own is refused outright as `The multi file
+  manifest has inconsistent field values`, exit `-1978335191`, an error rather
+  than a warning. What this repository can state is that the three templates and
+  the script's `$SchemaVersion` carry one value and a test compares them, so a
+  bump on one side reddens rather than producing files that then fail for a
   reason nobody expected.

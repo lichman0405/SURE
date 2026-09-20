@@ -151,19 +151,61 @@ $ErrorActionPreference = 'Stop'
 # Off explicitly: programs here write to stderr on success.
 $PSNativeCommandUseErrorActionPreference = $false
 
-# The manifest schema version this script writes and checks against. Measured
-# against winget 1.29.290 on 2026-09-20, with the rendered files and only this
-# value changed: 1.12.0 is answered with "Manifest validation succeeded." and
-# exit 0, and so is 1.10.0; 1.11.0 and 1.13.0 are answered with "Manifest
-# validation succeeded with warnings", the warning being "The schema header URL
-# does not match the expected pattern" on each file's
-# `# yaml-language-server: $schema=...` line, and exit -1978335192. A warning is
-# not a pass here, so the value that is one on this machine is the one written.
-# Which versions another `winget` expects is that machine's answer, not this
-# script's; what this script can state is that it writes one value and checks
-# the files against it (`$fileManifestVersion -ne $SchemaVersion` below), and
-# `crates/sure-cli/tests/winget_manifest.rs` compares it with the templates.
-$SchemaVersion = '1.12.0'
+# The manifest schema version this script writes and checks against.
+#
+# `1.4.0` is the *oldest* version that can express this manifest, and that is why
+# it is the one written. Fetched and searched on 2026-09-20:
+# `aka.ms/winget-manifest.installer.1.4.0.schema.json` carries `InstallerType:
+# zip`, `NestedInstallerType: portable`, `NestedInstallerFiles` and
+# `PortableCommandAlias` — every field these templates use — and a manifest that
+# validated under it drew no warning at all of the kind below. 1.0.0's schema
+# does not carry them, and answers a manifest that uses them with `Unknown field.
+# [NestedInstallerType]`. Nothing here needs anything newer, so the oldest schema
+# that can say it is the one the widest range of `winget` builds will accept.
+#
+# That clause is measured, and it cost a red CI to learn. `winget` recognises a
+# fixed set of schema versions, and which set is *that build's*: a newer `winget`
+# knows more of them, an older one fewer. A manifest whose `ManifestVersion` is
+# not in it is answered with "Manifest validation succeeded with warnings" at
+# exit -1978335192. Measured against `winget` 1.29.290 on 2026-09-20, changing
+# only this value in the rendered files: 1.4.0, 1.5.0, 1.6.0, 1.7.0, 1.9.0, 1.10.0
+# and 1.12.0 are answered with "Manifest validation succeeded." and exit 0; 1.8.0,
+# 1.11.0, 1.13.0 and 1.14.0 with the warning above. The `windows-2025-vs2026`
+# runner image's older `winget` answers 1.12.0 with that same warning, which is
+# what the red CI was: the version this line used to carry. A version that is
+# merely newer is not more correct, only more fragile.
+#
+# What the recognised set is compared against is the `ManifestVersion` property,
+# not the version in the header URL, and that decides which of the two lines to
+# edit when this breaks. Measured on the rendered files, one change at a time,
+# with the other two files left agreeing:
+#
+#   header  property  what `winget validate` said
+#   1.4.0   1.4.0     "Manifest validation succeeded."
+#   1.13.0  1.4.0     "Manifest validation succeeded." — the header URL alone is
+#                     inert, and an unknown version in it draws nothing
+#   1.13.0  1.13.0    "succeeded with warnings": "The schema header URL does not
+#                     match the expected pattern"
+#   1.4.0   1.13.0    that warning, and a second one: "The manifest version in
+#                     the schema header does not match the ManifestVersion
+#                     property value in the manifest. Value: 1.4.0"
+#
+# So the pattern warning comes from the property, and the header/property warning
+# comes from a header that disagrees with a *recognised* property. Lowering the
+# header URL alone would not have fixed the red CI. The three files must also
+# agree with each other: one file's `ManifestVersion` moved on its own is refused
+# outright as "The multi file manifest has inconsistent field values", exit
+# -1978335191, which is an error rather than a warning.
+#
+# A warning is not a pass here. What this script can state is that it writes one
+# value, refuses a manifest that says another (`$fileManifestVersion -ne
+# $SchemaVersion` below), and that `crates/sure-cli/tests/winget_manifest.rs`
+# compares it with the templates, so a bump on one side reddens rather than
+# producing files the script then refuses for a reason nobody expected. When
+# `winget validate` does refuse, the message says which `winget` judged it: the
+# first version of this script named only the exit code, and the build behind
+# that red CI had to be inferred from its warning text rather than read.
+$SchemaVersion = '1.4.0'
 
 # The one target this repository produces, and the architecture WinGet calls it.
 # A target that is not in this map is refused rather than mapped by a guess: the
@@ -906,6 +948,20 @@ manifest this script is satisfied with.
 "@
     }
 
+    # Which `winget` judged this is part of the answer, so it is asked before the
+    # manifest is put to it. The first version of this script reported the exit
+    # code alone, and when that was a red CI the build behind it had to be
+    # identified from its warning text; a version line costs one process and
+    # removes the inference. A `winget` that will not say is not a reason to
+    # stop — the validation below is what the caller came for, and it will say
+    # more — so this is captured, never required.
+    $versionOut = Join-Path $ScratchDirectory 'winget-version.txt'
+    $versionErr = Join-Path $ScratchDirectory 'winget-version.err.txt'
+    $null = Invoke-Captured -Program $wingetPath -Arguments @('--version') -OutPath $versionOut -ErrPath $versionErr
+    $wingetVersion = (Read-Captured -Path $versionOut).Trim()
+    if ($wingetVersion -eq '') { $wingetVersion = (Read-Captured -Path $versionErr).Trim() }
+    if ($wingetVersion -eq '') { $wingetVersion = '(it did not report one)' }
+
     $validateOut = Join-Path $ScratchDirectory 'winget-validate.txt'
     $validateErr = Join-Path $ScratchDirectory 'winget-validate.err.txt'
     $validateCode = Invoke-Captured -Program $wingetPath -Arguments @(
@@ -913,14 +969,23 @@ manifest this script is satisfied with.
     ) -OutPath $validateOut -ErrPath $validateErr
     $validateText = ((Read-Captured -Path $validateOut) + (Read-Captured -Path $validateErr)).Trim()
     Write-Detail "winget      $wingetPath"
+    Write-Detail "version     $wingetVersion"
+    Write-Detail "schema      ManifestVersion $SchemaVersion, the version this script writes"
     Write-Detail "directory   $ManifestDirectory"
     if ($validateCode -ne 0) {
         # `winget validate` answers a manifest it can read but not accept with
         # "Manifest validation succeeded with warnings" and a non-zero status. A
         # warning is not a pass here, so the status is the contract, and the text
-        # is shown so the reason does not have to be looked up.
+        # is shown so the reason does not have to be looked up. Both sides of the
+        # disagreement that reddened CI once — the version the manifests carry
+        # and the versions the `winget` doing the checking recognises — are named
+        # here, because this message exists to make that pair readable rather
+        # than inferable.
         Fail @"
 winget validate exited ${validateCode} for ${ManifestDirectory}
+
+The winget that judged it is $wingetVersion at $wingetPath.
+The manifests say ManifestVersion $SchemaVersion.
 
 $validateText
 "@

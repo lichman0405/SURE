@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.4.0.schema.json
 
 # >>> template notes: removed when this file is rendered
 # =============================================================================
@@ -36,4 +36,4 @@ PackageIdentifier: lichman0405.SURE
 PackageVersion: <version>
 DefaultLocale: en-US
 ManifestType: version
-ManifestVersion: 1.12.0
+ManifestVersion: 1.4.0

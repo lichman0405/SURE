@@ -30,6 +30,24 @@ lowering the header alone would have changed nothing, and the version that draws
 `ManifestVersion` property. Three templates, the script and that document are the correction; the
 worker's own account of what it built stands, and is the paragraph below.
 
+**The fix is confirmed, and the same run paid the known flake's price.** CI run `35508587192` on
+`0b0af1dcdf79dc94ffa7d61b995180aca37e34c5` — the commit the paragraph above describes — is
+`rust (windows-latest)` **success**, which is the job that failed on the acceptance commit and whose
+own `winget` made the correction necessary, so the pin is now answered by the build that refused it;
+`rust (macos-latest)`, `bootstrap-validate-windows` and `shellcheck-secondary` are green beside it.
+The run is nevertheless **failure** on `rust (ubuntu-latest) alone**, and it is the `ETXTBSY` class
+`P15-T019` owns rather than anything this commit did:
+`a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange`, `left: Error` against
+`right: Pass`, panicking at `crates/sure-core/tests/runtime_start.rs:1007:5` with the product
+answering `Text file busy (os error 26)` — `Error`, never a pass, which is the line that keeps this a
+re-run rather than a correctness defect. It is a site not previously on record and an earlier line in
+that file than the `:1450` sighting, and it is recorded on `P15-T019`'s own `notes` field, together
+with the source reading that the contended inode is `current_exe()` and is therefore shared by every
+fixture that copies a program. **`P15-T019`'s ordering call is not reopened by it:** that call turns
+on this flake failing a tree that cannot be its cause *twice* more, and this is the first such
+sighting since the task was minted. The job log is kept at
+`target/tmp/ci-ubuntu-fail-35508587192.txt`.
+
 **`P15-T004` is accepted at `2c82f91acbd5953cba55dcb9a5931f5e3ee5570e`, over a single worker commit on
 base `7f53dcf`, with no supervisor correction to any file it delivered — the first task in this phase
 accepted as handed back.** A later commit corrected three of its templates, its script and one document

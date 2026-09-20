@@ -41,7 +41,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::config::{Authority, Layer, ProjectRequest};
 use sure_core::discover::{DiscoverOptions, Discovery, discover};
@@ -58,13 +57,14 @@ use sure_core::status::{NO_TRUSTED_INTENT_LIMITATION, RequirementClaim};
 /// A project directory under the workspace's git-ignored `target/tmp`, and the
 /// place the user's own settings would live.
 ///
-/// Unique per call and **never cleared**, which is the pattern this repository
-/// settled on after a false report: clearing a fixed path with
+/// The claiming rules live in `sure_testkit::scratch`, and the history that put
+/// them there is this repository's: clearing a fixed path with
 /// `let _ = remove_dir_all(..)` and then treating it as fresh fails on Windows,
-/// and the test then describes a directory that was never emptied. A path nobody
-/// has used before needs no removal. Uniqueness comes from `create_dir`, not
-/// from the name, so two processes given the same id cannot collide — a
-/// directory that exists is skipped rather than adopted.
+/// and the test then describes a directory that was never emptied. So nothing
+/// here is adopted — a directory is taken with `create_dir`, which fails when
+/// the name is taken, and one that is already there is skipped rather than
+/// entered — and the helper clears only directories carrying *its own*
+/// process's id, which no live process can own.
 ///
 /// The user settings are a **sibling** of the project directory rather than a
 /// file inside it, because that is the whole point of the two layers: a file the
@@ -78,28 +78,16 @@ struct Fixture {
 
 impl Fixture {
     fn new(test: &str) -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("intent sources");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let name = format!("{test}-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-            let project = base.join(&name);
-            match std::fs::create_dir(&project) {
-                Ok(()) => {
-                    return Self {
-                        user: base.join(format!("{name}.user.yaml")),
-                        project,
-                    };
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", project.display()),
-            }
+        let project = sure_testkit::scratch::directory("intent sources", test);
+        let name = project
+            .file_name()
+            .expect("a scratch directory has a file name")
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            user: project.with_file_name(format!("{name}.user.yaml")),
+            project,
         }
-        panic!("no free fixture name under {}", base.display());
     }
 
     fn write(&self, relative: &str, contents: &str) -> &Self {

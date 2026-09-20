@@ -3,8 +3,8 @@
 //!
 //! This crate holds the things tests need and the product must not ship:
 //! deterministic fixtures, fake harness events, fake model providers, golden
-//! report assertions, and the checks that hold the repository's own shape in
-//! place.
+//! report assertions, scratch directories, and the checks that hold the
+//! repository's own shape in place.
 //!
 //! Nothing in the product depends on this crate. `sure_testkit::workspace`
 //! enforces that, which is the only way the rule survives contact with a
@@ -12,6 +12,7 @@
 
 pub mod integrations;
 pub mod program;
+pub mod scratch;
 pub mod workspace;
 
 pub use integrations::{IntegrationFile, ThinnessFinding};

@@ -52,7 +52,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::db_migrations::{
     DETECTORS, Detector, MigrationsReport, Record, a_migration_directory,
@@ -74,35 +73,23 @@ const CANARY: &str = "sk-live-CANARY-4c1e8a6b2f";
 
 /// A directory under the workspace's git-ignored `target/tmp`.
 ///
-/// Unique per call and **never cleared**, which is the pattern this repository
-/// settled on after a false report: clearing a fixed path with
+/// The claiming rules live in `sure_testkit::scratch`, and the history that put
+/// them there is this repository's: clearing a fixed path with
 /// `let _ = remove_dir_all(..)` and then treating it as fresh fails on Windows,
-/// and the test then describes a directory that was never emptied. A path nobody
-/// has used before needs no removal. Uniqueness comes from `create_dir`, not from
-/// the name, so two processes given the same id cannot collide — a directory that
-/// exists is skipped rather than adopted.
+/// and the test then describes a directory that was never emptied. So nothing
+/// here is adopted — a directory is taken with `create_dir`, which fails when
+/// the name is taken, and one that is already there is skipped rather than
+/// entered — and the helper clears only directories carrying *its own*
+/// process's id, which no live process can own.
 struct Fixture {
     project: PathBuf,
 }
 
 impl Fixture {
     fn new(test: &str) -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("db migrations");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let project = base.join(format!("{test}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&project) {
-                Ok(()) => return Self { project },
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", project.display()),
-            }
+        Self {
+            project: sure_testkit::scratch::directory("db migrations", test),
         }
-        panic!("no free fixture name under {}", base.display());
     }
 
     /// Write a file, making the directories it needs.

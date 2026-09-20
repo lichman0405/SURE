@@ -73,7 +73,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::Value;
 use sure_core::candidate_context::{CandidateContext, classify_path};
@@ -298,32 +297,22 @@ fn signatures(readings: &[Reading]) -> Vec<Signature> {
 
 /// A project under the workspace's git-ignored `target/tmp`.
 ///
-/// Unique per call and never cleared, which is the pattern
-/// `adversarial_fixture_detection.rs` settled on: clearing a fixed path and
-/// treating it as fresh fails on Windows, and the test then describes a
-/// directory that was never emptied.
+/// The claiming rules live in `sure_testkit::scratch`, and the history behind
+/// them is this repository's: clearing a fixed path and treating it as fresh
+/// fails on Windows, and the test then describes a directory that was never
+/// emptied. Nothing is adopted — a directory is taken with `create_dir`, which
+/// fails when the name is taken, and one that is already there is skipped rather
+/// than entered — and the helper clears only directories carrying *its own*
+/// process's id, which no live process can own.
 struct Scratch {
     project: PathBuf,
 }
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("benign-test-mocks controls");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let project = base.join(format!("{name}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&project) {
-                Ok(()) => return Self { project },
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", project.display()),
-            }
+        Self {
+            project: sure_testkit::scratch::directory("benign-test-mocks controls", name),
         }
-        panic!("no free control name under {}", base.display());
     }
 }
 

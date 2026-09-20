@@ -1041,27 +1041,10 @@ mod tests {
     /// writes what it found to the store. Reading or writing the store on the
     /// machine running the suite is the defect `--store-dir` exists to remove,
     /// so every session here names one, under the workspace's git-ignored
-    /// `target/tmp`. Made unique by `create_dir` rather than by the name, so
-    /// that two sessions in one process cannot share a store and see each
-    /// other's records.
+    /// `target/tmp` by way of `sure_testkit::scratch`, which holds the reasoning
+    /// these helpers used to repeat.
     fn a_store_of_our_own() -> PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("sure mcp");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free store directory under {}", base.display());
+        sure_testkit::scratch::directory("sure mcp", "store")
     }
 
     /// A session that has completed the handshake.

@@ -757,28 +757,11 @@ mod tests {
     //! changed shape fails here rather than being papered over by a hand-built
     //! `Discovery` that no longer matches what discovery produces.
 
-    use std::sync::atomic::{AtomicU32, Ordering};
-
     use super::*;
     use crate::discover::{DiscoverOptions, discover};
 
     fn scratch(name: &str) -> PathBuf {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("components");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let dir = base.join(format!("{name}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&dir) {
-                Ok(()) => return dir,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", dir.display()),
-            }
-        }
-        panic!("no free scratch name under {}", base.display());
+        sure_testkit::scratch::directory("components", name)
     }
 
     fn write(path: &Path, text: &str) {

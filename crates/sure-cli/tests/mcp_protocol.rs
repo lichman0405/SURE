@@ -43,7 +43,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -62,28 +61,12 @@ const SURE: &str = env!("CARGO_BIN_EXE_sure");
 /// somebody else's history is the same defect as a test that writes it, and this
 /// file had one of each.
 ///
-/// Under the workspace's git-ignored `target/tmp`, made unique by `create_dir`
-/// rather than by the name, never cleared, and created empty: a store SURE has
-/// never written looks like exactly that.
+/// Under the workspace's git-ignored `target/tmp` by way of
+/// `sure_testkit::scratch`, which holds the reasoning these helpers used to
+/// repeat in twenty-five files, and created empty: a store SURE has never
+/// written looks like exactly that.
 fn a_store_of_our_own() -> PathBuf {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("target")
-        .join("tmp")
-        .join("sure mcp protocol");
-    std::fs::create_dir_all(&base)
-        .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-    for _ in 0..1_000 {
-        let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-        match std::fs::create_dir(&candidate) {
-            Ok(()) => return candidate,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-        }
-    }
-    panic!("no free store directory under {}", base.display());
+    sure_testkit::scratch::directory("sure mcp protocol", "store")
 }
 
 /// The binary, with a store named on its command line.

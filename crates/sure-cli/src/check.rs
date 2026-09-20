@@ -962,8 +962,6 @@ fn fingerprint_machine(state: &ProjectFingerprint) -> Value {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::sync::atomic::{AtomicU32, Ordering};
-
     use serde_json::json;
     use sure_core::store::{HistoryFilter, RecordKind, StoredRecord};
 
@@ -973,37 +971,20 @@ mod tests {
     /// A directory under the workspace's git-ignored `target/tmp`, holding
     /// everything one test needs to be a different machine.
     ///
-    /// Unique per call and never cleared, which is the pattern this repository
-    /// settled on: clearing a fixed path and then treating it as fresh fails on
-    /// Windows, and the test then describes a directory that was never emptied.
-    /// Uniqueness comes from `create_dir`, not from the name, so two processes
-    /// given the same id cannot collide.
+    /// The helper is `sure_testkit::scratch`, which holds the reasoning once
+    /// for every file that used to carry its own copy: one directory per run
+    /// per pool, named for the process, and the directory handed back is this
+    /// call's own.
     struct Fixture {
         root: PathBuf,
     }
 
     impl Fixture {
         fn new(test: &str) -> Self {
-            static NEXT: AtomicU32 = AtomicU32::new(0);
-            let base = sure_testkit::repository_root()
-                .join("target")
-                .join("tmp")
-                .join("sure check");
-            std::fs::create_dir_all(&base)
-                .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-            for _ in 0..1_000 {
-                let root = base.join(format!("{test}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-                match std::fs::create_dir(&root) {
-                    Ok(()) => {
-                        std::fs::create_dir_all(root.join("project"))
-                            .unwrap_or_else(|error| panic!("cannot create the project: {error}"));
-                        return Self { root };
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                    Err(error) => panic!("cannot create {}: {error}", root.display()),
-                }
-            }
-            panic!("no free fixture name under {}", base.display());
+            let root = sure_testkit::scratch::directory("sure check", test);
+            std::fs::create_dir_all(root.join("project"))
+                .unwrap_or_else(|error| panic!("cannot create the project: {error}"));
+            Self { root }
         }
 
         /// The project `sure check` is pointed at.

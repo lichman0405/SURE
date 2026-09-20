@@ -46,7 +46,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::config::{Authority, ProtectionMode};
 use sure_core::execution::{ExecutionMode, ExecutionPermissions, Permission};
@@ -83,30 +82,12 @@ impl Run {
 
 /// A directory of this test's own, under the workspace's git-ignored `target/tmp`.
 ///
-/// Unique per call, and made unique by `create_dir` rather than by the name, so
-/// that two tests in one process cannot be handed the same one. Never cleared:
-/// clearing a fixed path and then treating it as fresh fails on Windows, where a
-/// deletion can fail silently, and the test then describes a directory that was
-/// never emptied.
+/// The reasoning lives with the helper rather than here, because it is the same
+/// reasoning in twenty-five files: see `sure_testkit::scratch`. Every call in
+/// one run shares a directory of that run's own, named for the process, and the
+/// directory handed back is created by this call and by nothing else.
 fn a_directory_of_our_own(what: &str) -> PathBuf {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("target")
-        .join("tmp")
-        .join("sure cli contract");
-    std::fs::create_dir_all(&base)
-        .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-    for _ in 0..1_000 {
-        let candidate = base.join(format!("{what}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-        match std::fs::create_dir(&candidate) {
-            Ok(()) => return candidate,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-        }
-    }
-    panic!("no free directory under {}", base.display());
+    sure_testkit::scratch::directory("sure cli contract", what)
 }
 
 /// A store directory for one process to use.

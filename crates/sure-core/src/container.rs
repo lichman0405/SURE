@@ -642,24 +642,21 @@ mod tests {
 
     /// A temporary directory this call can call its own.
     ///
-    /// Unique by `create_dir` rather than by the name, so that a second process
-    /// — this same test run twice, or a run whose process id has been recycled —
-    /// cannot be handed the directory this one is asserting about.
+    /// Under the system temp directory and not under the workspace's
+    /// `target/tmp`, which is where the code this replaces already put it. That
+    /// choice is left where it was rather than moved as a side effect of
+    /// replacing one allocator: the test builds a `PATH` out of nothing but this
+    /// directory, so what it asserts does not depend on where it is, and a
+    /// module that changed one *other* thing in the same commit would be harder
+    /// to read.
+    ///
+    /// The claiming rules are `sure_testkit::scratch`'s, and are the same
+    /// wherever the root is — a run directory named for this process's id, and
+    /// each call's directory inside it named by a counter only this process can
+    /// advance, so a second process testing the same thing cannot be handed the
+    /// directory this one is asserting about.
     fn a_directory_of_our_own() -> PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = std::env::temp_dir().join("sure-container-search-order");
-        std::fs::create_dir_all(&base).expect("a temporary directory");
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free directory under {}", base.display());
+        sure_testkit::scratch::under(&std::env::temp_dir(), "sure-container-search-order", "run")
     }
 
     /// What `doctor` appends to a name with no extension, which is what a

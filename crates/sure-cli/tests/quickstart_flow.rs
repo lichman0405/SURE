@@ -61,7 +61,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use sure_core::paths::Paths;
 
@@ -92,29 +91,15 @@ fn integration_installer() -> PathBuf {
 
 /// A directory of this test's own, under the workspace's git-ignored `target/tmp`.
 ///
-/// Unique per call, made unique by `create_dir` rather than by the name, never
-/// cleared afterwards — the same fixture, for the same reasons, as
-/// `a_directory_of_our_own` in `crates/sure-cli/tests/install_flow.rs`. The space
-/// and the non-ASCII character are `CLAUDE.md`'s rule and are load-bearing here:
-/// this journey carries a path through PowerShell's argument parsing, a ZIP, a
-/// copy, and back out to a check.
+/// Unique per call, by way of `sure_testkit::scratch` — the same fixture, for
+/// the same reasons, as `a_directory_of_our_own` in
+/// `crates/sure-cli/tests/install_flow.rs`, and the reasoning lives with the
+/// helper rather than in each of the twenty-five files that used to repeat it.
+/// The space and the non-ASCII character are `CLAUDE.md`'s rule and are
+/// load-bearing here: this journey carries a path through PowerShell's argument
+/// parsing, a ZIP, a copy, and back out to a check.
 fn a_directory_of_our_own(what: &str) -> PathBuf {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let base = repository_root()
-        .join("target")
-        .join("tmp")
-        .join("sure quickstart flow é中文 and spaces");
-    std::fs::create_dir_all(&base)
-        .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-    for _ in 0..1_000 {
-        let candidate = base.join(format!("{what}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-        match std::fs::create_dir(&candidate) {
-            Ok(()) => return candidate,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-        }
-    }
-    panic!("no free directory under {}", base.display());
+    sure_testkit::scratch::directory("sure quickstart flow é中文 and spaces", what)
 }
 
 // --- The PowerShell hosts ------------------------------------------------

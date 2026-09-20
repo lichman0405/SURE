@@ -144,7 +144,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
 use sure_core::aggregation::{NOTHING_CAME_BACK, RunReport, aggregate_run};
@@ -234,10 +233,14 @@ fn fixture(id: &str) -> PathBuf {
 ///
 /// These are the negative half of each Python fixture's claim, and they are
 /// built here rather than shipped as fixtures because a control is not a
-/// scenario the corpus has a case for. Unique per call and never cleared, which
-/// is the pattern `tests/db_migrations.rs` settled on: clearing a fixed path and
-/// treating it as fresh fails on Windows, and the test then describes a
-/// directory that was never emptied.
+/// scenario the corpus has a case for. The claiming rules live in
+/// `sure_testkit::scratch`, and the history behind them is this repository's:
+/// clearing a fixed path and treating it as fresh fails on Windows, and the test
+/// then describes a directory that was never emptied. Nothing is adopted — a
+/// directory is taken with `create_dir`, which fails when the name is taken,
+/// and one that is already there is skipped rather than entered — and the
+/// helper clears only directories carrying *its own* process's id, which no live
+/// process can own.
 struct Scratch {
     project: PathBuf,
 }
@@ -253,22 +256,9 @@ impl Scratch {
     /// their scratch directories are named for what they hold; the directory
     /// discipline is the one above and is not restated.
     fn under(base_name: &str, test: &str) -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join(base_name);
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let project = base.join(format!("{test}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&project) {
-                Ok(()) => return Self { project },
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", project.display()),
-            }
+        Self {
+            project: sure_testkit::scratch::directory(base_name, test),
         }
-        panic!("no free control name under {}", base.display());
     }
 
     fn write(&self, relative: &str, contents: &str) -> &Self {

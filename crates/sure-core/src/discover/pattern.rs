@@ -226,27 +226,24 @@ mod tests {
     //! papered over by a hand-built tree.
 
     use std::path::Path;
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
     use crate::scan::{ScanOptions, scan};
 
     /// A scratch directory under the workspace's git-ignored `target/tmp`.
     ///
-    /// Unique per call and **never cleared**, because this repository has already
-    /// had a false report from the other approach: five helpers removed a fixed
-    /// scratch path with `let _ = remove_dir_all(..)` and then treated it as
-    /// fresh, and on Windows that deletion can fail — producing a report about a
-    /// directory that had never been emptied. A path nobody has used before needs
-    /// no removal, and the discarded error goes away with it.
-    ///
-    /// Uniqueness is established by `create_dir` and not by a name, which is the
-    /// part worth keeping: a counter is unique within one process and says
-    /// nothing across two, so a name built from a counter alone collides with a
-    /// previous run whose process happened to be given the same id — and the test
-    /// would then read a directory some earlier run had already written into.
-    /// `create_dir` fails rather than reusing a directory that exists, so a stale
-    /// path is skipped instead of adopted, whatever is running alongside.
+    /// The claiming rules are `sure_testkit::scratch`'s, and this file's history
+    /// is why they are the ones they are. Five helpers elsewhere in this
+    /// repository removed a fixed scratch path with `let _ = remove_dir_all(..)`
+    /// and then treated it as fresh, and on Windows that deletion can fail —
+    /// producing a report about a directory that had never been emptied. That is
+    /// why nothing here is adopted: a directory is taken with `create_dir`, which
+    /// fails when the name is taken, and a directory that is already there is
+    /// skipped rather than entered. The one deletion the shared helper does make
+    /// is of directories carrying *its own* process's id, once per pool, before
+    /// this run has created anything — so what it deletes can only be a previous
+    /// process's leftovers, and a deletion that fails leaves a directory nobody
+    /// is handed.
     ///
     /// Nothing from the process module here, deliberately:
     /// `discovery_runs_none_of_the_scripts_it_reads` reads this file's text and
@@ -254,24 +251,10 @@ mod tests {
     /// process. That check sees `#[cfg(test)]` code too, and it caught a first
     /// version of this helper that asked for the process id — which is a true
     /// positive about the file and not about the guarantee, so the helper moved
-    /// rather than the check.
+    /// rather than the check. The process id is asked for in `sure-testkit` now,
+    /// which is on the other side of that boundary.
     fn scratch(name: &str) -> PathBuf {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("discover pattern");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let dir = base.join(format!("{name}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&dir) {
-                Ok(()) => return dir,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", dir.display()),
-            }
-        }
-        panic!("no free scratch name under {}", base.display());
+        sure_testkit::scratch::directory("discover pattern", name)
     }
 
     /// A directory in the fixture.

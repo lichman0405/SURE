@@ -50,7 +50,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::json;
 use sure_cli::mcp::PROTOCOL_VERSION;
@@ -98,10 +97,14 @@ fn claude_code_mcp_launcher() -> PathBuf {
 
 /// A directory of this test's own, under the workspace's git-ignored `target/tmp`.
 ///
-/// Unique per call, and made unique by `create_dir` rather than by the name, so
-/// that two tests in one process cannot be handed the same one. Never cleared
-/// afterwards: a failed test's directory is the evidence of what it did, and
-/// `target/tmp` is where this repository already keeps that.
+/// Unique per call, so that two tests in one process cannot be handed the same
+/// one, by way of `sure_testkit::scratch` — which holds the reasoning these
+/// helpers used to repeat.
+///
+/// A failed test's directory survives the run that made it, which is what it is
+/// for, but not forever: a later run under the same process id reclaims the
+/// directories its own process id left behind. `target/tmp` is git-ignored and
+/// is where this repository already keeps that kind of thing.
 ///
 /// The name carries a space, a non-ASCII character and a full stop, because
 /// `CLAUDE.md` says to test paths with spaces and Unicode and this flow carries
@@ -109,22 +112,7 @@ fn claude_code_mcp_launcher() -> PathBuf {
 /// back out. The install *root* below it still ends in `SURE`, because that leaf
 /// is what the launcher scripts resolve and what `sure-core`'s `APP_DIR` names.
 fn a_directory_of_our_own(what: &str) -> PathBuf {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let base = repository_root()
-        .join("target")
-        .join("tmp")
-        .join("sure install flow é中文 and spaces");
-    std::fs::create_dir_all(&base)
-        .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-    for _ in 0..1_000 {
-        let candidate = base.join(format!("{what}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-        match std::fs::create_dir(&candidate) {
-            Ok(()) => return candidate,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-        }
-    }
-    panic!("no free directory under {}", base.display());
+    sure_testkit::scratch::directory("sure install flow é中文 and spaces", what)
 }
 
 // --- The PowerShell hosts ------------------------------------------------

@@ -619,28 +619,14 @@ mod tests {
     /// A scratch directory this call can call its own, under the workspace's
     /// git-ignored `target/tmp`.
     ///
-    /// Unique by `create_dir` rather than by the name, so that two calls — in
-    /// this process or in another one that has been handed the same process id —
-    /// cannot be handed the same directory and overwrite each other's program.
+    /// Unique by construction rather than by name-collision, by way of
+    /// `sure_testkit::scratch`, which holds the reasoning these helpers used to
+    /// repeat: a run's directory is named for its process id and each call's
+    /// directory for a counter only that process can advance, so two calls — in
+    /// this process or in another one — cannot be handed the same directory and
+    /// overwrite each other's program.
     fn a_directory_of_our_own() -> PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("claude-cli-analyzer");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free directory under {}", base.display());
+        sure_testkit::scratch::directory("claude-cli-analyzer", "run")
     }
 
     /// A command that exits with a non-zero code, portable across Windows and Unix.

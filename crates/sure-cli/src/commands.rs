@@ -213,7 +213,6 @@ fn not_yet(command: &Command, does: &'static str, instead: &'static str) -> Repo
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
     use crate::cli::{ConfigAction, HistoryAction, HookAction, McpAction};
@@ -221,28 +220,13 @@ mod tests {
     /// A store directory this test names, so that nothing below reads or writes
     /// the store the machine running the suite really uses.
     ///
-    /// Under the workspace's git-ignored `target/tmp`, made unique by
-    /// `create_dir` rather than by the name, so that two processes given the same
-    /// id cannot collide — the same pattern the other test modules in this crate
-    /// use. Nothing is created inside it: a store SURE has never written looks
-    /// exactly like that, and `sure doctor` reports it rather than creating it.
+    /// Under the workspace's git-ignored `target/tmp`, by way of
+    /// `sure_testkit::scratch`, which holds the reasoning every one of these
+    /// helpers used to repeat. Nothing is created inside it: a store SURE has
+    /// never written looks exactly like that, and `sure doctor` reports it
+    /// rather than creating it.
     fn a_store_of_our_own() -> PathBuf {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = sure_testkit::repository_root()
-            .join("target")
-            .join("tmp")
-            .join("sure commands");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("store-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free store directory under {}", base.display());
+        sure_testkit::scratch::directory("sure commands", "store")
     }
 
     /// Every invocation the grammar accepts, built by hand.

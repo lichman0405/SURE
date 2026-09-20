@@ -370,7 +370,6 @@ mod driven_by_powershell {
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output, Stdio};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
     use serde_json::json;
@@ -444,30 +443,16 @@ mod driven_by_powershell {
     }
 
     /// A directory of this test's own, under the workspace's git-ignored
-    /// `target/tmp`.
+    /// `target/tmp`, by way of `sure_testkit::scratch` — which holds the
+    /// reasoning these helpers used to repeat.
     ///
     /// The name carries a space and a non-ASCII character because `CLAUDE.md`
     /// says to test paths with spaces and Unicode, and this flow carries one
     /// path through PowerShell's argument parsing, a ZIP, a YAML file and back
-    /// out. Never cleared afterwards: a failed test's directory is the evidence
-    /// of what it did, and `target/tmp` is where this repository keeps that.
+    /// out. A failed test's directory survives the run that made it, which is
+    /// what it is for; a later run under the same process id reclaims it.
     fn a_directory_of_our_own(what: &str) -> PathBuf {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = repository_root()
-            .join("target")
-            .join("tmp")
-            .join("sure winget manifest é中文 and spaces");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("{what}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free directory under {}", base.display());
+        sure_testkit::scratch::directory("sure winget manifest é中文 and spaces", what)
     }
 
     // --- Running things ---------------------------------------------------

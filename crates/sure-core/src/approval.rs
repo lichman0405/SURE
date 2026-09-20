@@ -1550,35 +1550,20 @@ mod tests {
 
     /// A directory nothing else is using, claimed by `create_dir`.
     ///
-    /// The name is not what makes it unique: a previous version of this helper
-    /// took `target/tmp/approval-{name}` and cleared it with `remove_dir_all`
-    /// before using it, and two `cargo test` processes running at once then
-    /// deleted one another's store mid-test — observed here as
+    /// The name is not what makes it unique, and that is the whole reason the
+    /// helper lives in `sure_testkit::scratch` now. A previous version of this
+    /// helper took `target/tmp/approval-{name}` and cleared it with
+    /// `remove_dir_all` before using it, and two `cargo test` processes running
+    /// at once then deleted one another's store mid-test — observed here as
     /// `the previous run's directory: Os { code: 2, kind: NotFound … }` and as
-    /// three `approval::tests::*` failures under load. `create_dir` fails
-    /// rather than adopting a directory that exists, so a name already in use
-    /// is skipped and never touched, whatever is running alongside.
+    /// three `approval::tests::*` failures under load. Two rules came out of
+    /// that and both are kept: a directory is taken with `create_dir`, which
+    /// fails rather than adopting one that exists, and the only directories
+    /// cleared are the ones carrying *this* process's own id — which no other
+    /// live process can own, and which is what makes clearing safe where
+    /// clearing a fixed path was not.
     fn a_directory_of_our_own(name: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("the workspace root")
-            .join("target")
-            .join("tmp")
-            .join("approval");
-        std::fs::create_dir_all(&base)
-            .unwrap_or_else(|error| panic!("cannot create {}: {error}", base.display()));
-        for _ in 0..1_000 {
-            let candidate = base.join(format!("{name}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
-            match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => panic!("cannot create {}: {error}", candidate.display()),
-            }
-        }
-        panic!("no free directory under {}", base.display());
+        sure_testkit::scratch::directory("approval", name)
     }
 
     impl Scratch {

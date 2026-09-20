@@ -257,16 +257,29 @@ read as closing the contradiction; §3 records it.
   asserts it. It is a second way for a harness to see an answer SURE could not
   record, and it is not in the failure table because the answer itself is real.
 
-### 6.1 A packaging gap found while writing this
+### 6.1 A packaging gap found while writing this, and closed by P15-T008
 
-`git ls-files -s` reports every launcher script in this repository at mode
-**100644**, including the `.sh` ones. A fresh Unix checkout therefore cannot
-execute `sure-hook.sh` by path, and the codex manifest's
-`"${PLUGIN_ROOT}/scripts/sure-hook.sh"` is a direct invocation. The tests here
-run `.sh` launchers through `/bin/sh <script>`, which works at 100644, so this
-page's Unix claims are true of the scripts' contents; they are not proof that a
-user can run them as shipped. Changing a file mode is a packaging decision for
-the supervisor, and the tests do not depend on the outcome either way.
+When this page was written, `git ls-files -s` reported every launcher script in
+this repository at mode **100644**, including the `.sh` ones. A fresh Unix
+checkout therefore could not execute `sure-hook.sh` by path, and the codex
+manifest's `"${PLUGIN_ROOT}/scripts/sure-hook.sh"` is a direct invocation. The
+tests here run `.sh` launchers through `/bin/sh <script>`, which works at 100644,
+so this page's Unix claims were true of the scripts' contents; they were never
+proof that a user could run them as shipped.
+
+`P15-T008` closed the gap. The three `.sh` launchers are now recorded at
+**100755** in the index, and
+`the_unix_launchers_carry_the_executable_bit_in_the_index` fails if that stops
+being true. Two things this page's numbers do *not* gain from that:
+
+- Every Unix row above is still a measurement taken through `/bin/sh <script>`.
+  Making the files executable did not re-measure them, and the
+  `#!/usr/bin/env bash` shebang is still not exercised — these tests hand the
+  file to a shell rather than starting it by path.
+- No launcher's bytes changed. The mode is the only thing that moved.
+
+`docs/integrations/INSTALLATION_MATRIX.md` carries the decision, the option that
+was not taken and the cost of the one that was.
 
 ## 7. Sources
 

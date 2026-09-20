@@ -81,9 +81,17 @@ a POSIX shell script rather than a second PowerShell script because the artifact
 is built on macOS and Linux runners, where `scripts/Build-Release.ps1` cannot
 run at all: it is `ZipFile::CreateFromDirectory`, `%LOCALAPPDATA%`, a `sure.exe`
 and a MAX_PATH guard. The workflow invokes it as `sh scripts/Build-Release.sh`
-and not by path: this file's mode in the git index is 100644, like every other
-`.sh` in the repository, because Git on Windows does not record the executable
-bit, so on a runner it is a text file whose shebang nothing acts on.
+and not by path: this file's mode in the git index is 100644, and the workflow
+starts it through `sh`, so the bit is not load-bearing for it. Two corrections
+to what this sentence said before `P15-T008` read the modes across the
+repository. It is no longer true that every `.sh` here is 100644: the three
+integration launchers are 100755 on purpose, and
+`docs/integrations/INSTALLATION_MATRIX.md` records that decision. And "Git on
+Windows does not record the executable bit" says too much — `git update-index
+--chmod=+x` records one on Windows. What Windows does not do is read a mode back
+off the filesystem, because `core.filemode` is `false` in a normal Git for
+Windows checkout, so a mode changed in the working tree is invisible until it is
+set in the index deliberately.
 
 | | |
 | --- | --- |

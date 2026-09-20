@@ -76,5 +76,12 @@ jobs:
       # twice and by the same dialect. The rest of the line is about the other
       # scripts: they are bash by construction and say so on their own first
       # lines, and nothing about how they are checked changes here.
+      #
+      # The integration half of the second glob was two package names spelled out
+      # until P15-T008, which left `integrations/codex/scripts/sure-hook.sh`
+      # unchecked — the one launcher a manifest execs by path rather than through
+      # PowerShell, and so the only one whose shell dialect a Unix harness
+      # actually depends on. The glob is now the same shape `scripts/preflight.sh`
+      # already used, and it covers all three launchers rather than two.
       - run: shellcheck -s sh scripts/Build-Release.sh
-      - run: shellcheck scripts/*.sh integrations/claude-code/scripts/*.sh integrations/cursor/scripts/*.sh
+      - run: shellcheck scripts/*.sh integrations/*/scripts/*.sh

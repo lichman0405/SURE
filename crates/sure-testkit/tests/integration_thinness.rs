@@ -1679,3 +1679,558 @@ fn agent_plugin_uninstall_script_removes_installed_plugin() {
 
     let _ = std::fs::remove_dir_all(&temp);
 }
+
+// --- packaging: the version a package declares, and the launchers a platform
+// --- can actually start ---------------------------------------------------
+//
+// P15-T008's acceptance has two lines, and each one is a claim this file can
+// hold: "Installable/local-test packages have version aligned with release" and
+// "Windows launchers are tested; secondary platform launchers/configs are
+// included as supported".
+//
+// **What "supported" means is decided here, because until it is decided the
+// word asserts nothing.** A package's non-Windows launcher counts as supported
+// when all three of these hold, and each is an assertion below rather than a
+// sentence in a README:
+//
+//   1. the launcher is shipped, and it names its own interpreter on its first
+//      line, so the only thing between it and starting by path is the mode;
+//   2. the repository records that path as executable, in the **git index**;
+//   3. a manifest that names the launcher by path is checked beside it, since
+//      that manifest's `command` is only startable while (2) holds.
+//
+// The argument for the index and against naming an interpreter in the manifest
+// is in `docs/integrations/INSTALLATION_MATRIX.md`, which is where a reader who
+// is not reading this file will look for it.
+
+/// A script inside one integration package.
+///
+/// Gated with the tests that use it: a helper whose only callers are
+/// `#[cfg(windows)]` is dead code everywhere else, and `-D warnings` fails those
+/// jobs on it.
+#[cfg(windows)]
+fn integ_script(package: &str, name: &str) -> PathBuf {
+    sure_testkit::repository_root()
+        .join("integrations")
+        .join(package)
+        .join("scripts")
+        .join(name)
+}
+
+/// Every POSIX launcher an integration package ships.
+///
+/// Used by a test that runs on every platform as well as by the Unix-gated one
+/// below, because a helper that a `#[cfg]`-gated test is the only user of is
+/// dead code on the other platforms and `-D warnings` fails those jobs on it.
+fn posix_launchers() -> Vec<IntegrationFile> {
+    let launchers: Vec<IntegrationFile> = loaded()
+        .into_iter()
+        .filter(|f| f.extension() == "sh")
+        .collect();
+    assert!(
+        launchers.len() >= 3,
+        "expected a POSIX launcher for claude-code, cursor and codex; found {:?}",
+        launchers.iter().map(|f| &f.relative).collect::<Vec<_>>()
+    );
+    launchers
+}
+
+/// The mode the repository records for a path under `integrations/`, read out of
+/// the git index.
+///
+/// The index is what a clone materialises, so this is the mode a Unix checkout
+/// gets — and it is readable on Windows, where a working tree cannot carry one
+/// at all.
+fn indexed_mode(relative_to_integrations: &str) -> String {
+    let relative = format!("integrations/{relative_to_integrations}");
+    let output = std::process::Command::new("git")
+        .current_dir(sure_testkit::repository_root())
+        .args(["ls-files", "-s", "--", &relative])
+        .output()
+        .expect(
+            "`git` must be runnable to read the index mode this assertion is about; \
+             it is absent or not on PATH",
+        );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| panic!("git ls-files -s reported nothing for {relative}: {stdout}"));
+    line.split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[test]
+fn every_packaged_manifest_declares_the_release_version() {
+    // `sure_domain::VERSION` is the version `sure` reports for itself, and
+    // `docs/development/RELEASE_PROCESS.md` names the release archive after the
+    // version `sure` reports. Taking it from the core rather than re-parsing
+    // `Cargo.toml` here is what keeps this assertion from drifting from the
+    // value the release is named after.
+    let release = sure_domain::VERSION;
+    assert!(
+        !release.is_empty(),
+        "the core reports an empty version, so nothing here could be aligned with it"
+    );
+
+    let files = loaded();
+    let mut found: Vec<(String, String)> = Vec::new();
+    for file in &files {
+        if file.path.file_name().and_then(|n| n.to_str()) != Some("plugin.json") {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_str(&file.text)
+            .unwrap_or_else(|error| panic!("{} must be valid JSON: {error}", file.relative));
+        let version = value
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{} must declare a version", file.relative));
+        found.push((file.relative.clone(), version.to_owned()));
+    }
+    found.sort();
+
+    // The set is pinned, not only swept: a package that loses its manifest, or
+    // a fourth that ships one with a version nobody aligned, would otherwise
+    // make this test greener the less there was to check.
+    let expected: Vec<&str> = vec![
+        "agent-plugin/plugin.json",
+        "claude-code/.claude-plugin/plugin.json",
+        "cursor/.cursor-plugin/plugin.json",
+    ];
+    assert_eq!(
+        found
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>(),
+        expected,
+        "the packages that declare a version are not the ones that did"
+    );
+    for (path, version) in &found {
+        assert_eq!(
+            version, release,
+            "{path} declares version '{version}' and the release is '{release}'"
+        );
+    }
+
+    // A package with an installer is installable by definition, so it is the
+    // one shape that must never be able to lose its version unnoticed.
+    let mut installable: Vec<&str> = files
+        .iter()
+        .filter(|f| f.relative.ends_with("scripts/install.ps1"))
+        .filter_map(|f| f.relative.split('/').next())
+        .collect();
+    installable.sort_unstable();
+    installable.dedup();
+    assert!(
+        !installable.is_empty(),
+        "no package ships an installer, so the sweep above proves nothing about \
+         installable packages"
+    );
+    for package in &installable {
+        assert!(
+            found
+                .iter()
+                .any(|(path, _)| path.starts_with(&format!("{package}/"))),
+            "{package} ships an installer and declares no version at all, so there is \
+             nothing of it to align with the release"
+        );
+    }
+}
+
+#[test]
+fn the_unix_launchers_carry_the_executable_bit_in_the_index() {
+    // The codex hook manifest runs its launcher by path — `command` is
+    // `"${PLUGIN_ROOT}/scripts/sure-hook.sh"` — so on the platform that command
+    // targets, the exec bit is the difference between the hook running and the
+    // kernel answering "Permission denied". A clone with `core.filemode=true`
+    // takes this mode from the index; a clone with it false does not, which is
+    // stated as the cost of this choice rather than hidden.
+    for launcher in posix_launchers() {
+        assert_eq!(
+            indexed_mode(&launcher.relative),
+            "100755",
+            "{} is recorded without the executable bit, so a fresh Unix checkout \
+             cannot start it by path",
+            launcher.relative
+        );
+        assert!(
+            launcher.text.starts_with("#!"),
+            "{} must name its interpreter on its first line, or the mode above starts \
+             nothing anyway",
+            launcher.relative
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn the_unix_launchers_are_executable_where_that_is_observable() {
+    // Only a Unix filesystem can answer this, and it is the end-user-visible
+    // half of the assertion above: what the checkout actually produced. The
+    // index says what a clone should get; this says what one got. Windows jobs
+    // compile it out, so the `ubuntu-latest` and `macos-latest` jobs are what
+    // hold this property.
+    use std::os::unix::fs::PermissionsExt;
+
+    for launcher in posix_launchers() {
+        let mode = std::fs::metadata(&launcher.path)
+            .unwrap_or_else(|error| panic!("{} readable: {error}", launcher.relative))
+            .permissions()
+            .mode();
+        assert!(
+            mode & 0o111 != 0,
+            "{} is mode {:o} on this checkout, so naming it by path does not start it",
+            launcher.relative,
+            mode
+        );
+    }
+}
+
+/// Every `command` / `commandWindows` string in a hook manifest, and where it
+/// was found.
+fn collect_command_strings(
+    prefix: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<(String, String)>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                let here = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                if (key == "command" || key == "commandWindows")
+                    && let Some(text) = item.as_str()
+                {
+                    out.push((here, text.to_owned()));
+                    continue;
+                }
+                collect_command_strings(&here, item, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_command_strings(&format!("{prefix}[{index}]"), item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn the_codex_manifest_gives_each_platform_a_launcher_that_platform_can_start() {
+    // The one manifest in this tree whose Unix `command` is a launcher rather
+    // than an interpreter, and therefore the one place the index mode is
+    // load-bearing. Both halves are read out of the file, so a change to either
+    // is a change this test sees.
+    let text = codex_text("hooks/hooks.json");
+    let value: serde_json::Value =
+        serde_json::from_str(&text).expect("codex hooks.json must be valid JSON");
+
+    let mut commands: Vec<(String, String)> = Vec::new();
+    collect_command_strings("", &value, &mut commands);
+    assert!(
+        commands.len() >= 4,
+        "expected a command for each codex hook, found {commands:?}"
+    );
+
+    for (found_at, command) in &commands {
+        // `commandWindows` is called that because it names the Windows
+        // executable; the POSIX one is the plain `command`.
+        if found_at.ends_with("commandWindows") {
+            assert!(
+                command.contains("powershell") && command.contains("-File"),
+                "codex {found_at} must name the interpreter that starts it, since the \
+                 `.ps1` it points at is not executable by anything: {command}"
+            );
+            assert!(
+                command.contains("sure-hook.ps1"),
+                "codex {found_at} names no launcher: {command}"
+            );
+        } else {
+            assert!(
+                command.contains("scripts/sure-hook.sh"),
+                "codex {found_at} must name the POSIX launcher: {command}"
+            );
+            // Naming the file rather than an interpreter is the decision this
+            // task made; it works only while the file is one the index marks
+            // executable, which
+            // `the_unix_launchers_carry_the_executable_bit_in_the_index` asserts
+            // for every `.sh` in the tree.
+            assert!(
+                !command.starts_with("sh ") && !command.contains("sh -c"),
+                "codex {found_at} names an interpreter, so the packages have stopped \
+                 relying on the index mode this repository sets: {command}"
+            );
+        }
+    }
+}
+
+// --- the Windows hook launchers, run rather than read ----------------------
+
+/// A program on the parent's `PATH`, resolved before the child's environment is
+/// written.
+///
+/// `std::process::Command` resolves a bare program name against the child's
+/// `PATH` where one is set, and these tests set an empty one on purpose — so the
+/// host has to be found by absolute path, or the test would fail for a reason
+/// that is not the launcher.
+#[cfg(windows)]
+fn on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The stand-in for the core: it records the argv it was handed and the payload
+/// it was given, and answers 0.
+#[cfg(windows)]
+fn recording_sure_stub(dir: &std::path::Path) -> PathBuf {
+    // `%*` is the argv the launcher handed the core, and `%~dp0` the stub's own
+    // directory — the scratch directory this test made. Nothing outside it is
+    // written. The payload arrives on the stub's stdin, which is where a harness
+    // puts it.
+    stub_binary(
+        dir,
+        "sure.cmd",
+        "(echo %*) > \"%~dp0args.txt\"\r\n\
+         findstr /r \".\" > \"%~dp0stdin.txt\"\r\n\
+         exit /b 0\r\n",
+    )
+}
+
+/// Run a launcher under a PowerShell host that will start it, and return the run.
+///
+/// Windows PowerShell 5.1 refuses to start any `.ps1` at all when the machine's
+/// execution policy is `Restricted`, which is the default on a Windows client.
+/// This test does not pass `-ExecutionPolicy Bypass` to get past that: an
+/// override makes a launcher pass for a reason that is not the launcher, and the
+/// packages' own manifests deliberately do not carry one. It asks the hosts that
+/// will start the file instead, and when none will, it fails with what each host
+/// answered — a refusal that is visible, never a run that is quietly skipped.
+#[cfg(windows)]
+fn run_launcher(
+    script: &std::path::Path,
+    args: &[&str],
+    stdin: &str,
+    envs: &[(&str, &std::ffi::OsStr)],
+    removals: &[&str],
+) -> std::process::Output {
+    use std::io::Write;
+
+    let mut hosts: Vec<PathBuf> = Vec::new();
+    if let Some(pwsh) = on_path("pwsh.exe").or_else(|| on_path("pwsh")) {
+        hosts.push(pwsh);
+    }
+    hosts.push(powershell());
+
+    let mut refusals: Vec<String> = Vec::new();
+    for host in hosts {
+        let mut command = std::process::Command::new(&host);
+        command.arg("-NoProfile").arg("-File").arg(script);
+        for arg in args {
+            command.arg(arg);
+        }
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        for key in removals {
+            command.env_remove(key);
+        }
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            // This host is not installed; the next candidate is.
+            Err(_) => continue,
+        };
+        if let Some(mut pipe) = child.stdin.take() {
+            let _ = pipe.write_all(stdin.as_bytes());
+            // `pipe` is dropped here, which closes it: the launcher reads to EOF.
+        }
+        let output = child
+            .wait_with_output()
+            .unwrap_or_else(|error| panic!("{} did not finish: {error}", host.display()));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Only a refusal by the execution policy moves on to the next host. Any
+        // other outcome is the launcher's, and is returned to be asserted on.
+        if stderr.contains("about_Execution_Policies") || stderr.contains("UnauthorizedAccess") {
+            refusals.push(format!("{}: {}", host.display(), stderr.trim()));
+            continue;
+        }
+        return output;
+    }
+    panic!(
+        "no PowerShell host on this machine will start {}; each answered:\n{}",
+        script.display(),
+        refusals.join("\n")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn the_windows_hook_launchers_forward_the_event_and_fail_safe() {
+    // Every shipped `.ps1` hook, run as a program with a stand-in for the core.
+    // Reading the file proves the text is what it was; this proves the event
+    // arrives and the argv is the contract, which is the half of acceptance line
+    // 2 that no test did before.
+    let event = r#"{"hook_event_name":"SessionStart","session_id":"sure-thinness"}"#;
+    // (package, the arguments a harness hands the launcher, the argv the core
+    // must be handed). Codex takes no event name: its payload carries
+    // `hook_event_name` itself, which is why its launcher forwards no argument.
+    let cases: [(&str, &[&str], &[&str]); 4] = [
+        (
+            "claude-code",
+            &["session-start"],
+            &["hook", "ingest", "--source", "claude-code", "session-start"],
+        ),
+        (
+            "cursor",
+            &["session-start"],
+            &[
+                "--format",
+                "json",
+                "hook",
+                "ingest",
+                "--source",
+                "cursor",
+                "session-start",
+            ],
+        ),
+        (
+            "copilot",
+            &["session-start"],
+            &[
+                "--format",
+                "json",
+                "hook",
+                "ingest",
+                "--source",
+                "copilot",
+                "session-start",
+            ],
+        ),
+        (
+            "codex",
+            &[],
+            &["--format", "json", "hook", "ingest", "--source", "codex"],
+        ),
+    ];
+
+    for (package, launcher_args, expected_argv) in cases {
+        let scratch = launcher_scratch(&format!("hook-{package}"));
+        let stub = recording_sure_stub(&scratch);
+        let script = integ_script(package, "sure-hook.ps1");
+
+        let output = run_launcher(
+            &script,
+            launcher_args,
+            event,
+            &[("SURE_BIN", stub.as_os_str())],
+            &[],
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{package} launcher failed: stdout={stdout}, stderr={stderr}"
+        );
+
+        let forwarded = std::fs::read_to_string(scratch.join("args.txt")).unwrap_or_else(|error| {
+            panic!("{package} launcher never started the core it resolved: {error}")
+        });
+        assert_eq!(
+            forwarded.split_whitespace().collect::<Vec<_>>(),
+            expected_argv,
+            "{package} launcher handed the core a different argv"
+        );
+
+        let delivered = std::fs::read_to_string(scratch.join("stdin.txt"))
+            .unwrap_or_else(|error| panic!("{package} launcher sent nothing to the core: {error}"));
+        assert!(
+            delivered.contains("sure-thinness"),
+            "{package} launcher did not forward the event it was given: {delivered:?}"
+        );
+
+        // The other half: SURE absent. The launcher must not block the session
+        // and must not fabricate a result — nothing on the protocol stream, and
+        // a sentence naming what was looked for.
+        let empty_path = scratch.join("empty-path");
+        let empty_local = scratch.join("empty-localappdata");
+        std::fs::create_dir_all(&empty_path).expect("empty PATH directory");
+        std::fs::create_dir_all(&empty_local).expect("empty per-user directory");
+        let output = run_launcher(
+            &script,
+            launcher_args,
+            event,
+            &[
+                ("LOCALAPPDATA", empty_local.as_os_str()),
+                ("PATH", empty_path.as_os_str()),
+            ],
+            &["SURE_BIN"],
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "a missing SURE must not block the session: {package}: {stderr}"
+        );
+        assert!(
+            stdout.is_empty(),
+            "{package} launcher fabricated a result with no SURE to ask: {stdout:?}"
+        );
+        assert!(
+            stderr.contains("SURE binary not found") && stderr.contains(package),
+            "{package} launcher did not say which binary was missing and for whom: {stderr:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn the_windows_hook_launchers_do_not_bind_the_event_to_a_parameter() {
+    // The shape the Codex launcher records a measurement for
+    // (`integrations/codex/scripts/sure-hook.ps1:3-10`): a `param` block is
+    // bound from a redirected event by PowerShell 5.1 — the host Windows 11 runs
+    // by default, and the one every manifest here names — and the event never
+    // arrives. The launcher then starts, exits 0 and collects nothing, which is
+    // the silent failure this whole file exists to make visible.
+    //
+    // It is asserted as text because the behaviour is the 5.1 host's, and this
+    // repository's development machine cannot run 5.1 at all: its execution
+    // policy is `Restricted`, these tests pass no `-ExecutionPolicy` override,
+    // and `& 'x.ps1'` under 5.1 was measured to be refused for that reason. So
+    // no test here observes 5.1's binding. A string assertion is evidence of the
+    // shape; it is not evidence of the host's behaviour, and it is not claimed
+    // to be.
+    for package in ["claude-code", "cursor", "codex", "copilot"] {
+        let text = std::fs::read_to_string(integ_script(package, "sure-hook.ps1"))
+            .unwrap_or_else(|error| panic!("{package} hook launcher readable: {error}"));
+        assert!(
+            !text.contains("param("),
+            "{package} declares a param block, which PowerShell 5.1 binds from the \
+             redirected event, so the hook runs and the event never arrives"
+        );
+        assert!(
+            text.contains("$input"),
+            "{package} does not read `$input`, which is where a redirected payload \
+             arrives in both hosts"
+        );
+        assert!(
+            text.contains("[Console]::In.ReadToEnd()"),
+            "{package} has no fallback to the console, so a payload that arrives there \
+             is read as empty"
+        );
+    }
+}

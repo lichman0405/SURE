@@ -1,14 +1,21 @@
-param([Parameter(ValueFromRemainingArguments=$true)][string[]]$HookArgs)
 $ErrorActionPreference='SilentlyContinue'
 
-# Read the JSON payload Cursor sends to this hook process.
-$inputJson=[Console]::In.ReadToEnd()
+# Read the JSON payload Cursor sends to this hook process. There is no `param`
+# block and `$input` is read before the console, which is the shape
+# `integrations/codex/scripts/sure-hook.ps1:3-10` records a measurement for:
+# PowerShell 5.1 binds a `param` block from the redirected event and the event
+# never arrives. The event name the manifest passes arrives in `$args` instead.
+$inputJson=($input -join "`n")
+if([string]::IsNullOrWhiteSpace($inputJson)){$inputJson=[Console]::In.ReadToEnd()}
+
+# 5.1's default encoding for the pipe below is ASCII, which turns non-ASCII in
+# the payload into `?`; that is the same file's line 18, measured there.
+$OutputEncoding=New-Object System.Text.UTF8Encoding($false)
 
 # Resolve the local SURE binary. Order:
 # 1. Explicit override (useful for development and custom installs).
 # 2. PATH lookup (works once SURE is on the user's PATH).
-# 3. Per-user install location under %LOCALAPPDATA% (works when Cursor is
-#    launched from the Windows Start menu and the installer placed SURE there).
+# 3. Per-user install location under %LOCALAPPDATA%.
 $bin=$env:SURE_BIN
 if(-not $bin){$cmd=Get-Command sure -ErrorAction SilentlyContinue;if($cmd){$bin=$cmd.Source}}
 if(-not $bin){$candidate=Join-Path $env:LOCALAPPDATA 'SURE\bin\sure.exe';if(Test-Path $candidate){$bin=$candidate}}
@@ -21,7 +28,7 @@ if (-not $bin) {
     exit 0
 }
 
-# Forward the event to SURE and return its exit code. stdout/stderr are passed
-# through unchanged so Cursor sees any decision/response SURE produces.
-$inputJson | & $bin --format json hook ingest --source cursor @HookArgs
+# Forward the event to SURE and return its exit code. stdout/stderr pass through
+# unchanged so Cursor sees any decision/response SURE produces.
+$inputJson | & $bin --format json hook ingest --source cursor @args
 exit $LASTEXITCODE

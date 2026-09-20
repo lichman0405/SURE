@@ -43,11 +43,16 @@
 //! packages' events on either platform.
 //!
 //! **The `.sh` launchers are run through `/bin/sh` rather than by path.** Git
-//! records them `100644`, so a fresh checkout has no executable bit and the
-//! manifests, which name the script directly, cannot start one there either.
-//! The scripts use no bash-only syntax; running them under `sh` measures their
-//! failure logic and not the checkout's file mode. The mode is recorded in
-//! `docs/integrations/HOOK_FAILURE_SEMANTICS.md` as an open packaging gap.
+//! records them `100755` since `P15-T008`, so a fresh checkout does have the
+//! executable bit and a manifest naming one directly can start it there. These
+//! tests still pass the file to a shell rather than starting it by path, because
+//! what they measure is the scripts' failure logic and not the checkout's file
+//! mode — and a runner whose checkout lost the bit would otherwise report a
+//! packaging failure as a hook-failure failure. The scripts use no bash-only
+//! syntax, so `sh` is a faithful host for that measurement. The mode itself is
+//! asserted separately, by
+//! `the_unix_launchers_carry_the_executable_bit_in_the_index` in
+//! `integration_thinness.rs`.
 
 // The workspace forbids `unwrap`, `expect` and `panic` in shipped code because a
 // panic is a message nobody chose. In a test the panic *is* the report.

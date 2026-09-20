@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# shellcheck disable=SC3043
 # SURE - build, package and check a release artifact for one of the three
 # non-Windows targets: macOS Apple Silicon (aarch64-apple-darwin), macOS Intel
 # (x86_64-apple-darwin) or Linux x64 (x86_64-unknown-linux-gnu).
@@ -32,7 +33,15 @@
 # `[[ ]]`, no `mapfile`, no process substitution, no `${var,,}`, and no `${x//y}`
 # — because macOS's `/bin/sh` is bash 3.2 in POSIX mode and a Linux runner's
 # `/bin/sh` can be `dash`, and a script that needs bash 4 is a script that runs
-# on the machine it was written on. The workflow
+# on the machine it was written on. **That paragraph was true and the file
+# contradicted it**: the shebang said `#!/usr/bin/env bash` and the `set` line
+# said `pipefail`, which is bash-only, so the first Linux run of this script
+# exited 2 before it built anything (`P15-T007`, run `35524124026` — the whole
+# account is at the `set` line). The shebang now says `#!/bin/sh`, which is the
+# claim every invocation actually makes, and the one line where this file is not
+# POSIX on purpose — `local`, which bash-as-sh and dash both implement — carries
+# its own `SC3043` directive at the top so that the linter, which now reads this
+# file as `sh`, still reads the rest of it as `sh` without a false report. The workflow
 # invokes it as `sh scripts/Build-Release.sh` rather than by path, for the reason
 # `crates/sure-testkit/tests/hook_failure_semantics.rs` gives about the `.sh`
 # hook launchers: Git on Windows does not carry the executable bit, so a script
@@ -527,7 +536,70 @@
 # Linux target no artifact exists on any machine yet; and the `Authority=`
 # branch, Gatekeeper and reproducibility remain unmeasured on every machine.
 
-set -euo pipefail
+# =============================================================================
+# `set -eu`, and why `pipefail` is not in this line
+# =============================================================================
+#
+# **It was in this line, and it is why the Linux artifact job went red.**
+# `P15-T007`, run `35524124026`, job `package-linux`, step "Build, package,
+# checksum and check the artifact" — 9 ms after the step started, before the
+# release gate was read, before anything was staged or built:
+#
+#   scripts/Build-Release.sh: 530: set: Illegal option -o pipefail
+#   ##[error]Process completed with exit code 2.
+#
+# The invocation is `sh scripts/Build-Release.sh` (the three artifact jobs in
+# `.github/workflows/release-dry-run.yml`), and on that runner `sh` does not
+# implement `pipefail`. This is not a defect this task introduced: both the `set`
+# line and the shebang are `c522699`'s (`P15-T005`), and they were correct on
+# every machine that had run this file before — macOS twice and this Windows
+# host — because every `sh` those runs met accepts the option. The `/bin/sh` on
+# the Ubuntu runner is the first that does not, and `P15-T007` is what put this
+# script on that runner for the first time.
+#
+# **The measured contrast, so the mechanism is not guessed at.** In the same job
+# on the same runner, at step 4, `.github/workflows/release-dry-run.yml` runs
+# `set -euo pipefail` inside a `run:` step and that step concluded `success`:
+# GitHub executes `run:` steps under bash, where the option is legal. This script
+# is the only thing in the job that leaves bash — it is the only thing invoked as
+# `sh` — and it is the only thing that failed. So the statement this fix rests on
+# is "bash's `pipefail` is not `sh`'s", not "the runner's `sh` is dash", which is
+# true but was inferred from an error message's shape rather than measured.
+#
+# **The lesson is not "also test under dash".** Three shells called `dash` are
+# reachable from the machine this was written on, and two of them accept and
+# implement `set -o pipefail` (the MSYS one, and WSL Ubuntu 26.04's
+# `dash 0.5.12-12ubuntu3`) while the runner's does not. A local run therefore
+# cannot see this, and the first hand-back for this task claimed one had seen it.
+# What no local run can ever be is the runner's shell; the measurement that
+# decides this is the runner's log above.
+#
+# **What the option was covering, and what covers it now.** `pipefail` makes a
+# pipeline's status the failure of any element rather than the status of the
+# last one, so dropping it leaves every pipeline whose *left* side can fail while
+# its *right* side succeeds reading as a success. The shape in this file was the
+# `wc` reading:
+#
+#   written_bytes="$(wc -c <"$SHA_PATH" | tr -d ' ')"
+#
+# `wc` failing there does not stop anything: `tr` reads empty input and succeeds,
+# the variable holds the empty string, `set -e` sees the pipeline's status (0)
+# and continues, and the check that consumes it is
+#
+#   if [ "$written_bytes" -ne "$expected_bytes" ]; then fail ...; fi
+#
+# which `test` answers with exit 2 when an operand is empty — measured here under
+# `sh`, `dash` and `bash`, all three — and `if` reads any non-zero status as
+# false. The check would be **skipped** and the run would walk on to its verdict.
+# That is the quieter wrong answer, and it is the trade this repository exists to
+# refuse. So every such reading is now taken by `count_of`/`count_char` below:
+# the program runs with both streams captured and its status read, `tr` reads the
+# file it wrote rather than feeding a pipeline, and a reading that is not a whole
+# number is a named failure rather than a zero or an empty string. Every
+# remaining pipeline in this file is listed with its reason in the block above
+# `count_of`, and the two that are not obviously safe are commented at their own
+# lines.
+set -eu
 
 usage() {
     cat <<'EOF'
@@ -810,11 +882,20 @@ fail() {
 
 # Run one program with a typed argument array and both streams sent to files.
 #
-# Returns the exit status; never prints or throws on the text. **Nothing here is
-# read out of a pipeline**, for the reason `Build-Release.ps1` records: a
+# Returns the exit status; never prints or throws on the text. **No exit status
+# is read out of a pipeline here**, for the reason `Build-Release.ps1` records: a
 # Windows capture once produced a wrong number about a child process by taking
 # it from one. The status is `$?` on the line after the call and nowhere else,
 # and the text a reader sees is read back from a file.
+#
+# Since `set -o pipefail` was removed from this script, that rule covers the
+# *values* too and not only the statuses: a program whose output this script
+# decides on is run through `run_captured` and read back from the file it wrote,
+# never through a pipeline, because without `pipefail` a pipeline reports its
+# last element's status and the earlier element's failure disappears into an
+# empty value. `count_of` below is where that happens for every number; the
+# pipelines this script still holds and why each is a different thing are listed
+# in the block above `count_of`.
 #
 # `set +e` around the call is deliberate and is the only place this script turns
 # it off: without it a failing program would abort the shell before the caller
@@ -836,6 +917,118 @@ run_captured() {
 have() {
     command -v "$1" >/dev/null 2>&1
 }
+
+# -----------------------------------------------------------------------------
+# Numbers, read from a program rather than out of a pipeline
+# -----------------------------------------------------------------------------
+#
+# **Every number this script compares or prints is read by one of these two, and
+# that is what took over the job `set -o pipefail` was doing before it was
+# removed.** The line this replaces was, four times over,
+#
+#   written_bytes="$(wc -c <"$SHA_PATH" | tr -d ' ')"
+#
+# and the hazard is not cosmetic. Without `pipefail` a pipeline's status is its
+# *last* element's, so a `wc` that failed — a file that vanished between two
+# lines, a permission that changed, a `wc` that is not the one this script
+# thinks it is — leaves `tr` reading empty input and succeeding. The pipeline
+# reports 0, `set -e` continues, and the variable holds the empty string. The
+# check that consumes it is `[ "$written_bytes" -ne "$expected_bytes" ]`, and
+# `test` answers an empty operand with **exit 2**, which `if` reads as false:
+# the check is *skipped* and the run walks on to its verdict. Measured here under
+# `sh`, `dash` and `bash`, all three. A red job, which is what removing
+# `pipefail` risks on a bad day, is the acceptable failure; a check that silently
+# does not run is not.
+#
+# So a count is taken the way every other reading in this file is taken: the
+# program runs with both streams captured and its status read, and the text is
+# read back from the file it wrote. `tr` then reads *that file* rather than
+# feeding a pipeline, so there is no pipeline left to have a status. And the
+# reading is refused unless it is a whole number, because an empty or
+# unparsable value is precisely what the skipped check above was made of.
+#
+# The pipelines that remain in this file, and why each is not this hazard:
+#
+#   digest fold (`digest_of`)      `printf '%s' "$DIGEST" | tr 'A-F' 'a-f'` — the
+#                                  left side is the shell's own `printf` writing
+#                                  a 64-character string, and the value is
+#                                  refused immediately after unless it is 64
+#                                  hex characters, so a short read is a failure
+#                                  with a name and not a digest.
+#   header reads (both readers)    `printf '%s' "$HEADER_BYTES" | cut -c...` —
+#                                  `cut` is the last element, so a `cut` that
+#                                  fails is the pipeline's status and `set -e`
+#                                  stops on it; every value is then compared
+#                                  against a constant, so a truncated read is a
+#                                  refusal rather than agreement.
+#   layout, `running from`         `sed ... | sort` and `sed ... | head -n 1` —
+#                                  left sides that could only fail if the file
+#                                  they read were gone, and each has a consumer
+#                                  that turns an empty result into a named
+#                                  failure (`cmp` against the promised entry
+#                                  list; the `-z` check on `reported_from`).
+#                                  Neither can report success over a failed
+#                                  producer, which is the property that matters.
+#
+# `count_of <flag> <path> <label>` - one `wc` reading of one file, status read
+# and value shape-checked. Sets COUNT.
+count_of() {
+    local flag="$1"
+    local path="$2"
+    local label="$3"
+    local out="$LOGS/wc-$label.txt"
+    local err="$LOGS/wc-$label.err.txt"
+    if [ ! -f "$path" ]; then
+        fail "there is no file at $path for wc $flag to read, so this run has no $label"
+    fi
+    local status=0
+    run_captured wc "$out" "$err" "$flag" <"$path" || status=$?
+    if [ $status -ne 0 ]; then
+        fail "wc $flag exited $status on $path, so this run has no $label. Where wc ran, its stderr is $err."
+    fi
+    COUNT="$(tr -d ' \t\r\n' <"$out")"
+    case "$COUNT" in
+        '' | *[!0-9]*)
+            fail "wc $flag printed '$COUNT' for $path, which is not a whole number and not one this script will print in a sentence or compare"
+            ;;
+    esac
+}
+
+# `count_char <char> <path> <label>` - how many bytes of one character a file
+# holds, in two status-checked steps rather than in one three-stage pipeline:
+# `tr -dc` writes the characters it matched to a file, `count_of -c` reads that
+# file. Sets COUNT.
+count_char() {
+    local char="$1"
+    local path="$2"
+    local label="$3"
+    local out="$LOGS/chars-$label.txt"
+    local err="$LOGS/chars-$label.err.txt"
+    if [ ! -f "$path" ]; then
+        fail "there is no file at $path to count '$char' in, so this run has no $label"
+    fi
+    local status=0
+    run_captured tr "$out" "$err" -dc "$char" <"$path" || status=$?
+    if [ $status -ne 0 ]; then
+        fail "tr exited $status reading $path for '$char', so this run has no $label. Its stderr is $err."
+    fi
+    count_of -c "$out" "$label"
+}
+
+# `require_whole_number <value> <what>` - the same shape check, for a number
+# this script already holds in a variable and reads a status for by other means.
+# It exists for the two readings that are counts and not `wc` output, so that
+# "every number this script compares is a number" is a rule with no exceptions
+# to remember.
+require_whole_number() {
+    case "$1" in
+        '' | *[!0-9]*)
+            fail "$2 is '$1', which is not a whole number; a number this script could not read is a check this script will not skip"
+            ;;
+    esac
+}
+
+COUNT=''
 
 # -----------------------------------------------------------------------------
 # The digest. One value, from one tool, printed with the name of the tool.
@@ -1013,6 +1206,13 @@ read_macho_header() {
 
     # The first eight characters are the magic; the second eight are the CPU
     # type. Both are read as bytes on disk rather than through any tool's prose.
+    #
+    # Both lines are pipelines, and neither is the shape `pipefail` was covering:
+    # `cut` is the last element, so a `cut` that fails *is* the pipeline's status
+    # and `set -e` stops here; the left element is the shell's own `printf`
+    # writing a string this script already holds, with no file to fail on; and
+    # both values are compared against constants below, so a truncation is a
+    # refusal and never agreement.
     local magic=''
     local cpu=''
     magic="$(printf '%s' "$HEADER_BYTES" | cut -c1-8)"
@@ -1074,6 +1274,11 @@ read_elf_header() {
     # shorter than twenty bytes leaves the later of these empty, and an empty
     # value is refused below rather than read as agreement: `cut` on a line that
     # ran out is not an error and produces no output.
+    #
+    # Each line is a pipeline for the same reason and with the same answer as the
+    # Mach-O reader above: `cut` is the last element and its status is the
+    # pipeline's, the left element is `printf` over a variable, and every field
+    # is compared against a constant — so `pipefail` had nothing to add here.
     ELF_MAGIC="$(printf '%s' "$HEADER_BYTES" | cut -c1-8)"
     ELF_CLASS="$(printf '%s' "$HEADER_BYTES" | cut -c9-10)"
     ELF_DATA="$(printf '%s' "$HEADER_BYTES" | cut -c11-12)"
@@ -1278,6 +1483,11 @@ fi
 # times and not one of those lines starts with the key.
 DECISION_LINES="$(sed -n 's/^[[:space:]]*"decision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$GATE_PATH" || true)"
 DECISION_COUNT="$(printf '%s\n' "$DECISION_LINES" | grep -c . || true)"
+# The count decides whether the gate was read at all, and an empty value would
+# make the test below a skipped check rather than a refusal, so it is required to
+# be a number before it is used as one. `grep -c` prints a count when it exits 1
+# and prints nothing when it cannot read its input; this is about the second case.
+require_whole_number "$DECISION_COUNT" "the number of top-level \"decision\" fields grep counted in $GATE_PATH"
 if [ "$DECISION_COUNT" -ne 1 ]; then
     fail "the release gate at $GATE_PATH has $DECISION_COUNT top-level \"decision\" fields and this script reads exactly one. Expected one string field; the document may have changed shape, and a gate this script cannot read is not a gate that passed."
 fi
@@ -1440,7 +1650,11 @@ if [ "$PHASE" = 'all' ]; then
     binary_digest=''
     digest_of "$staged_binary" 'sure-binary'
     binary_digest="$DIGEST"
-    binary_bytes="$(wc -c <"$staged_binary" | tr -d ' ')"
+    # Read by `count_of` rather than by a `wc | tr` pipeline: this number is
+    # written into RELEASE.txt inside the archive, so a `wc` that failed and
+    # produced nothing would put an empty string in a document that ships.
+    count_of -c "$staged_binary" 'sure-binary'
+    binary_bytes="$COUNT"
     detail "sure        $binary_bytes bytes, SHA-256 $binary_digest"
 
     # The two passages of RELEASE.txt that cannot be the same text for every
@@ -1583,8 +1797,9 @@ EOF
     if [ -s "$tar_err" ]; then
         while IFS= read -r line; do detail "tar warns   $line"; done <"$tar_err"
     fi
+    count_of -c "$ARCHIVE" 'archive'
     detail "archive     $ARCHIVE"
-    detail "size        $(wc -c <"$ARCHIVE" | tr -d ' ') bytes"
+    detail "size        $COUNT bytes"
 
     # -------------------------------------------------------------------------
     # The checksum. Computed here, over the archive that was just written, and
@@ -1613,10 +1828,22 @@ EOF
     # without being looked for, because `grep`'s `^[0-9a-f]` above cannot match
     # a line that begins with three non-ASCII bytes, and the total length would
     # be three too many.
+    #
+    # This is where `pipefail` was covering a verdict and not a display, and the
+    # three readings below are why. Each of the three lines here used to be a
+    # pipeline whose left side could fail while its right side succeeded, and
+    # each of the three tests further down is `[ "$written_x" -ne N ]`, which an
+    # empty value turns into a skipped check rather than a failed one — a
+    # checksum file that is not the documented format, reported as one that is.
+    # They are `count_of` and `count_char` calls now: status read, shape checked,
+    # no pipeline left to report the wrong element's status.
     expected_bytes=$((64 + 2 + ${#sha_name} + 1))
-    written_bytes="$(wc -c <"$SHA_PATH" | tr -d ' ')"
-    written_lf="$(tr -dc '\n' <"$SHA_PATH" | wc -c | tr -d ' ')"
-    written_cr="$(tr -dc '\r' <"$SHA_PATH" | wc -c | tr -d ' ')"
+    count_of -c "$SHA_PATH" 'checksum'
+    written_bytes="$COUNT"
+    count_char '\n' "$SHA_PATH" 'checksum-lf'
+    written_lf="$COUNT"
+    count_char '\r' "$SHA_PATH" 'checksum-cr'
+    written_cr="$COUNT"
     detail "file        $SHA_PATH"
     detail "bytes       $written_bytes (expected $expected_bytes), $written_lf LF, $written_cr CR"
     if [ "$written_cr" -ne 0 ]; then
@@ -1648,8 +1875,9 @@ else
     ARCHIVE="$found"
     SHA_PATH="$ARCHIVE.sha256"
     ARTIFACT_NAME="$(basename "$ARCHIVE" .tar.gz)"
+    count_of -c "$ARCHIVE" 'archive'
     detail "archive     $ARCHIVE"
-    detail "size        $(wc -c <"$ARCHIVE" | tr -d ' ') bytes"
+    detail "size        $COUNT bytes"
 fi
 
 # -----------------------------------------------------------------------------
@@ -1669,6 +1897,12 @@ fi
 # comparison. The list is then compared by *set* rather than by order, because
 # the order of a tar's entries is the writer's and not something this script
 # asked for.
+#
+# The pipeline stays, and it cannot report success over a failed producer: `sort`
+# is the last element, its input is `sed`'s output, and the `cmp` immediately
+# below turns an empty or half-written result into a named failure — an empty
+# list is not the four-entry set this artifact promises. `pipefail` was not doing
+# anything here that the comparison does not.
 normalised="$LOGS/archive-entries.normalised.txt"
 sed 's:/$::' "$entries_out" | LC_ALL=C sort >"$normalised"
 expected="$LOGS/archive-entries.expected.txt"
@@ -1691,7 +1925,8 @@ if ! cmp -s "$normalised" "$expected"; then
     printf 'difference in what a user receives. The full listing is %s.\n' "$entries_out" >&2
     exit 1
 fi
-detail "entries     $(wc -l <"$normalised" | tr -d ' ') entries, exactly the promised set"
+count_of -l "$normalised" 'entries'
+detail "entries     $COUNT entries, exactly the promised set"
 
 # -----------------------------------------------------------------------------
 # 4. Verify the archive against the digest file, read back from disk. This is
@@ -1704,7 +1939,14 @@ step 'Verify the checksum file'
 if [ ! -f "$SHA_PATH" ]; then
     fail "no checksum file at $SHA_PATH, so nothing verifies $ARCHIVE"
 fi
+# `grep -c` prints a count even when it exits 1 — no line matched — so the `|| true`
+# here is about the status and not the value. What it is *not* is proof that a
+# value arrived: a `grep` that could not read the file exits 2 and prints
+# nothing, which would make the test below an empty operand and therefore a check
+# that does not run. So the value is checked for being a number first, through the
+# same helper `count_of` uses.
 sha_lines="$(grep -c . "$SHA_PATH" || true)"
+require_whole_number "$sha_lines" "the number of non-empty lines grep counted in $SHA_PATH"
 if [ "$sha_lines" -ne 1 ]; then
     fail "$SHA_PATH holds $sha_lines non-empty lines; this format is one digest line"
 fi
@@ -1941,6 +2183,11 @@ esac
 # archive was just extracted into: a run that picked up some other `sure` — a
 # copy on PATH, one left by an earlier release — would still exit 0 and still
 # print a well-formed report.
+# The pipeline stays: `head` is the last element, the file it reads is the
+# captured stdout of a run whose status was already read, and the `-z` check on
+# the next line is what turns "no such line" into a failure rather than into a
+# comparison that passes over nothing. A `sed` that failed would produce an empty
+# value, and an empty value is refused by name one line later.
 reported_from="$(sed -n 's/^running from //p' "$run_out" | head -n 1)"
 if [ -z "$reported_from" ]; then
     fail "the extracted binary reported no 'running from' line, so which binary answered cannot be checked: $run_out"
@@ -1991,14 +2238,24 @@ detail "from        $required_binary"
 # -----------------------------------------------------------------------------
 # 8. The result.
 # -----------------------------------------------------------------------------
+#
+# The two numbers in this block are read the same way every other number in this
+# script is read, and not inline in the `printf` as they were. They are the last
+# thing a reader sees and the sentence a release is described by, so an empty
+# value here would be the most expensive version of the failure this file's
+# `set` comment describes: `size        bytes`, printed by a script that exits 0.
+count_of -c "$ARCHIVE" 'archive'
+result_bytes="$COUNT"
+count_of -l "$normalised" 'entries'
+result_entries="$COUNT"
 printf '\nRESULT\n'
 printf '  artifact    %s\n' "$ARCHIVE"
-printf '  size        %s bytes\n' "$(wc -c <"$ARCHIVE" | tr -d ' ')"
+printf '  size        %s bytes\n' "$result_bytes"
 printf '  sha256      %s\n' "$actual"
 printf '  computed by %s\n' "$digest_tool"
 printf '  checksum    %s\n' "$SHA_PATH"
 printf '  verified    the archive matches the checksum file, re-read from disk\n'
-printf '  layout      %s entries, exactly the promised set\n' "$(wc -l <"$normalised" | tr -d ' ')"
+printf '  layout      %s entries, exactly the promised set\n' "$result_entries"
 printf '  runs        %s\n' "$extracted_binary"
 printf '  arch        %s, read from the header bytes %s\n' "$HEADER_DESCRIPTION" "$HEADER_BYTES"
 printf '  gate        permitted; read from %s\n' "$GATE_PATH"

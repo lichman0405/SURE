@@ -135,6 +135,18 @@ jobs:
           echo "rustc host        $(rustc -vV | sed -n 's/^host: //p')"
           echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
           echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
+          # The interpreter that runs `sh scripts/Build-Release.sh` below, named
+          # and versioned. It is the one tool this job depends on that was not
+          # listed here until P15-T007, and the one whose identity decides what
+          # that script is allowed to contain — on this runner `sh` is bash 3.2
+          # in POSIX mode, on a Linux runner it is dash. dash cannot report a
+          # version in one call, because `--version` is not an option it has, so
+          # the version comes from the package that owns it where `sh` will not
+          # say, and is `absent` rather than guessed where there is no `dpkg`.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          sh_version="$(sh -c 'printf "%s" "${BASH_VERSION:-}"')"
+          [ -n "$sh_version" ] || sh_version="$(dpkg-query -W -f='${Version}' dash 2>/dev/null)"
+          echo "sh version        ${sh_version:-not reported by this sh}"
           echo "tar               $(tar --version | head -n 1)"
           echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" \
                "shasum=$(command -v shasum || echo absent)" \
@@ -292,6 +304,16 @@ jobs:
           echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
           echo "cc                $(command -v cc || echo absent)"
           echo "clang             $(command -v clang || echo absent)"
+          # The interpreter that runs `sh scripts/Build-Release.sh` below, named
+          # and versioned, the same line the two other artifact jobs carry: on
+          # this runner `sh` is bash 3.2 in POSIX mode, on a Linux runner it is
+          # dash, and the script has to survive both. The version is asked of `sh`
+          # itself and falls back to the package that owns it, because dash has
+          # no `--version` to report one with.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          sh_version="$(sh -c 'printf "%s" "${BASH_VERSION:-}"')"
+          [ -n "$sh_version" ] || sh_version="$(dpkg-query -W -f='${Version}' dash 2>/dev/null)"
+          echo "sh version        ${sh_version:-not reported by this sh}"
           echo "tar               $(tar --version | head -n 1)"
           echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" \
                "shasum=$(command -v shasum || echo absent)" \
@@ -363,9 +385,29 @@ jobs:
           retention-days: 14
 
   # ===========================================================================
-  # The Linux x64 artifact — P15-T007. **THIS JOB HAS NOT RUN.** Nothing in
-  # this repository has produced `sure-*-x86_64-unknown-linux-gnu.tar.gz`, and
-  # that is a statement about this job's history rather than about this job.
+  # The Linux x64 artifact — P15-T007. **THIS JOB HAS RUN ONCE, AND IT HAS NOT
+  # PRODUCED AN ARTIFACT.** Run `35524124026`, attempt 1, on commit `70ef6dd`, is
+  # the only run that has reached it. Five of that run's six jobs are green; this
+  # one is the failure, and it failed in the step below named *"Build, package,
+  # checksum and check the artifact"*, 9 ms after that step started, before the
+  # release gate was read and before anything was staged, built or written:
+  #
+  #   scripts/Build-Release.sh: 530: set: Illegal option -o pipefail
+  #   ##[error]Process completed with exit code 2.
+  #
+  # Exit 2. The step after it, *"What this archive asks of its glibc, read off the
+  # binary"*, the checksum re-read step and *"Upload the artifact and its
+  # checksum"* were all `skipped`. `sure-*-x86_64-unknown-linux-gnu.tar.gz` and
+  # its `.sha256` do not exist on any machine, and nothing below may be read as
+  # saying that they do.
+  #
+  # **What that run did establish, and it stays.** In this same job, on this same
+  # runner, the step *"The workspace's tests, on this runner"* concluded
+  # `success`: 81 `test result:` lines, **2648 passed, 0 failed, 12 ignored**.
+  # The tests half of the acceptance sentence below was earned on the runner the
+  # artifact half is meant to run on. What failed was the script's first executed
+  # line — and the same log shows the step's own `shell: /usr/bin/bash -e {0}`,
+  # which is the measurement behind the comment at the invocation below.
   # ===========================================================================
   #
   # Its acceptance is
@@ -380,13 +422,16 @@ jobs:
   # --target x86_64-unknown-linux-gnu`, the same script the two macOS jobs run,
   # which packages, checksums and then reads the artifact back.
   #
-  # **What is not here yet.** The dispatch. Everything below is written to be
-  # run and has been exercised on a Windows host only up to the point that host
-  # can reach — the architecture read over real ELF bytes, the package, the
+  # **What is not here yet: the artifact.** Everything below is written to be run
+  # and has been exercised on a Windows host only up to the point that host can
+  # reach — the architecture read over real ELF bytes, the package, the
   # `.sha256` and the extraction — with the mode check, the signature step, the
-  # run of the extracted binary and the verdict line unreached there. This job
-  # is what measures the rest, and until it has run, the accepted sentence above
-  # is not yet earned for Linux.
+  # run of the extracted binary and the verdict line unreached there; and the one
+  # run that reached a Linux runner stopped before the first of those steps, for
+  # the reason recorded above. So the tests half of the acceptance sentence is
+  # earned and the artifact half is not: this job is what measures the rest, and
+  # until a run of it reaches the verdict line, the accepted sentence above is
+  # not earned for Linux.
   #
   # **Why the architecture cannot come from the label.** `ubuntu-latest` being
   # x86_64 is a belief about a label, and this repository does not read beliefs
@@ -442,6 +487,19 @@ jobs:
           echo "rustc release     $(rustc -vV | sed -n 's/^release: //p')"
           echo "targets installed $(rustup target list --installed | tr '\n' ' ')"
           echo "cc                $(command -v cc || echo absent)"
+          # The interpreter that runs `sh scripts/Build-Release.sh` below, named
+          # and versioned next to `cc` and `objdump`. **Run 35524124026 could not
+          # be read without it**: its failing step printed
+          # `scripts/Build-Release.sh: 530: set: Illegal option -o pipefail` and
+          # nothing that said which `sh` had refused the option, so the runner's
+          # shell had to be inferred from the shape of an error message — which is
+          # the kind of answer this repository does not accept when a reading is
+          # available. dash cannot report a version in one call, so the version
+          # comes from the package that owns it when `sh` will not say it.
+          echo "sh                $(command -v sh || echo absent) -> $(readlink -f "$(command -v sh)" 2>/dev/null || echo absent)"
+          sh_version="$(sh -c 'printf "%s" "${BASH_VERSION:-}"')"
+          [ -n "$sh_version" ] || sh_version="$(dpkg-query -W -f='${Version}' dash 2>/dev/null)"
+          echo "sh version        ${sh_version:-not reported by this sh}"
           echo "tar               $(tar --version | head -n 1)"
           echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" \
                "shasum=$(command -v shasum || echo absent)" \
@@ -461,6 +519,20 @@ jobs:
       - name: The workspace's tests, on this runner
         run: cargo test --workspace --no-fail-fast
 
+      # **This step's shell is bash and the script it runs is not.** `run:` steps
+      # execute under bash — the run's own log prints `shell: /usr/bin/bash -e {0}`
+      # for this step — and the *identity* step above, four steps earlier in this
+      # same job on this same runner, contains a `set -euo pipefail` of its own
+      # and concluded `success`. So `pipefail` is legal in the step and was
+      # refused by the thing the step handed the work to: `sh` on this runner is
+      # dash, and this invocation is the only place in the job where anything
+      # leaves bash. The mechanism is therefore measured in one log rather than
+      # argued from an error message — same runner, same job, bash step green on
+      # the option and `sh` script red on it — and it is why no `shell:` override
+      # belongs here: the step was not what was wrong. What was wrong was a
+      # script claiming POSIX in one comment and using a bash extension in the
+      # next line, which is fixed in the script and checked as `sh` by
+      # `ci.yml`'s lint job.
       - name: Build, package, checksum and check the artifact
         run: sh scripts/Build-Release.sh --phase all --target x86_64-unknown-linux-gnu --output-dir "$GITHUB_WORKSPACE/target/tmp/release"
 

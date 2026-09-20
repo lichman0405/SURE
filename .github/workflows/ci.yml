@@ -58,4 +58,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # `scripts/Build-Release.sh` is invoked as `sh scripts/Build-Release.sh` by
+      # all three artifact jobs in `release-dry-run.yml`, so `sh` is the shell it
+      # has to be checked against. This job checked it as `bash` until P15-T007,
+      # because shellcheck follows the shebang and the shebang said
+      # `#!/usr/bin/env bash` — which is why `set -o pipefail`, legal in bash and
+      # absent from the dash the script actually ran under, reddened the Linux
+      # release job while this lint stayed green. The file's shebang now says
+      # `#!/bin/sh`, and the dialect is pinned here as well rather than left to a
+      # first line a later edit could change back: the invocation in the workflow
+      # is what the script has to survive, and that is not on the file's first
+      # line. The one construct the file uses that POSIX `sh` does not have is
+      # `local`, which is why the file carries a single `# shellcheck
+      # disable=SC3043` at its top; everything else in it is checked as `sh`.
+      #
+      # The glob below still covers the file, by its shebang, so it is checked
+      # twice and by the same dialect. The rest of the line is about the other
+      # scripts: they are bash by construction and say so on their own first
+      # lines, and nothing about how they are checked changes here.
+      - run: shellcheck -s sh scripts/Build-Release.sh
       - run: shellcheck scripts/*.sh integrations/claude-code/scripts/*.sh integrations/cursor/scripts/*.sh

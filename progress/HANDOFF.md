@@ -3,9 +3,55 @@
 Last updated: 2026-09-19
 Branch: `claude/v0.1-autonomous`
 
-**In flight:** nothing, as of this paragraph. `P15-T002` — *"Build Windows x64 release artifact"* —
-is **accepted at `ae36719`**, over three worker commits (`0443625`, `794673c`, `ae36719`) from base
-`673df59`. It adds `scripts/Build-Release.ps1` and the paragraph in
+**In flight, uncommitted, and paused on a red gate.** A record amendment for `P15-T002` is complete in
+the worktree and **not committed**: it moves `P15-T002`'s `head_sha` to the repair commit, adds the
+repair, both CI readings and the three named gaps to its evidence, corrects a stale note in
+`tasks/tasks.json`, and regenerates `SHA256SUMS.txt`. Four files are modified — `progress/state.json`,
+`progress/HANDOFF.md`, `tasks/tasks.json`, `SHA256SUMS.txt` — and they are mutually consistent, the
+manifest's three changed digests matching the three files on disk. **`HEAD` is `d819d57` and equals
+`origin/claude/v0.1-autonomous`; nothing about this amendment is committed or pushed. Do not
+`git checkout --` those four files: they are the work.** It is held back rather than committed because
+the six gates are red at this tree, and a commit whose gate is known-red becomes a false green the
+moment someone reads the log as a pass.
+
+**The red gate is a false red whose cause is understood, and it is not this change.**
+`& .\target\tmp\gates.ps1 -Label p15t002-record` gave `fmt=0 clippy=0 test=101 bootstrap=0 taskctl=0
+nonwindows=0` with `passed=2622 failed=1`. The failure is
+`commands::tests::a_command_that_runs_never_answers_a_question_it_was_not_asked`, panicking at
+`crates/sure-cli/src/commands.rs:245` with *"no free store directory under
+`…\target\tmp\sure commands`"*. The cause, measured: `a_store_of_our_own` (`commands.rs:229`) creates one
+directory per call under a git-ignored `target/tmp` pool, **never removes it**, and makes at most 1_000
+attempts. `target/tmp/sure commands` now holds **1_122 directories, `store-0`…`store-1121`, contiguous
+with no gaps**, so the first call in any fresh process exhausts its 1,000 attempts and panics. Nothing
+about it is caused by the amendment, which touches four files no Rust test reads, and **CI cannot see it
+because CI starts with an empty `target/tmp`** — the same blind spot as the gate-6 exclusion. The same
+helper, identically written, sits at `crates/sure-cli/tests/mcp_protocol.rs:68` and
+`crates/sure-cli/src/mcp.rs:1047`.
+
+**What is *not* established, and is recorded as a question rather than as a mechanism.** By the reading
+above, every pool should fail once it holds `store-0`…`store-999` — but `sure mcp protocol` holds
+**2,289 contiguous directories and its 25 tests pass**, twice, including after a forced rebuild. I
+measured the scan starting from 0 by deleting `store-500` and watching the next run recreate it, and
+measured a run creating `store-2374` — an attempt index no 1,000-iteration loop can reach. I could not
+reconcile that with the identical source and am **not** asserting a cause. Treat "the pools are safe
+because CI is green" as unproven. My own experiments grew that pool by about 100 directories.
+
+**The first action on resume** is to clear the `sure commands` pool — 1_122 empty directories in a
+git-ignored scratch path, created by tests, removed by nobody — then re-run the six gates, expect
+`test=0`, and commit the amendment. **That is clearing a symptom, not a fix, and the fix already has an
+owner: `P15-T015`** — *"Stop the contract tests running out of scratch directories"* — minted for this
+helper from `P13-T004`'s verification, which records the allocator's real rule: a call needs a free name
+for *its own prefix* within 1,000 attempts of wherever the per-process counter stands, so the binding
+number is the highest index for the busiest prefix and not the total directory count, and which already
+warns that its older "about eight runs" figure must not be reused. A previous session cleared the
+subtree and the gates re-ran green, which is exactly the clean-up this paragraph prescribes and which
+fixes nothing. **Corrected 2026-09-20:** this paragraph first read that the leak "deserves a task of its
+own"; it did not, it already had one, and the claim was written without looking in `tasks/tasks.json`
+for a task whose title says this. Do not confuse the clean-up with a green.
+
+**Then,** and unchanged by any of the above: `P15-T002` — *"Build Windows x64 release artifact"* —
+is **accepted at `ae36719` and delivered at `d819d57`**, over three worker commits (`0443625`,
+`794673c`, `ae36719`) from base `673df59` plus the repair below. It adds `scripts/Build-Release.ps1` and the paragraph in
 `docs/development/RELEASE_PROCESS.md` that decides what a release artifact **is** — the format, the
 name, the layout inside it, the checksum — because that document had said only "Windows x64
 archive/package" plus "SHA-256 checksum", and `P15-T003` has to install what this produces. Measured
@@ -35,9 +81,59 @@ run into a fresh directory dies at `:718` → `:278` with `Could not find a part
 Checking a downloaded artifact in a new folder is the natural use of that phase, and it reports FAILED
 for a good archive. The parameter comment at `:200-202` also says Verify runs "without writing anything
 next to it", and it writes four log files into `$OutputDirectory\logs`. This is a false **red**, not a
-false green — it fails loudly and the artifact is unaffected — so it is recorded as an owed repair
+false green — it fails loudly and the artifact is unaffected — so it was recorded as an owed repair
 rather than treated as an acceptance blocker. Reproduction: `& .\scripts\Build-Release.ps1 -Phase
 Verify -OutputDirectory <fresh dir holding the zip and its .sha256>` → exit 1.
+
+**It is repaired at `d819d57`, which is now `P15-T002`'s `head_sha`.** The `New-Item` moved out of the
+`if ($Phase -eq 'All')` branch to immediately above it, so both phases reach it; the parameter comment
+now describes what the phase does, and says in terms that the **sentence** was changed rather than the
+behaviour, with the reason — what it writes is the run's own evidence, and a reader looking at a failed
+verification is already reading that directory; and a fourth mutation was added to the header. Verified
+by the supervisor in scratch directories of the supervisor's own making rather than taken from the
+hand-back: with `logs\` absent before the run, `-Phase Verify` against a directory holding only the
+archive and its `.sha256` now exits **0** and prints `OK the bytes that are checksummed are the bytes
+that were run`, with `running_from` still equal to the extraction directory; and an archive with one
+byte appended still exits **1** at the checksum comparison — `2fb0d05f…` expected against `3ace2834…`
+actual — stopping before extraction. The fix did not buy its green by removing a check. The accepted
+artifact is byte-identical after the repair, still 4045010 bytes with SHA-256 `2fb0d05f…`, so the
+acceptance readings above carry unchanged and `base_sha` does not move.
+
+**CI, read on the commits themselves and not on their dispatches.** Run **35441171735** on `d2e7888`
+(P15-T002's acceptance) is **success on all five jobs** — `rust (ubuntu-latest)` `105892093550`,
+`rust (macos-latest)` `105892093576`, `rust (windows-latest)` `105892093575`,
+`bootstrap-validate-windows` `105892093511`, `shellcheck-secondary` `105892093616` — with `headSha` read
+back from the API as `d2e7888…`. Run **35441573661** on `d819d57` (the repair) is **success on all
+five** — `rust (windows-latest)` `105893171895`, `rust (ubuntu-latest)` `105893171932`,
+`rust (macos-latest)` `105893171941`, `bootstrap-validate-windows` `105893171860`,
+`shellcheck-secondary` `105893171912`. **This is the correction the `P15-T001` false green demanded:**
+that acceptance cited run `35436798102` on the *dispatch* commit `f3d803a` as evidence about the work,
+and a dispatch carries no worker code. Both readings above are of the commit that holds the work, and
+the macOS job is the one that matters — it is where the `P15-T001` failure surfaced.
+
+**Three gaps the repair worker named are recorded rather than covered.** (1) `-Phase Verify` still needs
+`target/tmp/release-gate.json` to read `permitted` **in the checkout it is run from**, because the gate
+path is derived from the script's own location — so a person holding only a downloaded archive cannot
+run this phase at all, and *check a downloaded artifact in a fresh folder* is true of `-OutputDirectory`
+only. `P15-T003`'s brief has to carry this. (2) Verify writes `logs\` and `scratch\` into the directory
+holding the archive, so pointing it at a directory meant to stay undisturbed adds two subdirectories;
+the archive and its `.sha256` are never written. (3) The pre-repair line numbers in the mutation text
+(278/718) are the old file's, which is why the comments cite the mutation by content rather than by
+line; the current numbers are 313/778.
+
+**The next dispatch is `P7-T012`, and §14 is the reason rather than this thread.** `MASTER_PROMPT.md`
+§14 prefers *the lowest-numbered READY phase/task unless another ordering is required by the DAG*.
+`P7-T012`'s last dependency, `P7-T010`, was accepted **2026-09-18T14:33:28.669Z**, so it has been
+dispatchable since then. **It did not appear in this loop's ready list, and the reason is a truncation
+rather than a judgement:** `scripts/dev-context.mjs:8` prints `ready.slice(0, 8)` in `tasks/tasks.json`
+file order, the file lists the `P15` entries first, and there are **19** ready tasks by that script's
+own rule (line 6, reproduced rather than estimated). `P7-T012` sits **18th** of those 19 and `P7-T013`
+19th, so neither can ever reach a list cut at eight. The hook's `ready=` line is therefore a prefix of
+the ready set and not the set — a reader who takes it as the set will work the tail of the file forever.
+**The deviation is recorded rather than left silent:** the run drifted onto the `P14`/`P15` thread for a
+day while two lower-numbered tasks sat dispatchable, and the standing correction is to read the whole
+ready set rather than the hook's first eight. `P15-T003` is next after `P7-T012`, and its brief has to
+carry the `-Phase Verify` gate limitation above.
 
 **Before it,** `P15-T001` — *"Finalize `sure doctor` for
 Windows developer/user environment"* — is **accepted as `7720202` and repaired at `072ac9ee`**, over

@@ -170,6 +170,14 @@ tell them apart:
 | A store that holds events for *other* projects | The same, followed by `SURE also read N session events recorded for other projects; they are not part of this project's tier and were not counted.` |
 | A store that holds this project's session events | `(capability tier 1, observed) SURE counted N session events recorded for this project by codex, between <oldest> and <newest>.` — which is Tier 1, from the events rather than from a claim. |
 
+Each line below the first — the store was read, and counted nothing, something
+else's, or this project's events — is followed by `What SURE still cannot see:`
+and the gaps that remain at that tier. A project SURE counted nothing for
+therefore still says in full that it cannot see the session and cannot ask
+before a dangerous action; the counted sentence adds to that account rather than
+replacing it. The first line is the command line's own report and is unchanged
+by any of this.
+
 Three things this deliberately does **not** do:
 
 - **It does not raise the tier to Tier 2.** Events prove what happened, never

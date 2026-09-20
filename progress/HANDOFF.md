@@ -3,6 +3,18 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T007` is accepted at `87412f408cfac3fd19e86cf790542d73e450dad3`, and the Linux x64 artifact exists — because the run that was meant to produce it went red, and the reason was not this task.** The acceptance is *"Linux x64 Rust core/UX package builds/tests and checksum generated"*, and all three counts are earned: `sure-0.0.0-bootstrap-x86_64-unknown-linux-gnu.tar.gz`, **4599814 bytes**, sha256 **`44cd8357478cd2dbafaead10d71a4e56ff10ec86620cb9c8c26650e491c9bb2a`**, built and tested on the runner (`2648 passed; 0 failed; 12 ignored`), with its checksum generated and confirmed by the supervisor rather than by reading a report about it.
+
+**The first dispatch failed, in a way that is worth more than a first-dispatch success would have been.** Run `35524124026` on `70ef6dd`: five of six jobs green, and `package-linux` dead **9 ms** into its build step at `scripts/Build-Release.sh: 530: set: Illegal option -o pipefail`, exit 2, before the release gate was read and before anything was staged, built or written. The script is invoked as `sh scripts/Build-Release.sh` by all three artifact jobs; on macOS `/bin/sh` is bash 3.2, which accepts the option, and on the Ubuntu runner it is dash, which does not. **The defect is `P15-T005`'s** — `set -euo pipefail` and `#!/usr/bin/env bash` both come from `c522699`, confirmed with `git log -S` — and it had been green for two tasks because no target had ever run the script where `sh` is not bash. P15-T007 added that target and paid for the discovery.
+
+**The linter is why it stayed hidden, and that is the structural half of the fix.** `ci.yml` ran `shellcheck scripts/*.sh` with no `-s`, so shellcheck followed the shebang and checked the file as **bash**, where `pipefail` is perfectly legal. The job was validating the shebang's claim and never the invocation — and the script's own comment at line 31 already stated the contract correctly, naming dash, so the file carried a true sentence and a false first line and a linter that only read the first line. The shebang is now `#!/bin/sh` and the dialect is pinned as `shellcheck -s sh scripts/Build-Release.sh` rather than left to a first line a later edit could change back.
+
+**Deleting the option would have made the failure quieter instead of fixing it, and this is the part of the task that was not on the criterion.** Without `pipefail`, a pipeline's status is its last element's, so `written_bytes="$(wc -c <"$SHA_PATH" | tr -d ' ')"` reads as success when `wc` fails: `tr` takes empty input and succeeds, the variable holds the empty string, and `set -e` sees 0 and walks on. The check that consumes it is `[ "$written_bytes" -ne "$expected_bytes" ]`, and `test` answers an empty operand with **exit 2**, which `if` reads as false — so **the check is skipped, not failed**, and `set -e` cannot catch it because POSIX ignores `-e` for any command in an `if` condition. Measured under `sh`, `dash` and `bash` on this machine. Every number the script compares is now read by `count_of` / `count_char` / `require_whole_number`, which read the program's status and refuse a value that is not a whole number, and the nine pipelines that remain are each listed with the reason they are not this hazard.
+
+**No shell on this machine can see the defect, and one of them actively denies it.** MSYS's `dash` and WSL Ubuntu 26.04's `dash 0.5.12-12ubuntu3` both **accept** `set -o pipefail`; the pre-fix script run under this machine's dash exits 0 and prints its own help. So the first hand-back's claim that a local `sh`/`dash` comparison had closed the interpreter gap was not careless — it was the natural conclusion of a test that cannot fail — and the lesson is not "also test under dash" but that **no local shell is ever the runner's shell**. All three artifact jobs now print the interpreter beside `cc` and `objdump`, and the green run answers it in its own log: `sh  /usr/bin/sh -> /usr/bin/dash`, `sh version  0.5.12-6ubuntu5`. The failing run could not answer that question about itself, which is why its shell had to be inferred from the shape of an error message.
+
+**The artifact carries a cost that the documents now state.** Read off its own bytes, the highest `GLIBC_` symbol version it requires is **`GLIBC_2.39`**, so this binary needs **glibc ≥ 2.39** and will not run on Ubuntu 22.04 (2.35) or Debian 12 (2.36). That is the floor of the Ubuntu 24.04.5 runner it was built on, and the previous documents refused to name a floor at all because no artifact existed to read one from — which was the right refusal and is now the wrong silence. **Building in an older container to lower it is owed and not done.** The binary is also **not signed**: the signature step reports `not read`, with the reason that an ELF carries no signature field, and that is recorded as a measurement that did not happen rather than as a pass.
+
 **`P15-T019` is accepted at `bdbc361`, and the program a test executes is now published by a rename rather than written at the path it is run from.** The task is *"Make the program a test executes one that nothing is still writing"*, and it was **re-opened before it was dispatched**: criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the tree already held one that command cannot reach — `crates/sure-core/src/analysis_provider/mod.rs:591` writes its program with `fs::write`, copies nothing, and lives in a `#[cfg(test)]` module inside `src/`. Dispatched against the original wording this task would have closed having left a known instance of the class unfixed, and reported the class fixed. `6ca551c` widened the criterion from the mechanism to the property and added the reverse direction to criterion 2. The answer to the widened criterion is **five program sites, and exactly one of them the named search could not find**.
 
 The four it can find are `runtime_start.rs:397`, `service_supervisor.rs:180`, `process_runner.rs:691` and `winget_manifest.rs:1078` — the last a `Links/sure.exe` alias the launcher is then asked to start, and one this record had never named at all. The fifth is the `fs::write` above. The record before this task named two fixtures and said the failure rate was unknown; both are corrected in place now, and the rate is no longer unknown — of the 60 most recent `ci` runs on this branch the ubuntu test step executed **59** times, **47** with zero failures and **11 on `Text file busy (os error 26)` and nothing else**, about one in five.
@@ -3001,6 +3013,140 @@ after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
 
 **The next task is `P15-T019`, not `P15-T007`.** Its own re-open condition — *"if this one fails a tree that cannot be its cause twice more, the ordering decision is to be reopened rather than defended"* — is met: three trees that changed no Rust have now failed on the ETXTBSY flake (`0b0af1d`, `8342764`, `6226ce8`), against two that came back green (`f6706d4`, `a009f57`), and each occurrence was read to its test name, line and errno before it was counted. The old argument's second half still holds — this task's verification is a number of clean ubuntu runs, and those arrive one push at a time whatever the order — but the first half does not, and a leading indicator exists so that the reopening happens *before* a failure is hidden rather than after. Two things moved besides the count. The task's own criterion 1 named `grep -rn "fs::copy" crates/*/tests/` as the search that finds every site, and the fourth occurrence of the class, `crates/sure-core/src/analysis_provider/mod.rs:591`, is a site that command cannot reach — so the criterion has been widened from the mechanism to the property, and criterion 2 has gained the reverse direction that occurrence measured. And three of this window's ubuntu runs were red on trees the flake cannot be caused by, so every later acceptance pays a re-run to separate signal from noise.
+
+## What `P15-T007` added
+
+`read_elf_header` and `require_elf_arch` are the ELF counterparts of the two Mach-O readers, taking **twenty**
+bytes and comparing four fields one at a time — magic, `EI_CLASS`, `EI_DATA`, `e_machine` — printing `found`
+against `required` and refusing a mismatch by name. **The obvious repair is a false green and this is the
+whole point of the reader.** An ELF's first eight bytes are `7f454c4602010100` — magic, `EI_CLASS`, `EI_DATA`,
+`EI_VERSION`, `EI_OSABI` — and **that prefix is identical for `x86_64` and for `aarch64`**. A check written by
+analogy with the macOS one, magic plus the field that names the machine, would accept an arm64 ELF under a
+name that says x86_64 and report that it had checked. The discriminating field is `e_machine`, two
+little-endian bytes at **offset 18**: `3e00` is `EM_X86_64`, `b700` is `EM_AARCH64`.
+
+**Offsets 16-17 are deliberately not compared, and that is the half that is easy to get wrong.** They are
+`e_type`: `0300` is `ET_DYN` (a PIE) and `0200` is `ET_EXEC`. Which one a build produces is a property of the
+linker invocation and not a promise this repository has ever made, so a fixed twenty-byte prefix would refuse
+a legitimate artifact for a reason that has nothing to do with architecture — and Rust's Linux default is
+PIE, so it would refuse the real one. The shipped artifact confirms both halves: its header is
+`7f454c4602010100000000000000000003003e00`, `ET_DYN` at offsets 16-17 and `EM_X86_64` at 18-19.
+
+**Twelve rows over six kinds of bytes, and which of them are real.** The Linux name is exercised against a
+real x86_64 ELF (accepted), the same file with bytes 18-19 changed `3e00`→`b700` (**constructed**, refused), a
+real ELF32 ARM image, a real ELF32 i386 image, a real Mach-O and a real PE. The ARM32 and i386 refusals are
+**real linker output** — 57872 and 266684 bytes of ARM and i386 code with the correct `EI_CLASS`, `EI_OSABI`
+and `EM_*` fields, from binaries on this host. WSL hands out linker-produced x86_64 ELF images and no aarch64
+one, and no package may be installed to obtain one, so the arm64 refusal is the one row that is constructed;
+it is labelled as constructed everywhere it appears, and the two bytes changed are exactly the two the check
+compares. The supervisor re-read all eight fixtures' headers with `od` rather than accepting the transcript.
+
+**`set -euo pipefail` became `set -eu`, and three helpers took over what the option was covering.** In POSIX
+`sh` a pipeline's status is its last element's, so every pipeline whose *left* side can fail while its *right*
+side succeeds reads as a success; the shape in this file was the `wc` count, and the hazard was not a red job
+but a **skipped check** — `test` answers an empty operand with exit 2, `if` reads 2 as false, and `set -e`
+does not apply inside an `if` condition. `count_of` runs `wc` with both streams captured and its status read,
+reads the number back from the file it wrote rather than through a pipeline, and refuses anything that is not
+a whole number; `count_char` does the same in two status-checked steps; `require_whole_number` covers the two
+counts that are not `wc` output. Nine pipelines remain and each is listed above `count_of` with its reason —
+the digest fold, the two header readers, the entry-list `sort` and the `running from` `head` — and the last
+two each have a consumer that turns an empty result into a named failure.
+
+**The shebang is now `#!/bin/sh` and the lint checks the dialect the script is actually run in.** `ci.yml`
+gains `shellcheck -s sh scripts/Build-Release.sh` ahead of the unchanged glob, so the pin does not depend on a
+first line a later edit could change back. `local` is the one construct here that POSIX `sh` lacks — 53 uses —
+and it is covered by a single `# shellcheck disable=SC3043` on **line 2**, which is file-wide by the tool's
+own rule. **All three artifact jobs now print the interpreter** they will run the script with, beside `cc` and
+`objdump`, which is the reading whose absence made the failing run's own log unable to say which `sh` refused
+the option.
+
+**Three false sentences repaired, and two crates neither log contains.** The older text in three places named
+`libsqlite3-sys` as what the build stopped at. Neither the `P15-T006` macOS log nor the Linux log mentions
+`libsqlite3-sys` at all — **nor `rusqlite`** — and both stop at `ring`'s build script, `ring v0.17.14` being
+the crate named on the line that decides it. All three now say what the logs show and leave the correction
+visible rather than swapping a name in place; the two transcripts in `RELEASE_PROCESS.md` gained the
+identifying line and name the log's own line numbers, because a trimmed excerpt that omits the decisive line is
+how the wrong crate came to be named underneath it.
+
+## Validation of `P15-T007`
+
+**The first dispatch was red, and what it proved is worth more than a clean one.** Run `35524124026` on
+`70ef6dd`, attempt 1: `validate` on all three platforms and both macOS artifact jobs green, `Linux x64
+artifact` the only failure, dead **9 ms** into *"Build, package, checksum and check the artifact"* at
+`scripts/Build-Release.sh: 530: set: Illegal option -o pipefail`, exit 2, with the glibc read, the checksum
+re-read and the artifact upload all `skipped`. **The tests half of the acceptance was earned on that runner
+and stayed earned**: 81 `test result:` lines, 2648 passed, 0 failed, 12 ignored.
+
+**The mechanism was measured inside one log rather than argued from the error message, and that distinction
+is the reason the fix is shaped the way it is.** The same job, four steps earlier, runs its identity step
+under `shell: /usr/bin/bash -e {0}` — the log prints it — and that step contains a `set -euo pipefail` of its
+own and **succeeded**. So `pipefail` was legal to everything in the job except the one thing that left bash,
+and `sh scripts/Build-Release.sh` is the only thing that leaves bash. The statement the fix rests on is
+therefore *"bash's `pipefail` is not `sh`'s"*, not *"the runner's `/bin/sh` is dash"* — which is also true but
+was **inferred from the shape of an error message**, and a run that decides on the interpreter should not have
+to be read that way. All three artifact jobs now print it, and the green run answers directly: `sh
+/usr/bin/sh -> /usr/bin/dash`, `sh version 0.5.12-6ubuntu5`.
+
+**The defect is `P15-T005`'s and `git log -S` says so for both halves.** `set -euo pipefail` and
+`#!/usr/bin/env bash` each trace to `c522699`, the commit that created the script. It survived two green
+macOS dispatches because macOS's `/bin/sh` is bash 3.2, which is a property of that host and not a promise
+this repository ever made.
+
+**Deleting the option would have traded a red job for a quieter wrong answer, and the supervisor measured that
+rather than taking it from the hand-back.** Under `sh`, `dash` and `bash` on this machine,
+`[ "" -ne 1 ]` exits **2**; `if` reads any non-zero as false, so the check is **skipped**; and `set -e` does
+not save it, because POSIX ignores `-e` for any command in an `if` condition. A failing `wc` under the old
+shape would leave the variable empty, `tr` would succeed on empty input, the pipeline would report 0, and the
+run would reach its verdict having never compared the byte count. **The pipeline audit was verified rather
+than accepted**: every non-comment line of the script containing a pipe was listed independently and gives
+**nine** real pipelines — the other ten hits are `case` patterns and usage text — and the inventory names
+exactly those four groups. The consumer the inventory promises for `reported_from` was checked to exist
+(`:2192`), and no bare `wc` pipeline survives anywhere in the file.
+
+**Two claims the worker declared it could not measure were closed by the supervisor rather than left
+reasoned.** shellcheck is absent here and in WSL, so the `# shellcheck disable=SC3043` placement was reasoned,
+not run; the supervisor settled it from the tool's own rule — *"directives that replace or are immediately
+after the shebang apply to the entire script"* — with the directive on line 2 and no command between it and
+the shebang. An independent scan for every other construct `sh` mode flags found only arithmetic expansion,
+which is POSIX.
+
+**The second dispatch is green on all six jobs, and the artifact was verified by hand rather than read
+about.** Run `35526723850`, attempt 1, on `f727d5f`: **completed / success**, including both macOS jobs, so
+neither macOS path regressed — corroborated by a diff showing the only touched lines matching macOS constants
+are inside a comment. The supervisor downloaded the Linux archive and computed its digest: **`44cd8357…bb2a`
+at 4599814 bytes**, matching the run's own `RESULT` block exactly. The `.sha256` beside it is 119 bytes, 1 LF,
+0 CR; `sha256sum -c` run against it returns `OK`; the archive holds 4 entries; and the ELF header read out of
+the shipped binary is **`7f454c4602010100000000000000000003003e00`**, identical to what the script's reader
+reported and to what the local fixtures predicted. The extracted binary **ran**: `sure doctor`, exit 0,
+*"SURE 0.0.0-bootstrap (harness protocol 1), built for linux x86_64, C library gnu"*.
+
+**The artifact's cost is now stated instead of absent.** The glibc floor read off its own bytes is
+**`GLIBC_2.39`** (highest of `2.30`, `2.32`, `2.33`, `2.34`, `2.39`), so it requires **glibc ≥ 2.39** and will
+not run on Ubuntu 22.04 (2.35) or Debian 12 (2.36). It was **not** executed on an older distribution — the
+floor is read from the symbols the binary references, which is how such a floor is read, and that is the one
+thing this measurement is not. Lowering it by building in an older container is **owed and not done**. The
+binary is **not signed**, and the signature step says `not read` with its reason, which is a measurement that
+did not happen and is recorded as such.
+
+**No shell on this machine can reproduce the defect, and the supervisor confirmed that by trying.** MSYS's
+`dash` and WSL Ubuntu 26.04's `dash 0.5.12-12ubuntu3` both **accept** `set -o pipefail`; the **pre-fix** script
+run under this machine's dash exits 0 and prints its own help. The first hand-back's claim that a local
+`sh`/`dash` comparison had closed the interpreter gap was therefore the conclusion of a test that cannot fail,
+and the red run is its disproof. **No local shell is ever the runner's shell.**
+
+**Two omissions in the checking, both named.** The second hand-back did not mention `SHA256SUMS.txt` although
+both workflows it edited are listed there — and the brief had not asked for it either, so the omission was the
+supervisor's as much as the worker's. What caught it was `regen-sums.mjs` reporting `2 stale`, not a gate: the
+manifest is not gate-checked. It was regenerated to 195 entries, 19199 bytes, no trailing newline, 0 CR bytes.
+Separately, the supervisor's own `grep -c $'\r'` reported 195 CR bytes and nearly became a false alarm about a
+corrupted manifest; the `$'\r'` collapsed to an empty pattern inside the double-quoted command substitution,
+and `tr -dc '\r' | wc -c` gives the true count of **0**.
+
+**Local gates over the accepted tree**, `target/tmp/gates.ps1 -Label p15t007-pipefail-fix`: `exits: fmt=0
+clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`; `result-lines=81 passed=2676 failed=0 ignored=12
+not-ok=0`; `headers (case-sensitive): 71`; `bootstrap: SURE bootstrap validation OK: 17 phases, 191 tasks.`;
+`taskctl: state OK: 191 tasks`; `store identical: True` (`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`,
+348160 bytes, mtime unchanged); `worktree at start:` and `worktree:` identical.
 
 ## What `P15-T019` added
 
@@ -23289,4 +23435,5 @@ absent text.
 | `cargo test --workspace --all-features --no-fail-fast` | green |
 | `node scripts/validate-bootstrap.mjs` | green (17 phases, 166 tasks) |
 | `node scripts/taskctl.mjs validate` | green (state OK) |
+
 

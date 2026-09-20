@@ -3,6 +3,8 @@
 Last updated: 2026-09-21
 Branch: `claude/v0.1-autonomous`
 
+**`P15-T013` is accepted at `957324790bdf0fd6a19f5d83177bf93ae5fa21e6`, and the macOS half of the signing claim is now measured instead of merely written down.** The acceptance is *"If Apple credentials are unavailable, mark external limitation honestly"* and *"Do not fake signing/notarization."* Before this task, `signing_status.rs` mentioned "notariz" **zero** times, and the word "stapl" in any spelling appeared **nowhere in the tracked tree** — so the notarization half of *"nothing here is signed or notarized"* was carried by prose that nothing checked, while the signing half had rules behind it. The repair is a statement and a check over it: `docs/development/RELEASE_PROCESS.md` gains *`### macOS: no Developer ID, no notarization and no staple`* naming the three missing things and who would have to provide them, plus *`### What must not be claimed about macOS`* holding four families of overclaim; `crates/sure-testkit/tests/notarization_status.rs` (1409 lines, 7 tests, 37 `BREAKS` rows) measures both directions over eight files. **The load-bearing distinction is that `codesign -d`'s `Authority=` is a *signing* field and notarization "is not read by that step at all"** — the ticket Apple holds and the staple `xcrun stapler` attaches are not lines `codesign` can be asked for, so the notarization sentence rests on there being no notarization step in the build rather than on that reading. Nothing was added to the build: no step notarizes, no Apple credential exists, and neither archive has been launched on a Mac, which the statement says. Verified independently by injecting two edits the author did not write — `xcrun notarytool submit` into `scripts/Build-Release.sh` (4 of 7 tests red) and *"This archive has been notarized by Apple."* into `MACOS.md` (3 of 7 red) — with both files restored byte-identical.
+
 **`ci` was red for eight consecutive runs and this file recorded none of them; the run that ends the streak is `35535737108`.** `P15-T016`'s first criterion is *"a run of the `ci` workflow on this branch has all five jobs green ... and the run id is named in the hand-back so the claim can be checked rather than believed."* The green half went false at `f727d5f` and stayed false for eight runs. Seven of them failed `shellcheck-secondary` alone on the same `SC3013` at `scripts/Build-Release.sh:1509` — a non-POSIX `-nt` that `P15-T005` wrote and `P15-T007`'s dialect pin correctly reported. The eighth is the repair's own run, and it failed for a different reason: fixing step one let step two execute for the first time since the pin, and step two immediately found `SC2016` in `P15-T011`'s `scripts/Assemble-Release.sh`. So the repair did not end the streak; it moved the red from one step to the next, which is the case for repairing a red build rather than silencing it. The recording half had stopped earlier still — the newest run id in any table here is `35426296617`, and `grep -c` returns **0** for all ten run ids involved, including the failing half of a pair where the successful half was written down — so the failure the 75-run section below was written to end had already happened a second time, because what that section built was a reading and not a guard. The detail is in *The second red streak* below.
 
 **`P15-T012` is accepted at `29098ab719f7ce74583055f666b11f6c5cad0506`, and the Windows build no longer *says* it is unsigned — it asks, and records the answer.** The acceptance is *"If Authenticode/code-signing credentials are unavailable, mark external limitation honestly"* and *"Do not fake signing or claim SmartScreen reputation."* Five places in this repository asserted the build carried no signature and **not one of them had read the signature**: `scripts/Build-Release.ps1` wrote an unconditional `THIS BUILD IS UNSIGNED` paragraph into the archive's own `RELEASE.txt` without ever opening the file it described, while `scripts/Build-Release.sh` had been reading the macOS artifact with `codesign -d` all along and its Linux branch reports `not read` *with its reason*. Windows was the platform that asserted where the other two measured or explained. Measured against `HEAD` before the commit, `git grep -i -E 'UNSIGNED|authenticode' HEAD -- 'crates/*/tests/*.rs'` returned **nothing**, so all five sentences could have been deleted with every gate staying green.
@@ -2788,6 +2790,122 @@ twice more, this placement is to be reconsidered rather than defended. `P7-T010`
 both are accepted along with `P1-T012`; `P14-T013` joined the list when
 `P7-T011` gave the corpus's own record an owner, and `P7-T013` when `P12-T007`'s
 verification found that recorded events never reach the verdict's tier.
+
+## What `P15-T013` added
+
+The task is *"Document secondary macOS signing/notarization status"*, and
+`docs/development/RELEASE_PROCESS.md:855-859` handed it over by name: the macOS
+signature *"is read"* by `codesign -d`, but **"notarization is not read by that
+step at all, because nothing in the build notarizes, and that half is
+`P15-T013`'s question rather than this one's."**
+
+**The gap was measured before it was filled, and it was a gap in both
+directions.** At `HEAD~1`:
+
+    git grep -c -i -E "notarytool|stapler|spctl|altool|xcrun"   -> nothing
+    git grep -c -i "stapl"                                      -> nothing
+    grep -c -i "notariz" crates/sure-testkit/tests/signing_status.rs -> 0
+
+So the repository said *"nothing here is signed or notarized"* in at least five
+places, and the notarization half of that sentence was checked by nothing at
+all. The signing half had `signing_status.rs` behind it — 7 tests, 25 `BREAKS`
+rows — which is exactly why the notarization half read as covered when it was
+not: the sentence names both halves, and one of them had a guard.
+
+**What was added.** A statement and a check over it:
+
+- `docs/development/RELEASE_PROCESS.md` gains *`### macOS: no Developer ID, no
+  notarization and no staple`* (`:852`) — naming the three missing things (a
+  Developer ID Application certificate, a notarization credential, the Apple
+  Developer Program membership both belong to), who would have to provide them,
+  the consequence for a downloader, and the explicit boundary that *"Nothing in
+  this repository asks anyone to turn Gatekeeper off"*. It gains *`### What must
+  not be claimed about macOS`* (`:922`) holding four families of overclaim.
+- `crates/sure-testkit/tests/notarization_status.rs` — 1409 lines, 7 tests, **37
+  `BREAKS` rows**, over `CORPUS` (8 files): presence rules for the statement,
+  structural rules that fail the moment a notarization tool or an Apple
+  credential enters the build path, and four forbidden-phrase families for the
+  forms that would overclaim.
+- `docs/development/MACOS.md` — two lines, pointing the platform document at the
+  authoritative section.
+
+**The distinction the task exists for.** `codesign -d --verbose=2` prints
+`Authority=`, which a *certificate* produces. It is a signing field. There is no
+notarization field in a Mach-O for it to print — notarization produces a ticket
+Apple holds and a staple `xcrun stapler` attaches. So the sentence *"notarization
+is not read by that step at all"* is true for a reason that has nothing to do
+with the reading being incomplete, and the test fails if that distinction is
+dropped. *Unnotarized* and *unstapled* are one state reported twice.
+
+## Validation of `P15-T013`
+
+**Supervisor verification, independent of the author's report.** The author's
+`BREAKS` table proves the checker reacts to the author's own edits. That is a
+weaker claim than it looks, because the author chose both the edit and the
+assertion, so the supervisor injected **two edits the author did not write** and
+confirmed the checker catches them:
+
+| injected into | edit | result | restored |
+| --- | --- | --- | --- |
+| `scripts/Build-Release.sh` | `xcrun notarytool submit "$extracted_binary" --wait` | **4 of 7 tests red**, with *carries "notarytool", and the build path names Apple's notarization client…* | byte-identical |
+| `docs/development/MACOS.md` | `This archive has been notarized by Apple.` | **3 of 7 tests red**, with *carries "has been notarized"… (this would claim a notarization that never happened)* | byte-identical |
+
+Both files were confirmed restored by sha256 before and after, and the worktree
+returned to clean. This is the check that the rules hold edits nobody rehearsed.
+
+**The nine failures the author reported were its sandbox, and that is now
+measured rather than argued.** The author's `cargo test -p sure-testkit
+--no-fail-fast` reported `hook_failure_semantics` 1 passed / 4 failed and
+`integration_thinness` 49 passed / 5 failed, all `UnauthorizedAccess` from
+PowerShell script execution being disabled in its environment. The same two
+targets were run from native PowerShell and **both are clean**: 5 passed / 0
+failed and 54 passed / 0 failed. The author named the trap, declined to work
+around it, and asked for exactly this confirmation — which is the outcome the
+brief asks for, and it is recorded here because "the worker could not run it"
+and "it does not pass" are different facts and only one of them is true.
+
+**The enumeration was checked rather than assumed.** The new section says the
+build path is *"`scripts/Build-Release.sh`, `scripts/Build-Release.ps1`,
+`scripts/Assemble-Release.sh` and the three files in `.github/workflows/`."*
+`.github/workflows/` contains exactly `ci.yml`, `release.yml` and
+`release-dry-run.yml`, and all three are in the test's `BUILD_PATH`. A rule scoped
+to a hand-written file list is only as good as the list, so the list was counted.
+
+**Found and not fixed, by the author, and left that way.** `scripts/Build-Release.sh:1694-1714`
+carries a conflation hazard — the archive's own `RELEASE.txt` opens
+`THIS BUILD CARRIES NO APPLE DEVELOPER ID SIGNATURE AND NOTHING NOTARIZES IT` and
+then says *"the bytes are read"*, which a fast reader can take as covering both
+halves. It was not edited because those bytes are pinned by a recorded
+measurement (`:430-439`: the arm64 `RELEASE.txt` is identical across `6226ce8`
+and the current file apart from the `built at` timestamp), so an edit would
+invalidate a measurement that can only be re-earned on macOS CI. Reporting an
+edit that would cost more than it buys is the right call; the distinction is
+stated explicitly in the new section instead. Also reported and not edited:
+`.github/workflows/release.yml:693` states two thirds of the state (it says
+signed-or-notarized but never names stapling).
+
+**Cannot confirm, and stated rather than papered over.** Nothing here can
+observe a Mac: neither archive has been downloaded by a person and launched, so
+what Gatekeeper does with either *"is unobserved here and stays unobserved"*, and
+the test fails if that boundary sentence is dropped. No Apple account, no
+`notarytool` credential and no ticket exist, so a notarization cannot be shown to
+succeed even hypothetically, and no file claims one did.
+
+**Chain-rule backfill.** `6308b4a`'s own push started a run that did not exist
+when `6308b4a` was written, so it had no row anywhere. Read from the API at this
+acceptance, job by job:
+
+| run | commit | workflow | result |
+| --- | --- | --- | --- |
+| `35536191597` | `6308b4a` | `ci` | `completed / success`, all five jobs |
+
+It is the second consecutive green run, and it is green on a commit that touches
+no shell script at all — so it does not independently re-test `P15-T016`'s two
+repairs. What it establishes is narrower and worth stating: the workflow stays
+green across a push that does not itself make it green. `release-dry-run` did
+not trigger for that push, which is expected (`workflow_dispatch`-only) and is
+recorded so a later reader comparing run counts does not read the difference as
+a gap.
 
 ## The second red streak: eight runs across two findings, and ten run ids this file does not contain
 

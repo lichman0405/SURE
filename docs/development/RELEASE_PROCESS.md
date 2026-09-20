@@ -23,11 +23,12 @@ Decided by `P15-T002` and produced by `scripts/Build-Release.ps1`:
 | layout | one top-level directory of the same name, holding `sure.exe`, `LICENSE` and `RELEASE.txt` |
 | checksum | `<archive>.sha256` beside it: one `sha256sum`-format line, `<64 lowercase hex><two spaces><file name>`, ASCII, no BOM |
 | where | `target/tmp/release/` by default. `target/` is gitignored, so no binary is committed |
-| signature | none. See `## Signing` below |
+| signature | read rather than assumed, and recorded in the archive's own `RELEASE.txt` as a `signature` line: `not-signed`, `signed` (which fails the run) or `cannot-confirm`. See `## Signing` below |
 
 `RELEASE.txt` travels inside the archive and carries the commit it was built
 from, whether the worktree was clean at the time, the `rustc` that built it, the
-SHA-256 of `sure.exe`, and the release gate's decision.
+SHA-256 of `sure.exe`, the signature state read off that `sure.exe`, and the
+release gate's decision.
 
 The checksum is **over the artifact**. It is deliberately not an entry in
 `SHA256SUMS.txt`: that file is a curated manifest over a subset of the source
@@ -713,8 +714,153 @@ not own, and no package exists there.
 
 ## Signing
 
-Authenticode/code-signing credentials are external. If unavailable, document the unsigned state and expected Windows warnings. Do not fake signing.
+**This section is the authoritative statement of the signing limitation.** The
+other four places that say the Windows build is unsigned — `RELEASE.txt` inside
+the archive, `scripts/Install-Sure.ps1`'s output,
+`docs/development/INSTALL_WINDOWS.md` and `.github/workflows/release.yml`'s
+release notes — each restate it for the moment a reader meets it, and each points
+here for the reason. Nothing in this section is a policy a script could have
+guessed: every claim in it about the Windows binary is either read off the bytes
+or named as unmeasurable.
 
-Apple Developer ID signing/notarization is likewise an optional external credential-dependent enhancement for macOS artifacts.
+Authenticode/code-signing credentials are external. If unavailable, document the
+unsigned state and expected Windows warnings. Do not fake signing.
 
-For Linux there is no field to sign into and none to read: a signature over an ELF is a detached file beside it, never a field inside the image. So `package-linux`'s *Signature* step reports `not read` and gives that as its reason rather than letting the absence of a value read as a pass.
+### Windows: the state is read, not asserted
+
+`scripts/Build-Release.ps1` asks Windows its own question about the `sure.exe` it
+is about to put in the archive — `Get-AuthenticodeSignature`, the cmdlet Windows
+provides for exactly this — and writes the answer into the archive's
+`RELEASE.txt` as a `signature` line in the header block. The sentence in that
+file is **selected by the reading**, so the archive's own text cannot say
+something the run did not read. Three states exist, and there is no fourth:
+
+| `signature` | what was read | what happens |
+| --- | --- | --- |
+| `not-signed` | the cmdlet answered `Status` = `NotSigned`, with no signer certificate and no signature type | the archive is packaged; `RELEASE.txt` says the binary carries no Authenticode signature, and says that this was read |
+| `signed` | a signer certificate or a signature type came back | **the run fails, before anything is packaged**, naming the four files this repository would otherwise be contradicting |
+| `cannot-confirm` | the cmdlet was not available in the host, threw, or answered something that is neither | the archive is packaged; `RELEASE.txt` says the state **was not read** and names why, and the result block prints that this is not a pass |
+
+**`cannot-confirm` does not fail the packaging step, and that is deliberate.**
+`Get-AuthenticodeSignature` ships in the module `Microsoft.PowerShell.Security`,
+which does not load in a constrained host, on a stripped image, or from a
+`PSModulePath` that cannot find it, so a host exists in which the question cannot
+be asked at all. A missing credential is an *external* limitation — the whole of
+what this task's acceptance asks to be marked — and a packaging step that refused
+here would make the Windows artifact unbuildable on a legitimate machine. A check
+that makes a build impossible is a check somebody deletes. So it is recorded in
+three places rather than enforced in one: the run's output, the archive's
+`RELEASE.txt`, and the result block. It is a stated limitation beside a
+successful packaging run. It is never a pass.
+
+That reading also produced a measurement worth recording, because it argues
+against a simpler design this could have had: **the cmdlet does not answer
+uniformly about bytes that are not an image.** On 2026-09-21, on one machine, a
+plain `.txt` file answered `UnknownError` and a `.ps1` file answered `NotSigned`.
+So `not-signed` cannot be inferred from "the cmdlet did not complain", which is
+why the third state exists rather than a two-way branch, and why the reader only
+reports `not-signed` when the status is exactly that. The file this script asks
+about is a PE it has just built, and the reading is trusted for that file because
+the answer was measured for that file.
+
+**A signature appearing fails the run.** That looks like the opposite of
+honesty and is the same thing. Four files in this repository are written on the
+footing that this binary carries no signature — the installer's own output,
+`INSTALL_WINDOWS.md`, this section and the release notes — so a signed binary
+would contradict every one of them at the moment a user read it, with nothing
+else in the tree to notice. Three of the four state it outright. The fourth,
+`scripts/Install-Sure.ps1`, reports the state the archive carries rather than a
+state of its own, and declares a signed archive one this project does not build;
+it is in the list because that is what a signed binary would make it change. The
+failure prints each file and stops before anything is packaged.
+`scripts/Build-Release.sh` has the same rule for macOS, keyed on an `Authority=`
+line, and gives the same reason: an archive whose own text contradicts its own
+bytes is the shape this repository exists to refuse.
+
+**The reading is taken twice.** Once on the staged `sure.exe`, before
+`RELEASE.txt` is written, so the sentence is a function of the reading. Once
+again on the extracted `sure.exe` after extraction, in both phases, and compared
+against the `signature` line the archive carries. The second is why
+`-Phase Verify` reports a signature state at all: that phase stages nothing, so
+without it the whole claim on a verified archive would be the archive's own
+sentence about itself. A claim *weaker* than the reading — an archive recording
+`cannot-confirm` whose binary is in fact unsigned — is printed as a note rather
+than failed, because the failure mode being guarded here is a claim stronger
+than the reading, not a claim weaker than it.
+
+### What is measured, and what is not
+
+`There is no Authenticode signature on this file` is a fact about bytes. It is
+measured on the machine that built them, and it is the only thing about signing
+this project can state.
+
+**SmartScreen is not measurable here at all.** It is a Microsoft service driven
+by download telemetry this project does not hold and cannot observe. Nothing in
+this repository has ever seen the prompt: no test runs an unsigned binary through
+a download-marked file and observes what Windows does, and
+`docs/development/INSTALL_WINDOWS.md`'s `## What is not covered` says so in the
+same words. What can be said is that the binary is unsigned and that Windows
+**may** warn. Which of those two a particular person meets depends on the
+Mark-of-the-Web on their copy, their SmartScreen settings and their
+organisation's policy, none of which this repository can see.
+
+### What must not be written
+
+The acceptance is *"Do not fake signing or claim SmartScreen reputation."* That
+rules out, specifically and not as a general principle:
+
+* **Any statement that a reader will not meet a warning.** *No SmartScreen
+  prompt*, *you will not be warned*, *nothing will appear*, *this avoids the
+  SmartScreen warning*. Nothing here can observe what their machine does.
+* **Reputation as a promise about this binary.** *Reputation builds over time*,
+  *once it has been downloaded enough the warning stops*, *SmartScreen will trust
+  it*. Reputation is a Microsoft service driven by telemetry this project does
+  not have; a promise about it is a promise about somebody else's system.
+* **Signing presented as free, instant, or already done.** *Signing is free*,
+  *the certificate is configured*, *signed by SURE*. No certificate is held, none
+  is configured, and the cost of one is not this project's to quote.
+* **The absence presented as a neutral fact.** *No signature is required*, *the
+  signature state is informational*, *this does not affect anything*. A person
+  who runs the program may meet a prompt, and the sentence has to leave them
+  expecting that rather than surprised by it.
+* **A definite prompt, in the other direction.** *Windows will warn* over-commits
+  for the same reason *Windows will not warn* does: the outcome belongs to a
+  service this project cannot observe. The honest form is **may**.
+
+`crates/sure-testkit/tests/signing_status.rs` holds the bullets above as **four**
+families of strings it fails on, over the three files that make the claim to a
+reader. The count is four rather than five because the first two bullets are one
+family: a claim about SmartScreen reputation covers both the promise that it
+accrues over time and the assertion that a reader meets no warning, which are the
+same claim about somebody else's service written in opposite directions. The
+remaining three bullets are the other three families. That test's own header says
+what it cannot do: a list of phrases cannot contain the phrasing nobody thought
+of, and no test can prove what a user will not see.
+
+**One site is known to break the last bullet today, and it is named rather than
+left to be found.** `packaging/winget/template/lichman0405.SURE.locale.en-US.yaml`
+tells a `winget show` reader that "Windows SmartScreen will warn the first time it
+runs", which is the definite form this section rules out — the honest word there
+is *may*. That file is `P15-T004`'s artifact rather than this task's, so
+`P15-T012` reported it instead of editing it, and the phrasing rule above does not
+scan it: adding it to the scanned set would fail the build with no fix available
+inside this task. Whichever task next opens that file should correct the sentence
+and add it to `SCANNED_FOR_PHRASING` in the same change. The same paragraph
+appears in `docs/development/INSTALL_WINGET.md`, where it correctly says **may**,
+so the document and the manifest it describes currently disagree.
+
+### The other platforms
+
+Apple Developer ID signing/notarization is likewise an optional external
+credential-dependent enhancement for macOS artifacts. `scripts/Build-Release.sh`
+already reads the macOS artifact's signature with `codesign -d` and reports it,
+which is the standard the Windows half above was brought up to; **notarization
+is not read by that step at all**, because nothing in the build notarizes, and
+that half is `P15-T013`'s question rather than this one's.
+
+For Linux there is no field to sign into and none to read: a signature over an
+ELF is a detached file beside it, never a field inside the image. So
+`package-linux`'s *Signature* step reports `not read` and gives that as its
+reason rather than letting the absence of a value read as a pass. That is the
+same rule as the Windows `cannot-confirm` row above, and it is where the rule
+came from.

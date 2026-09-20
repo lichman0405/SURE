@@ -146,6 +146,68 @@
 #   unrelated-sounding message surface - see the guard above the run step.
 #
 # =============================================================================
+# The signature: read rather than asserted (P15-T012)
+# =============================================================================
+#
+# Until `P15-T012` this script wrote a flat heading into the archive's
+# `RELEASE.txt` and **never once looked at the file it was talking about**. That
+# is a false green of the quietest kind - true on the day it was written, and
+# silently false from the moment anybody signs a build - and it was also the one
+# platform that behaved that way. `scripts/Build-Release.sh` has had a
+# *Signature* step all along: `codesign -d` reads the macOS artifact's signature
+# and the reading is printed, and its Linux branch reports `not read` **and gives
+# the reason**. Windows asserted. This closes that.
+#
+# The reading is `Get-AuthenticodeSignature` on the `sure.exe` that is about to
+# be zipped, and it has **three** outcomes rather than two, because a reader that
+# did not answer is not an observation of absence:
+#
+#   not-signed       The cmdlet answered `Status` = `NotSigned` with no signer
+#                    certificate and no signature type. This is a measurement,
+#                    and it is the only state in which `RELEASE.txt` may say the
+#                    binary carries no Authenticode signature.
+#   signed           A signer certificate or a signature type was read. **The run
+#                    fails**, before anything is staged into the archive, and the
+#                    failure names every file in this repository that would
+#                    otherwise be lying about it. This is `Build-Release.sh`'s
+#                    `Authority=` rule, one platform over: an archive whose own
+#                    text contradicts its own bytes is the shape this repository
+#                    exists to refuse.
+#   cannot-confirm   The cmdlet could not be reached, or did not answer in a form
+#                    this script can read. It ships in
+#                    `Microsoft.PowerShell.Security`, which does not load in a
+#                    constrained host, a stripped image, or a session whose
+#                    `PSModulePath` cannot find it, so a host exists in which the
+#                    question cannot be asked at all. **The run does not fail.** A
+#                    missing credential is an *external* limitation, which is the
+#                    whole of what `P15-T012`'s acceptance asks to be marked
+#                    honestly; a packaging step that refused here would make the
+#                    Windows artifact unbuildable on a legitimate machine, and a
+#                    check that makes a build impossible is a check somebody
+#                    deletes. So the state is written into `RELEASE.txt`, printed,
+#                    and repeated in the result block - a stated limitation
+#                    beside a successful packaging run, never a pass.
+#
+# **What is measurable here and what is not.** `There is no Authenticode
+# signature on this file` is a fact about bytes, and it is measured on the
+# machine that built them. What Windows then *does* with the program - whether a
+# given person meets a prompt, in either direction - is a fact about SmartScreen,
+# a Microsoft service driven by download telemetry this project does not hold and
+# cannot observe. No run here has ever seen the prompt, so this script does not
+# get to have an opinion about it: what it can say is that the binary is unsigned
+# and that Windows **may** warn. `docs/development/RELEASE_PROCESS.md`'s
+# `## Signing` is where that boundary and the list of things that must not be
+# written about it are kept.
+#
+# The reading is taken **twice**, and the second one is why this is a measurement
+# rather than a note: once on the staged `sure.exe` before `RELEASE.txt` is
+# written, so the sentence in the archive is a function of the reading rather
+# than a constant beside it; and once again on the extracted `sure.exe` after
+# extraction, in both phases, compared against what `RELEASE.txt` says. That is
+# this script's own rule - "the writer checked its own work" and "something else
+# re-read it later" are different claims - applied to the signature.
+#
+# =============================================================================
 # Falsifiability - what reddens this script
 # =============================================================================
 #
@@ -212,6 +274,25 @@
 # Deleting the line instead of moving it is a *different* mutation with a wider
 # blast radius: `-Phase All` redirects into `logs\` in its own first step, so
 # that version reddens both phases rather than only `Verify`.
+#
+# **Mutation 4 - take the reading back out and assert the sentence again.** This
+# is the mutation `P15-T012` is about, and it is a mutation of a *check's
+# existence* rather than of a check's behaviour, so it is named here with what it
+# does and does not do. Delete the `Get-SignatureReading` call and write the
+# unsigned paragraph into `RELEASE.txt` unconditionally, as this script did
+# before that task: the archive is still produced, the checksum still matches,
+# the extracted binary still runs, and every assertion below still agrees,
+# because every assertion below is about the *archive* and none of them is about
+# whether the sentence inside it was earned. Nothing in this script can notice
+# that shape - a script cannot see that a claim it made was never measured.
+#
+# The guard against it is therefore not here. It is
+# `crates/sure-testkit/tests/signing_status.rs`, which reads this file as text
+# and fails if the reading leaves it. That test's own header says what that buys
+# and what it does not: it proves the mechanism is still written in this file, and
+# it cannot prove the branch is taken at run time. What says the branch was taken
+# is this script's own output for a real run, which is the evidence `P15-T012`'s
+# hand-back carries; it is not a property a test can hold.
 #
 # A third property - that this cannot pass over a stale extraction - is not
 # asserted by a mutation but by construction: the extraction directory is
@@ -335,6 +416,142 @@ function Read-Captured {
 function Get-Sha256 {
     param([Parameter(Mandatory)][string] $Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+# Ask Windows whether a file carries an Authenticode signature, and report the
+# answer in a shape the rest of this script can branch on.
+#
+# Returns an object with three fields:
+#
+#   State    'not-signed', 'signed', or 'cannot-confirm'. These are the only
+#            three, and the third one exists because **a reader that failed is
+#            not an observation of absence**. Reporting 'not-signed' from a
+#            reading that did not happen is the false green this repository
+#            exists to prevent, one layer down: the sentence would sound exactly
+#            like the measured one and would rest on nothing.
+#   Status   what the cmdlet said, in its own words, or an English description of
+#            why there was no reading at all.
+#   Detail   one line: what was asked, and what came back.
+#
+# **The cmdlet ships in `Microsoft.PowerShell.Security`**, and that is not a
+# detail. Measured 2026-09-21 on the machine this was written on:
+# `(Get-Command Get-AuthenticodeSignature).ModuleName` is
+# `Microsoft.PowerShell.Security`. A PowerShell host started in a constrained
+# runner, a stripped image or with a `PSModulePath` that cannot find the module
+# is a machine where the question cannot be asked at all - `Get-Command` returns
+# nothing and this function returns `cannot-confirm` rather than `not-signed`.
+#
+# **`Status` is compared; `StatusMessage` is not read at all.** `Status` is the
+# `SignatureStatus` enumeration's name and is the same word in every locale;
+# `StatusMessage` is prose in the machine's language. Measured 2026-09-21: on
+# this machine the `NotSigned` message came back in Chinese. A comparison or a
+# printed sentence built from it would be a check whose meaning depends on the
+# reader's locale.
+#
+# Measured 2026-09-21 on this machine, so that the branch table above is read
+# off real answers rather than imagined ones:
+#
+#   the built target\...\release\sure.exe   Status NotSigned,    no signer, Type None
+#   C:\Windows\System32\notepad.exe         Status Valid,        signer CN=Microsoft Windows, Type Catalog
+#   a plain .txt file                       Status UnknownError, no signer, Type None
+#   this script's own .ps1 file             Status NotSigned,    no signer, Type None
+#   a path that is not there                throws FileNotFoundException
+#   a directory                             throws FileNotFoundException
+#
+# The two non-PE lines are the ones that shaped this function, and they do not
+# say the same thing. A `.txt` file answered `UnknownError` and a `.ps1` file
+# answered `NotSigned` on the same machine, so **what the cmdlet says about
+# bytes that are not an image is not uniform**, and an extension is not enough
+# to predict it. That is the whole reason the third state exists rather than a
+# two-way branch on `NotSigned`: the only file this script ever asks about is a
+# PE it has just built, and the reading is trusted for that file because the
+# answer was measured for that file - not because the cmdlet is assumed to
+# behave uniformly. What this function must never do is turn an answer it did
+# not get into the answer `not-signed`.
+function Get-SignatureReading {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $reading = [pscustomobject]@{
+        State  = 'cannot-confirm'
+        Status = 'not asked'
+        Detail = ''
+    }
+
+    # Resolved before it is called, because "never asked" and "asked and did not
+    # answer" are different facts and the sentence a reader gets should name
+    # which one happened.
+    $cmdlet = Get-Command -Name 'Get-AuthenticodeSignature' -ErrorAction SilentlyContinue
+    if ($null -eq $cmdlet) {
+        $reading.Status = 'unavailable'
+        $reading.Detail = 'Get-AuthenticodeSignature is not available in this PowerShell host, so the question was not asked'
+        return $reading
+    }
+
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        $reading.Status = 'threw'
+        $reading.Detail = "Get-AuthenticodeSignature threw $($_.Exception.GetType().Name), so it did not answer"
+        return $reading
+    }
+    if ($null -eq $signature) {
+        $reading.Status = 'nothing'
+        $reading.Detail = 'Get-AuthenticodeSignature returned nothing, which is not an answer either way'
+        return $reading
+    }
+
+    $reading.Status = [string] $signature.Status
+    $hasSigner = $null -ne $signature.SignerCertificate
+    $hasType = $null -ne $signature.SignatureType -and [string] $signature.SignatureType -ne 'None'
+
+    if ($hasSigner -or $hasType) {
+        $reading.State = 'signed'
+        $subject = if ($hasSigner) { [string] $signature.SignerCertificate.Subject } else { 'no signer certificate came back with it' }
+        $reading.Detail = "Get-AuthenticodeSignature read a signature: Status $($reading.Status), SignatureType $($signature.SignatureType), signer $subject"
+    } elseif ($reading.Status -eq 'NotSigned') {
+        $reading.State = 'not-signed'
+        $reading.Detail = 'Get-AuthenticodeSignature reported NotSigned, with no signer certificate and no signature type'
+    } else {
+        $reading.Detail = "Get-AuthenticodeSignature reported $($reading.Status), which is neither a signature that was read nor a statement that there is none, so this is not a reading of absence"
+    }
+    return $reading
+}
+
+# Read the `signature` token out of a `RELEASE.txt`.
+#
+# The top of that file is a title line followed by an indented block of
+# `label  value` lines, and the prose sections come after it at column 0. The
+# block is therefore the run of indented lines, and the label is looked for only
+# inside it: everything below is sentences, and several of them contain the word
+# "signature" without being a statement of one.
+#
+# This function's text is **identical** in `scripts/Build-Release.ps1` and
+# `scripts/Install-Sure.ps1`, which are the two things that read this file. There
+# is no shared module between them, and two copies of a reader are two readers
+# unless something holds them together, so
+# `crates/sure-testkit/tests/signing_status.rs` compares the two definitions
+# character for character and fails if either is edited alone. A fix to one has
+# to be a fix to both, or it is not a fix.
+#
+# It returns the token, or the empty string when there is no line - including
+# when the file is not there at all. The empty string is not a state: it means
+# the state was not stated, and callers report it as such.
+function Get-StatedSignature {
+    param([Parameter(Mandatory)][string] $Path)
+    $token = ''
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $token }
+    $inBlock = $false
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        if ($line.Trim() -eq '') { continue }
+        $indented = $line.StartsWith(' ') -or $line.StartsWith("`t")
+        if (-not $indented) {
+            if ($inBlock) { break }
+            continue
+        }
+        $inBlock = $true
+        if ($line.Trim() -match '^signature\s+(\S+)') { $token = $Matches[1]; break }
+    }
+    return $token
 }
 
 function Fail {
@@ -537,6 +754,113 @@ Re-run it:  cargo test -p sure-core --test acceptance_report_runner
         $rustcVersion = ((Read-Captured -Path $rustcOut) -split "`r?`n" | Select-Object -First 1)
 
         $exeDigest = Get-Sha256 -Path $stagedExe
+
+        # ---------------------------------------------------------------------
+        # 3b. The signature, read from the bytes that are about to be zipped.
+        #
+        # It has to happen here - before `RELEASE.txt` is written - because the
+        # paragraph that goes into that file is *selected by* this reading. A
+        # sentence about a file, written next to no reading of it, is the false
+        # green this step exists to remove: it is true on the day it is written
+        # and silently false from the moment anybody signs a build.
+        #
+        # The reading is of the staged copy rather than of `$builtExe`, and the
+        # tie between the two is already asserted later in this script: the
+        # extracted `sure.exe` is hashed and compared with the one cargo built, so
+        # reading the staged file reads the bytes that travel.
+        # ---------------------------------------------------------------------
+        Write-Step 'Signature'
+        $exeSignature = Get-SignatureReading -Path $stagedExe
+        Write-Detail "asked       Get-AuthenticodeSignature -LiteralPath $stagedExe"
+        Write-Detail "answer      $($exeSignature.Detail)"
+        Write-Detail "state       $($exeSignature.State)"
+
+        if ($exeSignature.State -eq 'signed') {
+            Fail @"
+the sure.exe this build staged carries an Authenticode signature:
+
+  $($exeSignature.Detail)
+
+Every statement this repository ships about this binary is written on the footing
+that it carries no signature, so a release built here would put a signed program
+under text that denies it:
+
+  scripts\Install-Sure.ps1      reports the archive's own signature state to the
+                                person installing it, and declares a signed
+                                archive one this project does not build
+  docs\development\INSTALL_WINDOWS.md
+                                "The build is unsigned, and how that is known" is
+                                the section a reader is sent to
+  docs\development\RELEASE_PROCESS.md
+                                "## Signing" is the section every other file
+                                points at
+  .github\workflows\release.yml the release notes say nothing here is signed
+
+One of the two is wrong, and an archive whose own text contradicts its own bytes
+is the shape this repository exists to refuse, so this run stops before anything
+is written. If the binary really is signed now, update those four files first -
+and say which certificate signed it - rather than deleting this check.
+
+Nothing was packaged.
+"@
+        }
+
+        # The two paragraphs `RELEASE.txt` chooses between, and the header line
+        # that carries the same state in one word. Nothing here is written
+        # unconditionally: `$exeSignature.State` is what picks, so the archive's
+        # own text cannot say something this run did not read.
+        $signatureToken = $exeSignature.State
+        switch ($exeSignature.State) {
+            'not-signed' {
+                $signatureSection = @"
+THE BINARY IN THIS ARCHIVE WAS ASKED ABOUT ITS SIGNATURE, AND IT HAS NONE
+sure.exe carries no Authenticode signature, and that is a reading rather than a
+turn of phrase: this script asked Windows its own question about the bytes about
+to be zipped - Get-AuthenticodeSignature - and the answer was Status NotSigned,
+with no signer certificate and no signature type. The reading is stated in the
+header above and is taken again from the extracted binary when this archive is
+verified.
+
+Windows may show a SmartScreen or "unknown publisher" prompt the first time the
+program is run. That is a consequence of the paragraph above rather than a fault
+in this archive - and **whether it does is not something this project can
+measure**. SmartScreen is a Microsoft service driven by download telemetry this
+project does not hold and cannot observe; no run here has ever seen the prompt.
+Nothing in this file says you will not meet one, and nothing in it promises that
+this binary comes to be treated any differently over time. Code-signing
+credentials are external to this project, docs/development/RELEASE_PROCESS.md
+records what that means under "Signing", and this build fakes nothing: the
+absence of a signature is a limitation you may meet, not a neutral fact.
+"@
+            }
+            default {
+                $signatureSection = @"
+THE SIGNATURE STATE OF THE BINARY IN THIS ARCHIVE WAS NOT ESTABLISHED
+sure.exe may or may not carry an Authenticode signature. This build does not
+say, because it could not ask: the question this script puts to Windows is
+Get-AuthenticodeSignature, and here it did not produce an answer -
+
+  $($exeSignature.Detail)
+
+**A reading that did not happen is not an observation that there is no
+signature**, so this file does not claim there is none, and it does not claim
+there is one either. That cmdlet ships in the PowerShell module
+Microsoft.PowerShell.Security, which does not load in every host, on every image
+or from every module path, and a host where it cannot be found is a host where
+the question cannot be asked at all. The packaging step does not fail on this: it
+is an external limitation - the credential this project does not hold - and
+marking it honestly is the whole of what docs/development/RELEASE_PROCESS.md
+asks under "Signing".
+
+Windows may show a SmartScreen or "unknown publisher" prompt the first time the
+program is run. **Whether it does is not something this project can measure**: it
+is a Microsoft service driven by download telemetry this project does not hold.
+Nothing in this file says you will not meet one, and nothing in it promises that
+this binary comes to be treated any differently over time.
+"@
+            }
+        }
+
         $releaseText = @"
 SURE $version - Windows x64 release artifact
 
@@ -551,16 +875,15 @@ SURE $version - Windows x64 release artifact
   sure.exe      SHA-256 $exeDigest
                 $exeBytes bytes
 
+  signature     $signatureToken
+                $($exeSignature.Detail)
+
 WHAT THIS IS
 The SURE command-line program for 64-bit Windows, built for the
 x86_64-pc-windows-msvc target. "sure doctor" reports the build it is running
 from and where it is running from; "sure --help" lists the commands.
 
-THIS BUILD IS UNSIGNED
-Windows will show a SmartScreen or "unknown publisher" warning the first time
-it is run, and that is expected rather than hidden:
-docs/development/RELEASE_PROCESS.md says code-signing credentials are external
-and "Do not fake signing". There is no Authenticode signature on sure.exe.
+$signatureSection
 
 THIS ARCHIVE IS NOT BYTE-FOR-BYTE REPRODUCIBLE
 A ZIP records a timestamp per entry, so building the same commit twice produces
@@ -769,6 +1092,97 @@ the sure.exe inside the archive is not the one that was built:
         Write-Detail 'same as     the sure.exe cargo built'
     }
 
+    # -------------------------------------------------------------------------
+    # 7b. The signature, read a second time - from the bytes the archive
+    #     actually carries, and compared against what the archive says about
+    #     itself.
+    #
+    # The first reading went into `RELEASE.txt` at stage time and was taken from
+    # the staged file. This one is the "something else re-read it later" half of
+    # this script's own rule, and it is the only reading `-Phase Verify` takes:
+    # that phase never stages anything, so without this step the whole of the
+    # signature claim on a verified archive would be the archive's own sentence
+    # about itself. It runs in both phases, on the extracted binary.
+    #
+    # Three things can redden here and each names what it read:
+    #
+    #   * the extracted binary carries a signature -> the archive is not one of
+    #     this repository's, whatever its own text says;
+    #   * `RELEASE.txt` claims a signature and none was read -> the archive's text
+    #     contradicts its own bytes;
+    #   * anything else, including a reading that did not happen, does **not**
+    #     fail. It is reported, and the difference between what the archive says
+    #     and what this run read is printed rather than smoothed over.
+    #
+    # A `RELEASE.txt` that says less than this run knows - `cannot-confirm` when
+    # the file is in fact unsigned - is a weaker true statement and not a lie, so
+    # it is printed as a note rather than failed. That direction is deliberate:
+    # the failure mode this guards against is a claim *stronger* than the
+    # reading, not a claim weaker than it.
+    # -------------------------------------------------------------------------
+    Write-Step 'Signature'
+
+    $extractedSignature = Get-SignatureReading -Path $extractedExe
+    Write-Detail "asked       Get-AuthenticodeSignature -LiteralPath $extractedExe"
+    Write-Detail "answer      $($extractedSignature.Detail)"
+    Write-Detail "state       $($extractedSignature.State)"
+
+    # The header block of `RELEASE.txt` - the indented `label  value` lines under
+    # the title - is where the state is stated, and the `signature` label is
+    # looked for only there: the prose sections below it are full of sentences
+    # with the word in them. `Get-StatedSignature` is the reader, and its text is
+    # identical to the one in `scripts/Install-Sure.ps1` so that the two cannot
+    # come to different conclusions about the same file.
+    $releaseTxtPath = Join-Path $extractDir 'RELEASE.txt'
+    $statedSignature = Get-StatedSignature -Path $releaseTxtPath
+    if (-not (Test-Path -LiteralPath $releaseTxtPath -PathType Leaf)) {
+        Write-Detail 'RELEASE.txt     not in this archive at all, so it states nothing'
+    } elseif ($statedSignature -eq '') {
+        Write-Detail 'RELEASE.txt states  nothing: its header block carries no `signature` line'
+    } else {
+        Write-Detail "RELEASE.txt states  $statedSignature"
+    }
+
+    if ($extractedSignature.State -eq 'signed') {
+        Fail @"
+the sure.exe inside this archive carries an Authenticode signature:
+
+  $($extractedSignature.Detail)
+
+Nothing in this repository ships a signed Windows binary: `RELEASE_PROCESS.md`'s
+"## Signing", `INSTALL_WINDOWS.md`, the installer's own output and the release
+notes all state that the build carries none, and this archive's `RELEASE.txt`
+says "$statedSignature". An archive whose bytes contradict the text this
+repository publishes about them is the shape this script exists to refuse, so
+the run stops here - before the binary is started, so nothing that follows was
+measured against a program this project does not recognise.
+"@
+    }
+    if ($statedSignature -eq 'signed' -and $extractedSignature.State -ne 'signed') {
+        Fail @"
+the RELEASE.txt inside this archive says its sure.exe is signed, and this run
+read the extracted binary and did not find a signature:
+
+  RELEASE.txt says  signed
+  this run read     $($extractedSignature.State) - $($extractedSignature.Detail)
+
+One of the two is wrong and the run does not get to guess which. The full
+reading is above; the extracted binary is $extractedExe.
+"@
+    }
+    if ($extractedSignature.State -eq 'cannot-confirm') {
+        Write-Detail 'cannot confirm  the binary in this archive may or may not carry a signature;'
+        Write-Detail '                this run did not establish which, and does not report an'
+        Write-Detail '                absence it did not observe'
+    } elseif ($statedSignature -eq '' -or $statedSignature -ne $extractedSignature.State) {
+        $asStated = if ($statedSignature -eq '') { 'nothing' } else { $statedSignature }
+        Write-Detail "note        RELEASE.txt states $asStated and this run read $($extractedSignature.State);"
+        Write-Detail '            a claim weaker than the reading is not a contradiction, so this'
+        Write-Detail '            is printed rather than failed'
+    } else {
+        Write-Detail 'agrees      the archive''s own text and the bytes it carries say the same thing'
+    }
+
     Write-Step 'Run the extracted binary'
     $stdoutPath = Join-Path $LogDirectory 'extracted-doctor.json.txt'
     $stderrPath = Join-Path $LogDirectory 'extracted-doctor.err.txt'
@@ -861,6 +1275,11 @@ have been checked against the artifact.
     Write-Host "  ran         $extractedExe"
     Write-Host "  reported    $($build.running_from)"
     Write-Host "  gate        permitted; $($gate.corpus.cases) cases, $($gate.corpus.release_blocking) release-blocking and all observed"
+    Write-Host "  signature   $($extractedSignature.State) - $($extractedSignature.Detail)"
+    if ($extractedSignature.State -eq 'cannot-confirm') {
+        Write-Host '              this is not a pass: the signature state of the bytes in this archive'
+        Write-Host '              was not established, and the archive says so in its own RELEASE.txt'
+    }
     Write-Host '  OK          the bytes that are checksummed are the bytes that were run'
     exit 0
 } catch {

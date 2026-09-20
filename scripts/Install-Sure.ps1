@@ -85,9 +85,15 @@
 # * No symlink. `CLAUDE.md` prefers copy/render/install flows on Windows unless
 #   Developer Mode or administrator capability is explicitly detected, and a
 #   release binary is copied rather than linked here.
-# * No signing claim. The archive is unsigned (`RELEASE_PROCESS.md` -
-#   "Authenticode credentials are external ... Do not fake signing"), and the
-#   output says so rather than implying a publisher.
+# * No signing claim, and no signing *reading* either. The output's last block
+#   reports the `signature` line out of the archive's own `RELEASE.txt` - the
+#   file the build that measured it wrote, which this install copies to
+#   `bin\RELEASE.txt` - rather than stating a state this script has not read.
+#   An installer that printed its own sentence about the bytes would be the
+#   unmeasured claim `P15-T012` took out of `scripts/Build-Release.ps1`, one
+#   step further down the pipe, and it would be read by the one person who
+#   cannot check it. `docs/development/RELEASE_PROCESS.md`'s `## Signing` is
+#   the authoritative statement and says what may and may not be written.
 #
 # =============================================================================
 # What reddens this script
@@ -244,6 +250,43 @@ function Get-Sha256 {
     # `BitConverter` spells it uppercase with dashes; `sha256sum` and the
     # `.sha256` file this repository writes both want lowercase with none.
     return ([System.BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant()
+}
+
+# Read the `signature` token out of a `RELEASE.txt`.
+#
+# The top of that file is a title line followed by an indented block of
+# `label  value` lines, and the prose sections come after it at column 0. The
+# block is therefore the run of indented lines, and the label is looked for only
+# inside it: everything below is sentences, and several of them contain the word
+# "signature" without being a statement of one.
+#
+# This function's text is **identical** in `scripts/Build-Release.ps1` and
+# `scripts/Install-Sure.ps1`, which are the two things that read this file. There
+# is no shared module between them, and two copies of a reader are two readers
+# unless something holds them together, so
+# `crates/sure-testkit/tests/signing_status.rs` compares the two definitions
+# character for character and fails if either is edited alone. A fix to one has
+# to be a fix to both, or it is not a fix.
+#
+# It returns the token, or the empty string when there is no line - including
+# when the file is not there at all. The empty string is not a state: it means
+# the state was not stated, and callers report it as such.
+function Get-StatedSignature {
+    param([Parameter(Mandatory)][string] $Path)
+    $token = ''
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $token }
+    $inBlock = $false
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        if ($line.Trim() -eq '') { continue }
+        $indented = $line.StartsWith(' ') -or $line.StartsWith("`t")
+        if (-not $indented) {
+            if ($inBlock) { break }
+            continue
+        }
+        $inBlock = $true
+        if ($line.Trim() -match '^signature\s+(\S+)') { $token = $Matches[1]; break }
+    }
+    return $token
 }
 
 # Join path segments without letting a separator decision depend on the host.
@@ -613,9 +656,68 @@ if ($onPath -and $onPath.Source -eq $installedExe) {
 Write-Step 'Done'
 Write-Detail "program      $installedExe"
 Write-Detail "check it     & '$installedExe' doctor"
-Write-Detail 'unsigned     this build has no Authenticode signature, so Windows may show a SmartScreen'
-Write-Detail '             or "unknown publisher" warning the first time it runs. That is expected'
-Write-Detail '             (docs/development/RELEASE_PROCESS.md, "Do not fake signing"), not a fault'
-Write-Detail '             in this install.'
+
+# -----------------------------------------------------------------------------
+# The signature: read out of the archive's own `RELEASE.txt`, never asserted
+# here.
+#
+# The `signature` line the build wrote into that file is the state the machine
+# that built the archive measured, and it is the whole of what anything
+# downstream needs to read: the label, then one word. `Get-StatedSignature` is
+# the reader, and its text is identical to the one in `scripts/Build-Release.ps1`
+# so that the two cannot come to different conclusions about the same file. It
+# looks only at the header block, because the prose sections further down are
+# full of sentences containing the word "signature".
+#
+# What is *not* here is a second reading. This script could ask Windows the same
+# question about the copy it just installed, and it deliberately does not: that
+# would be a second measurer of the same fact, on the machine least able to do
+# anything with the answer, and the two could disagree without either being
+# wrong. What this script can honestly do is carry the archive's own sentence to
+# the person who has just installed it.
+#
+# When there is no line - an archive built before this existed, or one staged by
+# something other than `scripts/Build-Release.ps1` - the answer is that the state
+# is not stated. That is `cannot confirm`, and `cannot confirm` is not a yes: it
+# is certainly not "unsigned".
+# -----------------------------------------------------------------------------
+$signatureToken = Get-StatedSignature -Path (Join-Path $BinDirectory 'RELEASE.txt')
+switch ($signatureToken) {
+    'not-signed' {
+        Write-Detail 'signature    not-signed, read from the archive''s own RELEASE.txt and copied to'
+        Write-Detail "             $(Join-Path $BinDirectory 'RELEASE.txt')"
+        Write-Detail '             the machine that built this archive asked Windows its own question'
+        Write-Detail '             about the sure.exe inside it and was told NotSigned, so no'
+        Write-Detail '             publisher is named and no certificate signs it.'
+        Write-Detail 'warning      Windows may show a SmartScreen or "unknown publisher" prompt the'
+        Write-Detail '             first time the program runs. Whether it does is not something this'
+        Write-Detail '             project can measure; docs/development/RELEASE_PROCESS.md, "Signing",'
+        Write-Detail '             is where that limit and what may not be claimed about it are kept.'
+    }
+    'signed' {
+        Write-Detail 'signature    signed, read from the archive''s own RELEASE.txt'
+        Write-Detail '             this is not an archive this project builds: scripts/Build-Release.ps1'
+        Write-Detail '             refuses to package a signed binary, because every statement SURE'
+        Write-Detail '             publishes says its Windows build carries no signature. This install'
+        Write-Detail '             has copied it as it found it and has not verified the signature.'
+    }
+    'cannot-confirm' {
+        Write-Detail 'signature    cannot-confirm, read from the archive''s own RELEASE.txt'
+        Write-Detail '             the build that made this archive could not take the reading - the'
+        Write-Detail '             cmdlet that answers it is not available in every PowerShell host and'
+        Write-Detail '             does not read everything - so it recorded that it did not establish'
+        Write-Detail '             the state, and this install repeats that rather than guessing.'
+        Write-Detail 'warning      Windows may show a SmartScreen or "unknown publisher" prompt the'
+        Write-Detail '             first time the program runs. Whether it does is not something this'
+        Write-Detail '             project can measure.'
+    }
+    default {
+        Write-Detail 'signature    not stated: the archive''s RELEASE.txt has no `signature` line in'
+        Write-Detail '             its header block, so this install does not know whether the program'
+        Write-Detail '             carries an Authenticode signature and does not claim either way.'
+        Write-Detail 'warning      Windows may show a SmartScreen or "unknown publisher" prompt the'
+        Write-Detail '             first time the program runs.'
+    }
+}
 Write-Detail "uninstall    & '$(Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Uninstall-Sure.ps1')' -InstallRoot '$InstallRoot'"
 exit 0

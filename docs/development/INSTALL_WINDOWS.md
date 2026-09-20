@@ -94,14 +94,43 @@ a directory as it found it.
 The installer checks the checksum itself, which is what a person downloading an
 archive actually needs.
 
-## The build is unsigned
+## The build is unsigned, and how that is known
 
-There is no Authenticode signature. Authenticode credentials are external and
-`RELEASE_PROCESS.md` says not to fake signing, so this build has none, and the
-installer says so in its output rather than implying a publisher. The first run
-of the installed `sure.exe` may show a SmartScreen or "unknown publisher"
-warning. That is the expected consequence of an unsigned build, not a fault in
-the archive or in the install.
+Authenticode credentials are external to this project and it does not hold one,
+so the Windows build carries no Authenticode signature. **That is read from the
+binary rather than assumed about it**: `scripts/Build-Release.ps1` asks Windows
+its own question — `Get-AuthenticodeSignature` — about the `sure.exe` it is about
+to zip, and writes the answer into the archive's `RELEASE.txt` as a `signature`
+line. `scripts/Install-Sure.ps1` copies that file to `bin\RELEASE.txt` and
+**reports what it says** rather than making a claim of its own, so the line the
+installer prints when it finishes is the one the machine that built the archive
+measured.
+
+Three answers are possible, and the archive tells you which one it holds:
+
+* `not-signed` — the binary carries no signature and that was read. Windows may
+  show a SmartScreen or "unknown publisher" prompt the first time the program
+  runs. That is the consequence of the state above, not a fault in the archive or
+  in the install, and it is a prompt a person may meet rather than a neutral
+  detail.
+* `cannot-confirm` — the reading could not be taken. The cmdlet that answers it
+  lives in the PowerShell module `Microsoft.PowerShell.Security`, which does not
+  load in every host or on every image, so there are machines where the question
+  cannot be asked at all. The archive then says the state was **not read** and
+  names why, and nothing here claims either way. **A reading that did not happen
+  is not an observation that there is no signature**, and this project does not
+  report an absence it did not observe.
+* `signed` — a signature was read. `scripts/Build-Release.ps1` refuses to package
+  in that case, because this document, the installer's output, the release notes
+  and `RELEASE_PROCESS.md` all tell a user the binary has none.
+
+`RELEASE_PROCESS.md`'s `## Signing` is where the reason, the boundary and the
+phrasings that must not be written are kept. The short form of the boundary:
+whether a particular person meets a SmartScreen prompt is **not measurable from
+here** — SmartScreen is a Microsoft service driven by download telemetry this
+project does not hold — and nothing in this repository promises that SmartScreen
+comes to treat this binary any differently over time. `## What is not covered`
+below says the same thing about the tests.
 
 ## Options
 
@@ -248,7 +277,11 @@ Named as limits rather than left to be assumed:
   that artifact is separate from this.
 * **The SmartScreen warning is not exercised.** No test runs an unsigned binary
   through a download-marked file and observes the prompt. The claim is limited
-  to: the build carries no Authenticode signature, and Windows may warn.
+  to: the build carries no Authenticode signature — which
+  `scripts/Build-Release.ps1` reads off the binary and the archive's `RELEASE.txt`
+  records, see `## The build is unsigned, and how that is known` above — and
+  Windows may warn. **What a given machine does with that binary is not
+  measurable from here**, and no test asserts it either way.
 * **No test asserts what an antivirus or an endpoint agent does** with the
   installed binary.
 * **`Get-FileHash` is deliberately not used** by either script, and the reason is

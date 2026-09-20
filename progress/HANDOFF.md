@@ -3,14 +3,26 @@
 Last updated: 2026-09-20
 Branch: `claude/v0.1-autonomous`
 
-**`P7-T012` is accepted and delivered at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which equals
-`origin/claude/v0.1-autonomous`, and the worktree is clean.** The acceptance commit is records plus one
-corrected doc sentence: `progress/state.json` (189 records; `P7-T012` accepted with 13 evidence entries),
+**`P7-T013` is accepted and delivered in the two worker commits this record accompanies — `4e1097d` and
+`3beebbd`, on base `f810ffc` — and the worktree is clean.** It is the task the Codex package's README
+said needed its own task: `sure check` now reads the capability tier from the project's own recorded
+events, at stage 10 of the pipeline, instead of from the command line. `progress/state.json` carries 190
+records and `P7-T013` is accepted with ten evidence entries; `tasks/tasks.json` carries 190 tasks, with
+`P15-T030` minted from a defect found while accepting this one; `SHA256SUMS.txt` was stale for **four**
+digests and is regenerated with all three of its invariants intact (195 entries, 19199 bytes, no
+trailing newline). The task's own account is in "What `P7-T013` added" and "Validation of `P7-T013`"
+below.
+
+**`P7-T012` is still accepted at `ad5368e292d80801292c8984a7947b0c6ffab4e7`, which was
+`origin/claude/v0.1-autonomous` when that sentence was written and has since been superseded twice.**
+The paragraph that stood here asserted the equality in the present tense, and committing `f810ffc`
+falsified it — a record that names the tip is invalidated by whoever commits next, so it is dated here
+instead of restated. The acceptance commit it describes is records plus one corrected doc sentence:
+`progress/state.json` (189 records at that time; `P7-T012` accepted with 13 evidence entries),
 `tasks/tasks.json` (189 tasks; `P15-T028` and `P15-T029` minted, `P15-T015`'s note corrected),
 `crates/sure-core/src/recheck_lifecycle.rs` (one sentence that claimed a symmetry with
 `allowance::SCAN_LIMIT` the code does not have), this file, and `SHA256SUMS.txt` — whose dry run found
-**seven** digests stale and which was regenerated with all three of its invariants intact (195 entries,
-19199 bytes, no trailing newline).
+**seven** digests stale.
 
 **CI run `35501183734` on `ad5368e` is SUCCESS on all five jobs** — `rust (windows-latest)`,
 `rust (ubuntu-latest)`, `rust (macos-latest)`, `bootstrap-validate-windows`, `shellcheck-secondary` —
@@ -20,13 +32,26 @@ class have surfaced before, and neither fired. The push carried `a217882` as wel
 worker's own commit has a run of its own for the first time — the two local gate runs are in the
 acceptance section below.
 
-**The next dispatch is `P7-T013`** — *"Let the check report read the capability tier from the project's
-recorded events"* — on §14's ordering, and the paragraph further down works that out from the ready set
-rather than from the hook's truncated `ready=` line. Its brief is written, and its anchors were re-read
-on this tree rather than carried over. The trap it carries is that the obvious implementation **deletes
-a blind spot while keeping the same tier**: `CapabilityReport::cli()` reports `Snapshot` with *two*
-blind spots and `report_from_events(&[], _)` reports `Snapshot` with *one*, so the naive swap makes the
-report read as more complete at exactly the moment SURE can see least.
+**CI run `35501495428` on `f810ffc` — the commit that recorded that acceptance and dispatched
+`P7-T013` — is also SUCCESS on all five jobs**, with `headSha` read back from the API as
+`f810ffc539570bedef103f426abfd9270e24c709`. All three supervisor record commits on this thread now carry
+their own reading, and the two worker commits carry the runs their pushes earned.
+
+**The next dispatch is `P15-T003`** — *"Create Windows per-user install/uninstall PowerShell flow"* —
+and §14 hands it there **by measurement rather than by the hook's truncated `ready=` line**: with
+`P7-T013` accepted, every task in the ready set is `P15`, and `P15-T003` is the lowest-numbered of them,
+so no DAG edge is being traded away for it. Its brief is written, and its landmine is confirmed on disk
+rather than assumed: `%LOCALAPPDATA%\SURE\sure.db` exists — 348,160 bytes, mtime 2026-09-18 — and there
+is **no `bin\` beside it yet**, so the install creates `bin\` directly alongside the user's evidence
+store, and an uninstaller that removes the directory recursively destroys it. Criterion 2 is not "ask a
+yes/no question"; it is that the uninstaller must be structurally incapable of removing data the install
+did not create.
+
+**The trap `P7-T013` carried is now a measured result rather than a warning.** The obvious
+implementation **deletes a blind spot while keeping the same tier**: `CapabilityReport::cli()` reports
+`Snapshot` with *two* blind spots and `report_from_events(&[], _)` reports `Snapshot` with *one*. The
+supervisor measured the count before and after on a project with no events — **2 and 2** — and the union
+that holds it is a rule about the report's own fields, not about this caller's inputs.
 
 **One gate run on the accepted tree was red, and it is the known flake rather than that change.**
 `& .\target\tmp\gates.ps1 -Label p7t012-accept` → `test=101`, `passed=2631 failed=1`, the failure being
@@ -2713,6 +2738,131 @@ source and cargo reused it. Setting the mtime to now gave 11 passed, 0 failed.
 A clean tree and a matching hash are not evidence that anything was rebuilt —
 after any restore, touch the file or `cargo clean -p <crate>` before believing a
 result.
+
+## What `P7-T013` added
+
+`P7-T013` — *"Let the check report read the capability tier from the project's
+recorded events"* — is **accepted in `4e1097d` and `3beebbd`** on base `f810ffc`,
+11 files, +1441/−19, and none of them supervisor-owned.
+
+The defect it closes was documented by the Codex package itself in words that
+made it a task: recording Codex events did not change what `sure check` said
+about a project, because the pipeline read the tier from the command line rather
+than from the project's recorded events, and `capability_report.rs` had a
+function that would do it and no caller. The supervisor reproduced that from the
+outside before the change, with the binary hashed at both ends of the run: a
+project with four events recorded for its exact directory printed the same
+sentence as a directory with none — *"It cannot see what the AI did while it
+worked."* SURE held the evidence and said it did not.
+
+What replaced it is `capability_report::for_project(store, project_root)`, and
+three decisions in it are the substance rather than the plumbing:
+
+1. **The blind spot no event can remove.** `with_unprovable_blind_spots` keeps
+   `no_pre_action_control` attached to any report whose `pre_action_control` is
+   false, and it is written as a rule about the report's own fields rather than
+   about the caller's inputs — so a later caller that *does* have proof of
+   pre-action control loses the gap automatically, and one that forgot to add it
+   cannot. This is what stops the fix from deleting a blind spot while keeping
+   the same tier.
+2. **The store a run was handed, never one it opens.** `for_project` takes
+   `Option<&Store>`; the pipeline passes `self.store`, and the new test asserts
+   `!paths.store_file().exists()` after a bare check, so "the pipeline reads a
+   store when it is given one and never opens one itself" is now pinned by a
+   test rather than only by a comment.
+3. **A read that failed is not a project with no session.** `ProjectCapability`
+   carries `read_failure` beside the report, and the tier falls to the snapshot
+   tier — the safe direction — rather than reporting "no events" about a store
+   SURE never managed to look inside. A saturated scan is detected
+   (`records.len() == EVENT_SCAN_LIMIT`) and reaches the reader as a sentence:
+   *"SURE stopped before it had read every event the store holds, so anything
+   older than the events it read is not counted here."* **That is the
+   fail-closed direction, and it is the opposite of the shape `P15-T029` was
+   minted for** — `previous_open_findings` returns `Ok` whether or not its scan
+   saturated. One module in this repository now does the thing the other has
+   been asked to do, which is worth knowing when `P15-T029` is dispatched.
+
+The account of what was counted travels with the tier in both renderings: the
+human sentence names the harnesses, the count and the window, and the machine
+form carries `blind_spots` as wire names and an `evidence` object, so a script
+asks whether a *named* gap is present instead of parsing a sentence. On the
+documents, `integrations/codex/README.md`'s paragraph stating the gap as
+permanent is gone, replaced by a four-case table that includes the case
+criterion 5 singled out — events exist and the tier did not rise — stated twice,
+once as rows and once as three explicit non-claims.
+
+## Validation of `P7-T013`
+
+**The supervisor's gate run is `p7t013-accept` at `3beebbd`:**
+`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`,
+`result-lines=79 passed=2651 failed=0 ignored=12 not-ok=0`. The run is evidence
+because `worktree at start: []` and `worktree: []` are identical at both ends and
+`store before:`/`store after:` are the same hash — the user's real store was not
+written to. The count moved 2632 → 2651 across this task. The worker's own run
+at `4e1097d` (label `p7t013`) reported the same line and the same counts; the
+acceptance rests on the supervisor's run, not on that one.
+
+**Criterion 1 and criterion 3 were observed by running the command, with
+`target/debug/sure.exe` hashed at both ends of the readings** (sha256
+`2312b78f…`, identical) — the same discipline the gates apply to the worktree,
+because a worker rebuilding the binary mid-measurement would silently corrupt a
+"before" reading into an "after" one. Three cases, all on a scratch store and a
+project under a path containing a space:
+
+- **No store file:** `… (capability tier 0, snapshot)` — **character-for-character
+  identical to the same run taken before the change**, so the frozen no-history
+  line is frozen.
+- **This project's four recorded Codex events:** `(capability tier 1, observed)
+  SURE counted 4 session events recorded for this project by codex, between
+  2026-09-20T09:13:16.240Z and 2026-09-20T09:13:16.676Z.`
+- **A store read for a project nothing was recorded for:** tier 0, *"SURE
+  counted no session events for this project: SURE's store holds none for it.
+  SURE also read 4 session events recorded for other projects…"*, followed by
+  **both** blind spots.
+
+**The trap's numbers, measured rather than argued: 2 before, 2 after.** The
+machine form agrees with the prose rather than the prose standing alone — with
+the four events, `--format json` reports `tier: 1` with six named gaps and
+`evidence.harnesses = ["codex"]`, `events = 4`, a window, `elsewhere = 0`.
+
+**A defect was found at acceptance, and it is minted rather than absorbed.**
+The project-identity comparison is `record.project_root.as_deref() ==
+Some(project_root)` — a **string** comparison — so the tier depends on how the
+path was spelled. One store, one session, one directory, five spellings:
+
+| how the project was named | tier |
+| --- | --- |
+| as the hook recorded it | **1, observed**, counted 4 events |
+| with forward slashes | 0, *"SURE's store holds none for it"* |
+| upper-case drive and user | 0, the same sentence |
+| a trailing separator | 0, the same sentence |
+| a `.` segment inside the path | 0, the same sentence |
+
+All four mismatches **understate** and name the events they did not count, so
+this is a defect and not a false green — but the sentence is confident, specific
+and false about a directory SURE has a session for. It is `P15-T030`, and its
+note carries the five spellings, both directions of possible error, the
+`recheck_lifecycle::normalise_path` precedent, and the `P15-T018` boundary. The
+existing test **cannot** catch it: it records and checks with the same `root`
+string, so both sides of the comparison are one spelling.
+
+**One limit is recorded rather than repaired.** A project with **no store at
+all** prints no blind-spot text, and its line is byte-identical to what it
+printed before this task. The worker disclosed it and argued that changing it
+would alter every project's frozen output; the supervisor checked the direction
+and agreed it is not a false green — tier 0 claims nothing, and every path that
+counts something now names its gaps — and it is written into the evidence as a
+stated limit. The other limits are in the state record: the wiring is pinned by
+one CLI test (all 1375 sure-core tests pass with `cli()` restored), the
+4096-record truncation path has no end-to-end test, and everything was observed
+on Windows only.
+
+**`SHA256SUMS.txt` was stale for four digests** — the four changed documents the
+manifest lists — and this is the **fourth** hand-found instance, arriving on the
+very next task after the third was recorded. `P15-T020`'s note now says that
+rather than counting instances: the interval between "the manifest is stale" and
+"the manifest is stale again" is one task, and a file that is wrong after almost
+every task touching a listed path is not a file with a maintenance lapse.
 
 ## What `P7-T012` added
 

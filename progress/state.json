@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P15",
-  "last_updated": "2026-09-20T11:38:36.617Z",
+  "last_updated": "2026-09-20T11:54:37.592Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2200,10 +2200,10 @@
       "notes": "Accepted at `2c82f91` over a single worker commit from base `7f53dcf`, with **no supervisor correction to the delivered files** — the first task in this phase accepted as handed back. Every claim in the hand-back that the acceptance rests on was re-derived independently, and the two that mattered most were re-measured rather than read: the checksum and version-vs-binary refusals were re-run by the supervisor against fixtures of the supervisor's own making, and the renderer was driven end to end against the real `Build-Release.ps1` archive rather than a staged one.\n\nThe task's central hazard was that a WinGet manifest is a set of confident claims about a file that is not in this repository — a `PackageVersion`, an `InstallerUrl` and an `InstallerSha256` that nobody in the checkout can check. The handling is the point of the acceptance: the templates carry placeholders spelled so the schema **rejects** them rather than reading them as plausible, no 64-hex constant exists in any committed file, every other value is derived from the archive's bytes or from `Cargo.toml`, and the one value that cannot be derived — the existence of the release asset — is named as unconfirmable rather than asserted.\n\nThe design question the brief left open was which of the launchers' three resolution steps finds a WinGet install. The answer is step 2, and it is a measurement with a falsifier in the same run rather than a reading of the schema: the real `Links` directory was observed, a link of that shape was planted on `PATH` with the per-user `bin` empty, the launcher completed a real MCP handshake through it, and the same run was required to fail closed when the link was removed. A package manager that installs a working `sure.exe` somewhere nothing in the tree looks is the failure this task was dispatched to prevent, and the tree now records where it does look.\n\nTwo things are recorded because they are the kind this project exists to catch. The first is small and self-reported: the `RELEASE_PROCESS.md` staleness, measured by the worker to the digit and fixed here. The second is the reason the supervisor does not accept a hand-back on its own report — a claim quoted at a capture that does not contain it. The claim turned out to be **true**, which is exactly why re-measuring was the right move and re-reading was not: the committed text is now backed by a run rather than by a summary line.\n\nThe worker found two real defects by **running** its own new work rather than by reading it — two concurrent `-Phase Verify` calls sharing one scratch directory, and two tests reaching `winget validate` at once making winget exit `-1978335231`, a failure to run the check rather than a verdict. Both are fixed in the commit and both were reported in its message. The flake it hit first, in `sure-core`'s `runtime_start.rs:1184`, is the load-sensitive cluster already recorded as un-fixed, and it was reported rather than retried into silence.\n\nA commit after this acceptance corrected three of the delivered templates, the script and one document, and the reason is the last evidence entry: CI on the acceptance commit was red on `rust (windows-latest)`, because `ManifestVersion: 1.12.0` is not in the set of schema versions the runner's older `winget` recognises. What the worker delivered was right for the machine it was measured on and did not survive a second one, which is what limit (e) said would eventually happen without anyone being able to say when."
     },
     "P15-T005": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-20T11:54:37.591Z",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "41f05cd9dc30ce15e2d4310dfdc94a496be7409b",
       "head_sha": null,
       "evidence": [],
       "notes": ""

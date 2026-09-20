@@ -50,7 +50,11 @@ binary reports against the directory it extracted to, so that "the artifact was
 tested" means the bytes in the archive were run rather than a debug build that
 happened to be on `PATH`.
 
-`P15-T003` installs this archive. `P15-T004` references it.
+`P15-T003` installs this archive, per user and without administrator rights, and
+`docs/development/INSTALL_WINDOWS.md` is where that flow is written down: the
+install location, the checksum, the unsigned-build warning, what is and is not
+put on `PATH`, and what the uninstaller does with the user's evidence. `P15-T004`
+references it.
 
 A future user-friendly installer may use MSIX/WiX or another appropriate Windows packaging system after CLI behavior stabilizes. Do not add installer complexity before core acceptance.
 

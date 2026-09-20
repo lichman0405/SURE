@@ -101,3 +101,9 @@ Cursor plugin
 repair/re-check
 uninstall
 ```
+
+`install` and `uninstall` are `scripts/Install-Sure.ps1` and
+`scripts/Uninstall-Sure.ps1`, and `docs/development/INSTALL_WINDOWS.md` is the
+procedure: where it installs, what it writes, what it never touches, and what is
+not covered by a test. Read it before running either script against a real
+`%LOCALAPPDATA%`, because that directory also holds the user's `sure.db`.

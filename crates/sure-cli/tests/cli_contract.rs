@@ -142,6 +142,66 @@ fn a_project_of_our_own() -> PathBuf {
     project
 }
 
+/// The same, with a stack SURE recognises and a command it will plan a check for.
+///
+/// [`a_project_of_our_own`] is a README and nothing else: no stack, no declared
+/// command, so no check, so no finding, so nothing for the repair loop to carry.
+/// A test about what a finding is carried *through* needs a project that produces
+/// one, and building it here rather than pointing at `fixtures/` keeps this
+/// file's rule — every project these tests run against is one they made under
+/// `target/tmp`.
+///
+/// The declared scripts are never run: this build runs no project code from a
+/// product path, so what they do is irrelevant and their names are what matter.
+fn a_project_with_a_declared_command_that_never_runs() -> PathBuf {
+    let project = a_directory_of_our_own("node-project");
+    // The shape the node proposer reads: a root manifest that names a package
+    // manager and a workspace, and a member that declares a `test` script. A
+    // manifest on its own proposes nothing — the manager is what says which
+    // command runs a script, and `Managers::agreed` answers `None` without it —
+    // which is how this helper was written the first two times and why the parts
+    // that matter are named here.
+    let root = serde_json::json!({
+        "name": "a-project-with-a-declared-test",
+        "version": "0.0.0",
+        "private": true,
+        "packageManager": "npm@10.9.0",
+        "workspaces": ["packages/*"],
+        "scripts": { "start": "node scripts/demo.js" },
+    });
+    std::fs::write(project.join("package.json"), format!("{root}\n"))
+        .unwrap_or_else(|error| panic!("cannot write into {}: {error}", project.display()));
+    let member = project.join("packages").join("only");
+    std::fs::create_dir_all(&member)
+        .unwrap_or_else(|error| panic!("cannot create {}: {error}", member.display()));
+    let manifest = serde_json::json!({
+        "name": "@a-project/only",
+        "version": "0.0.0",
+        "private": true,
+        "scripts": { "test": "node tests/only.js" },
+    });
+    std::fs::write(member.join("package.json"), format!("{manifest}\n"))
+        .unwrap_or_else(|error| panic!("cannot write into {}: {error}", member.display()));
+
+    // A second member, so that `repair_impact` has a regression check to add:
+    // its rule reaches a check that runs project code and carries a deterministic
+    // class, and one member's test check is exactly that for the other member's
+    // finding. With a single member the selected list would equal the seed and the
+    // assertion about widening below would be checking nothing.
+    let second = project.join("packages").join("also");
+    std::fs::create_dir_all(&second)
+        .unwrap_or_else(|error| panic!("cannot create {}: {error}", second.display()));
+    let manifest = serde_json::json!({
+        "name": "@a-project/also",
+        "version": "0.0.0",
+        "private": true,
+        "scripts": { "test": "node tests/also.js" },
+    });
+    std::fs::write(second.join("package.json"), format!("{manifest}\n"))
+        .unwrap_or_else(|error| panic!("cannot write into {}: {error}", second.display()));
+    project
+}
+
 /// The same, with the store named by the caller of this function.
 ///
 /// This is how every process in this file is started, apart from the one that
@@ -1677,6 +1737,154 @@ fn the_three_pipeline_commands_are_one_orchestrator_with_three_purposes() {
         serde_json::json!("not_part_of_work"),
         "`sure check` claims to write repair instructions: {}",
         frames[0]
+    );
+}
+
+#[test]
+fn a_repair_contract_is_carried_to_the_next_run_and_that_run_says_what_it_left_open() {
+    // P7-T012's first acceptance, observed by running the two commands rather
+    // than by reading a module: `sure repair` answers with a repair contract, and
+    // a later `sure recheck` over the same store reports what the first run left
+    // open.
+    //
+    // Four mutations redden this test. All four were run, and each one is a way
+    // the loop could look like it works from the outside:
+    //
+    // - restore `Vec::new()` for the findings in `pipeline.rs`'s `build_verdict`.
+    //   Stage 11 goes back to writing no contract and `details.repairs` is `[]`,
+    //   so the assertion that a contract exists fails.
+    // - set `recheck_lifecycle::HISTORY_SCAN_LIMIT` to `0`. `Store::history`
+    //   documents `0` as "return none", so the re-check reads nothing back and
+    //   `still_open` is empty while the repair run wrote findings. This is the
+    //   mutation that matters most: without it the second run would report
+    //   "nothing was left open" and nothing outside would look wrong.
+    // - set `HISTORY_SCAN_LIMIT` to a small non-zero number instead, `2`, which is
+    //   the tempting repair and is not one: the count assertion fails with "the
+    //   repair run recorded 3 finding(s) and the re-check reports 2 as still
+    //   open", because `Store::history` answers newest-first and spends its rows
+    //   on the newest readings. A limit that is merely large is the same defect
+    //   with a longer fuse.
+    // - make `repair_impact::select_impacted_checks` return only the contract's
+    //   own list, dropping the affected and regression checks it adds. The last
+    //   assertion fails, because the run would then hold a finding to one check
+    //   after telling the reader it holds it to three.
+    let project = a_project_with_a_declared_command_that_never_runs();
+    let store = a_store_of_our_own();
+    let path = project
+        .to_str()
+        .expect("this test's own directory is a UTF-8 path");
+    let frame = |run: &Run| -> serde_json::Value {
+        serde_json::from_str(run.stdout.trim())
+            .unwrap_or_else(|error| panic!("`sure` printed no frame: {error}\n{}", run.stdout))
+    };
+    let strings = |value: &serde_json::Value| -> Vec<String> {
+        value
+            .as_array()
+            .unwrap_or_else(|| panic!("not an array: {value}"))
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .unwrap_or_else(|| panic!("not a string: {entry}"))
+                    .to_owned()
+            })
+            .collect()
+    };
+
+    // The repair run. Its findings are what the next run has to be able to read.
+    let repaired = run_in_a_store(&store, &["--format", "json", "repair", path]);
+    assert_eq!(
+        repaired.status, 1,
+        "`sure repair` returned {}:\n{}",
+        repaired.status, repaired.stderr
+    );
+    let repaired = frame(&repaired);
+    assert_eq!(
+        repaired["details"]["stages"][10]["outcome"], "ran",
+        "stage 11 recorded itself as anything other than a stage that ran, on a project whose \
+         checks were all planned and denied: {repaired}"
+    );
+    let repairs = repaired["details"]["repairs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("`sure repair` answered with no repairs array: {repaired}"));
+    assert!(
+        !repairs.is_empty(),
+        "`sure repair` answered with no contract at all for a project whose checks were all \
+         denied: {repaired}"
+    );
+
+    // Each contract names the check that produced its finding, and the run that
+    // will hold it to closing names that check too — plus the ones
+    // `repair_impact` selects. The second list is the product's answer and the
+    // first is the seed it was built from, so the seed is a subset of it, and on
+    // this project it is a **strict** subset: both members declare a test script
+    // and run project code deterministically, so each one's contract is widened
+    // by the other. A `select_impacted_checks` that returned only the contract's
+    // own list would leave every pair equal and fail the widening check below.
+    let mut widened = 0usize;
+    for contract in repairs {
+        let named = strings(&contract["recheck"]);
+        let held_to = strings(&contract["rechecks_that_must_pass"]);
+        assert!(
+            !named.is_empty(),
+            "a contract names no check to re-run, so nothing could ever close it: {contract}"
+        );
+        for id in &named {
+            assert!(
+                held_to.contains(id),
+                "the contract names {id} and the run does not hold the finding to it: {contract}"
+            );
+        }
+        if held_to.len() > named.len() {
+            widened += 1;
+        }
+    }
+    assert!(
+        widened > 0,
+        "no contract was held to anything beyond the check it named, so this project cannot tell \
+         the selection from the seed and the assertion above is about nothing: {repaired}"
+    );
+
+    // Stage 12 belongs to the other command, and the report says which rather
+    // than leaving the stage out.
+    assert_eq!(
+        repaired["details"]["stages"][11]["outcome"], "not_part_of_work",
+        "`sure repair` recorded the re-check stage as something other than another command's \
+         work: {repaired}"
+    );
+    assert!(
+        repaired["details"]["lifecycle"].is_null(),
+        "`sure repair` reported a life-cycle comparison it does not make: {repaired}"
+    );
+
+    // The same project and the same store, a later run.
+    let rechecked = run_in_a_store(&store, &["--format", "json", "recheck", path]);
+    assert_eq!(
+        rechecked.status, 1,
+        "`sure recheck` returned {}:\n{}",
+        rechecked.status, rechecked.stderr
+    );
+    let rechecked = frame(&rechecked);
+    assert_eq!(
+        rechecked["details"]["stages"][11]["outcome"], "ran",
+        "`sure recheck` did not compare against the earlier run: {rechecked}"
+    );
+    let still_open = rechecked["details"]["lifecycle"]["still_open"]
+        .as_array()
+        .unwrap_or_else(|| panic!("`sure recheck` reported no comparison: {rechecked}"));
+    assert_eq!(
+        still_open.len(),
+        repairs.len(),
+        "the repair run recorded {} finding(s) and the re-check reports {} as still open, so the \
+         two runs do not agree about what the project has open: {rechecked}",
+        repairs.len(),
+        still_open.len()
+    );
+    assert!(
+        rechecked["details"]["lifecycle"]["closed"]
+            .as_array()
+            .is_some_and(|rows| rows.is_empty()),
+        "a finding closed on a run in which no check passed: {rechecked}"
     );
 }
 
@@ -3998,13 +4206,55 @@ fn a_project_cannot_write_its_own_answer_into_the_cache_directory() {
         "the check produced no verdict to compare, so the equality above is about two runs that \
          stopped:\n{clean_frame}"
     );
-    for field in ["aggregate", "totals", "not_checked", "findings"] {
+    for field in ["aggregate", "totals", "not_checked"] {
         assert_eq!(
             clean_details["report"][field], poisoned_details["report"][field],
             "a `.sure` the project wrote changed the {field} of the verdict:\n{clean_details}\
              \n{poisoned_details}"
         );
     }
+
+    // Findings are compared on everything except their own id.
+    //
+    // An id is the one part of a finding this design says is different between two
+    // runs over the same bytes: `recheck_lifecycle::FindingKey`'s header states it
+    // ("Finding IDs are minted per run, so the same issue in two runs would look
+    // like two different findings") and that module's key exists because of it, so
+    // a comparison that included the id would be asserting something the design
+    // denies. Every other field — title, severity, status, `what`, `impact`,
+    // `next_action` and the anchors — is still compared, and a run whose *verdict*
+    // moved still fails here.
+    //
+    // The non-emptiness guard is not decoration. Until findings could be produced
+    // at all, both sides of this comparison were `[]` and it passed without being
+    // able to fail — the defect the guard names. It stays so that a project which
+    // stops producing a finding reddens here with the reason, rather than quietly
+    // turning the assertion below back into a comparison of two empty lists.
+    let stripped = |details: &serde_json::Value| {
+        let mut findings = details["report"]["findings"].clone();
+        if let Some(rows) = findings.as_array_mut() {
+            for row in rows {
+                if let Some(object) = row.as_object_mut() {
+                    object.remove("id");
+                }
+            }
+        }
+        findings
+    };
+    let clean_findings = stripped(clean_details);
+    assert!(
+        clean_findings
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty()),
+        "the check produced no finding at all, so the comparison below would be between two \
+         empty lists and would pass whatever a project's `.sure` did:\n{clean_details}"
+    );
+    assert_eq!(
+        clean_findings,
+        stripped(poisoned_details),
+        "a `.sure` the project wrote changed the findings of the verdict:\n{clean_details}\
+         \n{poisoned_details}"
+    );
     assert_eq!(
         poisoned_details["recorded_goal"]["project_state"]["digest"], clean_digest,
         "a `.sure` the project wrote moved the project state a goal is recorded against, so the \

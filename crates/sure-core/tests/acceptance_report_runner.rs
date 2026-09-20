@@ -895,8 +895,8 @@ fn the_limitations_are_in_the_document_rather_than_in_a_commit_message() {
     let all = report.limitations.join("\n");
     for (what, wanted) in [
         (
-            "the re-check list this build passes is empty",
-            "rechecks: &[]",
+            "the closing half of the repair loop is unreached, and why",
+            "The closing half of the repair loop is unreached here",
         ),
         ("no project code runs from a product path", "inspect_only"),
         ("nothing touched the store", "store: None"),

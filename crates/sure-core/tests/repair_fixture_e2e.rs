@@ -24,26 +24,29 @@
 //!   process's own exit code is what becomes its [`CheckResult`];
 //! - a repair is applied **by writing the corrected bytes into the copy**, so
 //!   the second run is over a project that is a different project;
+//! - [`seed_rechecks`] reads the failing check off the finding's own anchor, so
+//!   this file supplies no re-check list of its own;
 //! - [`select_impacted_checks`] chooses what has to pass before the finding may
 //!   close — and the check that catches the regression is chosen by *it*, not by
 //!   this file;
 //! - [`reconcile`] makes the decision, and [`aggregate_run`] with
 //!   [`build_verdict`] and [`render_summary`] say what the run may claim.
 //!
-//! # The one thing this file supplies, and why it has to
+//! # Which re-check list this file supplies, since `P7-T012`
 //!
-//! The finding's own re-check list — *which check can observe whether this fix
-//! worked* — is passed to [`RepairContract::from_finding`] by this file, because
-//! the module that would derive it does not exist yet. That is measured rather
-//! than assumed: `select_impacted_checks` has no caller outside tests, and
-//! `crates/sure-core/src/pipeline.rs` records why the live path passes an empty
-//! list instead of inventing one — a re-check list nobody gathered evidence for
-//! would let SURE close findings on nothing.
+//! None. The list is [`seed_rechecks`]'s answer, read off the finding's own
+//! anchor, and it reaches [`RepairContract::from_finding`] the same way it does
+//! from the live path — `crates/sure-core/src/pipeline.rs` seeds every contract
+//! with that one function, so a rule that stopped reading a finding's anchor
+//! would redden here as well as there. The refusal that function's caller has to
+//! satisfy is untouched: `from_finding` still rejects an empty list, so a finding
+//! nothing can observe is a contract nobody can write rather than one that closes
+//! on nothing.
 //!
-//! So this file names the check that was failing — `packages/checkout`'s — and
-//! **nothing else**. Every check that joins it is selected by the product, and
-//! the second half of this file's claim is exactly that the check which catches
-//! the regression gets in that way.
+//! So the failing check reaches the contract through the product's own rule
+//! rather than through a literal here, and **every other** check that joins it is
+//! selected by the product. The second half of this file's claim is exactly that
+//! the check which catches the regression gets in that way.
 //!
 //! # What the binary does with this fixture, measured and not asserted here
 //!
@@ -92,7 +95,7 @@ use sure_core::process::{
 };
 use sure_core::project_verdict::{build_verdict, render_summary};
 use sure_core::recheck_lifecycle::{FindingKey, LifecycleInputs, reconcile};
-use sure_core::repair_impact::select_impacted_checks;
+use sure_core::repair_impact::{seed_rechecks, select_impacted_checks};
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_domain::capability::CapabilityReport;
 use sure_domain::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
@@ -680,12 +683,19 @@ fn host_confirmed() -> ExecutionPermissions {
 /// check's own result, so a fixture whose check stopped being `must_fix` would
 /// be a red test here rather than a finding that quietly changed weight.
 ///
-/// The anchor is this file's, and it points at the file the defect is in. It is
+/// The anchor is this file's for *where it points* — the file the defect is in —
+/// and the failing check's own identity for *what can observe it*. It is
 /// deliberately **not** a manifest path: a check's own anchor is the manifest it
 /// was declared in (`CheckReason::DeclaredCommand`), and a finding anchored
 /// there would overlap both members' checks and make every selection an
 /// *affected* one. The claim this file finishes with is about the *regression*
 /// rule, which is the one that reaches a check nothing points at.
+///
+/// The two halves are separate fields and they do not interfere:
+/// `repair_impact`'s overlap test reads the location and the locator, and its
+/// seed reads the subject id. Adding the id moves nothing a reader follows and
+/// changes no overlap — it is what lets [`seed_rechecks`] answer *which check can
+/// observe whether this is fixed* without this file answering it by hand.
 fn the_finding(run: &Run) -> Finding {
     let result = run.result(&run.checkout);
     assert_eq!(
@@ -711,7 +721,8 @@ fn the_finding(run: &Run) -> Finding {
         .evidence(vec![Evidence::new(
             result.evidence_class,
             "the project's own check for the basket total fails",
-            EvidenceAnchor::new(AnchorSubject::File, CHECKOUT, "totalCents"),
+            EvidenceAnchor::new(AnchorSubject::File, CHECKOUT, "totalCents")
+                .with_subject_id(run.checkout.clone()),
             Some(result.project_fingerprint.clone()),
             result.severity,
         )])
@@ -726,9 +737,15 @@ fn the_finding(run: &Run) -> Finding {
 /// is the whole of the second half of this file, and it is why this function
 /// returns both values rather than just the selection: a test that only saw the
 /// selection could not tell a check that was named from one that was found.
+///
+/// The one check is named by the product too. It comes from [`seed_rechecks`]
+/// reading the finding's own anchor rather than from a literal here, so a fixture
+/// whose finding stopped pointing at the failing check would fail at this line
+/// instead of going on naming the right check by hand.
 fn contract_and_selection(run: &Run, finding: &Finding) -> (RepairContract, Vec<CheckId>) {
-    let contract = RepairContract::from_finding(finding, vec![run.checkout.clone()])
-        .expect("the finding is grounded and one check was supplied");
+    let seeded = seed_rechecks(finding, &run.schedule);
+    let contract = RepairContract::from_finding(finding, seeded)
+        .expect("the finding is grounded and its anchor names a check in this schedule");
     let selected = select_impacted_checks(&contract, &run.schedule);
     (contract, selected)
 }

@@ -32,6 +32,14 @@ and it reaches the reader at the weight `note`, in the report's noise bucket
 rather than its material list, with no blocker attached and nothing held back
 from hand-off because of it.
 
+Since `P7-T012` the run does raise one `Finding`, and it is not this sentence:
+the proposal is surfaced as a planned check, no planned check runs in this
+build, and `sure_core::findings_from_checks` raises a `cannot_confirm` finding
+for it — at `note`, the proposal's own weight, saying that SURE planned a check
+and did not run it rather than that the requirement is unmet. What the two are
+never allowed to become is a claim about the project: the finding's status is
+`cannot_confirm` and the candidate stays where it was.
+
 That is deliberately modest, and it is the point of the fixture. SURE matched the
 words of the request against the project's routes, its file paths, its declared
 commands and the first non-blank line of each source file. Matching nothing there
@@ -82,7 +90,11 @@ and the test copies the fixture's own two files rather than writing them out
 again, and asserts that the control differs from the fixture by exactly that one
 path before it reads either answer. With the file present the answer must flip:
 one requirement matched, nothing unmatched, no candidate at all, and the summary
-losing exactly the line about a check that could not run.
+one line shorter — the line counting the check that could not run is gone, and
+the findings line above it is back to `No open findings.`, because nothing is
+planned and so nothing is left unrun. That second half is the flip the finding
+producer is measured by, and the test asserts it by name rather than by line
+count.
 
 If SURE reported the mismatch anyway, it would be a checker that calls every
 stated requirement unimplemented.

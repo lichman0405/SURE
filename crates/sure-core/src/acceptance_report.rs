@@ -654,17 +654,25 @@ pub fn acceptance_report_json(report: &AcceptanceReport) -> Result<String, Corpu
 /// The three the brief names, plus the two a reader of the corpus needs to know
 /// before reading any row. They are constants rather than measurements because
 /// they are properties of this build, and each one is checked where it lives:
-/// the first by `crates/sure-core/src/pipeline.rs`, the second by the fact that
-/// every pipeline drive here is `inspect_only`, the third by this module's own
-/// signature, and the fourth by `crates/sure-core/tests/acceptance_report_runner.rs`.
+/// the first by `crates/sure-core/src/pipeline.rs`, `crates/sure-cli/src/check.rs`
+/// and `crates/sure-core/tests/acceptance_report_runner.rs`, the second by the
+/// fact that every pipeline drive here is `inspect_only`, the third by this
+/// module's own signature, and the fourth by
+/// `crates/sure-core/tests/acceptance_report_runner.rs`.
 fn limitations() -> Vec<String> {
     vec![
         String::from(
-            "No finding can be closed by this build. `crates/sure-core/src/pipeline.rs` passes \
-             `rechecks: &[]` to `recheck_lifecycle::reconcile` and the reason is written above that \
-             call: no module in this build derives \"the checks that can observe whether this finding \
-             is fixed\" from a finding. A row whose agreement is `met` is a row about what SURE \
-             reports, not about a repair SURE completed.",
+            "The closing half of the repair loop is unreached here, and that is the limit to read \
+             every `met` row against. This report's drives run with `store: None`, so there is no \
+             earlier run to compare against and `recheck_lifecycle::reconcile` has nothing it could \
+             close. The product path now carries the rest of the loop: \
+             `crates/sure-core/src/pipeline.rs` derives each contract's re-check list from \
+             `sure_core::repair_impact`, `sure repair` and `sure recheck` record every finding a run \
+             leaves open, and a second run over one store reports what the first left open. But a \
+             finding closes only when every check its contract named has passed, and no drive here \
+             produces a passing check at all — every one runs `inspect_only` and its own verdict \
+             says `0 check(s) produced a result`. A row whose agreement is `met` is a row about what \
+             SURE reports, not about a repair SURE completed.",
         ),
         String::from(
             "No project's code is run from a product path. Every pipeline drive in this report runs \

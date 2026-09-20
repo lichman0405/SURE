@@ -3074,9 +3074,7 @@ fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_f
         "{id}: the control's summary is not what the fixture declares"
     );
 
-    // The flip, in both directions and by equality: the control's summary is the
-    // fixture's with exactly the trailing line about the check that could not
-    // run removed, and nothing else.
+    // The flip, in both directions and by equality.
     let fixture_lines = rendered_summary(&outcome);
     let control_lines = rendered_summary(&control_outcome);
     assert_eq!(
@@ -3086,11 +3084,37 @@ fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_f
         control_lines.len(),
         fixture_lines.len()
     );
+    // The flip, in both directions and by equality: every line before the findings
+    // line is the same in both runs, the fixture's extra line is the sentence that
+    // counts the check that could not run, and the control — whose project answers
+    // the request, so nothing is planned and nothing is left unrun — has no open
+    // finding at all. The two lines that differ are both about that one check, and
+    // they are the only two: the finding `findings_from_checks` raises for a check
+    // that reported nothing, and the count of checks that could not run.
+    //
+    // **This is the assertion the finding producer is measured by**, in the
+    // direction that matters here: a mutation that made
+    // `crate::findings_from_checks` raise nothing would take `fixture_lines[3]` back
+    // to `No open findings.` — which reddens the declared summary above rather than
+    // this comparison, because the declaration pins the line's text and this pins
+    // only which lines moved. A mutation that made the *control* raise a finding
+    // (for instance one that stopped the added file from matching the requirement)
+    // reddens `control_lines[3]` here.
     assert_eq!(
-        &fixture_lines[..control_lines.len()],
-        control_lines.as_slice(),
-        "{id}: the control changed a line of the summary other than the one about the check that \
-         could not run"
+        &fixture_lines[..3],
+        &control_lines[..3],
+        "{id}: the control changed a line of the summary other than the ones about the check that \
+         could not run: {control_lines:?}"
+    );
+    assert_eq!(
+        control_lines[3], "No open findings.",
+        "{id}: the control's project answers the request and plans nothing, so it has nothing to \
+         leave open"
+    );
+    assert!(
+        fixture_lines[4].starts_with("1 check(s) could not run or were skipped."),
+        "{id}: the fixture's last line is not the count of checks that could not run: {:?}",
+        fixture_lines[4]
     );
 }
 
@@ -3887,11 +3911,12 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
         declared,
     );
 
-    // Visible in four places, because a field on a struct is not a report a
+    // Visible in five places, because a field on a struct is not a report a
     // person reads: in the verdict's own list of checks that did not run, in the
-    // coverage summary, in the aggregate's list of critical checks that were not
-    // checked and in the count `render_summary` prints. The last of those is
-    // asserted with the whole summary below.
+    // finding the run raises for it, in the coverage summary, in the aggregate's
+    // list of critical checks that were not checked and in the two lines
+    // `render_summary` prints. The last of those is asserted with the whole
+    // summary below.
     assert_declared_answer(
         id,
         "not_checked_count",
@@ -3911,6 +3936,82 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
             .iter()
             .map(|listed| listed.id.as_str())
             .collect::<Vec<_>>()
+    );
+    // The finding, which `P7-T012` added and which is the place a reader reaches
+    // first. Found by the anchor naming this check rather than by position: a
+    // verdict that raised a finding about something else and none about the check
+    // it refused would satisfy a count. The fixture declares its weight, its
+    // status and the check it points at, because those are what separate a
+    // material uncertainty from a claim that the code is wrong: `cannot_confirm`
+    // and never `open`, and the check's own `must_fix` rather than one chosen for
+    // the project.
+    //
+    // **Reproducible mutations, one per assertion**, each run and its output
+    // recorded rather than described: emptying the producer (replacing the call
+    // in `pipeline::build_verdict` with `Vec::new()`) makes the `find` below
+    // panic with an empty list, and reddens the declared summary and the
+    // intent-mismatch fixture with it; making `status_for` answer
+    // `FindingStatus::Open` for a check that produced no result reddens
+    // `finding_status` with `left: "open"` against `cannot_confirm`, and nothing
+    // else; replacing `result.severity` with a fixed severity on the
+    // `FindingBuilder` in `finding_for` — both `.severity(..)` and the rationale,
+    // or the builder refuses to construct — reddens `finding_severity` with
+    // `left: "note"` against `must_fix`; and dropping `with_subject_id` from the
+    // anchor `anchor_for` returns leaves the `find` above with nothing to point
+    // at, so it panics naming the finding it did raise.
+    //
+    // The severity mutation is deliberately *not* on `severity_of`: that
+    // function is public for a caller and used by this module's own unit test,
+    // but `finding_for` does not call it, and mutating it was measured to leave
+    // this test green — a mutation that cannot fail is not a measurement, which
+    // is why it is written down here rather than left as a plausible-looking
+    // sentence.
+    let finding = record
+        .verdict
+        .findings
+        .iter()
+        .find(|finding| {
+            finding.evidence.iter().any(|evidence| {
+                evidence
+                    .anchor
+                    .subject_id
+                    .as_ref()
+                    .is_some_and(|subject| subject.as_str() == check_id)
+            })
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: the run raised no finding anchored to the check it refused, so the check is \
+                 visible in the report's structures and not in its findings. The findings it did \
+                 raise: {:?}",
+                record
+                    .verdict
+                    .findings
+                    .iter()
+                    .map(|finding| finding.title.clone())
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_declared_answer(
+        id,
+        "findings",
+        json!(record.verdict.findings.len()),
+        declared,
+    );
+    assert_declared_answer(id, "finding_title", json!(finding.title), declared);
+    assert_declared_answer(id, "finding_severity", json!(finding.severity), declared);
+    assert_declared_answer(id, "finding_status", json!(finding.status), declared);
+    assert_declared_answer(
+        id,
+        "finding_subject_id",
+        json!(
+            finding.evidence[0]
+                .anchor
+                .subject_id
+                .as_ref()
+                .map(|subject| subject.as_str())
+        ),
+        declared,
     );
     assert_declared_answer(
         id,
@@ -4004,9 +4105,12 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
     );
 
     // The whole of what a person reads, by equality rather than by substring.
-    // The count of checks that could not run is one of these lines, and so is
-    // `No open findings.` — which is why the count has to be there, or a reader
-    // takes the silence for a pass on the one thing SURE could not do.
+    // The count of checks that could not run is one of these lines, and so is the
+    // findings line above it — `Open findings: 1 Must fix.` since `P7-T012`,
+    // where it used to read `No open findings.`, and that line is the finding
+    // asserted above rather than a second statement about it. Both have to be
+    // there, or a reader takes the report for a project with nothing outstanding
+    // when the one thing SURE could not do is the one thing it was asked to do.
     assert_declared_answer(
         id,
         "summary_lines",
@@ -4014,8 +4118,12 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
         declared,
     );
 
-    // And nothing was invented about the project: the `must_fix` on the check is
-    // the weight of the check, not a verdict about code nobody ran.
+    // And nothing was invented about the project. The finding above lives in the
+    // verdict's findings, raised for a check that did not run; what the
+    // aggregator's own buckets hold is a different question, and the answer to it
+    // has to be nothing. The `must_fix` on the check is the weight of the check,
+    // not a verdict about code nobody ran: a build that turned it into a material
+    // candidate about the project would fail here while passing everything above.
     assert_eq!(
         record.candidates.material.len(),
         0,
@@ -4262,6 +4370,93 @@ fn an_unauthorised_dynamic_check_stays_visible_and_the_control_moves_the_users_o
         id,
         "aggregate_severity",
         json!(control_record.verdict.aggregate.severity),
+        declared_control,
+    );
+    // The control raises the same finding, and that is the point rather than an
+    // oversight: the check is no longer refused, but nothing in this build
+    // carries a planned check out, so what SURE knows about the project is
+    // unchanged. The two declarations carry the same five finding keys, which is
+    // what `disagreeing_keys` below enforces — a control whose finding moved
+    // would have to name it in `moved.keys` or be a red test.
+    //
+    // **Reproducible mutations:** the ones named above redden these five
+    // assertions too, because both runs share the function — M1 (nothing
+    // raised) panics in the `find`, M2 (`Open`) and M5 (`Resolved`) redden
+    // `finding_status` on both sides, M3 reddens `finding_severity` and M4
+    // panics in the `find`. M5 additionally reddens the intent-mismatch fixture,
+    // which is the direction worth knowing: `Resolved` leaves
+    // `FindingStatus::needs_attention`, so the finding drops out of
+    // `open_findings()` and the summary goes back to `No open findings.` on a
+    // run that refused a check.
+    //
+    // Nothing here asserts that the two findings are equal, and that is
+    // deliberate rather than an omission: both runs share `status_for`, so an
+    // equality between them could not fail without one of the five declarations
+    // above failing first. What keeps the two sides from drifting apart is
+    // `disagreeing_keys` below — these five keys are in neither declaration's
+    // `moved.keys`, so a control whose finding moved is a red test unless
+    // someone widens that list, and widening it is a change to the corpus rather
+    // than to the product.
+    let control_finding = control_record
+        .verdict
+        .findings
+        .iter()
+        .find(|finding| {
+            finding.evidence.iter().any(|evidence| {
+                evidence
+                    .anchor
+                    .subject_id
+                    .as_ref()
+                    .is_some_and(|subject| subject.as_str() == check_id)
+            })
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{id}: the control raised no finding anchored to the check, so consent changed what \
+                 SURE says about the project rather than only what it may do. The findings it did \
+                 raise: {:?}",
+                control_record
+                    .verdict
+                    .findings
+                    .iter()
+                    .map(|finding| finding.title.clone())
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_declared_answer(
+        id,
+        "findings",
+        json!(control_record.verdict.findings.len()),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "finding_title",
+        json!(control_finding.title),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "finding_severity",
+        json!(control_finding.severity),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "finding_status",
+        json!(control_finding.status),
+        declared_control,
+    );
+    assert_declared_answer(
+        id,
+        "finding_subject_id",
+        json!(
+            control_finding.evidence[0]
+                .anchor
+                .subject_id
+                .as_ref()
+                .map(|subject| subject.as_str())
+        ),
         declared_control,
     );
     assert_declared_answer(

@@ -12,13 +12,90 @@
 //!
 //! The result is de-duplicated and kept in schedule order, so the re-check plan
 //! is stable and readable.
+//!
+//! # The circularity, and the seed that breaks it
+//!
+//! [`select_impacted_checks`] takes a [`RepairContract`], and
+//! `RepairContract::from_finding` refuses an empty re-check list — so the
+//! selector cannot be called before the constructor that needs its answer. The
+//! way out is not to loosen either: it is [`seed_rechecks`], which reads a
+//! [`Finding`] alone and returns the checks that finding already names.
+//!
+//! **The seed is a subset of what [`select_impacted_checks`] returns, and that is
+//! why it is not a second rule.** The selector's first act is to copy the
+//! contract's own `recheck` list into its answer; the contract's `recheck` list is
+//! the seed. So every check the seed names is in the selection by construction,
+//! and the seed can only ever be the smaller of the two. What the seed must not
+//! do — and does not — is decide anything the selector decides: it adds no
+//! anchored check, no regression check, and no check the finding did not name.
 
 use sure_domain::evidence::{EvidenceAnchor, EvidenceClass};
-use sure_domain::ids::CheckId;
+use sure_domain::finding::Finding;
+use sure_domain::ids::{AnyId, CheckId, IdKind};
 use sure_domain::severity::Severity;
 use sure_domain::vocabulary::RepairContract;
 
 use crate::schedule::{CheckSchedule, ScheduledCheck};
+
+/// The checks a finding names as able to observe whether it is fixed.
+///
+/// # What it reads
+///
+/// Every evidence anchor on the finding whose `subject_id` is a check, in the
+/// order the anchors appear. A finding built by
+/// [`crate::findings_from_checks`] carries exactly one, and it is the check whose
+/// result produced the finding — the check that was failing, or the check that
+/// was planned and did not run.
+///
+/// This is the seed `crates/sure-core/tests/repair_fixture_e2e.rs` used to name
+/// by hand before the rule had a home; that file now calls this function like
+/// every other caller, so there is one answer to *which check can observe whether
+/// this is fixed* rather than a product answer and a test answer that agree today.
+///
+/// # What it refuses
+///
+/// An anchor whose text names no check is not a seed, and neither is one whose
+/// identifier is not a [`CheckId`] — a finding that names no check gets an empty
+/// list, and an empty list is what `RepairContract::from_finding` refuses. That
+/// refusal is the point: a one-check contract naming a check nobody can run
+/// (`RepairContract::from_finding_with_one_check` with a generated identifier) is
+/// a contract that satisfies the letter of the rule and is unactionable, and this
+/// function cannot produce one.
+///
+/// # `schedule`
+///
+/// The identifiers are filtered to checks the run's own schedule holds, so a seed
+/// is always something a re-check could actually re-run. An identifier that is
+/// absent from the schedule is dropped rather than returned: the selector keeps
+/// contract identifiers the schedule has lost, because a contract outlives the
+/// schedule it was built from, but a *seed* built here is being built for a
+/// contract that is about to be made from this very run, and a check this run did
+/// not plan is a check this run cannot re-check.
+#[must_use]
+pub fn seed_rechecks(finding: &Finding, schedule: &CheckSchedule) -> Vec<CheckId> {
+    let mut seed: Vec<CheckId> = Vec::new();
+    for evidence in &finding.evidence {
+        let Some(id) = check_id_in(&evidence.anchor) else {
+            continue;
+        };
+        if schedule.get(&id).is_none() {
+            continue;
+        }
+        if !seed.contains(&id) {
+            seed.push(id);
+        }
+    }
+    seed
+}
+
+/// The check an anchor points at, when it points at one.
+fn check_id_in(anchor: &EvidenceAnchor) -> Option<CheckId> {
+    let subject: &AnyId = anchor.subject_id.as_ref()?;
+    if subject.kind() != IdKind::Check {
+        return None;
+    }
+    CheckId::parse(subject.as_str()).ok()
+}
 
 /// Select the checks to re-run for `contract` from `schedule`.
 ///

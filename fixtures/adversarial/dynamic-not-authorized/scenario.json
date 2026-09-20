@@ -9,7 +9,7 @@
       "function": "ScheduledCheck::not_run",
       "plain_report_module": "crates/sure-core/src/project_verdict.rs",
       "route": "the plan holds one entry whose decision is `Denied` (`sure_domain::execution::decide` refused `ActionKind::RunTests` under `InspectOnly`), so `not_run` produces a `CheckResult` whose status is `Skipped` and whose `not_checked_reason` is `NotCheckedReason::ExecutionNotAuthorized`",
-      "returns": "one skipped result carrying the frozen sentence, which reaches the reader through `ProjectVerdict::not_checked`, through `Aggregate::coverage.critical_not_checked`, through `CoverageNotCheckedSummary::not_checked` and through the count `render_summary` prints"
+      "returns": "one skipped result carrying the frozen sentence, which reaches the reader through `ProjectVerdict::not_checked`, through `Aggregate::coverage.critical_not_checked`, through `CoverageNotCheckedSummary::not_checked`, through the `cannot_confirm` finding `sure_core::findings_from_checks` raises for it into `ProjectVerdict::findings`, and through the two lines `render_summary` prints"
     },
     "project": {
       "files": [
@@ -56,12 +56,17 @@
       "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
       "is_ready_for_hand_off": false,
+      "findings": 1,
+      "finding_title": "run the tests",
+      "finding_severity": "must_fix",
+      "finding_status": "cannot_confirm",
+      "finding_subject_id": "chk_nodetestd6032c00e4d44f94",
       "summary_lines": [
         "Not enough could be checked to say whether this is ready.",
         "This project is not ready to hand off.",
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
-        "No open findings.",
+        "Open findings: 1 Must fix.",
         "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
       ]
     },
@@ -96,7 +101,7 @@
         "keys_are": "the two answer blocks compared key by key, sorted. The test reads the difference off the declarations and compares it with this list, so a control that stopped moving something, or started moving something else, is a red test rather than a change nobody noticed."
       },
       "why": "The same project, the same `package.json`, the same planned check and the same pipeline run, with the user's own file the only thing that appeared. Standard `sure check` reads execution authority from that file alone, so this is not a test-only route: it is the route. A reporter hard-wired to deny — the failure this fixture exists to catch — would satisfy every positive assertion above and fails here, because the refusal must be gone when the user has granted it.",
-      "unchanged": "The project's own `sure.yaml` still asks for `host_confirmed` in both runs and is still only a request in both: what moves is the user's file. The four keys the two declarations share that say what did *not* move are the summary lines (the same six, line for line), the check's identity and weight, the count of checks that could not run, and the aggregate's headline and severity — the aggregate is `not_enough_checked` either way, because nothing in this build carries a check out. Consent changes what SURE is allowed to do; it does not make anything checked.",
+      "unchanged": "The project's own `sure.yaml` still asks for `host_confirmed` in both runs and is still only a request in both: what moves is the user's file. The keys the two declarations share that say what did *not* move are the summary lines (the same six, line for line), the check's identity and weight, the count of checks that could not run, the finding the run raises for that check — one `must_fix` `cannot_confirm` finding anchored to it on both sides, because consent decides what SURE may do and not what SURE knows — and the aggregate's headline and severity, which are `not_enough_checked` either way, because nothing in this build carries a check out. Consent changes what SURE is allowed to do; it does not make anything checked, and since `P7-T012` it does not change what SURE says about the project either.",
       "expect": {
         "mode": "host_confirmed",
         "run_project_code": true,
@@ -129,12 +134,17 @@
         "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
         "blocking": ["chk_nodetestd6032c00e4d44f94"],
         "is_ready_for_hand_off": false,
+        "findings": 1,
+        "finding_title": "run the tests",
+        "finding_severity": "must_fix",
+        "finding_status": "cannot_confirm",
+        "finding_subject_id": "chk_nodetestd6032c00e4d44f94",
         "summary_lines": [
           "Not enough could be checked to say whether this is ready.",
           "This project is not ready to hand off.",
           "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
           "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
-          "No open findings.",
+          "Open findings: 1 Must fix.",
           "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
         ]
       }
@@ -181,15 +191,20 @@
       "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
       "is_ready_for_hand_off": false,
+      "findings": 1,
+      "finding_title": "run the tests",
+      "finding_severity": "must_fix",
+      "finding_status": "cannot_confirm",
+      "finding_subject_id": "chk_nodetestd6032c00e4d44f94",
       "summary_lines": [
         "Not enough could be checked to say whether this is ready.",
         "This project is not ready to hand off.",
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
-        "No open findings.",
+        "Open findings: 1 Must fix.",
         "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
       ],
-      "why": "The acceptance sentence is *dynamic-not-authorized stays visible*, and every word of it is asserted by equality against SURE's own answer rather than paraphrased. `check_status` is `skipped` and `check_not_checked_reason` is `execution_not_authorized` — the frozen vocabulary has no \"not authorized\" status at all, so a build that invented one would fail here. `check_reason` is the whole sentence `crates/sure-domain/src/status.rs` fixes for that reason, quoted rather than searched for. Visibility is asserted in four places rather than one, because a struct field is not a report: the result is in `ProjectVerdict::not_checked`, it is in `Aggregate::coverage.critical_not_checked`, it is an entry in `CoverageNotCheckedSummary::not_checked`, and the last line of the rendered summary names it and counts it. `coverage_checked` is zero, which is the honest half a reader could otherwise miss: nothing was checked at all, and the check is neither a pass nor a failure. The project's own `sure.yaml` asking for `host_confirmed` is asserted beside it — `project_ask_refused_escalation` is true, `project_ask_granted` is false — because a build that took execution authority from the project would have made this answer a green light on a stranger's advice."
+      "why": "The acceptance sentence is *dynamic-not-authorized stays visible*, and every word of it is asserted by equality against SURE's own answer rather than paraphrased. `check_status` is `skipped` and `check_not_checked_reason` is `execution_not_authorized` — the frozen vocabulary has no \"not authorized\" status at all, so a build that invented one would fail here. `check_reason` is the whole sentence `crates/sure-domain/src/status.rs` fixes for that reason, quoted rather than searched for. Visibility is asserted in five places rather than one, because a struct field is not a report: the result is in `ProjectVerdict::not_checked`, it is in `Aggregate::coverage.critical_not_checked`, it is an entry in `CoverageNotCheckedSummary::not_checked`, the run raises one `cannot_confirm` finding for it into `ProjectVerdict::findings` (added by `P7-T012`, and the five keys at the end of this entry pin its weight, its status and the check it is anchored to), and the last two lines of the rendered summary name it and count it. `coverage_checked` is zero, which is the honest half a reader could otherwise miss: nothing was checked at all, and the check is neither a pass nor a failure. The project's own `sure.yaml` asking for `host_confirmed` is asserted beside it — `project_ask_refused_escalation` is true, `project_ask_granted` is false — because a build that took execution authority from the project would have made this answer a green light on a stranger's advice."
     },
     {
       "kind": "control",
@@ -231,12 +246,17 @@
       "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
       "is_ready_for_hand_off": false,
+      "findings": 1,
+      "finding_title": "run the tests",
+      "finding_severity": "must_fix",
+      "finding_status": "cannot_confirm",
+      "finding_subject_id": "chk_nodetestd6032c00e4d44f94",
       "summary_lines": [
         "Not enough could be checked to say whether this is ready.",
         "This project is not ready to hand off.",
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
-        "No open findings.",
+        "Open findings: 1 Must fix.",
         "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
       ],
       "why": "The fixture is worth nothing without this half, and the assertion that makes it a measurement is the negative one: with the user's own file granting execution, **no result carries `ExecutionNotAuthorized`** — asserted by that predicate, not by a count of passes and not by a greener aggregate. `refusals` is declared as zero and the test computes it as `results().iter().filter(|result| result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized)).count()`, so a reporter that refused everything fails here and a reporter that refused nothing fails the outcome above. What the check becomes is stated rather than dressed up: `check_status` is `unknown` with `check_reason` *Nothing was reported for this check*, because this build has no runner for a planned check — a check that is no longer refused is still not a check that ran. `coverage_checked` stays zero for that reason, and the aggregate stays `not_enough_checked`, so the honest reading of this half is \"the reason changed\", not \"the project got greener\". If a later build learns to carry the check out, this declaration is what has to be re-made, and this sentence is where that decision is written down."
@@ -253,12 +273,12 @@
     },
     {
       "kind": "false_positive",
-      "description": "The lack of authorisation is reported as a defect in the project: a finding, a failure, or a `must_fix` about the code. Nothing here is wrong — the script is declared and the file it names exists — and a project must not be blamed for a permission the person at the keyboard has not given."
+      "description": "The lack of authorisation is reported as a defect in the project: a failure, a `must_fix` that says the code is wrong, a finding whose status is `open` rather than `cannot_confirm`, or an outcome that names the code as the thing to fix. Nothing here is wrong — the script is declared and the file it names exists — and a project must not be blamed for a permission the person at the keyboard has not given. This sentence used to forbid the finding itself, in the words 'a finding, a failure, or a `must_fix` about the code', and `P7-T012` made that half false: a check the plan refused is a material uncertainty a reader has to be told about, and `sure_core::findings_from_checks` raises one `cannot_confirm` finding for it, carrying the check's own `must_fix` rather than a weight chosen for the project. What survives is the distinction the sentence was written for, and the test asserts it rather than leaving it to a reader: the finding's status is `cannot_confirm` and never `open`, what it says is that SURE planned this check and did not run it, its impact is that nothing here is known to be broken, and its next step is to run the check or to allow SURE to run it — never to change the code."
     },
     {
       "kind": "false_positive",
       "description": "The project's own `sure.yaml` is treated as authorisation. A repository SURE was merely pointed at cannot decide that SURE may run it, which is the escalation `docs/architecture/CONFIG_AUTHORITY.md` exists to prevent; a build that read the mode from the project would show this check as allowed."
     }
   ],
-  "notes": "`dynamic-not-authorized` is a case in `evaluation/acceptance-manifest.json` with `release_blocking: false`, `expected_severity: \"note\"` and the expectation `unexecuted dynamic checks stay visible as not checked/skipped`; the two fields at the top of this file are copied from that row rather than chosen here, and `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking` in `crates/sure-testkit/tests/fixture_apps.rs` fails if either drifts. The row is why this fixture is **not** in `FIXTURES_WITHOUT_A_MANIFEST_CASE`: it has a case, and the exemption list is checked in both directions. SURE reports no `Finding` for this case — a `note` is a ceiling this fixture stays far under — and the `must_fix` the check itself carries is the weight of the check, not a candidate about the project: `candidates.material` and `candidates.style_noise` are both empty, which the test asserts rather than leaves to a reader. This is the second fixture in the corpus that ships a `package.json` without being one of `P14-T001`'s scanners, so it is named in `TYPESCRIPT_FIXTURES` for the reason that file gives — a directory that ships a `package.json` is a Node application and belongs in the runnability sweep — and the test that grades it lives in `crates/sure-core/tests/adversarial_fixture_detection.rs`, where the real pipeline is reachable. The pipeline is driven with `store: None`, so grading this fixture writes nothing anywhere, and the project is read where it ships rather than copied, so a fixture edited without the test being edited is a red test."
+  "notes": "`dynamic-not-authorized` is a case in `evaluation/acceptance-manifest.json` with `release_blocking: false`, `expected_severity: \"note\"` and the expectation `unexecuted dynamic checks stay visible as not checked/skipped`; the two fields at the top of this file are copied from that row rather than chosen here, and `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking` in `crates/sure-testkit/tests/fixture_apps.rs` fails if either drifts. The row is why this fixture is **not** in `FIXTURES_WITHOUT_A_MANIFEST_CASE`: it has a case, and the exemption list is checked in both directions. SURE reports one `Finding` for this case since `P7-T012`, and this sentence is where that is written down: the refused check is a plan entry that reported nothing, and `sure_core::findings_from_checks` raises one `cannot_confirm` finding for it carrying the check's own `must_fix`. This sentence used to say SURE reports no `Finding` for this case, which that change made false — and the reason it is worth saying rather than leaving out is that it is the exact sentence the forbidden outcome below used to be written against. What it still says is unchanged: the `must_fix` the check itself carries is the weight of the check, not a candidate about the project, `candidates.material` and `candidates.style_noise` are both empty, and the case's `expected_severity` of `note` is the manifest's row for what SURE says about the project rather than the weight of a check nobody authorised. The test asserts the buckets rather than leaving them to a reader. This is the second fixture in the corpus that ships a `package.json` without being one of `P14-T001`'s scanners, so it is named in `TYPESCRIPT_FIXTURES` for the reason that file gives — a directory that ships a `package.json` is a Node application and belongs in the runnability sweep — and the test that grades it lives in `crates/sure-core/tests/adversarial_fixture_detection.rs`, where the real pipeline is reachable. The pipeline is driven with `store: None`, so grading this fixture writes nothing anywhere, and the project is read where it ships rather than copied, so a fixture edited without the test being edited is a red test."
 }

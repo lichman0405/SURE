@@ -38,6 +38,7 @@ pub mod env_completeness;
 pub mod external_service;
 pub mod false_completion_aggregator;
 pub mod finding_gravity;
+pub mod findings_from_checks;
 pub mod fingerprint;
 pub mod full_recording;
 pub mod harness_event;
@@ -78,8 +79,8 @@ pub mod support;
 pub mod ui_action_bridge;
 
 pub use sure_domain::{
-    PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, ids, intent,
-    severity, status, vocabulary,
+    PRODUCT_EXPANSION, PRODUCT_NAME, PRODUCT_PROMISE, capability, evidence, execution, finding,
+    ids, intent, severity, status, vocabulary,
 };
 
 /// The integration protocol version this core build speaks.

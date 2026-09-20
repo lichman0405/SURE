@@ -8,7 +8,7 @@
 //! Every run's findings and check results are stored as records, so a previous
 //! run stays auditable even after a finding is closed.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sure_domain::finding::{Finding, FindingStatus};
 use sure_domain::ids::{CheckId, FindingId, FingerprintId};
@@ -212,15 +212,71 @@ fn clone_for_state(
     }
 }
 
-/// Read every open finding for `project_root` from runs before
-/// `current_fingerprint`.
+/// How many stored records one read of the earlier runs walks.
+///
+/// # Why this is a bound with a number rather than `0`
+///
+/// [`Store::history`] documents `0` as *"returns none"* and the implementation
+/// binds it as `LIMIT 0`, so a read that is meant to find the previous run's open
+/// findings could only ever return an empty list — and the caller then reports
+/// *"no earlier run left anything open"* as a fact about the project rather than
+/// as a failure to look. That was this function until `P7-T012`.
+///
+/// # Why this number
+///
+/// A bound rather than a promise, in the shape of [`crate::allowance::SCAN_LIMIT`]
+/// and for the same reason. **The query is newest-first and the project filter is
+/// applied in Rust after the limit**, so the budget is spent before this module
+/// knows which of the rows belong to the project it was asked about: any limit
+/// that is merely "big enough for this project" silently drops that project's
+/// older runs, which is the same failure as `0` with a quieter symptom. The
+/// number is therefore chosen against the store rather than against a project —
+/// far more runs than any project accumulates between two checks, and a store
+/// that reaches it has something wrong with it, which is exactly what
+/// `allowance::SCAN_LIMIT` says about its own.
+pub const HISTORY_SCAN_LIMIT: usize = 4096;
+
+/// Read every open finding for `project_root` from earlier runs.
 ///
 /// Open here means [`FindingStatus::needs_attention`]: `Open` and
 /// `CannotConfirm`. Resolved and accepted findings are not carried forward.
+///
+/// # One entry per finding, not one per row
+///
+/// [`store_run`] writes **every** finding on **every** run, so a project checked
+/// five times has five stored rows per open finding. Returning them all made the
+/// re-check report a count that grew with how often the project had been looked
+/// at rather than with how many problems it had — measured, before this rule
+/// existed: three runs over one unchanged project, and the third said `6 earlier
+/// finding(s) stayed open` for three findings.
+///
+/// The identity to deduplicate on is [`FindingKey`], because the id is minted per
+/// run — that is what the key exists for. [`Store::history`] returns newest-first,
+/// so the record kept is the most recent reading of that finding. A finding with
+/// no key at all (nothing a reader could be pointed at) is **kept rather than
+/// dropped**: SURE cannot tell two of them apart, so it cannot choose between them
+/// without discarding a record it has no basis to call a duplicate.
+///
+/// # Why there is no project-state filter
+///
+/// There was one, and it could never fire: it skipped a record whose
+/// `project_fingerprint` equalled the current run's, but a
+/// [`ProjectFingerprint`](sure_domain::vocabulary::ProjectFingerprint) carries a
+/// **minted** id beside its content digest, so two runs over identical bytes carry
+/// two different ids. The comparison is now gone rather than corrected to
+/// [`matches`](sure_domain::vocabulary::ProjectFingerprint::matches), because
+/// filtering by state would drop exactly the findings a re-check is for: a finding
+/// an earlier run left open against the state the project is still in is the one a
+/// reader most needs to see. Deduplicating on the key bounds the list; the state
+/// it was raised against does not make it any less open.
+///
+/// # Errors
+///
+/// Returns [`StoreError::MalformedRow`] when a stored finding does not decode,
+/// and whatever the store returns for a query it cannot answer.
 pub fn previous_open_findings(
     store: &Store,
     project_root: &str,
-    current_fingerprint: &FingerprintId,
 ) -> Result<Vec<Finding>, StoreError> {
     let filter = crate::store::HistoryFilter {
         project_fingerprint: None,
@@ -229,19 +285,23 @@ pub fn previous_open_findings(
         )),
         include_recordings: false,
     };
-    let records = store.history(&filter, 0)?;
+    let records = store.history(&filter, HISTORY_SCAN_LIMIT)?;
+    let mut seen: HashSet<FindingKey> = HashSet::new();
     let mut findings = Vec::new();
     for record in records {
         if record.project_root.as_deref() != Some(project_root) {
             continue;
         }
-        if record.project_fingerprint.as_deref() == Some(current_fingerprint.as_str()) {
+        let finding: Finding = record.decode()?;
+        if !finding.status.needs_attention() {
             continue;
         }
-        let finding: Finding = record.decode()?;
-        if finding.status.needs_attention() {
-            findings.push(finding);
+        if let Some(key) = FindingKey::from_finding(&finding)
+            && !seen.insert(key)
+        {
+            continue;
         }
+        findings.push(finding);
     }
     Ok(findings)
 }
@@ -329,6 +389,22 @@ mod tests {
 
     fn another_fingerprint() -> FingerprintId {
         FingerprintId::parse("fp_01j2m8q5aaaabbbbccccddddef").unwrap()
+    }
+
+    /// A store under `target/tmp`, git-ignored and on the same volume as the
+    /// checkout. The name carries the process id for the reason `store/mod.rs`'s
+    /// copy of this helper records in full: freshness must not depend on a
+    /// deletion succeeding, because on Windows a file another process holds
+    /// cannot be deleted and the failure is easy to swallow.
+    fn store_in(name: &str) -> Store {
+        let dir = crate::store::scratch_root().join(format!("{name}-{}", std::process::id()));
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot clear {}: {error}", dir.display()),
+        }
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        Store::open_at(&dir.join("sure.db")).expect("the store opens")
     }
 
     fn finding_with(title: &str, location: &str, status: FindingStatus) -> Finding {
@@ -741,5 +817,98 @@ mod tests {
             another_fingerprint(),
         );
         assert!(open.is_empty());
+    }
+
+    /// The read that finds what an earlier run left open is only useful if a run
+    /// wrote it down and it reports each finding once.
+    ///
+    /// # Mutations this test is built to redden
+    ///
+    /// - `HISTORY_SCAN_LIMIT = 0` — the value this read carried before
+    ///   `P7-T012`. `Store::history` documents `0` as "return none", and the
+    ///   implementation passes it through to SQLite as `LIMIT 0`, so the read
+    ///   answers "no earlier run left anything open" about a store holding two
+    ///   runs of three open findings. Both count assertions fail.
+    /// - `HISTORY_SCAN_LIMIT = 2` — a small non-zero limit, which is the tempting
+    ///   fix and is not one: the query is newest-first, so the scan spends its
+    ///   rows on the newest readings and never reaches an earlier run's rows at
+    ///   all. The first count assertion fails while the store still holds every
+    ///   one of the findings.
+    /// - deleting the `seen.insert(key)` guard in [`previous_open_findings`] —
+    ///   each run stores every finding, so one unchanged project checked twice
+    ///   reports six entries for three problems. Measured on the CLI before the
+    ///   guard existed: three runs over one unchanged project, and the third
+    ///   said `6 earlier finding(s) stayed open` for three findings.
+    #[test]
+    fn a_previous_runs_open_findings_are_reported_once_each() {
+        let store = store_in("recheck-lifecycle-history");
+        let project = "C:/projects/sendmail";
+        let fixtures = [
+            ("Email not sent", "src/email/send.rs"),
+            ("Retry loop never ends", "src/email/retry.rs"),
+            ("Timeout is one second", "src/email/config.rs"),
+        ];
+        let open_in = |fixtures: &[(&str, &str)]| -> Vec<Finding> {
+            fixtures
+                .iter()
+                .map(|(title, location)| finding_with(title, location, FindingStatus::Open))
+                .collect()
+        };
+
+        // Run one: three open findings.
+        store_run(&store, project, &fingerprint(), &open_in(&fixtures), &[])
+            .expect("the first run is stored");
+
+        // Run two: the same three findings with freshly minted ids — which is
+        // what a second run over unchanged bytes produces, because a finding id
+        // is generated per run — and one the run itself resolved.
+        let mut second = open_in(&fixtures);
+        second.push(finding_with(
+            "Closed by the repair",
+            "src/email/other.rs",
+            FindingStatus::Resolved,
+        ));
+        store_run(&store, project, &fingerprint(), &second, &[]).expect("the second run is stored");
+
+        let mut open: Vec<String> = previous_open_findings(&store, project)
+            .expect("the history reads")
+            .into_iter()
+            .map(|finding| finding.title)
+            .collect();
+        open.sort();
+        assert_eq!(
+            open,
+            [
+                "Email not sent",
+                "Retry loop never ends",
+                "Timeout is one second"
+            ],
+            "two runs of three open findings are three findings, and the resolved one is not among them"
+        );
+
+        // Another project's finding is not this project's open list, however
+        // much of the store it shares.
+        store_run(
+            &store,
+            "C:/projects/other",
+            &fingerprint(),
+            &[finding_with(
+                "Someone else's problem",
+                "src/other.rs",
+                FindingStatus::Open,
+            )],
+            &[],
+        )
+        .expect("the other project's run is stored");
+        let mut after: Vec<String> = previous_open_findings(&store, project)
+            .expect("the history reads")
+            .into_iter()
+            .map(|finding| finding.title)
+            .collect();
+        after.sort();
+        assert_eq!(
+            after, open,
+            "another project's findings are not this project's open list"
+        );
     }
 }

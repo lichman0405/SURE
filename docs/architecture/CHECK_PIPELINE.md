@@ -10,5 +10,5 @@
 8. **Grounded model assessment** if configured.
 9. **Claim checking** against observed evidence/current state.
 10. **Aggregate** into findings + checked/not-checked scope + verdict.
-11. **Repair contract** for selected finding(s).
-12. **Re-check** affected and regression checks after repair.
+11. **Repair contract** — one per finding. The prompt names the problem, what a fix must preserve, and the acceptance; its re-check list is what step 12 will hold the next run to.
+12. **Re-check** — compare this run against what an earlier run left open, and close a finding only where **every** check its repair contract named has passed here. The list of those checks is `sure_core::repair_impact::select_impacted_checks`'s answer, not a second rule written beside it: the same function is what step 11's contract is held to, so the sentence a person reads and the test the run applies cannot disagree.

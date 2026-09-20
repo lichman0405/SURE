@@ -67,12 +67,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use sure_core::config::Authority;
+use sure_core::finding::Finding;
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::intent::IntentSource;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome, Stage, StageOutcome};
 use sure_core::privacy::{ModelUse, PrivacyStatement};
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
+use sure_core::recheck_lifecycle::store_run;
+use sure_core::repair_impact::select_impacted_checks;
 use sure_core::status::NotCheckedReason;
 use sure_core::store::{Store, StoreError};
 use sure_core::vocabulary::{ProjectFingerprint, ProjectVerdict};
@@ -100,6 +103,17 @@ const RECORDED_AND_UNCHECKED: &str = "The goal was recorded, and nothing was che
 /// written and SURE cannot say what.
 const RECORDED_WITHOUT_A_ROW: &str =
     "The goal was recorded, and SURE cannot say which record holds it.";
+
+/// What a run says when it checked the project and could not keep what it found.
+///
+/// A fourth sentence rather than a reuse, because the other three all describe a
+/// run whose work happened before the failure and this one's happened after: the
+/// verdict is real and complete, and it is the history the next run compares
+/// against that is missing a row. Telling the user *nothing was checked* here
+/// would be false, and telling them nothing at all would leave the next `sure
+/// recheck` reporting "no earlier run left anything open" about a run that did.
+const FOUND_AND_NOT_RECORDED: &str =
+    "The project was checked, and what it left open was not recorded.";
 
 /// `sure check`, `sure recheck` or `sure repair`, resolving where SURE keeps
 /// its files.
@@ -213,10 +227,9 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
     let loaded = authority.project_file();
     let privacy = PrivacyStatement::of(&authority);
 
-    // The history, when there is one — see the module comment for why nothing is
-    // created here.
+    // The history — see `open_for` for which commands create one and why.
     if store.is_none() {
-        match open_existing(paths, project) {
+        match open_for(purpose, paths, project) {
             Ok(opened) => store = opened,
             Err(error) => return failed(purpose, NOTHING_RECORDED, error.to_string()),
         }
@@ -231,6 +244,30 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         goal,
     }
     .run();
+
+    // What this run found, kept for the run that comes next — which is the whole
+    // of what makes stage 12 a comparison rather than a stage that always says
+    // there was nothing before it. Written by the commands that carry the loop
+    // and by no others: see `open_for`.
+    //
+    // A failure here ends the command rather than being noted, for the reason
+    // the module comment gives for status 5: the next `sure recheck` would
+    // otherwise compare against a history missing exactly the row it was run to
+    // find, and would report that as "no earlier run left anything open" — a
+    // sentence that is true about the store and false about the project.
+    if purpose.wants_repair_contracts()
+        && let (Some(store), Some(outcome)) = (store.as_ref(), run.run.as_ref())
+        && let Err(error) = store_run(
+            store,
+            &outcome.project_root,
+            &outcome.project_state.id,
+            &outcome.verdict.findings,
+            outcome.report.results(),
+        )
+    {
+        return failed(purpose, FOUND_AND_NOT_RECORDED, error.to_string());
+    }
+
     // Read after the run, because it is the run's own record of the one stage
     // that would ask a model — not a second opinion about the configuration.
     let model_use = ModelUse::of(privacy.provider, &run);
@@ -318,11 +355,11 @@ fn record_goal(
 
 /// The history, when its file is already there.
 ///
-/// Never created: see the module comment. A store that exists and cannot be used
-/// is an error rather than an absent history, because the pipeline's "SURE has
-/// no recorded history for this machine" is a true sentence only when there is
-/// none — a run that said it while a store sat unreadable on the disk would be
-/// describing a machine it never looked at.
+/// Never created. A store that exists and cannot be used is an error rather than
+/// an absent history, because the pipeline's "SURE has no recorded history for
+/// this machine" is a true sentence only when there is none — a run that said it
+/// while a store sat unreadable on the disk would be describing a machine it
+/// never looked at.
 ///
 /// # Errors
 ///
@@ -333,6 +370,41 @@ fn open_existing(paths: &Paths, project: &Path) -> Result<Option<Store>, StoreEr
         return Ok(None);
     }
     Store::open(paths, project).map(Some)
+}
+
+/// The history, created when this command is one that keeps one.
+///
+/// # Who is allowed to create a store
+///
+/// `P7-T012` had to answer this, because persisting findings is what makes the
+/// second half of the repair loop possible and the module comment above promises
+/// that a bare `sure check` writes nothing on a machine that has never used SURE.
+/// Both are kept, by drawing the line at the loop:
+///
+/// - **`sure check` reports.** It creates nothing, before or after. The promise
+///   in the module comment holds in exactly the words it is written in, and
+///   `a_check_with_no_goal_on_a_machine_with_no_history_writes_nothing` still
+///   measures it — the test was not changed to make this possible.
+/// - **`sure repair` and `sure recheck` carry the loop**, and a repair loop with
+///   no memory is not a loop: `sure repair` writes the finding a later `sure
+///   recheck` has to find, and `sure recheck` writes the resolution so that a
+///   third run does not re-open what the second one closed. A command whose whole
+///   purpose is to compare against an earlier run, that refused to keep the row
+///   the next comparison needs, would be a command that could never work.
+///
+/// The predicate is [`Purpose::wants_repair_contracts`] rather than a list of two
+/// names, so a fourth purpose added to the enum has to answer the question —
+/// *does this run keep a history?* — instead of inheriting `check`'s answer by
+/// default.
+///
+/// # Errors
+///
+/// As [`open_existing`], plus whatever creating the store can return.
+fn open_for(purpose: Purpose, paths: &Paths, project: &Path) -> Result<Option<Store>, StoreError> {
+    if purpose.wants_repair_contracts() {
+        return Store::open(paths, project).map(Some);
+    }
+    open_existing(paths, project)
 }
 
 /// One step of [`record_goal`] that did not happen, and what it cost.
@@ -399,6 +471,8 @@ fn finished(
     )?;
     writeln!(out)?;
 
+    repairs(run, out)?;
+    lifecycle(run, out)?;
     stages(outcome, out)?;
     privacy(&report.privacy, report.model_use, out)?;
     if let Some(recorded) = &report.recorded_goal {
@@ -427,6 +501,91 @@ fn finished(
     };
     status?;
     not_clean_note(report, outcome, out)
+}
+
+/// The repair contracts this run wrote, one block each.
+///
+/// `run.repairs` had no renderer at all before `P7-T012`: the pipeline filled the
+/// field and every reader of the field was a test. A contract a user cannot read
+/// is a contract only a programmer can act on, which is the opposite of what the
+/// stage is for.
+///
+/// # Which re-check list is printed
+///
+/// The **effective** one — `repair_impact::select_impacted_checks`'s answer for
+/// this contract and this run's schedule — rather than the shorter list the
+/// contract carries. The contract's own list is what
+/// `RepairContract::from_finding` was handed (the check whose result produced the
+/// finding), and the selection is that list widened with the checks a repair of
+/// this location could break. It is the selection that has to pass before the
+/// finding closes, so it is the selection a reader is owed; the function is the
+/// one the pipeline calls rather than a second rule written here.
+fn repairs(run: &RunOutcome, out: &mut impl Write) -> io::Result<()> {
+    if run.repairs.is_empty() {
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "Repair contracts, one per finding. SURE will not close a finding because someone says \
+         it is fixed: it closes when the checks below have passed."
+    )?;
+    for (number, contract) in run.repairs.iter().enumerate() {
+        writeln!(out)?;
+        writeln!(out, "{}. {}", number + 1, contract.problem)?;
+        writeln!(out, "   Why it matters: {}", contract.why_it_matters)?;
+        for fix in &contract.required_fix {
+            writeln!(out, "   Required: {fix}")?;
+        }
+        for preserve in &contract.preserve {
+            writeln!(out, "   Keep working: {preserve}")?;
+        }
+        for line in &contract.acceptance {
+            writeln!(out, "   Accepted when: {line}")?;
+        }
+        let checks = select_impacted_checks(contract, &run.schedule);
+        writeln!(
+            out,
+            "   Checks that must pass before this closes: {}",
+            checks
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+        if checks.is_empty() {
+            // `from_finding` refuses an empty list, so this is unreachable from
+            // the pipeline. It is written down rather than left to a reader to
+            // deduce, because a contract that printed no check would look like a
+            // contract that closes itself.
+            writeln!(
+                out,
+                "   (No check can observe this one. SURE will not close it on a claim.)"
+            )?;
+        }
+    }
+    writeln!(out)
+}
+
+/// What the comparison with an earlier run found.
+///
+/// Silent unless there was one. A run with no history, or one that is not
+/// comparing, has already said so in its stages, and a second sentence here
+/// saying the same thing in different words is how two explanations of one
+/// result start to disagree.
+fn lifecycle(run: &RunOutcome, out: &mut impl Write) -> io::Result<()> {
+    let Some(update) = &run.lifecycle else {
+        return Ok(());
+    };
+    writeln!(
+        out,
+        "Against the earlier run: {} finding(s) still open, {} closed.",
+        update.kept_open.len(),
+        update.resolved.len()
+    )?;
+    for finding in &update.resolved {
+        writeln!(out, "   Closed: {}", finding.title)?;
+    }
+    writeln!(out)
 }
 
 /// One sentence about what a not-clean verdict does and does not mean.
@@ -656,6 +815,14 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = json!(run.mode.as_str());
             details["support"] = support_machine(run);
             details["report"] = verdict_machine(&run.verdict);
+            // The two things only a run of *this* pipeline produces, and which
+            // no earlier form carried: what stage 11 wrote, and what stage 12
+            // compared. They sit here rather than under `report` because
+            // `report` is the verdict's own shape, defined and versioned by
+            // `crate::json_report`, and these are the fields this function says
+            // it adds — which stages ran, how far the run got, and what it wrote.
+            details["repairs"] = repairs_machine(run);
+            details["lifecycle"] = lifecycle_machine(run);
             details["checked_count"] = json!(run.coverage.checked_count);
             details["not_checked_count"] = json!(run.coverage.not_checked.len());
             details["has_critical_gaps"] = json!(run.coverage.has_critical_gaps);
@@ -667,9 +834,63 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = Value::Null;
             details["support"] = Value::Null;
             details["report"] = Value::Null;
+            details["repairs"] = Value::Null;
+            details["lifecycle"] = Value::Null;
         }
     }
     details
+}
+
+/// The repair contracts, with the effective re-check list added to each.
+///
+/// The contract's own fields are serialised from the contract rather than
+/// retyped, so a field added to [`sure_core::vocabulary::RepairContract`] reaches
+/// the frame without anyone remembering to add it here. The one thing added is
+/// `rechecks_that_must_pass`: the contract carries the check the finding named,
+/// and the list that governs closing is the selection the product widens it to.
+/// Both are in the frame, under names that say which is which, because a script
+/// asking "what has to pass" and a script asking "what did the finding name" are
+/// asking two different questions.
+fn repairs_machine(run: &RunOutcome) -> Value {
+    Value::Array(
+        run.repairs
+            .iter()
+            .map(|contract| {
+                let mut value = serde_json::to_value(contract).unwrap_or(Value::Null);
+                value["rechecks_that_must_pass"] = json!(
+                    select_impacted_checks(contract, &run.schedule)
+                        .iter()
+                        .map(|id| id.as_str())
+                        .collect::<Vec<_>>()
+                );
+                value
+            })
+            .collect(),
+    )
+}
+
+/// What the comparison with the earlier run found, or `null` when there was none.
+///
+/// Findings are written as identity and state rather than whole, because a frame
+/// that carried the full finding twice — once under `report` and once here —
+/// would be two copies of one fact with two chances to disagree.
+fn lifecycle_machine(run: &RunOutcome) -> Value {
+    let Some(update) = &run.lifecycle else {
+        return Value::Null;
+    };
+    json!({
+        "still_open": update.kept_open.iter().map(finding_machine).collect::<Vec<Value>>(),
+        "closed": update.resolved.iter().map(finding_machine).collect::<Vec<Value>>(),
+    })
+}
+
+fn finding_machine(finding: &Finding) -> Value {
+    json!({
+        "id": finding.id.as_str(),
+        "title": finding.title,
+        "severity": finding.severity.as_str(),
+        "status": finding.status.as_str(),
+    })
 }
 
 /// One stage, in the shape a script reads.

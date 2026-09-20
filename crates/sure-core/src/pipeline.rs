@@ -83,6 +83,7 @@ use crate::coverage_summary::{CoverageNotCheckedSummary, summarize};
 use crate::demo_data_heuristics::DemoDataHeuristics;
 use crate::discover::{self, DiscoverOptions, Discovery, Ecosystem, Findings};
 use crate::false_completion_aggregator;
+use crate::findings_from_checks::findings_from_checks;
 use crate::fingerprint::{self, project_fingerprint};
 use crate::intent_implementation::compare_intent_to_project;
 use crate::intent_model;
@@ -90,6 +91,7 @@ use crate::noop_heuristics::NoOpHeuristics;
 use crate::project_intent;
 use crate::project_verdict::build_verdict;
 use crate::recheck_lifecycle::{self, LifecycleInputs, LifecycleUpdate};
+use crate::repair_impact::{seed_rechecks, select_impacted_checks};
 use crate::route_consistency::RouteConsistency;
 use crate::runtime_probes::{PlanRefused, ProbePlan};
 use crate::schedule::{CheckProposal, CheckSchedule, PlanBuilder, ProposalRefused, ScheduledCheck};
@@ -784,12 +786,25 @@ impl Pipeline<'_> {
             .filter(|result| result.is_not_checked())
             .cloned()
             .collect();
+        // What this run found, as opposed to what it looked at. The rule and the
+        // argument for it are in `crate::findings_from_checks`: a check result
+        // that did not pass and did not stand aside for a scope limit is the one
+        // thing in a run that is already about the project, already carries a
+        // severity and already carries an evidence class. Candidates are not
+        // folded in here and the comment above the field that carries them says
+        // why; claims cannot be either, because `claim_checker` never contradicts
+        // one.
+        //
+        // Read from `report.results()` and not from `not_checked` below, although
+        // the two overlap: `not_checked` is the subset with no result, and a check
+        // that ran and failed is a finding with no entry in it.
+        let findings = findings_from_checks(report.results(), &schedule);
         let verdict = build_verdict(
             fingerprint,
             report.aggregate().clone(),
             intent.clone(),
             capability,
-            Vec::new(),
+            findings,
             not_checked,
             claims.clone(),
         );
@@ -1080,11 +1095,7 @@ impl Pipeline<'_> {
             );
         };
 
-        let previous = match recheck_lifecycle::previous_open_findings(
-            store,
-            &run.project_root,
-            &run.project_state.id,
-        ) {
+        let previous = match recheck_lifecycle::previous_open_findings(store, &run.project_root) {
             Ok(previous) => previous,
             Err(error) => {
                 return (
@@ -1099,19 +1110,31 @@ impl Pipeline<'_> {
             }
         };
 
-        // No module in this build derives "the checks that can observe whether this
-        // finding is fixed" from a finding — `repair_impact::select_impacted_checks`
-        // takes the contract it would be helping to build. `reconcile` documents
-        // what an absent entry means, and it is the conservative direction: the
-        // finding stays open unless a current finding matches it. SURE takes that
-        // reading and says so, rather than inventing a re-check list that would let
-        // it close findings on evidence nobody gathered.
+        // Which checks have to pass before an earlier finding may close. The list
+        // is `repair_impact::select_impacted_checks`'s answer, asked of each
+        // contract stage 11 wrote — the module that owns the rule, not a second
+        // rule written here. It is asked rather than stored because a copy of it
+        // on the run would be a second list that could disagree with the contract
+        // it was copied from, and the function is pure.
+        //
+        // A finding with no entry here is one `recheck_lifecycle` keeps open, and
+        // that is the right reading for a run that produced no contract for it.
+        let rechecks: Vec<(sure_domain::ids::FindingId, Vec<CheckId>)> = run
+            .repairs
+            .iter()
+            .map(|contract| {
+                (
+                    contract.issue_id.clone(),
+                    select_impacted_checks(contract, &run.schedule),
+                )
+            })
+            .collect();
         let update = recheck_lifecycle::reconcile(
             LifecycleInputs {
                 previous_open: &previous,
                 current_findings: &run.verdict.findings,
                 check_results: run.report.results(),
-                rechecks: &[],
+                rechecks: &rechecks,
             },
             run.project_state.id.clone(),
         );
@@ -1119,9 +1142,8 @@ impl Pipeline<'_> {
             "no earlier run left anything open for this project.".to_owned()
         } else {
             format!(
-                "{} earlier finding(s) stayed open, {} resolved. No re-check list could be derived \
-                 from a finding, so an earlier finding stayed open unless this run found it again \
-                 — the conservative reading, and the only one the evidence supports.",
+                "{} earlier finding(s) stayed open, {} resolved. A finding closes only when every \
+                 check its repair contract named has passed in this run.",
                 update.kept_open.len(),
                 update.resolved.len(),
             )
@@ -1132,17 +1154,39 @@ impl Pipeline<'_> {
 
 /// Stage 11: a repair contract per finding, when the purpose asks for one.
 ///
-/// **This stage cannot be performed as the modules stand**, and says so rather
-/// than inventing the input it is missing. [`RepairContract::from_finding`] needs
-/// the checks that can observe whether a finding is fixed; nothing in this
-/// workspace derives that list from a finding, and
-/// [`crate::repair_impact::select_impacted_checks`] — the module that owns the
-/// rule — takes the contract it would be helping to produce. A contract whose
-/// acceptance test was made up would be worse than no contract, so a run with
-/// findings records the stage as not-run. A run with no findings has nothing to
-/// write instructions for, which is a stage that ran and found nothing to do.
+/// # Where the re-check list comes from
+///
+/// [`RepairContract::from_finding`] refuses an empty list, and
+/// [`crate::repair_impact::select_impacted_checks`] takes the contract it would
+/// be helping to build — so the two cannot be called in the order they read in.
+/// The way through is the one this repository already models in
+/// `crates/sure-core/tests/repair_fixture_e2e.rs`: a **seed** derived from the
+/// finding alone, handed to the constructor, and then the selection, which the
+/// product widens.
+///
+/// The seed is [`seed_rechecks`], in the module that owns the selection rule, and
+/// it reads the check whose result produced the finding — the check that can
+/// observe whether the fix worked. It is a subset of the selection by
+/// construction, because the selection copies the contract's own list in first.
+///
+/// **The contract keeps the seed in its `recheck` field and the selection is what
+/// governs closing.** That is not an oversight: `from_finding` phrases the
+/// acceptance criteria from the list it was handed, so a contract whose `recheck`
+/// was widened afterwards would carry acceptance text about one check and a
+/// re-check list naming three. The widened list is what stage 12 hands to
+/// `reconcile`, which is where closing actually happens.
+///
+/// # When it cannot write one
+///
+/// A finding whose evidence names no check this run planned gets an empty seed,
+/// and `from_finding` refuses it — correctly, because a contract naming a check
+/// nobody can run is worse than no contract. The refusal is not swallowed: the
+/// stage records what could not be written, and a run whose findings *all*
+/// refused is a stage that did not run rather than one that ran and found nothing
+/// to do.
 ///
 /// [`RepairContract::from_finding`]: sure_domain::vocabulary::RepairContract::from_finding
+/// [`seed_rechecks`]: crate::repair_impact::seed_rechecks
 fn repair_contracts(
     run: &RunOutcome,
 ) -> (Vec<sure_domain::vocabulary::RepairContract>, StageOutcome) {
@@ -1156,15 +1200,53 @@ fn repair_contracts(
             },
         );
     }
+
+    let mut contracts = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
+    for finding in &run.verdict.findings {
+        // The seed comes from the finding and is filtered to checks this run
+        // planned, so it can never name a check nobody can re-run.
+        let seed = seed_rechecks(finding, &run.schedule);
+        match sure_domain::vocabulary::RepairContract::from_finding(finding, seed) {
+            Ok(contract) => contracts.push(contract),
+            Err(error) => refused.push(format!("{} ({error})", finding.title)),
+        }
+    }
+
+    let findings = run.verdict.findings.len();
+    if contracts.is_empty() {
+        return (
+            Vec::new(),
+            StageOutcome::NotRun {
+                reason: None,
+                detail: format!(
+                    "{findings} finding(s) need instructions and none of them names a check this \
+                     run planned, so SURE has no acceptance test it is willing to write: {}",
+                    refused.join("; ")
+                ),
+            },
+        );
+    }
+    let written = contracts.len();
+    if !refused.is_empty() {
+        return (
+            contracts,
+            StageOutcome::NotRun {
+                reason: None,
+                detail: format!(
+                    "{written} of {findings} finding(s) have instructions; the rest name no check \
+                     this run planned and SURE will not invent an acceptance test for them: {}",
+                    refused.join("; ")
+                ),
+            },
+        );
+    }
     (
-        Vec::new(),
-        StageOutcome::NotRun {
-            reason: None,
+        contracts,
+        StageOutcome::Ran {
             detail: format!(
-                "{} finding(s) need instructions. Building one needs the checks that can observe \
-                 whether the finding is fixed, and no module in this build derives that list from \
-                 a finding, so SURE will not invent an acceptance test for a repair.",
-                run.verdict.findings.len()
+                "{written} repair contract(s), one per finding. Each names the check that produced \
+                 the finding, and re-running that check is what closes it."
             ),
         },
     )

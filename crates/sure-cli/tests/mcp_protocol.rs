@@ -328,46 +328,127 @@ fn frame_of_in(store: &Path, args: &[&str]) -> Value {
 }
 
 /// The frame a tool answered with, and the frame the command line printed,
-/// brought to the same value by replacing the one field that is a property of
-/// the reading rather than of the project.
+/// brought to a common value by replacing every field whose value is **minted
+/// for the run that produced it** — and how many were replaced.
 ///
-/// `details.report.project_fingerprint` is a `FingerprintId`-shaped value —
-/// `crates/sure-protocol/tests/conformance.rs` fixes that spelling — and a
-/// fingerprint id is fresh on every computation so that two results can be told
-/// apart by value, while the digest is what two readings of one state share
-/// (`docs/architecture/FINGERPRINTING.md`, "The `id` is fresh on every
-/// computation"; `ProjectFingerprint::matches` compares the digest and never the
-/// id). The two sides here are exactly that: one reading taken inside the server
-/// process and one taken by a process of its own. Their stages, their check ids
-/// and their verdicts agree; their reading ids cannot, and asking them to would
-/// be asserting that two runs are one run.
+/// # Why these fields, and not a rule
 ///
-/// Everything else is compared as it stands, so this hides one field and not a
-/// class of them. The field is asserted to be present and to look like a
-/// fingerprint id on the way through, so a frame that stopped carrying one fails
-/// here rather than passing by omission.
-fn frame_without_the_reading_id(frame: &Value) -> Value {
-    const PLACEHOLDER: &str = "<this reading's fingerprint id>";
+/// The two sides are two runs: one inside the server process and one in a
+/// process of its own. Any value a run mints cannot be equal on both, and asking
+/// it to be would be asserting that two runs are one run. The fields a run mints
+/// in this frame are each named here rather than matched by a pattern:
+///
+/// - `details.report.project_fingerprint` — a fingerprint id is fresh on every
+///   computation so that two results can be told apart by value, while the digest
+///   is what two readings of one state share
+///   (`docs/architecture/FINGERPRINTING.md`, "The `id` is fresh on every
+///   computation"; `ProjectFingerprint::matches` compares the digest and never the
+///   id);
+/// - `details.report.findings[].id`, `details.lifecycle.still_open[].id` and
+///   `details.lifecycle.closed[].id` — `FindingId::generate()` is per run, which
+///   is the whole reason `recheck_lifecycle::FindingKey` exists: two runs over one
+///   unchanged project raise *the same* finding under two identifiers;
+/// - `details.repairs[].id`, `details.repairs[].issue_id`,
+///   `details.repairs[].evidence[].id` and
+///   `details.repairs[].evidence[].fingerprint` — a `RepairId` is minted where the
+///   contract is built, its `issue_id` is that run's `FindingId`, and the evidence
+///   it quotes is that run's `Evidence` about that run's project state. The
+///   contract's own `recheck` list and its anchors' `subject_id` are **not** here:
+///   a check id is a property of the plan, not of the run.
+///
+/// A rule — "normalise every `id`" — would hide a field the day somebody added
+/// one that *is* stable, and the comparison would stop holding the two frames to
+/// each other without saying so. The list is exhaustive rather than
+/// representative: every replaced value is asserted to carry the prefix its kind
+/// is documented to have (`IdKind::prefix`), so a field that stopped carrying an
+/// identifier fails here rather than passing by omission.
+///
+/// # The count
+///
+/// The caller needs to know that this did something. With no finding, no
+/// contract and no life-cycle row in either frame the replacement is a no-op and
+/// the comparison is between two frames that agree about nothing, which is the
+/// shape of a green that means "nothing was compared".
+fn frame_without_the_per_run_ids(frame: &Value) -> (Value, usize) {
     let mut frame = frame.clone();
-    let Some(field) = frame
-        .get_mut("details")
-        .and_then(|details| details.get_mut("report"))
-        .and_then(|report| report.get_mut("project_fingerprint"))
-    else {
-        // A frame with no verdict in it: not a refusal — no tool in this file
-        // refuses any more — but a report that is not about a project state,
-        // which `sure history` and `sure doctor` both are. There is nothing to
-        // normalize, and the comparison above still holds the two frames to each
-        // other.
-        return frame;
+    let mut replaced_ids = 0usize;
+    // A frame with no verdict in it — `sure history` and `sure doctor` are
+    // reports that are not about a project state — has no such field, and there
+    // is nothing to normalize.
+    let Some(details) = frame.get_mut("details") else {
+        return (frame, replaced_ids);
     };
-    let id = field
+    if let Some(report) = details.get_mut("report") {
+        if let Some(field) = report.get_mut("project_fingerprint") {
+            replaced_ids += replaced_id(field, "<this reading's fingerprint id>", "fp");
+        }
+        replaced_ids += replace_ids_in_array(
+            report.get_mut("findings"),
+            "<a finding id, minted for this run>",
+            "fnd",
+        );
+    }
+    if let Some(lifecycle) = details.get_mut("lifecycle") {
+        for rows in ["still_open", "closed"] {
+            replaced_ids += replace_ids_in_array(
+                lifecycle.get_mut(rows),
+                "<a finding id, minted for this run>",
+                "fnd",
+            );
+        }
+    }
+    if let Some(contracts) = details.get_mut("repairs").and_then(Value::as_array_mut) {
+        for contract in contracts {
+            if let Some(field) = contract.get_mut("id") {
+                replaced_ids += replaced_id(field, "<a repair id, minted for this run>", "rep");
+            }
+            if let Some(field) = contract.get_mut("issue_id") {
+                replaced_ids += replaced_id(field, "<a finding id, minted for this run>", "fnd");
+            }
+            if let Some(evidence) = contract.get_mut("evidence").and_then(Value::as_array_mut) {
+                for item in evidence {
+                    if let Some(field) = item.get_mut("id") {
+                        replaced_ids +=
+                            replaced_id(field, "<an evidence id, minted for this run>", "evd");
+                    }
+                    if let Some(field) = item.get_mut("fingerprint") {
+                        replaced_ids +=
+                            replaced_id(field, "<the state this evidence was read against>", "fp");
+                    }
+                }
+            }
+        }
+    }
+    (frame, replaced_ids)
+}
+
+/// Replace one per-run identifier, refusing a value that does not carry the
+/// prefix its kind is documented to have.
+fn replaced_id(field: &mut Value, placeholder: &str, prefix: &str) -> usize {
+    let value = field
         .as_str()
-        .unwrap_or_else(|| panic!("a project fingerprint is a string: {field}"))
+        .unwrap_or_else(|| panic!("a per-run identifier is a string: {field}"))
         .to_owned();
-    assert!(id.starts_with("fp_"), "that is not a fingerprint id: {id}");
-    *field = json!(PLACEHOLDER);
-    frame
+    assert!(
+        value.starts_with(&format!("{prefix}_")),
+        "a field that should carry a `{prefix}_` identifier carries {value:?}"
+    );
+    *field = json!(placeholder);
+    1
+}
+
+/// The same, for a list of rows that each carry an `id`.
+fn replace_ids_in_array(field: Option<&mut Value>, placeholder: &str, prefix: &str) -> usize {
+    let Some(rows) = field.and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut replaced_ids = 0;
+    for row in rows {
+        if let Some(field) = row.get_mut("id") {
+            replaced_ids += replaced_id(field, placeholder, prefix);
+        }
+    }
+    replaced_ids
 }
 
 /// A tool call, as a harness sends it.
@@ -597,23 +678,44 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
     // compared with what this same binary prints for the command the tool
     // stands for. The commands behind the three check tools run now, so the
     // comparison is a comparison of two real verdicts rather than of two
-    // refusals — and the one field the two readings cannot share, the
-    // fingerprint id of the reading itself, is named and set aside in
-    // `frame_without_the_reading_id` rather than waved at.
+    // refusals — and the fields the two runs cannot share, because a run mints
+    // them, are named and set aside in `frame_without_the_per_run_ids` rather
+    // than waved at.
     // One store for the session and for the command lines it is compared with,
     // which `sure_status`'s test already had to do and every route needs now:
     // a history frame carries the path of the store it read, so two runs in two
     // stores could not be compared at all.
     let store = a_store_of_our_own();
+    // One run is recorded before the comparison starts, because `sure recheck`
+    // is a comparison and its answer depends on what the store already holds:
+    // on a store with no history it reports that there is nothing to compare
+    // against, and on the next run it reports what the earlier one left open.
+    // Without this, the tool's re-check would be the first run and the command
+    // line's the second, and their frames would differ for a reason that has
+    // nothing to do with the two paths. It is also the state a user meets —
+    // `sure recheck` after `sure repair` — rather than an artefact of the test.
+    let project = env!("CARGO_MANIFEST_DIR");
+    let seeded = run_in(&store, &["repair", project]);
+    assert_eq!(
+        seeded.status, 1,
+        "the run that gives the store its history returned {} rather than 1 (checked, not \
+         clean):\n{}",
+        seeded.status, seeded.stderr
+    );
     let mut session = Session::open_in(&store, &["mcp", "serve"]);
     session.start();
+    let mut replaced_ids = 0usize;
     for (index, route) in routes().iter().enumerate() {
         let answer = session.ask(call(10 + index as u32, route.tool, route.arguments.clone()));
         let result = result_of(&answer).clone();
         let expected = frame_of_in(&store, route.command);
+        let (answered, answered_ids) =
+            frame_without_the_per_run_ids(&result["structuredContent"]["sure"]);
+        let (printed, printed_ids) = frame_without_the_per_run_ids(&expected);
+        replaced_ids += answered_ids + printed_ids;
         assert_eq!(
-            &frame_without_the_reading_id(&result["structuredContent"]["sure"]),
-            &frame_without_the_reading_id(&expected),
+            &answered,
+            &printed,
             "{} does not answer with `sure {}`'s frame",
             route.tool,
             route.command.join(" ")
@@ -657,6 +759,19 @@ fn every_tool_answers_what_the_command_line_behind_it_answers() {
             route.command.join(" ")
         );
     }
+    // The count is the guard against a comparison that holds nothing: with no
+    // finding, no contract and no life-cycle row in the frames, the frames agree
+    // and the loop above has measured nothing. Measured today, the three
+    // check-shaped routes carry findings, because `crates/sure-cli`'s own
+    // sources contain the placeholder and stub patterns `candidate_scanner.rs`
+    // and `noop_heuristics.rs` look for — which is also why this repository's
+    // `sure check` is not green.
+    assert!(
+        replaced_ids > 0,
+        "not one per-run identifier was replaced across {} routes, so the frames agreed without \
+         a finding, a contract or a life-cycle row between them: {replaced_ids}",
+        routes().len()
+    );
     assert_eq!(session.finish().status, 0);
 }
 

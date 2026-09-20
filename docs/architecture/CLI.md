@@ -21,6 +21,13 @@ between them — `check` performs 1–10, `repair` continues to the repair contr
 `recheck` to the re-check — and the stages it does not perform are recorded as
 `not part of this run` rather than omitted, so every run shows all twelve.
 
+One exception is stated rather than hidden. To print *the checks that must pass
+before this closes*, `crates/sure-cli/src/check.rs` asks
+`sure_core::repair_impact::select_impacted_checks` for them, because that is the
+function stage 12 hands to the lifecycle and a second derivation in the CLI is
+how a sentence a person reads and a test the run applies come apart. It is a
+call into the module that owns the rule, not a rule of the CLI's own.
+
 P2-T010 gave `sure check` its first flag with an effect: `--goal TEXT` records
 what the user asked for. It is the one place on this surface where a command
 changes something the output does not contain, so it has its own section below —
@@ -38,7 +45,7 @@ process's argument vector and from nowhere else.
 | --- | --- | --- |
 | `sure check [PATH] [--goal TEXT]` | check a project and report what it found | works: the pipeline, a per-stage record, and a verdict |
 | `sure recheck [PATH]` | check again and compare with last time | works: the same run, carried on to the last stage, which compares it with what an earlier run left open |
-| `sure repair [PATH]` | turn what was found into instructions an agent can act on | checks, and reaches the repair-contract stage; this build cannot perform that stage and says so rather than inventing an acceptance test |
+| `sure repair [PATH]` | turn what was found into instructions an agent can act on | works: the same run, carried on to the repair-contract stage, one contract per finding. Each names the check that produced it and the further checks that must pass before it closes, and each is recorded, so the next run has something to compare against |
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | works, except `export`: the sessions this machine has recorded, one session's events, and the delete |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
@@ -342,6 +349,18 @@ Where this run's record store goes, as a directory: `sure.db` is written inside
 it. It is global, so it is accepted before or after the command name, and it is
 the only thing on this surface that changes where SURE writes something.
 
+**Which commands write there, and which does not.** `--store-dir` says *where*;
+this says *whether*. `sure check` reports and remembers nothing: it opens a store
+only when one is already there and creates nothing, before or after, so a check
+on a machine that has never used SURE writes no file at all. `sure repair` and
+`sure recheck` carry the repair loop, and a loop with no memory is not a loop, so
+those two create the store when it is missing and record every finding the run
+leaves open. That is what lets a second run say what the first left open, and it
+is why the same project gives a different answer to `sure recheck` on its second
+run than on its first. A run that checked the project and then could not record
+what it left open returns status 5 and says exactly that, rather than reporting a
+clean-looking run whose evidence was thrown away.
+
 **The value comes from the process's argument vector and from nowhere else**, and
 that is the whole of the design rather than a detail of it. It is not read from
 `.sure/config`, from a manifest field, or from a file beside the sources: the
@@ -566,9 +585,13 @@ no run does: a project SURE can plan for has stage 5 recorded as `unknown`
 with no parts at all still has stage 8 unconfigured. A stage that did not run is
 recorded as such, and a run with one of those is never reported as clean — which
 is what the false-green rule asks for, and it means `sure check` returns 1 for
-every project it can read and 5 for one it cannot. Nothing in this file has to
-change the day a runner lands: the status comes from the verdict, and the verdict
-is what will change.
+every project it can read and 5 for one it cannot. `sure repair` and `sure
+recheck` return the same statuses for the same reasons. Stages 11 and 12 do
+their work now, on a project that has findings, and that changes no status
+either: a repair contract checks nothing — it says what would have to pass — so
+a command that wrote one and reached 0 would be the false green this table
+exists to prevent. Nothing in this file has to change the day a runner lands:
+the status comes from the verdict, and the verdict is what will change.
 
 The whole table is in `crates/sure-cli/src/report.rs` as `report::exit`, and it
 is the only place a status is chosen. `main` handles clap's parse error itself

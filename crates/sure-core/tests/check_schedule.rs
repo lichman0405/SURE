@@ -372,6 +372,21 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          rule exists to prevent, in a module whose reason for existing is to \
          report what other modules did",
     ),
+    (
+        "src/findings_from_checks.rs",
+        "`P7-T012`, and the fifth entry here that decides nothing: it reads the \
+         `CheckResult`s a run already has and turns each one that is a gap into a \
+         `Finding`. It names `PlanBuilder` in exactly one place — inside its \
+         `#[cfg(test)]` module, where `empty_schedule()` builds a plan with \
+         nothing in it, because `PlanBuilder::build` is the only door any code in \
+         this tree has to a `CheckSchedule` and the unit tests need one that \
+         proposes nothing. The file names none of the other three words anywhere, \
+         and there is no `propose` call in it: every check a finding here is about \
+         was proposed by a module in the entries above and reached this one as a \
+         result. **A line above `#[cfg(test)]` naming any of the four would be a \
+         proposer arriving in the module that reads results, and this entry is not \
+         cover for it**",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

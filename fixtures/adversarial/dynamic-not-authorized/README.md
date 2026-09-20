@@ -41,24 +41,33 @@ check that disappears:
 Not enough could be checked to say whether this is ready.
 This project is not ready to hand off.
 ...
-No open findings.
+Open findings: 1 Must fix.
 1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)
 ```
 
-Drop that last line and the report reads as a project with nothing outstanding.
-It is not. Nothing was checked at all: `coverage_checked` is zero, and the one
-thing SURE would have had to run to say anything is the thing it was not allowed
-to run.
+The last two lines are the check staying visible, and since `P7-T012` they are
+two rather than one: the sentence that counts checks that could not run, and the
+open `cannot_confirm` finding raised for that same check. Drop both and the
+report reads as a project with nothing outstanding. It is not. Nothing was
+checked at all: `coverage_checked` is zero, and the one thing SURE would have
+had to run to say anything is the thing it was not allowed to run.
 
-So the check is asserted in four separate places, because a field on a struct is
+So the check is asserted in five separate places, because a field on a struct is
 not a report a person reads: in the verdict's list of checks that did not run, in
 the aggregate's list of critical checks that were not checked, in the coverage
-summary, and in the last line of the summary above.
+summary, in the verdict's own finding list, and in the last two lines of the
+summary above.
 
 It must **not** be reported as a defect of the project either. The script is
 declared, the file it names exists, and the reason it did not run is a permission
-the user has not given. A finding here would blame a project for something a
-person decided.
+the user has not given — so the finding the run raises for it says exactly that
+and nothing more: its status is `cannot_confirm`, its statement is that SURE
+planned this check and did not run it, its impact is that nothing here is known
+to be broken, and its next step is to run the check or to allow SURE to run it.
+What would blame a project for something a person decided is a finding that calls
+the code wrong or holds the project out of hand-off because of a defect, and the
+false-positive outcome in `scenario.json` forbids that rather than the finding as
+such.
 
 ## Why the project's own `sure.yaml` is here
 
@@ -116,7 +125,7 @@ cargo test -p sure-core --test adversarial_fixture_detection -- an_unauthorised_
 
 That test reads `scenario.json`, drives SURE's real pipeline over this directory
 with execution unauthorised, asserts the status, the reason, the frozen sentence,
-the four places the check stays visible and the whole rendered summary, then
+the five places the check stays visible and the whole rendered summary, then
 writes the user's grant into a configuration root it owns and drives the same
 pipeline again and asserts the opposite. Nothing is run inside the project and
 nothing is written outside `target/tmp`.
@@ -125,8 +134,13 @@ The fixture has a case in `evaluation/acceptance-manifest.json` —
 `dynamic-not-authorized`, not release-blocking, expected severity `note`,
 expectation *unexecuted dynamic checks stay visible as not checked/skipped* — and
 the two fields at the top of `scenario.json` are copied from that row rather than
-chosen here. SURE produces no finding for this case at all, which is under that
-ceiling rather than at it.
+chosen here. What SURE says about the *project* here is under that ceiling rather
+than at it: nothing is claimed to be wrong, and the one finding the run raises is
+`cannot_confirm` and carries the check's own `must_fix` — the weight of a check
+nobody authorised, which `scenario.json` says in as many words beside the row.
+This paragraph used to end "SURE produces no finding for this case at all", and
+`P7-T012` made that false: a refused check is now reported as the uncertainty it
+is rather than only as a field a reader has to go looking for.
 
 ## Watch out
 
@@ -135,3 +149,10 @@ project: the report's material and style-noise buckets are both empty, and the
 test asserts that rather than leaving it to be assumed. A reader who takes
 *1 of them are critical* for a failing test has misread a check that never ran
 for one that ran and failed.
+
+The `must_fix` finding is where that misreading is easiest to make, so it is
+where the test is strictest: its status is `cannot_confirm` and never `open`, its
+severity is the check's own rather than one chosen for the project, and it is
+anchored to the check that did not run rather than to a file — so nothing in it
+names the code as the thing to fix, and the `forbidden_outcomes` entry in
+`scenario.json` forbids exactly the build that would make it do so.

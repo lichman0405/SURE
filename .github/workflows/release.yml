@@ -486,6 +486,13 @@ jobs:
           echo "digest tools      sha256sum=$(command -v sha256sum || echo absent)" "shasum=$(command -v shasum || echo absent)"
           echo "ldd               $(ldd --version 2>/dev/null | head -n 1 || echo absent)"
 
+      # The same workaround `ci.yml`'s Linux matrix leg carries: Ubuntu 24.04
+      # restricts unprivileged user namespaces through AppArmor, and Chromium
+      # refuses to start without a usable sandbox. The product never passes
+      # `--no-sandbox`, so the runner has to allow the sandbox instead.
+      - name: Let a sandboxed browser start on Linux
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: The workspace's tests, on this runner
         run: cargo test --workspace --no-fail-fast
 

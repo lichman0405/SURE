@@ -158,9 +158,9 @@ const REQUEST: Duration = Duration::from_millis(500);
 /// something, and it is the bound that ends the [`SILENT`] child's exchange. The
 /// handover row is the other way round: the exchange is meant to outlast the
 /// service, and what ends it is the anchor letting go. A bound that ended it
-/// first would produce the same failure for the wrong reason, so this one is an
-/// order of magnitude past the whole of [`LINGER`] plus the two polls that
-/// precede it, and it still fails in seconds if the instrument is wrong.
+/// first would produce the same failure for the wrong reason, so this one is
+/// five times the whole of [`LINGER`] plus the two polls that precede it, and it
+/// still fails in seconds if the instrument is wrong.
 const ENDS_DURING: Duration = Duration::from_secs(5);
 
 /// The whole-life budget of the one service whose **own** budget is what ends
@@ -176,12 +176,34 @@ const ENDS_DURING: Duration = Duration::from_secs(5);
 /// budget as generous as [`BUDGET`] could not be reached by a test at all, and a
 /// window or an exchange bound as short as these would be what ended the run.
 ///
-/// The margins are the point rather than the numbers. The window is twice the
-/// slowest startup this file has seen, the budget is well past the window, and
-/// the exchange bound is another two and a half seconds past the budget.
-const SHORT_WINDOW: Duration = Duration::from_secs(2);
-const SHORT_BUDGET: Duration = Duration::from_millis(3500);
-const OUTLASTS_THE_BUDGET: Duration = Duration::from_secs(6);
+/// The margins are the point rather than the numbers, and **the separation
+/// between the window and the budget is the margin this row rests on.** They are
+/// two clocks that do not start together: the budget is measured from before the
+/// service is spawned and the window from the moment the start returned, so
+/// whatever the start itself takes — creating the process, the two reader
+/// threads, handing the runner over — comes off the separation. If it takes all
+/// of it, the service is stopped by its own deadline before the window has
+/// closed, SURE never asks its question, and the reason is the warning for a
+/// service with no address instead of this row. The module's own guard compares
+/// the two durations and cannot see across that gap; a test that gives them a
+/// second and a half is asserting an ordering it does not control.
+///
+/// So the window is [`WINDOW`] itself, three seconds, which is the number this
+/// file already chooses against how long a process takes to get going on a
+/// loaded machine; and the budget is five seconds past it, so the start would
+/// have to take five seconds before the two clocks could pass each other. With
+/// the earlier pair — a two second window, three and a half seconds of budget,
+/// one and a half seconds apart — twelve copies of this binary started together
+/// put this row in that state six times in seventy-two runs. Whether five
+/// seconds is enough is a count, not a claim: it is recorded in `P15-T034`'s
+/// hand-back rather than asserted here.
+///
+/// The exchange bound is four seconds past the budget, so it is never what ends
+/// the exchange; and [`HOLD`] is past the budget too, so the child is not
+/// either.
+const SHORT_WINDOW: Duration = Duration::from_secs(3);
+const SHORT_BUDGET: Duration = Duration::from_secs(8);
+const OUTLASTS_THE_BUDGET: Duration = Duration::from_secs(12);
 
 /// How many bytes of each stream a service keeps, and how much of a response is
 /// read. More than anything below writes.
@@ -223,19 +245,30 @@ const POLL: Duration = Duration::from_millis(25);
 /// child closed the connection" cannot be confused: the first is the case the
 /// test is about, and a child that closed first would be reporting the same
 /// outcome for a different reason.
-const HOLD: Duration = Duration::from_secs(5);
+///
+/// Longer than [`SHORT_BUDGET`] as well, by the same argument at a longer range:
+/// the row that reaches the third door is ended by the service's own deadline,
+/// and a child still holding the connection when that deadline arrives is what
+/// makes the budget — rather than the child's own release — the thing that
+/// ended the exchange.
+const HOLD: Duration = Duration::from_secs(10);
 
 /// How long an [`ANCHOR`] keeps a question open **after the service it belongs
 /// to is gone**, before it puts the connection down.
 ///
-/// This is the margin the module's hardest row rests on, and it is deliberately
-/// measured from the ending rather than from the question: the anchor watches for
-/// the service's own marker, so its release can never happen before the ending
-/// it is supposed to come after, however slow the machine is. A hundred
-/// milliseconds is a hundred times the runner's own poll, which is what has to
-/// notice the ending — so the run is over, and reported as over, by the time the
-/// exchange comes back to SURE.
-const LINGER: Duration = Duration::from_millis(100);
+/// This is the margin the module's hardest row rests on, and it is measured from
+/// the ending rather than from the question: the anchor watches for the service's
+/// own marker, so its release can never happen before the ending it is supposed
+/// to come after.
+///
+/// What that argument does **not** buy is the service's own exit: the marker is
+/// written by a live process, and the process has to be gone before the module's
+/// stop arrives, so this has to be longer than a process takes to go — which a
+/// loaded machine can stretch, and a hundred milliseconds was not enough of. One
+/// second is forty times the runner's poll, which is what has to notice the
+/// ending, and it leaves the row's own bound, [`ENDS_DURING`], four seconds away
+/// from being what closed the connection instead.
+const LINGER: Duration = Duration::from_secs(1);
 
 /// What a child says on each stream once it is up.
 ///
@@ -650,15 +683,48 @@ fn smoke_with<'a>(
 /// alternative — having the child choose a port and report it back — cannot
 /// work here, because the address is a *bound* on the smoke check and is needed
 /// before the service that would report it is started.
+///
+/// What was **not** knowingly taken, and is not taken any more, is the operating
+/// system's own allocator. A port asked for as `0` comes out of the machine's
+/// dynamic range — 49152 to 65535 on this one, from `netsh int ipv4 show
+/// dynamicport tcp`, and 32768 and up by default on the platforms this has to
+/// port to — which is the same range every other `bind(0)` on the machine draws
+/// from, including the ones inside the other copies of this binary when a gate
+/// runs. Two asks at the same moment can be handed the same number, and the
+/// child's bind then fails on *having been handed it*, which is the one thing
+/// about this race the test can remove. The numbers here come from below that
+/// range instead, are walked forwards one at a time from a starting point no
+/// other live copy of this binary walks, and are each tried with `bind` before
+/// being released — so a port that is taken, reserved or excluded is skipped
+/// rather than handed to a child that cannot use it.
+///
+/// The residue is a process that binds a *number* in this range rather than
+/// asking for one — a fixed port in a file somewhere. No scheme on this side can
+/// rule that out, and the child's own report is what it is for.
 fn free_port() -> u16 {
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a loopback port must be bindable");
-    let port = listener
-        .local_addr()
-        .expect("a bound listener has an address")
-        .port();
-    drop(listener);
-    port
+    /// Below every default dynamic range, and past the well-known and registered
+    /// ports that a machine's own services are actually likely to be on.
+    const LOWEST: u16 = 10_000;
+    const HIGHEST: u16 = 32_000;
+    /// How far the walk goes before giving up. A range this wide cannot be full
+    /// of listeners, so the walk ends long before this on any machine.
+    const TRIES: u16 = 1_000;
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let span = HIGHEST - LOWEST;
+    // A per-process start and a per-test step, the same shape the fixture names
+    // use: two copies of this binary started together do not walk the same
+    // numbers in the same order.
+    let start = (std::process::id() % u32::from(span)) as u16;
+    let step = (NEXT.fetch_add(1, Ordering::Relaxed) % u32::from(span)) as u16;
+    for attempt in 0..TRIES {
+        let port = LOWEST + (start.wrapping_add(step).wrapping_add(attempt) % span);
+        if let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+            drop(listener);
+            return port;
+        }
+    }
+    panic!("no free loopback port in {LOWEST}..{HIGHEST}");
 }
 
 /// The address the smoke check asks about.
@@ -1185,7 +1251,7 @@ fn a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named() 
     assert!(
         result
             .reason
-            .contains("ran until its own budget of 3.5 seconds ran out"),
+            .contains("ran until its own budget of 8 seconds ran out"),
         "the reason does not say that the service's own budget is what ended the \
          run, which is the one thing this row is about: {}",
         result.reason
@@ -1423,7 +1489,7 @@ fn a_service_that_outlives_the_window_and_then_ends_is_still_a_failure() {
     // the anchor reports the question, the service writes the marker it ended
     // with and goes, the anchor waits [`LINGER`] and lets the connection go.
     // The stop therefore arrives at a run that is already over — by a margin
-    // that is a hundred times the poll that has to notice it, rather than by the
+    // that is forty times the poll that has to notice it, rather than by the
     // microseconds that separate the ask from the stop.
     let fixture = Fixture::new("outlives-then-ends");
     workspace(&fixture);

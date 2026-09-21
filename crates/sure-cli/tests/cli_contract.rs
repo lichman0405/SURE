@@ -4804,20 +4804,40 @@ fn ingest_argv(store: &Path, args: &[&str], payload: &str) -> Run {
 }
 
 #[test]
-fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
+fn the_inputs_a_harness_produces_by_accident_exit_5_and_record_nothing() {
     // `crates/sure-cli/src/hook.rs` asserts each of these as a `Report` value,
     // which is a statement about a function. A launcher does not talk to a
     // function; it talks to a process, and what it relays is the status. These
-    // four are the inputs a harness produces by accident — a payload it did not
-    // send, a source SURE does not know, an event SURE has no mapping for —
-    // and the status they must produce is 5 (`report::exit::FAILED`: SURE tried
-    // and did not finish), never 0 and never 1.
+    // are the inputs a harness produces by accident — a payload it did not
+    // send, a source SURE does not know, an event SURE has no mapping for, a
+    // command line with no source on it — and the status they must produce is 5
+    // (`report::exit::FAILED`: SURE tried and did not finish), never 0 and
+    // never 1.
     //
     // Never 0 is the whole point: 0 is what a launcher passes back to a harness
     // that then proceeds, and a hook that answered nothing while reading as
     // "SURE looked and said yes" is the false green this repository exists to
     // refuse. Never 1 matters just as much for the opposite reason: 1 is SURE's
     // `block`, and an event SURE could not read is not a refusal.
+    //
+    // **The name carries no count, and that is the repair `P15-T033` made.**
+    // It was `the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing`,
+    // which was a claim about a closed set: `docs/integrations/HOOK_FAILURE_SEMANTICS.md`
+    // §2.1 headed its block "the four failure inputs" and listed five, and
+    // `P15-T025` had since added a sixth that is not an accident at all. `four`
+    // was false in two directions at once. A count here goes stale the next time
+    // a branch is added and the characterisation does not, so the name is the
+    // characterisation; the case the old name had also stopped covering — a
+    // command line with no `--source` on it at all, which the block above has
+    // always listed — is below.
+    //
+    // The other kind of input is deliberately **not** here: one a project writes
+    // on purpose, by naming a settings file inside itself. It reaches the same
+    // status and the same absence of evidence for a different reason, and it is
+    // held, with the control that gives "nothing was written" its meaning, by
+    // `a_hook_event_that_names_a_settings_file_inside_the_project_is_refused`
+    // below. `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.4 is the argument
+    // for why both are failures rather than verdicts.
     let project = a_project_of_our_own();
     let known = serde_json::json!({
         "event": "preToolUse",
@@ -4840,7 +4860,7 @@ fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
     })
     .to_string();
 
-    let cases: [(&str, Vec<&str>, &str); 4] = [
+    let cases: [(&str, Vec<&str>, &str); 5] = [
         (
             "empty stdin",
             vec!["hook", "ingest", "--source", "cursor", "pre-tool-use"],
@@ -4860,6 +4880,16 @@ fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
             "an event type with no mapping",
             vec!["hook", "ingest", "--source", "cursor", "pre-tool-use"],
             &unknown_event,
+        ),
+        // The last case is a launcher that forgot the flag rather than one that
+        // sent something SURE cannot read, and it is here because the block
+        // above has listed it since it was written while this test asserted
+        // four of its five rows. The claim "this test asserts the block" is
+        // only true with it.
+        (
+            "no --source at all",
+            vec!["hook", "ingest", "pre-tool-use"],
+            &known,
         ),
     ];
 
@@ -4892,6 +4922,181 @@ fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
         );
         assert_untouched(&machine, "by a hook event SURE could not read");
     }
+}
+
+/// The refusal `P15-T025` added, held at the level a harness meets it: a
+/// process, its status, and the frame it wrote.
+///
+/// The input is the one a **project writes on purpose**: its own `sure.yaml`
+/// asks SURE to record everything, and the run is pointed at that file with
+/// `--settings-file`. A settings file says what SURE may do and what it may
+/// run, and one inside the project could have been written by the thing being
+/// judged, so SURE refuses to read it. That refusal is `P15-T025`'s and is not
+/// in question here — `a_settings_file_inside_the_project_is_refused_and_nothing_is_written`
+/// above holds it for `sure config set`. What `P15-T033` settled is the
+/// **shape** of the answer, and this holds the shape rather than any sentence:
+/// exit 5, a frame that says `outcome: "failed"` and carries **no `decision`
+/// key**, and a store directory with no file in it.
+///
+/// The control below is the same event about the same project with the flag
+/// left off. Without it, "no store and no row" would pass just as well against
+/// a hook that records nothing at all; with it, the refusal is the only
+/// difference between the two runs. The control is also where the shape's cost
+/// is visible: a run that **decides** answers exit 1, a `decision` of `block`,
+/// and a store with the event in it — so an answer of `decision: "block"` to
+/// this refusal would have had to write the very file its absence leaves out,
+/// under settings SURE refused to read. §2.4 of
+/// `docs/integrations/HOOK_FAILURE_SEMANTICS.md` is that argument in full.
+#[test]
+fn a_hook_event_that_names_a_settings_file_inside_the_project_is_refused() {
+    let machine = the_store_on_this_machine();
+    let project = a_project_of_our_own();
+    // The file the project could have written, in the shape the privacy
+    // corpus's `a-settings-file-the-project-could-write-grants-nothing` uses.
+    // Nothing in this test reads it: it is the file SURE refuses to read.
+    let inside = project.join("sure.yaml");
+    std::fs::write(&inside, "privacy:\n  full_recording: true\n")
+        .unwrap_or_else(|error| panic!("cannot write {}: {error}", inside.display()));
+    let inside_named = inside.to_str().expect("the scratch path is utf-8");
+    // A pre-action event, so the tool request is one SURE would otherwise judge
+    // — and the control below shows it judging it.
+    let request = shell_request(&project, "p15t033-inside-project-settings", "rm -rf /");
+
+    let store = a_store_of_our_own();
+    let refused = ingest_argv(
+        &store,
+        &[
+            "--format",
+            "json",
+            "--settings-file",
+            inside_named,
+            "hook",
+            "ingest",
+            "--source",
+            "cursor",
+            "pre-tool-use",
+        ],
+        &request,
+    );
+    assert_eq!(
+        refused.status, 5,
+        "a hook event whose settings file is inside the project it is about exited {} rather than \
+         5. 0 is what a launcher passes back to a harness that then proceeds, and 1 is SURE's \
+         `block`, which is a verdict about the request — a request SURE never looked at here, \
+         because it stopped one question earlier.\nstdout:\n{}\nstderr:\n{}",
+        refused.status, refused.stdout, refused.stderr
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(refused.stdout.trim()).unwrap_or_else(|error| {
+            panic!("the refusal is not one frame: {error}\n{}", refused.stdout)
+        });
+    assert_eq!(
+        frame["outcome"].as_str(),
+        Some("failed"),
+        "the refusal does not say it failed: {frame}"
+    );
+    assert_eq!(frame["exit_code"].as_i64(), Some(5), "{frame}");
+    assert_eq!(
+        frame["exit_code"].as_i64(),
+        Some(i64::from(refused.status)),
+        "the frame and the process disagree about the same run: {frame}"
+    );
+    assert!(
+        frame.get("decision").is_none(),
+        "the refusal carries a decision SURE never reached. It stopped before reading the \
+         settings, so it read none of the mode, the permissions or the tool the request names, \
+         and a harness that reads `decision` would read a verdict: {frame}"
+    );
+    assert_eq!(
+        frame["details"]["what"].as_str(),
+        Some("SURE did not read the settings it was pointed at."),
+        "{frame}"
+    );
+    let detail = frame["details"]["detail"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the refusal carries no detail: {frame}"));
+    assert!(
+        detail.contains(inside_named)
+            && detail.contains("the project it was asked about")
+            && detail.contains("SURE stopped rather than"),
+        "the refusal does not name the file it would not read, or does not say that it stopped \
+         rather than answer: {detail}"
+    );
+
+    assert!(
+        !store_file(&store).exists(),
+        "the refused event wrote a store at {}",
+        store_file(&store).display()
+    );
+    let reported = history_frame(&store, &[]);
+    assert_eq!(
+        reported["details"]["total"].as_i64(),
+        Some(0),
+        "a refused event was recorded anyway: {reported}"
+    );
+    assert_eq!(
+        reported["details"]["store_present"].as_bool(),
+        Some(false),
+        "a refused event left a store behind: {reported}"
+    );
+
+    // The control: the same event about the same project, with the flag left
+    // off. SURE reads the project, decides about the shell request, and records
+    // both — which is what makes the refusal's empty store a statement about
+    // the settings file rather than about a hook that writes nothing.
+    let store = a_store_of_our_own();
+    let decided = ingest_argv(
+        &store,
+        &[
+            "--format",
+            "json",
+            "hook",
+            "ingest",
+            "--source",
+            "cursor",
+            "pre-tool-use",
+        ],
+        &request,
+    );
+    assert_eq!(
+        decided.status, 1,
+        "the control event — the same request, with no settings file named — exited {} rather \
+         than 1, so the refusal above is not the only difference between the two runs:\n{}",
+        decided.status, decided.stderr
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(decided.stdout.trim()).unwrap_or_else(|error| {
+            panic!(
+                "the control's answer is not one frame: {error}\n{}",
+                decided.stdout
+            )
+        });
+    assert_eq!(
+        frame["decision"].as_str(),
+        Some("block"),
+        "the control did not reach a verdict about the request: {frame}"
+    );
+    assert_eq!(frame["outcome"].as_str(), Some("not_green"), "{frame}");
+    assert_eq!(
+        frame["exit_code"].as_i64(),
+        Some(i64::from(decided.status)),
+        "the frame and the process disagree about the same run: {frame}"
+    );
+    assert!(
+        store_file(&store).exists(),
+        "the control event recorded nothing, so the refusal's empty store would prove nothing"
+    );
+    let recorded = history_frame(&store, &[]);
+    assert_eq!(
+        recorded["details"]["total"].as_i64(),
+        Some(1),
+        "the control event is not in the history it was recorded in: {recorded}"
+    );
+
+    assert_untouched(
+        &machine,
+        "by a hook event whose settings file is inside the project",
+    );
 }
 
 /// One Cursor `sessionStart`, with the project root the caller names.

@@ -186,7 +186,17 @@ Every integration must document whether its hook failure behavior is fail-open o
 
 That documentation is `docs/integrations/HOOK_FAILURE_SEMANTICS.md`: one row per
 harness per event its manifest wires, the measured exit status and stream shape
-for the four ways a hook event can fail, and — separately, because the two are
-not the same kind of statement — what each harness is documented to do with a
-non-zero status. `crates/sure-testkit/tests/hook_failure_semantics.rs` reads that
-table and fails when a manifest wires an event the table does not answer for.
+for each way a hook event can fail before it answers, and — separately, because
+the two are not the same kind of statement — what each harness is documented to
+do with a non-zero status. `crates/sure-testkit/tests/hook_failure_semantics.rs`
+reads that table and fails when a manifest wires an event the table does not
+answer for.
+
+A count is a claim, and this sentence used to carry one — "the four ways" — while
+the table it pointed at had already grown a fifth row and then a sixth, so the
+sentence had stopped being true before anyone edited the table. The count is
+removed rather than re-set, because the next input added would falsify it again.
+The same reasoning removed the count from that page's own heading, and the
+deliberate member of that set — a project naming a settings file it could have
+written, which SURE refuses — is named as deliberate there rather than left
+looking like a malfunction.

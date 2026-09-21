@@ -289,6 +289,12 @@ fn run_allow_once_with_paths(
     // reading one out of an event. Before `load_execution_config`, which is the
     // read that would otherwise obey the file: a grant recorded under settings
     // the project wrote is a grant the project wrote.
+    //
+    // The refusal is answered as a failure rather than as a verdict — exit 5,
+    // `outcome: "failed"`, no `decision` field, nothing recorded — and it is the
+    // same answer at both sites, for the reasons written out at the site below
+    // and argued in `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.4. A
+    // `decision` here would be a verdict about a request SURE has not looked at.
     if let Err(error) = paths.ensure_settings_outside(Path::new(project_root)) {
         return failed(
             "SURE did not read the settings it was pointed at.",
@@ -484,6 +490,20 @@ fn run_ingest_with_paths(
     // sentence rather than toward a green answer over an unknown project. The
     // harness-by-harness consequence, and the source for each, is
     // `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.3.
+    //
+    // The shape both of these refusals take is a **failure, not a verdict**:
+    // `Report::Failed` → exit 5, `outcome: "failed"`, no `decision` field, and
+    // nothing recorded. It is not a `block`, because SURE stopped before it read
+    // the settings, so it has read none of the mode, the permissions or the
+    // request this event names: `block`'s sentence about the execution mode
+    // would be a verdict about a mode SURE never saw. Recording nothing is the
+    // other half of the same rule — `record_the_decision` writes down every
+    // decision the rule reached, so a `block` here would have to write a session
+    // and a tool request under the settings SURE refused to read. §2.4 argues
+    // it, including the case against, and
+    // `a_hook_event_that_names_a_settings_file_inside_the_project_is_refused`
+    // in `crates/sure-cli/tests/cli_contract.rs` holds the shape against a
+    // process rather than against this sentence.
     if let Err(error) = paths.ensure_settings_outside(Path::new(&project_root)) {
         return failed(
             "SURE did not read the settings it was pointed at.",

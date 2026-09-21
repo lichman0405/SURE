@@ -65,15 +65,29 @@ nothing loads, and §5 is where that is recorded.
 
 ## 2. What SURE emits — measured on this machine, 2026-09-19
 
-### 2.1 The four failure inputs, at the process level
+### 2.1 The failure inputs, at the process level
 
 Measured by running `target/debug/sure.exe` directly with `--store-dir` pointed
-at a scratch directory. `[F]` in §3 refers to this block, and
-`crates/sure-cli/tests/cli_contract.rs`'s
-`the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing` asserts it:
-after each of these, the store directory contains no file at all and
+at a scratch directory. `[F]` in §3 refers to this block. Every row in the table
+below ends the run the same way: exit 5, a failure frame carrying **no
+`decision` key**, and a store directory that afterward contains no file at all —
 `sure history --format json` reports zero total events with `store_present:
 false`.
+
+The first five rows are inputs a harness produces **by accident** — a payload it
+did not send, a source SURE does not know, an event SURE has no mapping for, a
+command line with no source on it. They are asserted by
+`the_inputs_a_harness_produces_by_accident_exit_5_and_record_nothing` in
+`crates/sure-cli/tests/cli_contract.rs`, which runs each of them as a process.
+The sixth row is the one a project writes **on purpose**, and it is the reason
+this heading carries no count: `P15-T025` added it after the block was written,
+and a count in a heading is a claim that goes false when a branch is added. It
+is a decision SURE made rather than an accident it suffered, it is asserted —
+with its own control — by
+`a_hook_event_that_names_a_settings_file_inside_the_project_is_refused` in the
+same file, and §2.4 argues why it is answered as a failure rather than as a
+`decision`. **The first five rows were measured on 2026-09-19, the sixth on
+2026-09-21**; the heading above carries the date the block was written.
 
 | Input | Exit | stdout | stderr (first two lines after the header) |
 | --- | --- | --- | --- |
@@ -82,18 +96,21 @@ false`.
 | an event type with no mapping | 5 | empty | `The event could not be normalised.` / `the Cursor event type 'whatIsThis' is not one SURE knows how to map` |
 | `--source copilot` | 5 | empty | `The event source is not supported.` / `Source 'copilot' is not one SURE knows how to ingest.` |
 | no `--source` at all | 5 | empty | `No source was given.` / `Use --source <name> …` |
+| `--settings-file` naming a file **inside the project** (deliberate, §2.4) | 5 | empty | `SURE did not read the settings it was pointed at.` / `SURE reads the user's settings from …, and that is inside …, the project it was asked about.` |
 
-The same four inputs in `--format json` put a machine-readable failure frame on
-**stdout** and leave stderr empty:
+Those inputs in `--format json` put a machine-readable failure frame on
+**stdout** instead and leave stderr empty:
 
 ```json
 {"command":"hook","details":{"detail":"The harness did not provide an event.","what":"No event was read from standard input."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.0.0-bootstrap"}
 ```
 
-There is no `decision` key in that frame, in either shape. A consumer that reads
-`decision` and does not check `outcome` or `exit_code` reads nothing where the
-one word that matters used to be — which is the safest reading available, and is
-why the launchers never synthesise one.
+There is no `decision` key in that frame, in either shape — and the last row of
+the table is the same frame with the same two fields missing, which is what its
+own test reads off the process rather than off the sentence (§2.4). A consumer
+that reads `decision` and does not check `outcome` or `exit_code` reads nothing
+where the one word that matters used to be — which is the safest reading
+available, and is why the launchers never synthesise one.
 
 ### 2.2 The launcher layer, measured by running the launchers
 
@@ -139,10 +156,13 @@ empty `PATH` there would have measured the test's setup instead of the launcher.
 
 ### 2.3 A project root SURE cannot use, and what happens to a `SessionStart`
 
-A fifth way a hook event stops before it answers, and the only one that is a
-decision rather than an accident. The event is well formed, SURE knows the source
-and the event type, and what stops it is that `project_root` is not an absolute
-path. Both shipped `SessionStart` fixtures carry
+A way a hook event stops before it answers that SURE chose rather than suffered.
+The event is well formed, SURE knows the source and the event type, and what
+stops it is that `project_root` is not an absolute path. It is not the only one
+of those — `--settings-file` naming a file inside the project is the other, one
+question earlier, and §2.4 is about it — and the count in this sentence is
+therefore left out rather than guessed at, for the reason §2.1 gives. Both
+shipped `SessionStart` fixtures carry
 `"project_root": "C:\\Users\\dev\\sample-project"`
 (`integrations/cursor/fixtures/session-start.json`,
 `integrations/claude-code/fixtures/session-start.json`), which is absolute on
@@ -198,6 +218,155 @@ because a `SessionStart` has no action to block and the failure this rule exists
 to prevent is the other one — a root SURE never read, written into the evidence
 as though it had.
 
+### 2.4 A settings file the project could have written: a decision, answered as a failure
+
+The question this section exists to answer, stated before it is answered:
+
+> When SURE refuses to read a settings file because it is inside the project the
+> event is about, is it **deciding** — the shape every other pre-action answer
+> takes, a `decision` of `block` and exit 1 — or has it **failed to produce an
+> answer** — `outcome: "failed"` and exit 5?
+
+The answer taken by `P15-T033` is that it **failed to produce an answer**: exit
+5, `outcome: "failed"`, no `decision` key, nothing recorded. The last row of
+§2.1's table is the measurement on this machine, and
+`a_hook_event_that_names_a_settings_file_inside_the_project_is_refused` in
+`crates/sure-cli/tests/cli_contract.rs` holds it against a real process, beside
+the control that names no settings file and gets a `block` and a written store.
+
+**The two shapes, side by side, on the same pre-action event.** Measured
+2026-09-21 by running `target/debug/sure.exe hook ingest --source cursor
+pre-tool-use` over one `preToolUse` event asking to run `rm -rf /`, against a
+project that wrote `privacy: {full_recording: true}` into its own `sure.yaml`.
+The two runs differ in one thing: whether that file was named with
+`--settings-file`.
+
+| Field | The refusal (`--settings-file` inside the project) | The control (no flag) |
+| --- | --- | --- |
+| exit status | 5 | 1 |
+| `outcome` | `failed` | `not_green` |
+| `decision` key | **absent** | `block` |
+| `reason` key | absent | `The current execution mode does not permit this action.` |
+| `details` | `what`: `SURE did not read the settings it was pointed at.`; `detail`: the file's path, that it is inside the project it was asked about, and `SURE stopped rather than treat it as the user's own word` | not present — a decision frame carries `reason` instead of `details` |
+| store file afterwards | none | `sure.db`, one session row |
+| `sure history --format json` | `store_present: false`, `total: 0` | `store_present: true`, `total: 1` |
+
+Same event, same project, same command line apart from the flag, so the table is
+a comparison rather than two anecdotes. Two neighbouring runs are worth one line
+here, because they are the shapes a reader will meet next: a project `sure.yaml`
+that does not parse, and one naming `protection.mode: custom`, both answer exit
+1 / `block` / `not_green` and both write a store. Neither of them is this refusal
+— neither names a `--settings-file` inside the project, so nothing is refused,
+and what happens is only that the project's own file will not load. `sure hook
+ingest` is the one caller that does not stop there: it answers under the settings
+it falls back to, `InspectOnly` + `inspect_only` + `Strict` — `load_execution_config`'s
+failure arm in `crates/sure-cli/src/hook.rs`, argued in
+`docs/architecture/CONFIG_AUTHORITY.md:172-181` — which is a fail-closed
+*decision* and is what §6's "Permission settings" bullet is about. The refusal
+differs in kind: SURE did not read the file at all, so there is no fall-back
+setting to decide under, which is why §2.4 exists.
+
+**Why a failure rather than a verdict.**
+
+1. **A `decision` is a verdict about the request, and this refusal read none of
+   the request's facts.** It stops one question earlier than any decision does:
+   no execution mode, no permission list, no protection mode, no classification
+   of the tool or the command. `block`'s own sentence — *"The current execution
+   mode does not permit this action."* — would be false here about a mode SURE
+   never read, and a harness that trusts `decision` would be told SURE judged the
+   tool call when SURE never looked at the tool call at all.
+2. **The failure shape is what this repository already documents for this
+   refusal, at every surface.** `docs/architecture/CLI.md` records it: *"A file
+   inside it is status 5, with a sentence saying SURE stopped rather than treat
+   it as the user's own word, and nothing is recorded"*, for `sure check`, for a
+   hook and for `sure config set` alike. `check.rs` and both sites in `hook.rs`
+   answer with `Report::Failed`, whose human form reads *"sure hook could not
+   finish."* and closes with *"SURE exited with status 5, which is what it
+   returns when it tried and did not finish."* This is a statement about what the
+   tree says and not about what must stay: a reader who rejects the argument
+   above is rejecting those documents too, and would have to change them rather
+   than only this page.
+3. **The block shape carries an invariant this refusal cannot satisfy
+   honestly.** `hook.rs`'s `record_the_decision` holds that every decision the
+   rule reached for a tool request is written down — *"absence is also what a
+   decision SURE never reached looks like"*. A `block` here would have to persist
+   the event to keep that rule, and what it would persist is a session and a tool
+   request recorded **under settings SURE refused to read**; a `block` that wrote
+   nothing would keep the store clean and break the invariant instead. The last
+   row of §2.1 is the way out that was taken: nothing is recorded because nothing
+   was decided.
+4. **The measured benefit of the other shape is zero.** §3's per-harness column
+   is where that belongs, and it says: on Claude Code, exit 1 and exit 5 are the
+   same thing to the harness — a non-2 non-zero error, and the launcher passes no
+   `--format json`, so no frame is read at all — and on Cursor and Codex what a
+   non-2 non-zero status does to a block is `cannot confirm`. On Copilot a
+   non-zero exit from `preToolUse` denies the call, so both shapes deny. A change
+   of shape there buys nothing a harness was measured to notice.
+5. **What the refusal owes is a sentence a person can act on, and it pays it.**
+   The detail names the file, says it is inside the project it was asked about,
+   and offers both remedies: name a settings file outside the project, or check
+   the project from outside the folder that holds the settings.
+
+**The case against, in its strongest form.** A consumer that reads only
+`decision` sees *nothing* here, and that is not a hypothetical reader: `decision`
+is the field every other pre-action answer puts its verdict in, and
+`crates/sure-testkit/tests/hook_failure_semantics.rs` measures that the launchers
+never synthesise one. So the project that writes its own `sure.yaml` — the case
+`P15-T025` exists for — gets no answer about its tool call, where the same
+project with a merely *broken* `sure.yaml` gets `block`. A protection layer that
+answers "nothing" to the deliberate input and "block" to the accidental one has
+its two cases round the wrong way.
+
+**Why that case does not win.** The tension it names is real, and it is the
+reason this shape is a decision rather than an oversight: whatever else a
+`block` owed a reader here, it would have to be **written down**, and the one
+place to write it is the store the refusal leaves absent. A `block` made
+consistent with `record_the_decision` would create the very file
+`fixtures/privacy/manifest.json`'s `a-settings-file-the-project-could-write-grants-nothing`
+forbids — a session and a tool request recorded under settings SURE refused to
+read, which is what the refusal exists to prevent — and a `block` made
+inconsistent would answer `block` while recording nothing, which is the state the
+invariant calls "a decision SURE never reached". The two shapes cannot both be
+honest at once, so the question becomes which one SURE owes, and the answer is
+the one it can back: it did not finish, and there is no verdict to write because
+there was nothing to judge. The severity is worth stating plainly rather than
+inflating: on the two harnesses whose rules §3 can cite, exit 1 and exit 5 are
+the same thing, so no action proceeds here that a `block` would have stopped.
+What is at stake is what SURE says about itself, not a hole through which a tool
+call escapes.
+
+**`check.rs` and the two hook sites, and the one thing that differs.** All three
+answer the same way about the same input. Measured 2026-09-21, with the same
+project and the same inside-the-project file named by `--settings-file`, each
+answers `outcome: "failed"`, exit 5, no `decision` key, the same
+`details.detail` (the file's path, that it is inside the project, and `SURE
+stopped rather than treat it as the user's own word`), and no store file:
+
+| Site | `details.what` |
+| --- | --- |
+| `sure check <project>` | `Nothing was recorded, and nothing was checked.` |
+| `sure hook ingest` | `SURE did not read the settings it was pointed at.` |
+| `sure hook allow-once` | `SURE did not read the settings it was pointed at.` |
+
+The shape is the same and one sentence differs, because the consequence differs:
+`check` was asked to check, so what did not happen is the check; a hook was asked
+for an answer about an action, so what did not happen is the answer — and the
+hook's sentence names the thing a person running it by hand has to fix. `what` is
+a sentence and not a status: a harness reads `outcome`, `exit_code` and the
+absence of `decision`, and those three agree at all three sites. No site falls
+back to another settings file either — the refusal is reached before any settings
+are read, and the runs above end in a failure with an empty store where a run
+that had read *some* settings would have ended in a decision and a row, which is
+what their controls do.
+
+**What this section does not claim.** It does not claim that refusing
+*authority a project asked for* should always be a failure — that is
+`exit::REFUSED` (status 4), reserved in `crates/sure-cli/src/report.rs` for
+exactly that family, unreachable without editing a file this task does not own,
+and recorded as a lead rather than taken here. It does not claim any harness was
+run: §3's harness column is untouched by this task, every `cannot confirm` in it
+is still `cannot confirm`, and nothing here was measured about Cursor or Codex.
+
 ## 3. The table
 
 `[F]` is §2.1. The `Failure semantics` cell holds exactly one of `fail-open`,
@@ -230,8 +399,11 @@ Reading the evidence column: a bare name is a test; `[F]` is §2.1. The
 per-event tests in the evidence column are in
 `crates/sure-core/src/normalizer/` — one `mod tests` per harness — and each one
 feeds that harness's fixture for that event through the normaliser and asserts
-the semantic event it maps to. The four failure rows share one process-level
-test, `the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing`, in
+the semantic event it maps to. The failure inputs in §2.1 share two process-level
+tests, and which input fell to which is the §2.1/§2.4 split: the accidental ones
+by `the_inputs_a_harness_produces_by_accident_exit_5_and_record_nothing`, and the
+deliberate one, with its control, by
+`a_hook_event_that_names_a_settings_file_inside_the_project_is_refused` — both in
 `crates/sure-cli/tests/cli_contract.rs`; the launcher rows in §2.2 are the four
 tests in `crates/sure-testkit/tests/hook_failure_semantics.rs` that spawn a
 launcher. Copilot's rows cite `unsupported_source_fails` because that is the
@@ -277,7 +449,7 @@ eleven lines in four files:
 
 | File | Lines | What the hits are |
 | --- | --- | --- |
-| `crates/sure-cli/tests/cli_contract.rs` | 4 | the doctor test that asserts Copilot is not an offered source and that `hook ingest --source copilot` refuses it (a comment and the loop), and the `a source SURE does not know` case of `the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing` |
+| `crates/sure-cli/tests/cli_contract.rs` | 4 | the doctor test that asserts Copilot is not an offered source and that `hook ingest --source copilot` refuses it (a comment and the loop), and the `a source SURE does not know` case of `the_inputs_a_harness_produces_by_accident_exit_5_and_record_nothing` |
 | `crates/sure-core/src/doctor.rs` | 1 | a doc comment on the doctor's integration list: a harness SURE ships a package for but cannot ingest from is deliberately not on it |
 | `crates/sure-testkit/tests/hook_failure_semantics.rs` | 3 | that file's own platform note and the failure-shape arm for the package's launcher |
 | `crates/sure-testkit/tests/integration_thinness.rs` | 3 | the argv the copilot launcher is expected to hand the core, and one text-shape assertion's package list |
@@ -358,10 +530,15 @@ event names that the reference read here does not define.
   600 s with no statement about the outcome. A SURE that hangs is a different
   failure mode from a SURE that exits 5, and the two must not be collapsed.
 - **Permission settings.** A settings file SURE cannot read makes it decide under
-  `InspectOnly` + `Strict` (`docs/architecture/CONFIG_AUTHORITY.md:146-152`) —
+  `InspectOnly` + `Strict` (`docs/architecture/CONFIG_AUTHORITY.md:172-181`) —
   that is a fail-closed *decision*, not a failure, and the status stays 0 or 1.
   It is out of scope for this table, and `crates/sure-cli/src/hook.rs`'s
   `a_refused_protection_mode_falls_to_the_firmest_one_this_build_has` covers it.
+  A settings file **inside the project** is the neighbouring case and is not out
+  of scope: SURE refuses to read it before that fallback is reached, so it is
+  exit 5 and nothing recorded, and §2.4 is about it. The difference is whether
+  the file was read at all: one that will not parse was read, and SURE fell back
+  to the firmest settings it has; one inside the project was never read.
 - **Evidence that could not be stored.** `crates/sure-cli/src/hook.rs:332-341`
   swallows a persistence failure on purpose: the decision stands and the exit
   status does not change. `a_decision_that_could_not_be_recorded_keeps_the_answer_and_says_so`

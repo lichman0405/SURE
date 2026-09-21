@@ -196,8 +196,11 @@ To take it out again:
 & .\integrations\claude-code\scripts\uninstall.ps1
 ```
 
-`docs/integrations/INSTALLATION_MATRIX.md` covers the other packages — Cursor,
-the portable agent plugin, Codex and Copilot — and what each of them installs.
+`docs/integrations/INSTALLATION_MATRIX.md` covers the other packages — Cursor and
+Codex — the CLI-only fallback for a person who installs no harness package, and
+what installing the Claude Code package means. It has no Copilot section because
+there is no Copilot install to describe: `integrations/copilot/README.md` opens
+by saying the package is a template that nothing installs.
 
 ## 5. Run your first check
 

@@ -26,30 +26,32 @@ afterwards.
     sure.db                 the user's evidence, which the install never writes
 ```
 
-`%LOCALAPPDATA%\SURE\bin\sure.exe` is not a preference chosen here. Seven
+`%LOCALAPPDATA%\SURE\bin\sure.exe` is not a preference chosen here. Eight
 launcher scripts, across five integration packages, already resolve exactly that
 path, and a different destination would be a binary those integrations cannot
-find. `Grep` over `integrations/` for `LOCALAPPDATA` returns these and no others
-(the `.sh` launchers beside them resolve `$SURE_BIN` and `PATH` instead, which is
-correct for Unix):
+find. `Grep` over `integrations/` for `LOCALAPPDATA` returns these among its
+results, and every other hit is a Markdown file (a README, a command, a prompt or
+a skill) or one of the two uninstall scripts (the `.sh` launchers beside them
+resolve `$SURE_BIN` and `PATH` instead, which is correct for Unix):
 
 | file | line | what it does |
 | --- | --- | --- |
 | `integrations/agent-plugin/scripts/install.ps1` | 7 | `Join-Path $env:LOCALAPPDATA 'SURE\bin\sure.exe'`, third in the order `$env:SURE_BIN` → `Get-Command sure` → here |
-| `integrations/claude-code/scripts/sure-hook.ps1` | 14 | the same candidate, third in the same order |
+| `integrations/claude-code/scripts/install.ps1` | 7 | the same candidate |
+| `integrations/claude-code/scripts/sure-hook.ps1` | 21 | the same candidate, third in the same order |
 | `integrations/claude-code/scripts/sure-mcp.ps1` | 16 | the same path, with `[Environment]::GetFolderPath('LocalApplicationData')` as a fallback when `%LOCALAPPDATA%` is unset |
 | `integrations/codex/scripts/sure-hook.ps1` | 24 | the same candidate |
-| `integrations/copilot/scripts/sure-hook.ps1` | 14 | the same candidate |
+| `integrations/copilot/scripts/sure-hook.ps1` | 21 | the same candidate |
 | `integrations/cursor/scripts/install.ps1` | 7 | the same candidate |
-| `integrations/cursor/scripts/sure-hook.ps1` | 14 | the same candidate |
+| `integrations/cursor/scripts/sure-hook.ps1` | 21 | the same candidate |
 
-Seven rather than three is worth stating because the brief that dispatched this
+Eight rather than three is worth stating because the brief that dispatched this
 task named three, and five packages rather than six because the first correction
 of that number still did not count them: the search is what is authoritative, it
-returns seven files and five directories, and it is what a change to the install
+returns eight files and five directories, and it is what a change to the install
 location would have to satisfy.
 
-`crates/sure-cli/tests/install_flow.rs` drives the third of them end to end
+`crates/sure-cli/tests/install_flow.rs` drives the fourth of them end to end
 against a real install.
 
 The known-folder lookup is not hand-rolled. `crates/sure-core/src/paths/mod.rs`
@@ -165,7 +167,7 @@ The program is reachable three ways without any `PATH` entry:
 
 1. by its full path, `%LOCALAPPDATA%\SURE\bin\sure.exe`;
 2. by `$env:SURE_BIN`, if you set it;
-3. by the seven launcher scripts above, which resolve the per-user path directly.
+3. by the eight launcher scripts above, which resolve the per-user path directly.
 
 If you want `sure` on `PATH` for your own shells, that is a change to your user
 environment and it is yours to make. The installer prints the line and does not

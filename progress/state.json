@@ -2426,22 +2426,36 @@
       "notes": ""
     },
     "P16-T001": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": " Note added 2026-09-18 by the supervisor from P1-T012's verification, about trusting this gate's result. `crates/sure-core/tests/browser_driver.rs:694` failed once under a full `cargo test --workspace` during P1-T012 with \"something is listening on 127.0.0.1:60014 after the listener was released\". The supervisor did not reproduce it: one full workspace run was clean (73 targets, 2406 passed, 0 failed) and six consecutive isolated runs of `cargo test -p sure-core --test browser_driver` were all \"5 passed; 0 failed\". So the honest statement is one occurrence across two full-suite runs, cause unknown, shape consistent with a race between tests that only bites when the suite runs concurrently. It matters here because this task has to run the gates and then be believed: a suite that fails one run in ten is a suite whose red is ambiguous, and the habit that grows around an ambiguous gate is re-running until it is green, which is how a real failure gets waved through. Before this task concludes, either reproduce it and fix the ownership of the port, or record how many clean full-suite runs it took."
+      "finished_at": "2026-09-21T11:33:53+08:00",
+      "base_sha": "ac15fc099f93e3fdb9fbd0f962278b32e76b3615",
+      "head_sha": "36482959b16af7b1d7bfb58c118f058ba45f2e82",
+      "evidence": [
+        "clause 1, \"Environment -> install -> doctor -> check -> Claude/Cursor plugin flow recorded on native Windows 11 x64\": the deliverable is `docs/development/VALIDATION_WINDOWS.md`, and the commit is exactly that one file, 906 insertions, 0 deletions, with the attribution trailer. The run was driven against a second checkout under a hostile path rather than the working copy, every install target was redirected, and the real per-user store was not touched: the supervisor measured `C:\\Users\\lishi\\AppData\\Local\\SURE\\sure.db` before and after and its size, mtime and sha256 are unchanged — 348160 bytes, `d171755690549d3a59f1949e85c124b1f06b5cc7f84b8e395f176a8031d67853`.",
+        "clause 1, that the page separates what ran from what did not: it carries a \"Not validated here\" section naming ten things it does **not** establish, including that the deepest path it produced was 221 characters against a `MAX_PATH` cap of 260, so the hostile path is a length test and not a limit test. That section is the reason this acceptance can be written at all: a page that had claimed the whole surface would have been unverifiable and would have been refused.",
+        "clause 1, the findings the page records, checked at the source or by measurement rather than read off the page: finding 1 is real and is at `scripts/Build-Release.ps1:1185-1200`, which runs `sure doctor --format json` with no `--store-dir` under the comment that a user runs `sure doctor` against their own store — measured harmless here (the store is byte-identical) but a different statement from \"the release build does not touch your data\". Finding 2 was reproduced by the supervisor using the launcher's own two lines against a byte-exact UTF-8 payload. Finding 4 is real: `scripts/Test-SureEnvironment.ps1` carries a `Zone.Identifier` ADS with `ZoneId=3` and is refused under `-ExecutionPolicy RemoteSigned` while a fresh `git clone` would not copy the ADS at all. Finding 5 is an observation the page declines to explain, which is the right call.",
+        "clause 2, \"Repository path includes a spaces/Unicode validation case\": the page records a second checkout at `C:\\Users\\lishi\\code\\SURE\\target\\tmp\\windows-validation\\路径 with spaces 校验\\sure repo` (82 characters), 5,125 paths created under the hostile tree, and the install, doctor, check and both plugin flows driven from it. The supervisor re-read the archive figures in that section and corrected one — see the next item.",
+        "what this acceptance **corrects** rather than inherits, because the numbers on a record like this are what a reader cannot re-derive: the supervisor re-measured four statements and three were wrong. The hostile-path archive size was given as 4,164,993 bytes and is 4,195,044 (the digest beside it, `b3f41c19a8d4d3f911540137089ff2c972fb5ebd11d86994a942359ad9805b16`, matches the file on disk exactly, so only the size was mis-transcribed). The PowerShell refusal was quoted as Restricted's \"因为在此系统上禁止运行脚本\" when this machine under `RemoteSigned` produces the unsigned-file message \"未进行数字签名。无法在当前系统上运行此脚本。\". The process-scope claim said every scope is `Undefined` when the session's `Process` scope is `Bypass`, which is precisely why the unforced run succeeded. And the console code page was stated as a machine fact when it is a property of the console — this machine's registry `ACP`/`OEMCP` are `936` and a freshly started console reports `936`, while the console these probes run in reports `65001`, so finding 2 reproduces in one and not the other. All four are corrected in `ab749d5`, the supervisor's own commit; the page's analysis, its five findings and its \"Not validated here\" section were re-read and stand.",
+        "what this entry does **not** claim: no six-gate reading. This task moved one Markdown page and no code. The batch reading is taken once at the frozen tree after `P16-T010` lands, which is the plan already recorded on `P16-T005`."
+      ],
+      "notes": "Accepted after the supervisor re-measured every number on the page that a reader could not re-derive. Three of four were wrong and are corrected in `ab749d5`; the errors were transcription rather than reasoning, and the page's structure is what makes that checkable — a record that states its evidence can be audited, which is the whole point of asking for one."
     },
     "P16-T002": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-21T11:33:53+08:00",
+      "base_sha": "eab162e3af51270a5187083003d81511e48da43d",
+      "head_sha": "69e1d4692c8e72f789d788bd8b5610987908bea0",
+      "evidence": [
+        "clause 1, \"macOS/Linux build/test results recorded; unsupported artifact limitations documented honestly\": the deliverable is `docs/development/PLATFORM_COVERAGE.md`, and the commit is exactly that one file, 553 insertions, 0 deletions, with the attribution trailer. The page records three green packaging jobs from `release-dry-run.yml` run `35555938432` — `aarch64-apple-darwin` (job `106199477354`), `x86_64-apple-darwin` (job `106199477470`) and `x86_64-unknown-linux-gnu` (job `106199477500`), each `success` on 2026-09-21, with the runner images named.",
+        "clause 1, the honest-limits half, which is the harder half and is where the page does its real work: every artifact is an `actions/upload-artifact` workflow artifact with a 14-day retention and **no public URL**, so \"the macOS build is green\" is a statement about a CI job and not about a download a user can reach. The page names this rather than letting a green tick imply a release.",
+        "clause 1, the page's headline claim, verified by the supervisor two independent ways. The page argues that `release.yml` \"is not merely unrun but unreachable\" because it is absent from the default branch and GitHub requires a `workflow_dispatch` workflow to exist there. Measured: `git ls-tree origin/main --name-only .github/workflows/` returns exactly two paths, `ci.yml` and `release-dry-run.yml`, while this branch has three including `release.yml`. And independently of that argument, `gh workflow list` — which is authenticated and answered, not inferred — lists `ci`, `release-dry-run` and `Dependabot Updates`, and does **not** list `release.yml` at all. GitHub's own view agrees with the page's reasoning, which is a stronger confirmation than the reasoning alone.",
+        "clause 1, that the page does not rest on that argument alone: it separately records zero tags (`release.yml`'s one required input is a tag that must already exist, so even a dispatchable `release.yml` would have nothing to release), no GitHub Releases, and nothing in any package manager. Each is stated with its carrier rather than asserted.",
+        "clause 1, the disagreements section, which is the part that makes the page worth keeping: it names where the repository's files contradict each other instead of smoothing them, including that `.github/workflows/release.yml` uses a phrasing its own authority forbids — `RELEASE_PROCESS.md`'s \"What must not be written\" rules out the definite prompt and the heredoc says \"Windows will warn about an unknown publisher\" — and records that as a pinned exemption rather than leaving it to be found by holding two files side by side.",
+        "what this entry does **not** claim: no six-gate reading, for the same reason as `P16-T001` — one Markdown page, no code, and the batch reading is taken at the frozen tree after `P16-T010` lands. The page's own \"What these readings do not establish\" section is the equivalent caveat inside the deliverable."
+      ],
+      "notes": "Accepted. The page takes the position that three green packaging jobs and an unreachable release workflow are different facts, and that saying so is the deliverable — which is the correct reading of a clause that asks for limitations documented honestly."
     },
     "P16-T003": {
       "status": "queued",

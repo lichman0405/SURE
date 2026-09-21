@@ -47,7 +47,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -103,6 +104,89 @@ fn serve(behavior: impl FnOnce(&mut TcpStream) + Send + 'static) -> (u16, Receiv
     });
 
     (port, receiver)
+}
+
+/// A loopback port nothing is listening on **at the moment it is handed over**,
+/// checked rather than assumed.
+///
+/// This is the instrument `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable`
+/// was missing, and the test is the fourth copy of the shape `P17-T001` repaired
+/// in `http_routes.rs`, `runtime_start.rs` and `browser_driver.rs`. What it
+/// replaces was three lines long: bind `127.0.0.1:0`, take the number, drop the
+/// listener, hand the number to the probe and assert a refusal. A port asked for
+/// as `0` comes out of the machine's **dynamic range** — 49152 to 65535 on this
+/// one, from `netsh int ipv4 show dynamicport tcp`, and 32768 and up by default
+/// on the platforms this has to port to — which is the same range every other
+/// `bind(0)` on the host draws from, including the ones inside the other copies
+/// of this binary when a gate runs. Something else can therefore be handed the
+/// number in the window between the release and the probe, and the test would
+/// then be reading whatever answered.
+///
+/// So the numbers here come from below that range, are walked forwards one at a
+/// time from a starting point no other live copy of this binary walks, and are
+/// each tried with `bind` before being released — a port that is taken, reserved
+/// or excluded is skipped rather than handed to the probe as if it were empty.
+///
+/// **The re-check with `connect_timeout` is kept here, and it is the half that
+/// matters for this test.** `http_routes.rs`'s copy carries it and
+/// `runtime_start.rs`'s does not; the difference is what each one does with the
+/// number. `runtime_start.rs` hands its port to a child that binds it and
+/// reports whether it could, so a failed `bind` there is answered by the child
+/// rather than by the test. This test asks the opposite question — it asserts
+/// that *nothing* answers — and the claim `bind` supports is only "no listener
+/// was bound when it was tried". A connection attempt that ends without an
+/// answer is the property itself rather than a proxy for it, so the port is
+/// returned only once one has ended that way. On a Unix build that is a refusal
+/// (and on Windows the connect ends at the bound); both are an `Err` here, and
+/// both mean nothing answered.
+///
+/// **The severity is a false red, and it is stated at the strength it was
+/// measured.** A process that takes the port in the remaining window — between
+/// the check above and the probe's own connect, which is microseconds — makes
+/// the assertion on [`ProbeOutcome::Refused`] fail, so what this walk narrows is
+/// a *flake*, not a hidden green: the test fails loudly rather than passing
+/// while the intended refusal path was never exercised. No scheme on this side
+/// can remove that residue, which is why it is written down rather than
+/// claimed away.
+fn free_port() -> u16 {
+    /// Below every default dynamic range, and past the well-known and registered
+    /// ports a machine's own services are actually likely to be on.
+    const LOWEST: u16 = 10_000;
+    const HIGHEST: u16 = 32_000;
+    /// How far the walk goes before giving up. A range this wide cannot be full
+    /// of listeners, so the walk ends long before this on any machine.
+    const TRIES: u16 = 1_000;
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let span = HIGHEST - LOWEST;
+    // A per-process start and a per-test step, the same shape the fixture names
+    // use: two copies of this binary started together do not walk the same
+    // numbers in the same order.
+    let start = (std::process::id() % u32::from(span)) as u16;
+    let step = (NEXT.fetch_add(1, Ordering::Relaxed) % u32::from(span)) as u16;
+
+    for attempt in 0..TRIES {
+        let port = LOWEST + (start.wrapping_add(step).wrapping_add(attempt) % span);
+        let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) else {
+            // Taken, reserved or excluded: skipped rather than handed to a probe
+            // that would then be asking about something else.
+            continue;
+        };
+        drop(listener);
+
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        if TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_err() {
+            return port;
+        }
+    }
+
+    panic!(
+        "all {TRIES} loopback ports this test walked between {LOWEST} and {HIGHEST} answered a \
+         connection attempt or refused to be bound, so no port could be shown to be one nothing \
+         answers on, and `a_port_with_nothing_behind_it_is_refused_rather_than_unreachable` would \
+         have been reading something else. That is a fact about this machine's load and not about \
+         SURE."
+    );
 }
 
 /// Reads until the blank line that ends the request, or until the peer stops.
@@ -377,15 +461,17 @@ fn something_other_than_http_that_speaks_first_is_recorded_as_not_http() {
 
 #[test]
 fn a_port_with_nothing_behind_it_is_refused_rather_than_unreachable() {
-    // Bind, learn the port, release it. Nothing is listening afterwards, and the
-    // operating system says so with a refusal — which is an observation about
-    // the project, unlike the probe's own failure.
-    let port = {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        port
-    };
+    // The port comes from [`free_port`] and not from the operating system's
+    // allocator. The version this replaces bound `127.0.0.1:0`, took the number,
+    // released it and then asserted a refusal — and the comment above it read
+    // "the operating system says so with a refusal", which is the one thing that
+    // version **cannot** support: a number released out of the dynamic range can
+    // be handed to something else in the window before the probe asks, and the
+    // probe would then be observing that other thing's answer (or its silence).
+    // What is claimed here is that a port **measured** to have nothing behind it
+    // is reported as a refusal rather than as unreachable, and the measurement
+    // is what makes the claim about the project rather than about the machine.
+    let port = free_port();
     let endpoint = Endpoint::loopback(port, "/").unwrap();
 
     let outcome = probe_under(GENEROUS).get(&endpoint);

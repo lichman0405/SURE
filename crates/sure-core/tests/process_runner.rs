@@ -178,18 +178,37 @@ const AWKWARD: &str = "a directory with a space and \u{00e9}\u{4e2d}\u{6587}";
 /// code units gets wrong.
 const NOT_ASCII: &str = "h\u{00e9}llo w\u{00f6}rld \u{4e2d}\u{6587} \u{1f389}";
 
-/// A scratch directory for one test, named after the test and this process.
+/// A scratch directory for one test, under the repository's `target/tmp`.
 ///
-/// The name is not removed on entry: a path left behind by a killed run is
-/// evidence, and silently clearing it would delete the thing a reader would
-/// want to look at. It *is* removed on the way out, so repeated runs stay
-/// independent.
+/// **Not removed on entry**, which is what the version this replaces said on
+/// its first line and contradicted on its third: it built a fixed name
+/// (`sure-process-{name}-{pid}`), cleared it with
+/// `let _ = fs::remove_dir_all(&directory)` and then created it. Two things
+/// were wrong with that, and the shared instrument below is what answers both.
+///
+/// The deletion's result was **discarded**, and `remove_dir_all` can fail
+/// part-way and leave its target standing — the hazard
+/// [`sure_testkit::scratch`]'s module documentation names. A later run with the
+/// same process id would then have found its own name taken, been handed it
+/// anyway by the `create_dir_all` that followed, and read a previous run's
+/// `report.tsv` as its own evidence: the directory that was never emptied is
+/// exactly the false green this test suite exists to refuse.
+///
+/// The sentence about evidence was therefore true of the intent and false of
+/// the code, and **the code moved rather than the sentence**. A path left behind
+/// by a killed run is evidence, and this helper now leaves it exactly where it
+/// is: [`sure_testkit::scratch::directory`] hands out
+/// `<pool>/run-<pid>/<what>-<n>` for a name no other call can be handed, and it
+/// never adopts a directory that already exists — a name that is taken is
+/// skipped, not emptied. Independence between runs is by construction rather
+/// than by a deletion that may have failed.
+///
+/// Each test here still removes its own directory on the way out when it
+/// reaches the end, which is the line the old comment's second sentence was
+/// about. That is space rather than independence, and a removal that fails
+/// there is read by nothing: no call is ever handed a name it has used before.
 fn scratch(name: &str) -> PathBuf {
-    let directory =
-        std::env::temp_dir().join(format!("sure-process-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&directory);
-    fs::create_dir_all(&directory).expect("a scratch directory");
-    directory
+    sure_testkit::scratch::directory("sure process runner", name)
 }
 
 /// Run one of the `#[ignore]`d children in this binary and hand back what came
@@ -985,44 +1004,83 @@ fn a_child_that_ends_by_itself_reports_the_code_it_ended_with() {
     let _ = fs::remove_dir_all(&directory);
 }
 
+/// How long the stopping deadline below is given before it arrives.
+///
+/// Generous rather than tight, for the same measured reason [`TREE_DEADLINE`]
+/// is: what the test needs is for the child to have **started and written its
+/// marker** before the deadline arrives, and that costs one process start on a
+/// machine nobody controls. The marker is the positive control the absence of a
+/// report is read against, so a deadline shorter than a process start would
+/// leave the same nothing behind as a stop that worked and would fail the test
+/// for a reason the runner did not cause.
+const STOP_DEADLINE: Duration = Duration::from_secs(2);
+
 #[test]
 fn a_run_that_passes_its_deadline_is_stopped_and_says_so() {
+    // **This test used to assert a property it could not observe, and the
+    // release file is the repair.** It ran `child_sleeps` — ten seconds — with a
+    // 150ms deadline, and read `!report.exists()` about a tenth of a second
+    // after the deadline. A runner that reported
+    // `TimedOut { stopped: Stop::WholeTree }` and merely *detached* the child
+    // passed all four assertions: the child had not reached the end of its
+    // sleep either, so the absence of the report was a fact about the sleep and
+    // not about the stop, and the child went on to write its report ten seconds
+    // later into a directory the test had already removed.
+    //
+    // The instrument is the one `a_grandchild_after_the_stop` uses, applied to
+    // the child itself. The child waits to be released rather than sleeping, so
+    // it is alive exactly until something stops it whatever the machine did with
+    // the clock; the marker it writes before it starts waiting is the positive
+    // control ("the stop reached it" and "it never ran" leave the same nothing
+    // behind); and afterwards it is *asked* whether it is still there — a child
+    // that survived the stop polls within [`POLL_INTERVAL`] and writes its
+    // report, and a child that was stopped cannot write anything at all.
     let directory = scratch("timeout");
     let report = report_path(&directory);
-    // The child would sleep far longer than the deadline, so a run that comes
-    // back at all came back because it was stopped.
     let outcome = run_child(
-        "child_sleeps",
+        "child_waits_to_be_released",
         "unused",
         &directory,
-        Environment::inherited().with(CHILD_ENV, instructions(&report, 10_000)),
-        Limits::new(Duration::from_millis(150), 64 * 1024, 64 * 1024),
+        Environment::inherited().with(CHILD_ENV, instructions(&report, POLL_INTERVAL)),
+        Limits::new(STOP_DEADLINE, 64 * 1024, 64 * 1024),
         Cancellation::new(),
     )
     .expect("the child starts");
 
-    match outcome.termination() {
-        Termination::TimedOut { stopped } => {
-            // The platform's answer, stated rather than assumed. This is the
-            // assertion that would have to change if Unix ever gained a way to
-            // reach a tree, which is the point: it is not a claim about what
-            // would be nice.
-            #[cfg(windows)]
-            assert_eq!(stopped, Stop::WholeTree);
-            #[cfg(not(windows))]
-            assert_eq!(stopped, Stop::ProcessOnly);
-        }
-        other => panic!("expected a deadline to stop the run, got {other:?}"),
-    }
+    assert!(
+        started_path(&report).exists(),
+        "the child never started, so nothing below says whether a stop reached it: a stop that \
+         reached a child and a child that never ran leave the same nothing behind, which is why \
+         the marker is asserted before the absence is read"
+    );
 
-    // Stopped means stopped: the child writes its report after the sleep, and a
-    // stopped child never gets there.
+    let stopped = match outcome.termination() {
+        // The platform's answer, stated rather than assumed. This is the
+        // assertion that would have to change if Unix ever gained a way to
+        // reach a tree, which is the point: it is not a claim about what
+        // would be nice.
+        Termination::TimedOut { stopped } => stopped,
+        other => panic!("expected a deadline to stop the run, got {other:?}"),
+    };
+    #[cfg(windows)]
+    assert_eq!(stopped, Stop::WholeTree);
+    #[cfg(not(windows))]
+    assert_eq!(stopped, Stop::ProcessOnly);
+
+    // Stopped means stopped, and this is the half that can fail. The child is
+    // released now and given longer than its poll interval to answer: one that
+    // is still running writes its report within a poll, and one that was
+    // stopped cannot write anything at all.
+    fs::write(released_path(&report), "go\n").expect("the release");
+    std::thread::sleep(RELEASE_WAIT);
     assert!(
         !report.exists(),
-        "the child reached the end of its sleep, so the deadline did not stop it"
+        "the run reported {stopped:?} and the child it was given time to answer wrote its report \
+         anyway — so the report was wrong"
     );
+
     assert!(
-        outcome.took() >= Duration::from_millis(150),
+        outcome.took() >= STOP_DEADLINE,
         "the run should have lasted at least its deadline, and lasted {:?}",
         outcome.took()
     );
@@ -1031,8 +1089,8 @@ fn a_run_that_passes_its_deadline_is_stopped_and_says_so() {
     // not being honoured — the allowance is for a loaded machine, not for a
     // poll interval nobody would accept.
     assert!(
-        outcome.took() < Duration::from_secs(3),
-        "the deadline was 150ms and the run took {:?}, so it was noticed far too late",
+        outcome.took() < STOP_DEADLINE + Duration::from_secs(3),
+        "the deadline was {STOP_DEADLINE:?} and the run took {:?}, so it was noticed far too late",
         outcome.took()
     );
 
@@ -1183,46 +1241,109 @@ fn a_cancelled_run_reaches_what_it_started_too() {
     let _ = fs::remove_dir_all(&directory);
 }
 
+/// How long the cancelling thread gives the child to say it has started.
+///
+/// The cancellation has to arrive **while the child is there**, or the test
+/// would be asking about a run that ended before it began. The marker is what
+/// says the child is there, and one process start is all that stands between
+/// the request and it, so this is generous rather than tight for the same
+/// measured reason [`TREE_DEADLINE`] is. It is a bound and not a race: a child
+/// that never appears makes the assertion below fail with a sentence about the
+/// child rather than about the cancellation.
+const CANCEL_PATIENCE: Duration = Duration::from_secs(2);
+
 #[test]
 fn a_cancelled_run_is_stopped_before_its_deadline() {
+    // **This test used to read an absence it could not observe, and the release
+    // file is the repair.** It ran `child_sleeps` — ten seconds — and asked
+    // whether the report was there the moment the run came back. The child had
+    // almost all of its ten seconds left, so the missing report was a fact about
+    // the sleep rather than about the stop, and the elapsed-time bound is no
+    // better: it reads draining, not stopping.
+    //
+    // That is measured rather than argued. Against a runner that reported
+    // `Cancelled { stopped: Stop::WholeTree }` and left the child running, the
+    // version this replaces passed in 1.03s — it is the pipes being released as
+    // well as the child that gets its five-second bound out of the way — while
+    // this one failed on the report above. The same runner *holding* the pipes
+    // failed that version on its elapsed bound instead, at 5.1s: a bound that
+    // happens to equal the runner's five-second drain grace, which is a fact
+    // about draining and not about whether anything was stopped.
+    //
+    // It is the instrument the deadline test above uses, applied to the other
+    // way a run ends, so that "stopped means stopped" is read the same way in
+    // both: the child waits to be released rather than sleeping, the marker it
+    // writes first is the positive control, and afterwards the child is *asked*
+    // whether it is still there. What this test needs on top of that is
+    // ordering — the cancellation has to land after the child is running — so
+    // the cancelling thread waits for the marker and reports whether it saw it.
     let directory = scratch("cancelled");
     let report = report_path(&directory);
+    let marker = started_path(&report);
     let cancellation = Cancellation::new();
     let cancelled_by = cancellation.clone();
 
     let started = Instant::now();
     let canceller = std::thread::spawn(move || {
-        // Long enough that the child is certainly running, short enough that
-        // the deadline below is nowhere near.
-        std::thread::sleep(Duration::from_millis(100));
+        let patience = Instant::now() + CANCEL_PATIENCE;
+        while !marker.exists() && Instant::now() < patience {
+            std::thread::sleep(Duration::from_millis(POLL_INTERVAL));
+        }
+        let child_was_there = marker.exists();
         cancelled_by.cancel();
+        child_was_there
     });
 
     let outcome = run_child(
-        "child_sleeps",
+        "child_waits_to_be_released",
         "unused",
         &directory,
-        Environment::inherited().with(CHILD_ENV, instructions(&report, 10_000)),
+        Environment::inherited().with(CHILD_ENV, instructions(&report, POLL_INTERVAL)),
         Limits::new(Duration::from_secs(30), 64 * 1024, 64 * 1024),
         cancellation,
     )
     .expect("the child starts");
-    canceller.join().expect("the cancelling thread");
+    let child_was_there = canceller.join().expect("the cancelling thread");
 
     assert!(
-        matches!(outcome.termination(), Termination::Cancelled { .. }),
-        "expected the cancellation to stop the run, got {:?}",
-        outcome.termination()
+        child_was_there,
+        "the child never said it had started, so the cancellation was asked for before there was \
+         anything to stop and nothing below is about a stop: a stop that reached a child and a \
+         child that never ran leave the same nothing behind"
     );
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "the cancellation was asked for 100ms in and the deadline was 30s, so a run that takes \
-         this long ended on neither; it took {:?}",
-        started.elapsed()
-    );
+
+    let stopped = match outcome.termination() {
+        Termination::Cancelled { stopped } => stopped,
+        other => panic!("expected the cancellation to stop the run, got {other:?}"),
+    };
+    // The platform's answer, stated rather than assumed, in the same sentence
+    // the deadline test asserts: this is the half that would have to change on
+    // purpose if a platform gained or lost a way to reach a tree.
+    #[cfg(windows)]
+    assert_eq!(stopped, Stop::WholeTree);
+    #[cfg(not(windows))]
+    assert_eq!(stopped, Stop::ProcessOnly);
+
+    // Stopped means stopped, and this is the half that can fail: the child is
+    // released now and given longer than its poll interval to answer. One that
+    // is still running writes its report within a poll, and one that was
+    // stopped cannot write anything at all.
+    fs::write(released_path(&report), "go\n").expect("the release");
+    std::thread::sleep(RELEASE_WAIT);
     assert!(
         !report.exists(),
-        "the child reached the end of its sleep, so the cancellation did not stop it"
+        "the run reported {stopped:?} and the child it was given time to answer wrote its report \
+         anyway — so the report was wrong"
+    );
+
+    // And the run ended on the cancellation rather than on its own clock: the
+    // deadline it was given is thirty seconds, so a run that takes longer than
+    // this ended on neither the cancellation nor the deadline it was given.
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the cancellation was asked for as soon as the child was there and the deadline was 30s, \
+         so a run that takes this long ended on neither; it took {:?}",
+        started.elapsed()
     );
 
     let _ = fs::remove_dir_all(&directory);

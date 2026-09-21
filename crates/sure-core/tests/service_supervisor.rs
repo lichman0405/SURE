@@ -149,16 +149,31 @@ const AWKWARD: &str = "a service directory with \u{00e9}\u{4e2d}\u{6587}";
 // The harness.
 // ---------------------------------------------------------------------------
 
-/// A scratch directory for one test, named after the test and this process.
+/// A scratch directory for one test, under the repository's `target/tmp`.
 ///
-/// Not removed on entry: a directory left behind by a killed run is evidence.
-/// Removed on the way out, so repeated runs stay independent.
+/// `P17-T004` repaired this helper, and **both of its sentences were false of
+/// the code below them**. "Not removed on entry: a directory left behind by a
+/// killed run is evidence" was contradicted by the very next line,
+/// `let _ = fs::remove_dir_all(&directory)`, which deleted that evidence and
+/// discarded the deletion's result — and `remove_dir_all` can fail part-way and
+/// leave its target standing, the hazard
+/// [`sure_testkit::scratch`]'s module documentation names. A later run with the
+/// same process id would then have found its own fixed name
+/// (`sure-service-{name}-{pid}`) taken, been handed it anyway by the
+/// `create_dir_all` that followed, and read a previous run's report as its own.
+/// "Removed on the way out, so repeated runs stay independent" described a
+/// cleanup no test in this file performs: the removal that kept repeated runs
+/// independent was the one on the way *in*.
+///
+/// **The code moved rather than the sentences.** What the comment promised is
+/// what [`sure_testkit::scratch::directory`] does by construction: every call is
+/// handed `<pool>/run-<pid>/<what>-<n>`, a name no other call in this process
+/// can be given, and a directory that already exists is skipped rather than
+/// emptied or adopted. Nothing is cleared, a directory left behind by a killed
+/// run stays exactly where it is, and repeated runs are independent because no
+/// name is ever reused.
 fn scratch(name: &str) -> PathBuf {
-    let directory =
-        std::env::temp_dir().join(format!("sure-service-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&directory);
-    fs::create_dir_all(&directory).expect("a scratch directory");
-    directory
+    sure_testkit::scratch::directory("sure service supervisor", name)
 }
 
 /// A copy of this test binary, named so that classification reads it as

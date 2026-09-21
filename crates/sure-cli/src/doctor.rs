@@ -284,12 +284,20 @@ fn row(out: &mut impl Write, label: &str, value: &str) -> io::Result<()> {
 /// that sentence is the module's own ([`Availability::explain`]) and is printed
 /// on the line below, so this is the short value a reader scans for and the
 /// other is the one they read.
+///
+/// **Both arms have to be true of this build, and the absent one is the one
+/// that was not.** It used to read *"none found, so checks run on this
+/// computer"* — and nothing runs on this computer, or anywhere else, in this
+/// build: `sure_core::enforce` has no check driving on the road to an admitted
+/// command and `support::CEILING` is `InspectOnly` for the same reason. A
+/// missing runtime is a fact about the machine and not a fallback, so the value
+/// says which machine this is and what that does and does not change.
 fn container_in_words(availability: &Availability) -> String {
     match availability {
         Availability::Found { runtime, program } => {
             format!("{} at {}", runtime.as_str(), program.display())
         }
-        Availability::Absent => "none found, so checks run on this computer".to_owned(),
+        Availability::Absent => "none found, and this build runs no check either way".to_owned(),
     }
 }
 
@@ -950,5 +958,70 @@ mod tests {
         // container" section`; `cargo test -p sure-cli --lib doctor` shows it is
         // the only failure the mutation causes. Reported in this task's
         // hand-back.
+    }
+
+    #[test]
+    fn neither_container_answer_tells_a_reader_that_a_check_ran_here() {
+        // **The regression this exists for.** `sure doctor` used to print, on a
+        // machine with no runtime, `none found, so checks run on this computer`
+        // and *"No container runtime was found, so checks run on this computer
+        // instead."* — and neither is true of this build: `sure_core::enforce`
+        // says no check drives on the road to an admitted command, and
+        // `sure_core::support::CEILING` is `InspectOnly` for the same reason,
+        // so nothing runs here or in a container. The guard over the module's
+        // sentence asked whether it contained a phrase, so it stayed green
+        // while the sentence was false.
+        //
+        // What is asserted here is the claim, on both lines a person reads: the
+        // short value in the column and the sentence under it. `sure_core`'s own
+        // rule does the reading — one copy of a rule is one rule — and the
+        // sentence still has to say what happens instead, which is that no check
+        // runs.
+        let absent = Availability::Absent;
+        let value = container_in_words(&absent);
+        let sentence = absent.explain();
+        for (what, text) in [("the column value", &value), ("the sentence", &sentence)] {
+            assert!(
+                !sure_core::container::claims_local_execution(text),
+                "{what} tells a reader a check runs on this computer, and none does: {text}"
+            );
+            assert!(
+                sure_core::container::denies_that_anything_runs(text),
+                "{what} has to say what happens instead of only what is missing, and what \
+                 happens is that nothing runs: {text}"
+            );
+        }
+        assert!(
+            sentence.contains("docker") && sentence.contains("podman"),
+            "an absence has to say what was looked for, or a user cannot act on it: {sentence}"
+        );
+
+        // And the whole report, not only the two strings: the sentence reaches a
+        // terminal through `human`, and the frame a script reads carries it under
+        // `container.sentence`. This is the assertion that would have caught the
+        // defect where it was seen.
+        let mut report = a_healthy_report();
+        report.container = Availability::Absent;
+        let text = rendered(&report);
+        let value = machine(&report);
+        for (what, text) in [
+            ("the human form", text.as_str()),
+            (
+                "the machine form",
+                value["container"]["sentence"]
+                    .as_str()
+                    .expect("the container answer carries a sentence"),
+            ),
+        ] {
+            assert!(
+                !sure_core::container::claims_local_execution(text),
+                "{what} prints a container answer that claims a check runs on this computer: \
+                 {text}"
+            );
+            assert!(
+                text.contains(&sentence),
+                "{what} does not carry the module's own sentence about an absence: {text}"
+            );
+        }
     }
 }

@@ -2,8 +2,9 @@
 
 ## What is in this directory
 
-A project with one check in it, and a computer with nowhere to run that check
-apart from the computer itself.
+A project with one check in it, and a computer with no container runtime on it —
+which, in this build, is the same answer as a computer that has one: nothing
+runs the check, here or in a container.
 
 | File | What is in it |
 | --- | --- |
@@ -27,17 +28,32 @@ Absent                       nothing was found
 There is no third shape, and in particular there is no *failed* shape. That is
 the whole of the honesty this fixture is about: a missing runtime is not an
 exception to catch, not a defect to report and not a silence. Ask a path with
-nothing on it and SURE says what happened and what happens instead, in one
-sentence:
+nothing on it and SURE says what happened, what it does not change, and what it
+looked for, in one sentence:
 
 ```
-No container runtime was found, so checks run on this computer instead.
-SURE looked for docker or podman on PATH.
+No container runtime was found, and that changes nothing: this build runs no
+check, in a container or on this computer, and each check is recorded as unknown
+rather than passed. SURE looked for docker or podman on PATH.
 ```
 
 The test compares that sentence whole rather than searching it for a word, and
-it has to do three things at once — say what was not found, say what happens
-instead, and name what was looked for — or a person reading it cannot act on it.
+it has to do three things at once — say what was not found, say that **nothing
+runs**, with a runtime and without one, and name what was looked for — or a
+person reading it cannot act on it.
+
+**That sentence used to read *"No container runtime was found, so checks run on
+this computer instead."*, and this README used to explain the requirement in the
+same false way.** The guard was green because it asked the sentence for a phrase
+rather than for a true claim, and the phrase it asked for — a fallback onto this
+computer — was false of a build in which no check runs anywhere: `sure_core::enforce`
+says no check drives on the road to `Enforcement::admitted()`, and
+`sure_core::support`'s `CEILING` is `InspectOnly` for the same reason. It is
+written down here so that nobody restores it. An absent runtime changes *inside
+what* a command would run and not *whether* anything runs, so a sentence that
+names a fallback is wrong in any wording, not only in the old one —
+`sure_core::container::claims_local_execution` is the rule that reads the claim
+rather than the phrase, and it is what fails if one comes back.
 
 ## The machine is never the measurement
 

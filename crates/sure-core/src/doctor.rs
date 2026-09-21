@@ -516,10 +516,15 @@ pub struct DoctorReport {
     pub toolchain: Vec<Compiler>,
     /// Whether a container runtime is here, and which.
     ///
-    /// [`Availability::Absent`] is an answer rather than a failure: the checks
-    /// run on this machine instead. **Nothing is run and no container is
-    /// started** — this is the same filesystem search as [`DoctorReport::tools`],
-    /// and planning or running a container is elsewhere, deliberately.
+    /// [`Availability::Absent`] is an answer rather than a failure: it says this
+    /// machine has no runtime on the search path it was given, and it is **not a
+    /// fallback** — no check runs on this computer either, with a runtime or
+    /// without one, because `crate::support`'s `CEILING` is `InspectOnly` and no
+    /// check drives on the road to
+    /// [`Enforcement::admitted`](crate::enforce::Enforcement::admitted). **Nothing
+    /// is run and no container is started** — this is the same filesystem search
+    /// as [`DoctorReport::tools`], and planning or running a container is
+    /// elsewhere, deliberately.
     pub container: Availability,
     /// The analysis providers this build offers, and what each needs from here.
     ///

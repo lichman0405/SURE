@@ -24,12 +24,22 @@
 //! # Absence is a value, and that is the first acceptance sentence
 //!
 //! [`Availability`] has no `Error` variant because a machine without Docker or
-//! Podman is not a failure: it is a machine where checks run on the host under
-//! the mode and permissions `P3-T005`, `P3-T006` and `P3-T007` built. A caller
-//! cannot forget to handle it, because the only way to get a [`Runtime`] out is
-//! to match, and `Container` mode's own documentation says what happens then.
-//! **An error would have made a normal machine a broken one**, and the failure
-//! mode of that is a user told their setup is wrong when it is not.
+//! Podman is not a failure: it is a machine with no runtime on its search path,
+//! which is a fact about the computer rather than a defect in it. **It is also
+//! not a machine where something different happens.** Absence changes *inside
+//! what* a command would run and not *whether* anything runs — the mode and the
+//! permissions `P3-T005`, `P3-T006` and `P3-T007` built do not consult what is
+//! installed — and in this build nothing runs at all: no check drives on
+//! [`Enforcement::admitted`](crate::enforce::Enforcement::admitted)'s road yet,
+//! so the checks are admitted and none of them is run, with a runtime or without
+//! one, and each is recorded as unknown rather than passed. `crate::support`'s
+//! `CEILING` is `InspectOnly` for the same reason. **A sentence that says the
+//! checks run on this computer instead is therefore false of this build**, and
+//! [`claims_local_execution`] is the rule that keeps one out of the sentences
+//! below. A caller cannot forget to handle an absence, because the only way to
+//! get a [`Runtime`] out is to match. **An error would have made a normal machine
+//! a broken one**, and the failure mode of that is a user told their setup is
+//! wrong when it is not.
 //!
 //! # Where "limited isolation" is, and why it is not marketing
 //!
@@ -146,9 +156,14 @@ pub enum Availability {
     },
     /// Nothing SURE knows how to ask was found.
     ///
-    /// Not a failure and not an empty success: it is the answer that says the
-    /// checks run on the host instead, under whatever mode and permissions are
-    /// in force.
+    /// Not a failure and not an empty success: it is the answer that says there
+    /// is no runtime here, which is a fact about the machine and not a decision
+    /// about the checks. **It does not mean the checks run on this computer
+    /// instead.** In this build nothing runs either way — the checks are
+    /// admitted and none of them is run — so the sentence
+    /// [`Availability::explain`] produces says so rather than implying a
+    /// fallback, and [`claims_local_execution`] is the rule that holds it to
+    /// that.
     Absent,
 }
 
@@ -202,6 +217,12 @@ impl Availability {
     }
 
     /// What to tell a user, in one sentence, either way.
+    ///
+    /// Both arms are held to [`claims_local_execution`]: neither may say that a
+    /// check runs on this computer, because none does. The absence arm used to
+    /// say *"No container runtime was found, so checks run on this computer
+    /// instead."* — which was false of this build, and which the guard that was
+    /// supposed to catch it asked for by phrase rather than by claim.
     #[must_use]
     pub fn explain(&self) -> String {
         match self {
@@ -213,8 +234,9 @@ impl Availability {
             Self::Absent => {
                 let names: Vec<&str> = Runtime::ALL.iter().map(|it| it.as_str()).collect();
                 format!(
-                    "No container runtime was found, so checks run on this computer instead. \
-                     SURE looked for {} on PATH.",
+                    "No container runtime was found, and that changes nothing: this build \
+                     runs no check, in a container or on this computer, and each check is \
+                     recorded as unknown rather than passed. SURE looked for {} on PATH.",
                     names.join(" or ")
                 )
             }
@@ -631,6 +653,189 @@ fn denied_in_the_same_clause(before: &str) -> bool {
     })
 }
 
+/// The words that say something runs.
+///
+/// Whole words rather than substrings, so that `runtime` — which this module
+/// says a great deal about — is not read as `run`. The list is written out for
+/// the reason [`denied_in_the_same_clause`]'s is: a suffix rule would catch
+/// `runtime` as well, and a rule an unrelated word can satisfy is the shape of
+/// false green this repository is built against.
+const RUNNING_WORDS: &[&str] = &[
+    "run",
+    "runs",
+    "ran",
+    "running",
+    "execute",
+    "executes",
+    "executed",
+    "executing",
+    "perform",
+    "performs",
+    "performed",
+];
+
+/// The places that make a running word a claim about *this* computer.
+///
+/// Every entry is a place on this machine and none of them is a container. That
+/// asymmetry is deliberate: what this rule is about is the **fallback** claim —
+/// that the checks ran here because a runtime was missing — which is the one
+/// this build made falsely. Whether a sentence may say a check runs inside a
+/// container is the other half of the same question, it is a different sentence
+/// with a different defect behind it, and this list does not decide it.
+const LOCAL_PLACES: &[&str] = &[
+    "on this computer",
+    "on your computer",
+    "on this machine",
+    "on the host",
+    "on the local machine",
+    "locally",
+    "here",
+];
+
+/// The words that deny a running word in the clause it sits in.
+///
+/// Deliberately **not** [`denied_in_the_same_clause`]'s list. That one counts
+/// `instead` and `rather` as denials, which is right for *"limited isolation
+/// rather than an isolated environment"* and wrong here: *"checks run on this
+/// computer **instead**"* is the claim itself, and a list that excused it would
+/// excuse the sentence this rule exists to catch.
+const NOT_RUNNING_WORDS: &[&str] = &[
+    "not", "never", "no", "none", "nor", "nothing", "cannot", "without", "isnt", "arent", "doesnt",
+    "dont", "wont", "wasnt", "werent",
+];
+
+/// Whether `sentence` claims that a check runs on this computer.
+///
+/// # The claim
+///
+/// This build admits the checks and runs none of them — in a container and on
+/// this computer alike — so a sentence that tells a reader a check ran here is
+/// false whichever words it uses. It is the claim the first acceptance sentence
+/// is about: [`Availability`] has no error because an absent runtime is not a
+/// failure, and **the absence does not mean the check happened somewhere else**.
+/// A reader who takes it that way believes a check of their project was
+/// performed when nothing was, which is the expensive kind of wrong.
+///
+/// # Why a rule about a claim rather than about a phrase
+///
+/// The sentence this was written for said *"No container runtime was found, so
+/// checks run on this computer instead."* — and the guard that was supposed to
+/// catch it asserted that the produced sentence **contained** the phrase *run on
+/// this computer instead*. A phrase check cannot tell that the phrase it asks
+/// for is a lie; it was green, and the claim was false. So this asks about the
+/// claim instead: a clause that names something running together with a place on
+/// this computer, with nothing in those clauses denying it.
+///
+/// # Why the clause after it is read as well
+///
+/// English puts the joint between two clauses on a comma, and a claim sits on
+/// either side of one — *"checks run, on this computer"* is the same claim as
+/// *"checks run on this computer"*. So a clause that names something running is
+/// read together with the clause after it, and the denial is looked for in both.
+/// **A denial excuses a claim only inside the clauses it reaches**, for the
+/// reason [`overclaims`] gives: a window wide enough to see an unrelated `not`
+/// would excuse the sentence the rule is for.
+///
+/// # What it deliberately cannot tell
+///
+/// - **Two clauses between the halves.** *"Checks run, quickly, on this
+///   computer"* has a clause between the running word and the place, and neither
+///   adjacent pair holds both. A sentence that reads as a claim to a person and
+///   defeats this rule is a reason to extend the word lists above, which is why
+///   they are here rather than in a test.
+/// - **A denial anywhere in the pair excuses it.** *"There is no doubt that
+///   checks run on this computer"* is read as a denial, exactly as
+///   [`overclaims`] reads the same shape. The cheap, checkable rule is worth
+///   more than the clever one, and this limit is stated rather than papered over.
+#[must_use]
+pub fn claims_local_execution(sentence: &str) -> bool {
+    let clauses = clauses(sentence);
+    for (index, clause) in clauses.iter().enumerate() {
+        if !mentions_running(clause) {
+            continue;
+        }
+        let next: &[String] = match clauses.get(index + 1) {
+            Some(clause) => clause,
+            None => &[],
+        };
+        let names_a_place = LOCAL_PLACES
+            .iter()
+            .any(|place| names(clause, place) || names(next, place));
+        if names_a_place && !(denies_running(clause) || denies_running(next)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether `sentence` says, in some clause of it, that nothing runs.
+///
+/// The other half of the same acceptance sentence: an absence has to say what
+/// happens instead and not only what is missing, and what happens is that no
+/// check runs. A sentence that is merely silent about running satisfies
+/// [`claims_local_execution`] by not making the claim, and this is the rule that
+/// refuses to let that silence pass as an answer.
+#[must_use]
+pub fn denies_that_anything_runs(sentence: &str) -> bool {
+    clauses(sentence)
+        .iter()
+        .any(|clause| mentions_running(clause) && denies_running(clause))
+}
+
+/// The clauses of `sentence`, lowercased and reduced to their words.
+///
+/// The punctuation is the boundary and it is thrown away: what a caller gets is
+/// one list of word lists, in the order they were written, so that a rule can
+/// ask *does this clause name something running* and *does the one after it name
+/// a place* without either rule having to know how English is punctuated.
+fn clauses(sentence: &str) -> Vec<Vec<String>> {
+    let lowered = sentence.to_lowercase();
+    lowered
+        .split(['.', ';', ':', '\n'])
+        .flat_map(|part| part.split(','))
+        .map(|clause| words(clause).collect::<Vec<String>>())
+        .collect()
+}
+
+/// Whether `clause` names something running.
+fn mentions_running(clause: &[String]) -> bool {
+    clause
+        .iter()
+        .any(|word| RUNNING_WORDS.contains(&word.as_str()))
+}
+
+/// The words of a clause, stripped of anything that is not a letter — the
+/// reading [`denied_in_the_same_clause`] gives a clause, so that `isn't` and
+/// `isnt` are one word here as they are there.
+fn words(clause: &str) -> impl Iterator<Item = String> + '_ {
+    clause.split_whitespace().map(|word| {
+        word.chars()
+            .filter(char::is_ascii_alphabetic)
+            .collect::<String>()
+    })
+}
+
+/// Whether `place`'s words appear in `clause`, consecutively.
+///
+/// A word sequence rather than a substring, because `here` is inside `there`,
+/// `where` and `whether` — and a rule that read *"whether the check ran"* as a
+/// claim about this computer would be wrong in the direction that gets a check
+/// relaxed until it catches nothing.
+fn names(clause: &[String], place: &str) -> bool {
+    let wanted: Vec<String> = words(place).collect();
+    !wanted.is_empty()
+        && clause
+            .windows(wanted.len())
+            .any(|window| window == wanted.as_slice())
+}
+
+/// Whether `clause` denies that anything runs.
+fn denies_running(clause: &[String]) -> bool {
+    clause
+        .iter()
+        .any(|word| NOT_RUNNING_WORDS.contains(&word.as_str()))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -888,9 +1093,23 @@ mod tests {
         let sentence = availability.explain();
         assert!(sentence.contains("docker"), "{sentence}");
         assert!(sentence.contains("podman"), "{sentence}");
+        // **The claim, and not the phrase that used to stand in for it.** This
+        // assertion was `sentence.contains("run on this computer instead")` with
+        // the message *"absence must say what happens instead, not only what is
+        // missing"* — and the sentence that satisfied it was false: nothing runs
+        // on this computer or anywhere else in this build, so the guard was
+        // asking for the defect. What is asserted now is the claim. A sentence
+        // that says a check runs here fails whichever words it says it in, and
+        // the sentence has to say what does happen: nothing does.
         assert!(
-            sentence.contains("run on this computer instead"),
-            "absence must say what happens instead, not only what is missing: {sentence}"
+            !claims_local_execution(&sentence),
+            "an absence must not claim that a check runs on this computer, because none does \
+             — not here and not in a container: {sentence}"
+        );
+        assert!(
+            denies_that_anything_runs(&sentence),
+            "absence must say what happens instead, not only what is missing, and what happens \
+             is that nothing runs: {sentence}"
         );
     }
 
@@ -994,6 +1213,86 @@ mod tests {
                     "`{phrase}` is used as a claim in: {sentence}"
                 );
             }
+            // The other claim this module may not make, checked over the same
+            // three sentences because it is the same kind of rule: an overclaim
+            // and a claim that a check ran here are both sentences that tell a
+            // user something this build does not do.
+            assert!(
+                !claims_local_execution(sentence),
+                "this sentence claims a check runs on this computer, and none does: {sentence}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_local_execution_rule_tells_a_claim_from_a_denial() {
+        // The rule's own test, the way `spawn_sites.rs` tests its matcher and
+        // `the_overclaim_rule_tells_a_claim_from_a_denial` tests the other one:
+        // a check whose matcher is wrong is a check that passes for the wrong
+        // reason, and this one has two ways to be wrong — missing a claim and
+        // reading a denial as one.
+        //
+        // **The first claim is the sentence this guard was written for**, kept
+        // here as a value rather than only in the commit message: it was the
+        // shipped sentence, it was false, and the assertion that was supposed to
+        // catch it asked for it by phrase and stayed green. If this list is ever
+        // emptied or the rule is ever relaxed, this case is what fails.
+        for claim in [
+            "No container runtime was found, so checks run on this computer instead. \
+             SURE looked for docker or podman on PATH.",
+            "With no runtime, the checks run on this computer.",
+            "The checks are executed on this machine.",
+            "no docker, so it ran locally",
+            "Checks run, on this computer.",
+            "Absence means the project's commands are performed here.",
+            "Nothing was found, so the check runs here.",
+        ] {
+            assert!(
+                claims_local_execution(claim),
+                "a claim about a check running on this computer went unnoticed: {claim}"
+            );
+        }
+        for denial in [
+            "This build runs no check, in a container or on this computer.",
+            "No check runs here, with a runtime or without one.",
+            "Nothing runs on this computer, and nothing runs in a container.",
+            "An absent runtime does not mean the checks run locally.",
+            "SURE will never run your project's commands on this computer.",
+            // `here` is inside `there`, `where` and `whether`, and this is the
+            // case that says so: a rule matching the substring would read this
+            // as a claim about this computer, and it is not one.
+            "The checks that ran are listed in a report, wherever they came from.",
+            // The limit, stated as a value so that a future edit cannot quietly
+            // change it into a claim: two clauses between the halves is not read
+            // as one, and the rule says so rather than pretending otherwise.
+            "Checks run, quickly and quietly, on this computer.",
+        ] {
+            assert!(
+                !claims_local_execution(denial),
+                "a denial or a sentence that names no place was read as a claim: {denial}"
+            );
+        }
+        // And the other half, so that a rule which excused every sentence would
+        // fail here: silence about running is not an answer.
+        for answer in [
+            "No container runtime was found, and this build runs no check either way.",
+            "This build admits the checks and runs none of them.",
+            "Nothing in this build executes a check.",
+        ] {
+            assert!(
+                denies_that_anything_runs(answer),
+                "a sentence that says nothing runs was not read as saying it: {answer}"
+            );
+        }
+        for silent in [
+            "No container runtime was found. SURE looked for docker or podman on PATH.",
+            "The search path held no docker and no podman.",
+        ] {
+            assert!(
+                !denies_that_anything_runs(silent),
+                "a sentence that says only what is missing was read as saying what happens: \
+                 {silent}"
+            );
         }
     }
 

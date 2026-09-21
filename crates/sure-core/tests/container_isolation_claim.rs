@@ -41,10 +41,24 @@
 //!   regex over spelling. The module's own sentences are covered instead by
 //!   `no_sentence_this_module_produces_carries_an_overclaim`, which asks the same
 //!   function about `isolation_claim()` and both `Availability::explain()` arms.
+//!
+//! # The second claim, and the rule that reads it
+//!
+//! `P16-T010` found a sentence this file's own subject had left alone: the
+//! absent-runtime answer said *"checks run on this computer instead"*, and no
+//! check runs on this computer — or anywhere else — in this build. The assertion
+//! that pinned it asked whether the sentence **contained a phrase**, and it was
+//! green. [`claims_local_execution`] is the rule that reads the claim instead, so
+//! that a sentence saying a check runs here fails in any wording, and
+//! [`denies_that_anything_runs`] is the other half: an absence must say that
+//! nothing runs, not only that something is missing.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use sure_core::container::{Availability, OVERCLAIMS, isolation_claim, overclaims};
+use sure_core::container::{
+    Availability, OVERCLAIMS, claims_local_execution, denies_that_anything_runs, isolation_claim,
+    overclaims,
+};
 use sure_core::scan::{ScanOptions, scan};
 
 /// The file that defines the forbidden phrases, which therefore contains them.
@@ -254,14 +268,29 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
     // absence — which is what makes this a property of the type rather than a
     // convention. What is asserted here is the observable half: a `PATH` holding
     // no runtime yields `Absent`, and the answer says what happens instead.
+    //
+    // **The assertion that used to be here asked the sentence for a phrase, and
+    // the phrase was a lie.** It was
+    // `sentence.contains("run on this computer instead")`, under the message
+    // *"absence must say what happens instead, not only what is missing"* — and
+    // nothing runs on this computer in this build, so the guard required the
+    // defect it was written to prevent. It was green. What is asserted now is
+    // the *claim*: a sentence that says a check runs here fails, in whatever
+    // words it says it, and the sentence has to say what does happen instead —
+    // which is that no check runs, here or in a container.
     let absent = Availability::in_path(std::ffi::OsStr::new(""));
     assert_eq!(absent, Availability::Absent);
     assert!(!absent.is_found());
     assert_eq!(absent.runtime(), None);
     let sentence = absent.explain();
     assert!(
-        sentence.contains("run on this computer instead"),
-        "{sentence}"
+        !claims_local_execution(&sentence),
+        "the absence claims that a check runs on this computer, and none does: {sentence}"
+    );
+    assert!(
+        denies_that_anything_runs(&sentence),
+        "an absence has to say what happens instead of only what is missing, and what happens \
+         is that nothing runs: {sentence}"
     );
     assert!(
         sentence.contains("docker") && sentence.contains("podman"),

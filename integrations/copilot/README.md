@@ -1,6 +1,8 @@
 # SURE Copilot adapter boundary
 
-This document defines the boundary between SURE core and a hypothetical GitHub Copilot adapter, so a future Copilot integration can reuse the same event/repair protocols used by the Claude Code and Cursor integrations without duplicating core logic.
+**This package is a template, and it does not answer.** Nothing in this repository installs it, `sure doctor` does not offer it, and no event sent through it is recorded: SURE has no Copilot normaliser, so `sure hook ingest --source copilot` exits 5 for every event `hooks/hooks.json` wires, and writes nothing. **Do not load that manifest or wire this package up.** Command `preToolUse` hooks are fail-closed in Copilot's own reference — a non-zero exit denies the tool call, and it is reported as `Denied by preToolUse hook (hook errored)` — so a session that loaded the manifest would have every tool call denied while SURE recorded no evidence for any of them. `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §5 carries the measurement.
+
+Everything below is the boundary between SURE core and a hypothetical GitHub Copilot adapter: what a future Copilot integration must implement to reuse the same event/repair protocols the Claude Code and Cursor integrations use without duplicating core logic. Read it as a specification for that adapter. Where it says *must*, it states a requirement on code that does not exist yet — including the fail-open requirement in [Fail-safe behavior](#fail-safe-behavior), which the launcher shipped beside this file keeps only for the case where the binary is missing.
 
 ## Design principle: thin adapter, thick core
 
@@ -143,7 +145,9 @@ Privacy settings (`privacy.full_recording` in `sure.yaml`) and execution mode (`
 
 ## Capability-tier honesty
 
-A Copilot adapter is **Observed (Tier 1)** until Copilot's hook contract guarantees that SURE's pre-action decision is enforced before the tool runs. This is the same tier assigned to Claude Code and Cursor:
+**This package claims no tier, because it observes nothing.** The tier a `sure check` reports is derived from the events SURE actually received, not from any field an adapter sets, and a package that answers no event contributes none: a project whose only harness is this template reports Snapshot, exactly as it would with no harness at all. `crates/sure-domain/src/capability.rs` defines the tiers and names no Copilot one, and `sure doctor` does not offer Copilot among the integrations it reports.
+
+A future Copilot adapter — one that answers at least one event — would be **Observed (Tier 1)** until Copilot's hook contract guarantees that SURE's pre-action decision is enforced before the tool runs. This is the same tier assigned to Claude Code and Cursor:
 
 - `crates/sure-core/src/hook_protection.rs` documents that Cursor and Claude Code are Observed because the manifest does not confirm the harness interprets the response.
 - `crates/sure-domain/src/capability.rs` defines the tiers: `0` snapshot, `1` observed, `2` protected.
@@ -154,11 +158,11 @@ A Copilot adapter is **Observed (Tier 1)** until Copilot's hook contract guarant
   with no recorded events still reports Snapshot. The envelope's field is what
   the adapter says about itself; the report is what SURE can prove.
 
-Claiming Protected (Tier 2) without an enforceable pre-action hook would be a false green: SURE would appear to block dangerous actions while Copilot might still run them.
+Claiming Protected (Tier 2) without an enforceable pre-action hook would be a false green: SURE would appear to block dangerous actions while Copilot might still run them. Claiming Observed for this package today would be the same false green in a smaller size — a tier for an adapter that answers nothing.
 
 ## Fail-safe behavior
 
-If `sure.exe` is missing, or if the hook cannot communicate with SURE, the adapter must fail open and must not fabricate evidence. The existing PowerShell launchers show the pattern in `integrations/claude-code/scripts/sure-hook.ps1` and `integrations/cursor/scripts/sure-hook.ps1`:
+**This section is a requirement on the future adapter, not a description of this package.** A Copilot adapter must fail open — it must not block the agent and must not fabricate evidence — when `sure.exe` is missing or when it cannot communicate with SURE. The existing PowerShell launchers show the pattern in `integrations/claude-code/scripts/sure-hook.ps1` and `integrations/cursor/scripts/sure-hook.ps1`, and the snippet below is the shape a future adapter's launcher should follow:
 
 ```powershell
 if (-not $bin) {
@@ -167,7 +171,9 @@ if (-not $bin) {
 }
 ```
 
-The decision is `allow` so the user's agent keeps working; the `acknowledged=$false` and `reason` make it clear that SURE did not see the event.
+The decision is `allow` so the user's agent keeps working; the `acknowledged=$false` and `reason` make it clear that SURE did not see the event. The launcher beside this file writes that note to **stderr** and leaves stdout empty (measured: exit 0, nothing on stdout, the note on stderr), so a harness reading stdout sees no decision at all rather than one SURE did not make.
+
+**The shipped template cannot keep this requirement as a whole, and the launcher is not what breaks it.** `integrations/copilot/scripts/sure-hook.ps1` keeps the missing-binary half and relays SURE's status and both streams unchanged otherwise — but `sure hook ingest --source copilot` exits 5 for every event, because there is no Copilot normaliser, and Copilot's reference makes a non-zero `preToolUse` exit deny the tool call. A fail-open requirement and a fail-closed harness rule cannot both hold for the same exit status, which is why the manifest says not to load it until `--source copilot` answers (see [Next steps](#next-steps-to-make-this-real)).
 
 ## File references
 
@@ -192,7 +198,9 @@ The decision is `allow` so the user's agent keeps working; the `acknowledged=$fa
 
 ## Next steps to make this real
 
+None of these is done, and the package must not be installed or loaded until the first two are. `sure hook ingest --source copilot` exits 5 today for every event in the manifest, and the fail-closed `preToolUse` rule is what a user would feel.
+
 1. Add a `copilot` normalizer module under `crates/sure-core/src/normalizer/` following `cursor.rs`/`claude_code.rs`.
 2. Wire `--source copilot` into `crates/sure-cli/src/hook.rs` and add a `decide_copilot_tool` function in `crates/sure-core/src/hook_protection.rs`.
 3. Add fixtures under `integrations/copilot/fixtures/` mirroring the Cursor fixtures.
-4. Replace the placeholder `hooks/hooks.json` below with a manifest validated against Copilot's actual hook contract.
+4. Replace the placeholder `hooks/hooks.json` below with a manifest validated against Copilot's actual hook contract. Two of the six event names it wires today — `afterFileEdit` and `stop` — are not names the reference defines (`agentStop` is what it calls a stop, and `afterFileEdit` is not in it), and a manifest is only the first of the two halves: the source has to answer before the event names matter.

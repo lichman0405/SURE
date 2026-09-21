@@ -54,9 +54,14 @@ That is recorded from upstream, not measured here, and it is not this task's to
 fix — it is named so that the failure table is not read as if exit 1 and exit 5
 were different kinds of thing to a harness. `crates/sure-domain/src/capability.rs`
 already assigns Tier 1 (Observed) to Claude Code and Cursor, which is consistent
-with it. For Cursor, Codex and Copilot this repository has no citable sentence
-about what a non-blocking status does to a block, so §3 says `cannot confirm`
-there and the same caveat applies to those rows' normal path.
+with it. For Cursor and Codex this repository has no citable sentence about what
+a non-blocking status does to a block, so §3 says `cannot confirm` there and the
+same caveat applies to those rows' normal path. Copilot is the harness whose
+reference does answer this, and answers it the other way: a non-zero exit from a
+command `preToolUse` hook denies the tool call (§3, `copilot / preToolUse`), so
+on that row SURE's block and SURE's failure would both be a denial to the
+harness. That is one of the reasons the Copilot package ships as a template
+nothing loads, and §5 is where that is recorded.
 
 ## 2. What SURE emits — measured on this machine, 2026-09-19
 
@@ -183,13 +188,15 @@ column is §3's and the sources are §3's, applied to this one event:
 | `claude-code` | **fail-open.** Exit 5 is not exit 2, and the launcher passes no `--format json`, so Claude Code reads a non-blocking error and the session starts. SURE records nothing for it. | §3, `claude-code / SessionStart`, from the Claude Code hooks page |
 | `cursor` | **fail-open.** "Non-zero exit codes other than 2 fail open by default", and for `sessionStart` "the agent loop does not wait for or enforce a blocking response". The `.ps1` launcher hands Cursor a failure frame carrying no `decision`; the session starts. | §3, `cursor / sessionStart`, from the Cursor hooks page |
 | `codex` | **cannot confirm.** The page defines exit 0 and exit 2 and no other status, so what Codex does with 5 is not knowable from it. Both launchers relay the status, and the frame they pass on carries no `decision`. | §3, `codex / SessionStart`, from the Codex hooks page |
-| `copilot` | **fail-open**, per the Copilot reference. The project-root question never arises here: `--source copilot` is refused for *every* event (§5), so a Copilot `sessionStart` stops one branch earlier, for a different reason, with the same status. | §3, `copilot / sessionStart`, from the Copilot hooks reference |
+| `copilot` | **Nothing here reaches this rule.** The package is a template that nothing loads (§5), so no Copilot `sessionStart` arrives at SURE through it and the project-root question never arises. A user who wired the manifest up by hand would stop one branch earlier, for a different reason and with the same status — `--source copilot` is refused for *every* event (§5) — and the reference's rule for a non-zero exit on `sessionStart` is then the one their session follows. | §3, `copilot / sessionStart`, from the Copilot hooks reference |
 | `agent-plugin` | **Nothing to answer.** The pack ships no hook script and has no `SessionStart` row (§6); this rule cannot reach it, and the launcher it does ship fails closed with exit 3 when the binary is missing. | §6, first bullet |
 
-Four of the five are fail-open and one cannot be confirmed; none is fail-closed.
-That is the safe direction here, because a `SessionStart` has no action to block
-and the failure this rule exists to prevent is the other one — a root SURE never
-read, written into the evidence as though it had.
+Two of the five — `claude-code` and `cursor` — are fail-open, `codex` cannot be
+confirmed, and `copilot` and `agent-plugin` are not reached by this rule at all.
+None is fail-closed. Where a config is reached, the direction is the safe one,
+because a `SessionStart` has no action to block and the failure this rule exists
+to prevent is the other one — a root SURE never read, written into the evidence
+as though it had.
 
 ## 3. The table
 
@@ -212,12 +219,12 @@ read, written into the evidence as though it had.
 | codex | PreToolUse | exit 0 or 1 depending on the decision | exit 5, nothing recorded `[F]` | `pre_tool_use_maps_to_tool_requested` | cannot confirm | The page says exit 2 blocks `PreToolUse` and says nothing about 1 or 5. `integrations/codex/README.md:365-371` already records the neighbouring limit in the same words this cell needs: the deny path is "documented, not exercised … Whether Codex reads SURE's frame as a deny was not observed." What would confirm it: a Codex hooks statement about non-2 non-zero statuses. |
 | codex | PostToolUse | exit 0, allow | exit 5, nothing recorded `[F]` | `post_tool_use_maps_to_tool_completed_and_keeps_the_response_verbatim` | cannot confirm | The page gives exit 2 for `PostToolUse` as feedback after the tool ran and no rule for 1 or 5. What would confirm it: the same statement asked for above. |
 | codex | SessionEnd | exit 0, allow | exit 5, nothing recorded `[F]` | `session_end_maps_to_session_stopped` | fail-open | The page: "If a command times out or exits with an error, Codex reports it as a hook failure." For `SessionEnd` that report is the whole effect — the page describes its hooks as advisory with nothing left to gate. `integrations/codex/README.md:375-377` records that SURE sends the event anyway. |
-| copilot | sessionStart | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | Copilot hooks reference (2026-09-19), for command hooks on Copilot CLI and the cloud agent: "Logged as a hook failure. The run continues (fail-open)." This package does not state which Copilot surface loads its manifest. |
-| copilot | preToolUse | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-closed | The same reference, same section: "Exception: `preToolUse` is fail-closed—a non-zero exit (other than exit 2) denies the tool call", reported as `Denied by preToolUse hook (hook errored)`, and that is so "even if that JSON reports `permissionDecision: \"allow\"`". Read with §5: as things stand, a Copilot `preToolUse` hook that reaches SURE denies every tool call. |
-| copilot | postToolUse | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | The same reference, same section: failures other than exit 2 "are logged and skipped" for events that are not `preToolUse` or `permissionRequest`. |
-| copilot | postToolUseFailure | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | The same reference, same section. It also says exit 2 for this event is treated as `additionalContext`; exit 5 is in the fail-open set. |
-| copilot | afterFileEdit | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | cannot confirm | The reference's event list does not contain `afterFileEdit`. What would confirm it: a Copilot document that defines this event, or a manifest rewritten to an event name one does. Until then this row says SURE exits 5 for an event whose failure rule nobody here can look up. |
-| copilot | stop | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | cannot confirm | The reference defines `agentStop` (the VS Code configuration style spells it `Stop`), not `stop`. What would confirm it: a Copilot source that defines `stop` as a hook event, so that the row has a failure rule to quote at all. |
+| copilot | sessionStart | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | Copilot hooks reference (2026-09-19), for command hooks on Copilot CLI and the cloud agent: "Logged as a hook failure. The run continues (fail-open)." Read with §5: this package is a template that nothing loads, so no Copilot session reaches SURE through it, and the cell is the harness's rule for a user who wired the manifest up by hand. Which Copilot surface loads a manifest is still not established here. |
+| copilot | preToolUse | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-closed | The same reference, same section: "Exception: `preToolUse` is fail-closed—a non-zero exit (other than exit 2) denies the tool call", reported as `Denied by preToolUse hook (hook errored)`, and that is so "even if that JSON reports `permissionDecision: \"allow\"`". Read with §5: this is what a Copilot user would experience for **every tool call** if they wired the template up — SURE refuses `--source copilot` with exit 5, and 5 is a non-zero exit — so the row is a warning about installing the package and not a protection it provides. Nothing in this repository installs it. |
+| copilot | postToolUse | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | The same reference, same section: failures other than exit 2 "are logged and skipped" for events that are not `preToolUse` or `permissionRequest`. Read with §5: no Copilot event reaches SURE through this package, so this is the harness's rule where the row above is the one a user would feel. |
+| copilot | postToolUseFailure | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | fail-open | The same reference, same section. It also says exit 2 for this event is treated as `additionalContext`; exit 5 is in the fail-open set. Read with §5, as the rows above. |
+| copilot | afterFileEdit | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | cannot confirm | The reference's event list does not contain `afterFileEdit`. What would confirm it: a Copilot document that defines this event, or a manifest rewritten to an event name one does. Until then this row says SURE would exit 5 for an event whose failure rule nobody here can look up — and §5 records that nothing loads the manifest naming it. |
+| copilot | stop | exit 5 for every event — see §5 | exit 5, nothing recorded `[F]` | `unsupported_source_fails` | cannot confirm | The reference defines `agentStop` (the VS Code configuration style spells it `Stop`), not `stop`. What would confirm it: a Copilot source that defines `stop` as a hook event, so that the row has a failure rule to quote at all. §5 records that no manifest wiring `stop` is loaded by anything today, so the row is a name to fix before it is a rule to quote. |
 
 Reading the evidence column: a bare name is a test; `[F]` is §2.1. The
 per-event tests in the evidence column are in
@@ -228,7 +235,12 @@ test, `the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing`, in
 `crates/sure-cli/tests/cli_contract.rs`; the launcher rows in §2.2 are the four
 tests in `crates/sure-testkit/tests/hook_failure_semantics.rs` that spawn a
 launcher. Copilot's rows cite `unsupported_source_fails` because that is the
-branch every Copilot event lands in, and §5 is what that means.
+branch every Copilot event lands in. The same refusal is pinned one layer out,
+at the process boundary and under the name itself, by
+`every_harness_the_doctor_report_offers_is_one_sure_will_take_an_event_from` in
+the same file: it runs `hook ingest --source copilot` and asserts the refusal,
+rather than asserting it of a name a test made up. §5 is what the two of them
+mean for the six Copilot rows.
 
 ## 4. What `cannot confirm` means here, and what would settle each
 
@@ -246,46 +258,86 @@ Six rows say `cannot confirm`. They are not one kind of uncertainty:
   the neighbouring deny path.
 - **copilot / afterFileEdit, stop** — the event names in
   `integrations/copilot/hooks/hooks.json` do not appear in the vendor reference
-  read here. Whether Copilot accepts, ignores or rejects the manifest is the
-  prior question, and this repository does not answer it either.
+  read here (`agentStop` is what it defines for a stop). The question that used
+  to sit in front of this one is settled by §5 rather than answered: the manifest
+  is a template that nothing loads, so no Copilot surface accepts, ignores or
+  rejects it — none of them is handed it. What is still unresolved is the name
+  itself, and a manifest that used a defined one would have a rule to quote
+  where this row has none.
 
 Each cell names its own remedy. The common one is: run the harness once, with
 this launcher, against a SURE that exits 5, and look at whether the action
 happened. Nothing in this repository can do that, and no test in it pretends to.
 
-## 5. The Copilot contradiction, measured
+## 5. The Copilot package: what the command returns, and what it is
 
-`grep -rn copilot crates/ --include=*.rs` returns nothing: there is no Copilot
-normaliser. `--source copilot` therefore lands in `crates/sure-cli/src/hook.rs`'s
+`grep -rn copilot crates/ --include=*.rs` returns hits, and what a reader should
+find in them is what is not there. Measured 2026-09-21, the command returns
+eleven lines in four files:
+
+| File | Lines | What the hits are |
+| --- | --- | --- |
+| `crates/sure-cli/tests/cli_contract.rs` | 4 | the doctor test that asserts Copilot is not an offered source and that `hook ingest --source copilot` refuses it (a comment and the loop), and the `a source SURE does not know` case of `the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing` |
+| `crates/sure-core/src/doctor.rs` | 1 | a doc comment on the doctor's integration list: a harness SURE ships a package for but cannot ingest from is deliberately not on it |
+| `crates/sure-testkit/tests/hook_failure_semantics.rs` | 3 | that file's own platform note and the failure-shape arm for the package's launcher |
+| `crates/sure-testkit/tests/integration_thinness.rs` | 3 | the argv the copilot launcher is expected to hand the core, and one text-shape assertion's package list |
+
+Every one of them is a test, a test's message, or a comment. **None is a branch
+that reads a Copilot event.** The narrower form of the same command is what
+settles it, and a reader can run this one too:
+`grep -rn copilot crates/sure-core/src/normalizer/ crates/sure-cli/src/hook.rs
+--include=*.rs` returns nothing at all — no Copilot normaliser, and no Copilot
+branch in the ingest path.
+
+`--source copilot` therefore lands in `crates/sure-cli/src/hook.rs`'s
 `Source '<name>' is not one SURE knows how to ingest.` branch, which is
-`Report::Failed` → **exit 5, for every event in the manifest, always**.
+`Report::Failed` → **exit 5, for every event in the manifest, always**. Measured
+at the process level like §2.1: exit 5, a failure frame on stdout in
+`--format json` saying `Source 'copilot' is not one SURE knows how to ingest.`,
+nothing on stderr, and an empty store directory afterwards.
 
-Three statements about Copilot are in the tree at the same time:
+**The three statements that used to disagree here now agree, and this section
+records the decision rather than the contradiction.** As of `P15-T023`:
 
-1. The code above: every Copilot hook exits 5 and records nothing.
-2. `integrations/copilot/README.md:156`: *"If `sure.exe` is missing, or if the
-   hook cannot communicate with SURE, the adapter must fail open and must not
-   fabricate evidence."* The launcher keeps that promise — it exits 0 when the
-   binary is missing. SURE itself does not, because it never gets to answer.
-3. `integrations/copilot/hooks/hooks.json`'s own `description`: a *"placeholder
-   template. Replace Copilot-specific event names and response handling once
-   Copilot's hook contract is documented."* The event names in it are Cursor's,
-   and two of them are not names the Copilot reference defines.
+1. The code: every Copilot hook exits 5 and records nothing. Unchanged, and
+   unchanged on purpose — a normaliser is not what this package needed first.
+2. `integrations/copilot/README.md` now opens by saying the package is a
+   **template that does not answer**, that nothing in this repository installs
+   it, that `sure doctor` does not offer it, and that its manifest is not to be
+   loaded. Its fail-open sentence, *"If `sure.exe` is missing, or if the hook
+   cannot communicate with SURE, the adapter must fail open and must not
+   fabricate evidence"*, is now marked as **a requirement on the future adapter
+   and not a description of this package** — because the shipped package cannot
+   keep it. The launcher keeps half of it, which was measured here as well as in
+   §2.2: with no SURE to find it exits 0 and writes no stdout, and with a SURE in
+   front of it, whatever status that SURE returned is the status it relays.
+3. `integrations/copilot/hooks/hooks.json`'s `description` says the same in the
+   manifest a user would open before wiring anything up: it is a template, SURE
+   refuses every event in it, and Copilot's fail-closed `preToolUse` rule is why
+   loading it would deny every tool call. The event names in it are still
+   Cursor's, and two of them are still not names the Copilot reference defines
+   (§4).
 
-Read against the reference in §3, (1) and (2) do not merely disagree, they
-disagree in the direction that hurts: for `preToolUse` the documented rule is
-**fail-closed on a non-zero exit**, so a package promising to fail open would,
-if it were installed and wired up, deny every tool call.
+Read against the reference in §3, the consequence of (1) is worth stating in one
+sentence, because it is why (2) and (3) changed rather than the code: for
+`preToolUse` the documented rule is **fail-closed on a non-zero exit**, so a
+package that answered exit 5 to every event while its README promised to fail
+open would, if it were installed and wired up, deny every tool call — the
+opposite of what it said, with no evidence recorded for any of it.
 
-This task does not settle it. It does not add a Copilot normaliser, and it does
-not soften the README to match the code, because which of the two should change
-is a product decision: either Copilot is a supported harness — in which case it
-needs a normaliser and an event name list checked against the reference — or the
-package is a template, in which case its README's "must fail open" sentence is
-about a future adapter and should say so. The recommendation is the second, plus
-moving `integrations/copilot/` out of any path a user could mistake for an
-installable integration until the first is true. Nothing in this page should be
-read as closing the contradiction; §3 records it.
+What would make Copilot a supported harness is written down in the package's own
+[Next steps](../../integrations/copilot/README.md#next-steps-to-make-this-real): a
+normaliser, `--source copilot` wired into the ingest path, fixtures, and a
+manifest whose event names the reference defines. Until the first two land,
+**nothing installs this package by default and nothing describes it as Observed
+or Protected tier** — no installer in the tree copies it, `sure doctor` reports
+three integrations and Copilot is not among them, and the package's own
+capability section claims no tier because a package that answers no event
+contributes no event.
+
+Two things this section still cannot settle, both named in §4: whether a Copilot
+surface loads a hook manifest at all (nothing here can observe one), and the two
+event names that the reference read here does not define.
 
 ## 6. What this page does not cover
 

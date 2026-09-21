@@ -31,7 +31,7 @@ including to the supervisor who was building it.
   beside it** — repaired at `P17-T002`. The census's `SilentlyContinue=0` was true
   of the six harness files and was quoted on its own in every gate log ever taken,
   while the tree contains **five launchers that open with
-  `$ErrorActionPreference='SilentlyContinue'`** and 57 lines naming the token. Both
+  `$ErrorActionPreference='SilentlyContinue'`** and 64 lines naming the token at `35d9c4d` — a figure that moves every time the record quotes the token it counts. Both
   figures now print, each with its scope inside the line, and the tree's line fails
   nothing — the argument for that asymmetry sits beside it in the runner.
 - **`FINAL_REPORT.md`** (1049 lines) — the deliverable, naming the exact commit its

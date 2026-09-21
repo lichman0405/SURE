@@ -4705,3 +4705,92 @@ task repaired. The lane's finding (c) stands as it corrected it, verified at
 outward-facing artefact the owner would then have to manage, and whether to open
 it is the owner's. Preparing and opening are different acts and only the first
 was asked for. `progress/PR_SUMMARY.md` says so on its face.
+
+## P17-T001 — a port the machine takes in the gap, and the sweep that found the second copy
+
+**The defect arrived on a commit that could not have caused it.** `d0d2dc5` moves
+`SHA256SUMS.txt` and three files under `progress/`; no Rust test reads the content
+of any of them. It went red on `ubuntu-latest` anyway, on
+`a_wait_that_runs_out_says_the_browser_was_still_running_and_not_how_long_it_took`,
+whose own guard fired with *"something is listening on 127.0.0.1:45843 after the
+listener was released, so this test would be about whatever that is"*. **The guard
+was right** — the port really had been taken — so the defect was the assumption
+behind it: that a number drawn from a range shared with every other process on the
+host is a fact about SURE.
+
+**The pair of runs is the evidence, and neither half is enough alone.** With no
+change of any kind to that commit, the re-run came back green on the same test.
+Same tree, red then green. A defect in the tree would have failed twice. That is
+also the reason the repair was worth making rather than shrugging at: a run that
+goes red once and green once is the easiest thing in the world to write off as
+flaky, and writing it off is how the second copy stays where it is.
+
+**It is a sweep defect, and that is the finding rather than the fix.**
+`runtime_start.rs:687-703` documents this exact race at length and says the
+operating system's dynamic range "is **not** knowingly taken, and is not taken any
+more" — it walks 10000..32000 and skips anything it cannot bind, so two copies of
+the test binary are not handed the same number. `browser_driver.rs` and
+`http_routes.rs` still asked for `0`. **A pattern diagnosed, argued and removed in
+one file was left standing in the two that assert on it**, which is the same shape
+`169098d` names as "the launcher count was wrong in two more places nobody had
+swept". So the fix is not an invention: it is applying a decision this repository
+had already made and already written down.
+
+**Only one of the two was measured red; the other was found by sweeping, and the
+record keeps them apart.** `http_routes.rs`'s `free_port` carried no check at all,
+so it could not have reddened on this — it would instead have let
+`a_port_nothing_is_listening_on_is_never_a_pass_and_the_reason_says_what_happened`
+become a reading of whatever took the port. Its doc comment claimed *"The address
+of a port nothing is listening on **at the moment it is asked**"* and the code
+established nothing of the kind. **A sentence claiming a measurement that was never
+taken is this repository's serious defect class**, so repairing it is in scope
+rather than scope creep, and both halves are repaired: the walk removes the
+shared-range draw and the check makes the sentence true.
+
+**The property is preserved and not traded for the retry.** No port is returned by
+either helper until a connection to it has ended without an answer, and a helper
+that cannot find such a port panics rather than returning one it could not show to
+be empty. The only assertion-line change in the whole diff is `assert!` becoming
+`panic!` inside the helper: **the guard moved from the first candidate to the
+last**, and the callers' assertions are untouched.
+
+**One thing deliberately left alone, because it is a different question.** On
+Windows a connect to a closed loopback port is not refused — it ends at the bound —
+which `http_routes.rs:1307-1311` already records as measured and explains. So on
+that platform the check distinguishes *nothing answered* rather than *nothing is
+listening*, and both comments now say so instead of implying a refusal on all
+three.
+
+**And the first gate run over the fix failed, correctly.** Minting a phase means
+declaring it in `tasks/phases.json` and P17 was not there: `bootstrap exit 2` /
+`P17-T001 uses missing phase P17`. Declared, and the gate answers `SURE bootstrap
+validation OK: 18 phases, 201 tasks.` It is recorded because it is the harness
+catching its own author — a task minted to repair a defect arrived carrying one,
+and the gate that checks the task graph found it before the commit rather than
+after.
+
+## P17 — the task graph is closed, and `status` is set to say so
+
+With `P17-T001` accepted, `node scripts/taskctl.mjs status` reports
+`{ accepted: 201 }` over 201 tasks and 18 phases: **nothing is `queued`, nothing is
+`in_progress`, nothing is blocked.** `progress/state.json`'s top-level `status` has
+said `in_progress` since the first task started, because that is the only value
+`scripts/taskctl.mjs` ever writes to it — it has a start transition and no
+completion one, so the field had no way to stop saying what was true at the time it
+was written.
+
+It now says `complete`, by hand. **Two things that does not mean, said here so the
+word is not read as more than it is.** It does not mean the product is finished: the
+carried list in `progress/PR_SUMMARY.md` and the tail of `progress/HANDOFF.md` is
+still owed, each item measured and each deliberately unfixed with its reason. It
+does not mean anything was released or merged — there is no tag, no release, and no
+merge to `main`, and `gh pr create` was deliberately not run.
+
+What it does mean is narrow and checkable: **the task graph declared in
+`tasks/tasks.json` is closed**, every id in it has an `accepted` record with
+evidence in `progress/state.json`, and no task is waiting on anything. Leaving
+`in_progress` in place while nothing was in progress would have been a false
+statement in the record, and the whole point of this repository is that a record
+which is true-but-misleading is the thing to avoid. `validate-bootstrap.mjs` does
+not read the field, so nothing in the gate set depends on this choice; it is a
+statement to a human reader, and it is explained rather than assumed.

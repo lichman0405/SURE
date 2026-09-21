@@ -18,6 +18,8 @@ including to the supervisor who was building it.
 
 ## What is in it
 
+- **201 tasks across 18 phases, every one of them `accepted`**, with the readings
+  for each held in `progress/state.json`. Nothing is in flight.
 - **A working CLI** — `sure check`, `repair`, `recheck`, `doctor`, `hook ingest`,
   `mcp`, `config`, `history` — with a human report, a machine frame, Markdown and
   HTML forms, and a re-check loop that closes a finding only when every check its
@@ -25,7 +27,7 @@ including to the supervisor who was building it.
 - **Seven local gates** in `scripts/gates.ps1`, run from PowerShell. CI runs six of
   the seven on all three platforms; the seventh, `check-non-windows.mjs`, is local
   only, because its subject is the *other* platform's shape.
-- **`FINAL_REPORT.md`** (1050 lines) — the deliverable, naming the exact commit its
+- **`FINAL_REPORT.md`** (1049 lines) — the deliverable, naming the exact commit its
   readings were taken at, and carrying ten sections including a "what this report
   did not measure" section.
 - **`docs/development/DOGFOOD.md`** — SURE pointed at its own repository, which is
@@ -85,6 +87,34 @@ Listed because they are the strongest evidence the method works:
   the cause recorded as *unestablished* rather than explained away, and two
   measurement errors of the supervisor's are written down with them.
 - **A fixture that required SURE to lie was found and deleted.** It had been green.
+- **A red CI run on a docs-only commit was diagnosed rather than written off, and
+  the diagnosis is a pair of readings rather than an opinion.** `d0d2dc5` moves
+  `SHA256SUMS.txt` and three files under `progress/`; on `ubuntu-latest` it went red
+  on a test whose own guard said *"something is listening on 127.0.0.1:45843 after
+  the listener was released"*. **The same commit, re-run unchanged, came back
+  green** — same tree, red then green, which is what a race looks like and is not
+  what a defect in the tree looks like. The guard was right and the assumption
+  behind it was wrong: a port drawn from the range every other process on the host
+  draws from is not a fact about SURE. **And it was a sweep defect, which is the
+  real finding** — `runtime_start.rs:687-703` had already argued this exact race
+  out and stopped drawing from that range, while `browser_driver.rs` and
+  `http_routes.rs` still asked for port `0`; a decision made and written down in
+  one file was left standing in the two that assert on it. `http_routes.rs`'s copy
+  was found by sweeping rather than by failing, and it carried a doc comment
+  claiming a measurement it never took, which is why repairing it is in scope.
+- **`T003`'s acceptance is amended rather than left standing.** It required the
+  three platform jobs green at the final commit; `a314c0a` met that, and then the
+  commit carrying `T003`'s *own acceptance* went red. An acceptance that quotes a
+  green reading and omits that the tip moved red afterwards is exactly the
+  true-but-misleading entry this project exists to prevent, so the amendment
+  records the red, its cause, and the run that closes it.
+- **The supervisor put an unchecked count into the acceptance record and a survey
+  agent found it.** `T008`'s evidence said `FINAL_REPORT.md` was 1050 lines; it is
+  1049, and has been 1049 at every moment since the corrections it describes. A
+  second number — §10's size — was *derived* from the assumed total rather than
+  measured, so one wrong reading produced two wrong numbers that agreed with each
+  other. Both are corrected in `progress/state.json`, and the correction says which
+  class of error it was rather than only what the right number is.
 
 ## Reviewing this
 

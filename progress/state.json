@@ -2478,13 +2478,20 @@
       "notes": "Accepted with the defect it found carried forward as P16-T010 rather than documented away. Two pages were read against the implementation and deliberately left unedited — `PROTECTION_MODE.md` and `PRIVACY_AND_MODEL_STRATEGY.md` — which is a decision, not an omission."
     },
     "P16-T006": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-21T11:32:50+08:00",
+      "base_sha": "b555245",
+      "head_sha": "ab42e01a2dd9d0cee61c87d509d9d874795cd262",
+      "evidence": [
+        "clause 1, \"README/quickstart/integration docs match exact commands\": the two edited pages were checked against the tree by the supervisor, not accepted from the worker report. Every line number the path table cites was re-read and each of the 8 rows contains the resolver it is said to contain — `agent-plugin/scripts/install.ps1:7`, `claude-code/scripts/install.ps1:7`, `claude-code/scripts/sure-hook.ps1:21`, `claude-code/scripts/sure-mcp.ps1:16`, `codex/scripts/sure-hook.ps1:24`, `copilot/scripts/sure-hook.ps1:21`, `cursor/scripts/install.ps1:7`, `cursor/scripts/sure-hook.ps1:21`. The three rows that cited line 14 were citing a blank line: line 14 of all three `sure-hook.ps1` files is whitespace, measured, so the old citation pointed at nothing rather than at something else.",
+        "clause 1, the search the table is built from: `Grep` over `integrations/` for `LOCALAPPDATA` returns **26** files, not the 8 the page used to claim. The replacement sentence classifies them, and the classification is the supervisor's own count: 8 resolving launchers, 2 uninstall scripts (`agent-plugin` and `claude-code`), and 16 Markdown files. 8 + 2 + 16 = 26.",
+        "clause 1, the claim about another document: `docs/integrations/INSTALLATION_MATRIX.md`'s section headings are Claude Code, Cursor, Codex, CLI-only fallback, and \"What installing the Claude Code package means\". There is no Copilot section and no portable-agent-plugin section, which is what the old sentence asserted and the new one denies. `integrations/copilot/README.md` opens \"**This package is a template, and it does not answer.** Nothing in this repository installs it\", so the new sentence's reason for the absence is a reading of that file.",
+        "clause 1, the executable form of the clause: `quickstart_flow`, run by the supervisor against the edited files using the prebuilt binary, reports **9 passed; 0 failed; 0 ignored** and exits 0. The suite includes `the_whole_documented_journey_installs_the_cli_an_integration_and_answers_a_check` and `the_windows_quickstart_satisfies_every_rule`, which are the tests that make \"the docs match exact commands\" checkable rather than a matter of reading. `signing_status` reports 7 passed; 0 failed on the same tree.",
+        "what the supervisor did **not** re-run, stated so that its absence is not mistaken for a pass: the worker's command sweep — help for every subcommand, `sure check` on a scratch project with the quoted verdict lines, `sure repair`, `sure recheck`, and `sure config set` refusing an invalid value — is the worker's report and not a supervisor measurement. The claims in these two pages that the supervisor verified directly are the structural ones above plus `sure config show|paths|validate` exiting 3 and `sure history delete --help` exiting 0, which were run here. The command sweep is carried by `quickstart_flow` only for the journey that suite actually drives.",
+        "no six-gate reading is claimed in this entry, for the reason already recorded on P16-T005: this task moved two Markdown pages and no code, and the batch reading is taken once, at the frozen tree, after P16-T010 lands. `quickstart_flow` and `signing_status` are the targeted checks and are scoped to exactly what these edits could have broken."
+      ],
+      "notes": "Accepted with the two defects the task found beyond its dispatch: the path table was short by a row (`claude-code/scripts/install.ps1` was listed nowhere, which made every count derived from the table wrong), and a search was described as returning \"these and no others\" when it returns 26 files. It also found `sure doctor` naming a settings command this build does not implement, which is minted as P16-T012 rather than fixed here."
     },
     "P16-T007": {
       "status": "queued",

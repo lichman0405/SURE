@@ -16,18 +16,24 @@ than filling the gap.
 
 ## 1. What this is, and the exact commit it describes
 
-HEAD at the time of writing: `d3e35ade3e3af65e435eeb340ef0f20c6127e90b`
+**The readings in this report were taken at
+`42812fc15e5465fb8280ab53a4f77e11ff03b26e`** — the tree the seven-gate set was run
+over, as `-Label p16-frozen`. No code, test, fixture or document it measures moved
+after that commit. A reader who needs the tree these readings describe should check
+that SHA rather than trust the branch name.
 
-That commit is dated `2026-09-21T12:11:07+08:00`, its subject is *"P16-T011: a
-redirected hook payload is decoded as UTF-8, except where the host has already
-decoded it"*, and it sits on the branch `claude/v0.1-autonomous`, which is **548
-commits** ahead of `origin/main` (`git rev-list --count origin/main..HEAD`).
+The report was first drafted at `d3e35ad`, and the tree moved twice more under it
+while it was being written: `d3e35ad` → `b55a675`, the three dogfood repairs →
+`42812fc`, this report and `docs/development/DOGFOOD.md` de-staled. It sits on the
+branch `claude/v0.1-autonomous`, against `origin/main`.
 
 Three things bound what the commit identifier means here, and each was measured
 rather than assumed:
 
 * **The branch moved twice while this report was being written, and it is still
-  moving.** `P16` had fourteen tasks and lanes landed throughout: `f34e18b`
+  moving.** `P16` has **twelve** tasks — `tasks/tasks.json` and
+  `progress/state.json` agree on the number, and an earlier draft of this report
+  said fourteen, which neither file supports — and lanes landed throughout: `f34e18b`
   (12:03:00) → `b5f44f9`, `P16-T012` (12:10:48) → `d3e35ad`, `P16-T011`
   (12:11:07). The reproducibility command in §2 was run against the first of
   those and again against the second, with identical output. **Two findings
@@ -38,22 +44,18 @@ rather than assumed:
   reading in §6 moved from `in_progress` to `success` for `f34e18b` while this
   was being typed. A reader who needs the tree this report describes should check
   the SHA rather than trust the branch name.
-* **The working tree was not clean, and the count of dirty files is itself a
-  moving reading.** `git status --porcelain` returned **15 modified tracked files
-  and 3 untracked files** earlier in this session and **8 modified and 3
-  untracked** at the last reading, as lanes committed what they had finished. The
-  files that matter for what a user reads are the ones still modified at the last
-  reading: `crates/sure-cli/src/human_report.rs`,
-  `crates/sure-cli/src/portable_report.rs`, `crates/sure-core/src/pipeline.rs`
-  and `docs/architecture/CLI.md`, plus an untracked
-  `crates/sure-cli/tests/verdict_sentence_once.rs`. Those are the three defects
-  named in §8 items 1–3. **All three are present at the commit named above** —
-  neither `b5f44f9` nor `d3e35ad` touched any of those files — so the repairs
-  exist in the working tree and are not part of the commit this report names.
-* **`target/` is not part of any of this.** Every reading the repository takes
-  under `target/tmp/` is a scratch record — gitignored, reproducible by running
-  the command that produced it, and never the evidence a reader should cite. The
-  pages this report links to are the tracked record.
+* **The tree was dirty for most of the writing, and the three repairs §8 describes
+  were uncommitted for part of it.** `git status --porcelain` returned **15
+  modified tracked files and 3 untracked files** at one reading and **8 modified
+  and 3 untracked** at the next, as lanes committed what they had finished. The
+  three files that carried the repairs — `crates/sure-cli/src/human_report.rs`,
+  `crates/sure-cli/src/portable_report.rs` and
+  `crates/sure-core/src/pipeline.rs`, with the new
+  `crates/sure-cli/tests/verdict_sentence_once.rs` — are **committed at
+  `b55a675`**, an ancestor of the commit named above, so the repairs are part of
+  the tree these readings describe. An earlier draft of §8 called them "in the
+  working tree, uncommitted"; that was true when it was written and is not true of
+  this commit, and the section was corrected rather than left standing.
 * **`target/` is not part of any of this.** Every reading the repository takes
   under `target/tmp/` is a scratch record — gitignored, reproducible by running
   the command that produced it, and never the evidence a reader should cite. The

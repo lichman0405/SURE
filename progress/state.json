@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P16",
-  "last_updated": "2026-09-21",
+  "last_updated": "2026-09-21T12:21:49+08:00",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2516,13 +2516,26 @@
       "notes": "Accepted with the two defects the task found beyond its dispatch: the path table was short by a row (`claude-code/scripts/install.ps1` was listed nowhere, which made every count derived from the table wrong), and a search was described as returning \"these and no others\" when it returns 26 files. It also found `sure doctor` naming a settings command this build does not implement, which is minted as P16-T012 rather than fixed here."
     },
     "P16-T007": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-21T12:21:49+08:00",
+      "base_sha": "d3e35ad",
+      "head_sha": "b55a675",
+      "evidence": [
+        "clause \"Includes ... the three defects the dogfood run found\": all three are repaired and committed, and each was reddened by mutation before it was trusted rather than argued. `b55a675` carries the repairs; `42812fc` carries the two documents that went false the moment it landed.",
+        "Defect 1, the verdict sentence printed twice: the duplication was the caller's, so all three callers changed — `human_report.rs` (terminal), `portable_report.rs` (markdown and HTML) — and `render_summary` was left alone because `acceptance_report.rs:1458`/`:1492` and eleven test sites push no headline and would have lost the verdict's first sentence. THE SUPERVISOR RAN THE RED-PROOF ITSELF, not taken from the report: with the pre-fix pair restored, `verdict_sentence_once` FAILED with 'the verdict sentence \"Not enough could be checked to say whether this is ready.\" appears 2 time(s) in the terminal report, and a reader should meet it once', cargo exit 101; then `git checkout HEAD -- crates/sure-cli/src/human_report.rs` and `git status --porcelain` on that file returned empty, so it is byte-identical to `b55a675`. Verified green after: 1 passed, 0 failed.",
+        "Defect 2, a first `recheck` reporting a comparison that never happened: the repair is a value and not a sentence — `pipeline.rs:1184` returns `None` when `previous` is empty, so the sentence is absent AND `details.lifecycle` is `null`. Suppressing only the sentence would have left the frame as `{\"closed\": [], \"still_open\": []}`, the shape of an answer to a question that was not asked. `crates/sure-cli/src/check.rs` was deliberately NOT edited: its `lifecycle()` already returns early on `None`, so the code was right and the value fed to it was wrong.",
+        "Defect 2, checked by the supervisor at the source rather than inferred: the early return at `pipeline.rs:1184` sits AFTER the store read (`previous_open_findings`, `:1139`) and BEFORE only `select_impacted_checks` (documented pure at `:1198`) and `reconcile` (builds a `LifecycleUpdate`), so no side effect is skipped. That `previous.is_empty()` is exactly the condition follows from `reconcile`'s loop, which classifies every entry it walks into `kept_open` or `resolved` and has no drop path.",
+        "Defect 2, the guard carries a control a weaker fix would fail: `a_recheck_with_nothing_to_compare_does_not_report_a_comparison` in `cli_contract.rs` also drives a later recheck over a store that DOES hold findings and requires \"Against the earlier run\" to be present there but not in its all-zero form.",
+        "Defect 3, method as well as content: the code was right and the sentence was over-broad, so NO behaviour changed. The sentence now reads \"refused when the run opens the store there\", with the measured three-state table, in both `docs/architecture/CLI.md` and `docs/architecture/STORAGE_AND_DATA_PATHS.md`, and the test-index row at `CLI.md:1066` now says what its test actually drives. The security property holds in all six cells — nothing was read and nothing was written in the four silent ones.",
+        "The supervisor extended the same correction to a shipped surface the lane could not reach: `crates/sure-cli/src/cli.rs:63`, the `--store-dir` `--help` text, which made the identical unconditional promise to anyone running `sure check --help`. Two further sites were found and deliberately left — `tasks/tasks.json:3040` is the task's own acceptance line, a record of what was asked rather than a claim about behaviour, and `DOGFOOD.md:432` quotes the criticised wording in order to criticise it.",
+        "THE SUPERVISOR'S OWN READING OF A FOURTH COMMAND WAS WRONG AND IS WITHDRAWN, recorded here rather than dropped. An earlier measurement had `sure config set --store-dir <inside project>` exiting 5, which would have made it a fourth store-keeping command missing from both enumerations. Re-measured cleanly — absolute path, a fresh `--settings-file` per state, no pipeline truncation — it is EXIT 0 IN ALL THREE STATES AND CREATES NO STORE, so it never opens one and the two pages are correct as written. Three candidate causes were tested and all three falsified (relative path -> exit 2; absolute inside the project -> exit 0; a settings file whose parent is missing -> exit 0, and it creates the parent). The cause is NOT established, so the reading is recorded as unreproducible rather than explained.",
+        "Two measurement errors of the supervisor's are recorded with the work: `... | Select-Object -First 4` corrupts `$LASTEXITCODE` because it stops the pipeline early, so every exit code in the first table was junk; and the settings file persisted across the three states, so two of them answered \"Already true\" and never reached the store logic. A measurement is not a measurement because it printed a table.",
+        "THE FOUR-TARGET TEST FAILURE REPORTED BY THE DEFECT LANE DID NOT REPRODUCE, and the harness is what makes that safe rather than lucky. The lane reported `install_flow` (10 failed), `mcp_protocol` (1), `quickstart_flow` (2) and `winget_manifest` (7) failing because the execution policy forbids `.ps1`. The supervisor measured `quickstart_flow` at 9 passed / 0 failed, and `Get-ExecutionPolicy -List` at Process=Bypass. Its reading was real for its own process scope, not for the supervisor's. `scripts/gates.ps1:400-435` MEASURES this rather than assuming it, and the green run reports `policy: measured -- the shell the tests start (C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe) loaded a local .ps1 (exit 0), so the six .ps1-spawning targets can load theirs`. A green gate therefore cannot come from a scope that would have failed the tests.",
+        "Two false statements in the deliverable were found by the supervisor and corrected, neither of them by the report's own Markdown check: an entire bullet duplicated verbatim at `FINAL_REPORT.md` lines 53-56 and 57-60, and the claim that P16 has fourteen tasks when `tasks/tasks.json` and `progress/state.json` both say twelve. A block-duplication scan over both deliverables found one adjacent-block repeat in `FINAL_REPORT.md` and none in `DOGFOOD.md`, whose repeated long lines are legitimate echoes of one command quoted in several contexts.",
+        "The seven-gate reading over the frozen tree, run by the supervisor: `pwsh -NoProfile -File scripts/gates.ps1 -Label p16-frozen` at `42812fc`, exit 0. `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0 productevals=0`; `result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`; `red: none`; `store identical: True` with the real store unchanged at D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853, 348160 bytes. The gate discloses its own limit in the same reading: `worktree at start: [ M progress/DECISIONS.md;  M progress/HANDOFF.md]` and `worktree: [ M FINAL_REPORT.md; ...]` at the end, because the supervisor corrected two false statements in FINAL_REPORT.md while the run was in progress. No gate reads that document, so the reading stands, but the reading says so itself rather than leaving it to be discovered."
+      ],
+      "notes": "Carried, not repaired, and each with its measurement: Windows PowerShell 5.1 does not apply a script-scope $OutputEncoding to a native pipe, so the hook write path still hands SURE `??` and stores 0 rows — repairing it would falsify the byte-order-mark measurement at `integrations/codex/README.md:287-291`, so it is owed as its own task. The suppression census prints `SilentlyContinue=0 continue-on-error=0` over six files while all four shipped hook launchers open with that token and `integrations/claude-code/scripts/sure-mcp.ps1:7` does too, so the zero is true of the census's six and false of the tree — carried to `FINAL_REPORT.md`."
     },
     "P16-T008": {
       "status": "queued",
@@ -3239,22 +3252,41 @@
       "notes": "The `Found` arm of `explain()` still says \"Checks can run in a container: docker was found at ...\", and the fixture control sentences at `scenario.json:46`/`:95` pin it. T010 was told not to widen into it. Handed to `P16-T012`, with the measurement that makes it more than a sentence edit: `claims_local_execution` requires a LOCAL place, and \"in a container\" is not one, so the arm needs a container-side twin of the rule rather than a rewording."
     },
     "P16-T011": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-21T12:21:49+08:00",
+      "base_sha": "f34e18b",
+      "head_sha": "d3e35ad",
+      "evidence": [
+        "CLAUSE 1 IS MET FOR TWO OF THE FOUR PACKAGES AS DECLARED, AND THE ACCEPTANCE SAYS SO RATHER THAN ROUNDING UP. claude-code and cursor: met, measured under `chcp 936` with a payload whose root carries `路径 with spaces 校验` — the repaired launchers store 1 session with the root correct to the codepoint, while the same payload with an ASCII root also stores its session, so the reading can tell the two cases apart.",
+        "clause 1 for codex: NOT met, and the reason is measured rather than assumed. Under the `-File` form codex's own manifest declares, the host has already read and decoded stdin before line 1 — `[Console]::In` holds 0 characters and `$input` holds 346 already-mangled ones for a 344-character payload — so no in-script read can recover bytes that no longer exist.",
+        "clause 1 for copilot: cannot be driven at all, because `sure hook ingest --source copilot` is refused as an unknown source, so its launcher is text-verified only. Stated as text-verified, never as passing.",
+        "clause 1 under Windows PowerShell 5.1: NOT met for ANY package, for a separate write-path reason. Measured clean A/B with only the scope differing: the shipped form hands SURE `??` (`41 3F 3F 42`) and stores 0 rows, while `$global:OutputEncoding` in a fresh process stores 1 with the root correct. Not repaired because it would falsify the BOM measurement at `integrations/codex/README.md:287-291`; owed as its own task.",
+        "clause 2, the three routes to the codex gap were each measured and each is recorded with its reason rather than left as an open question: a read inside the launcher cannot work (bytes gone); changing the declared command is forbidden by this repository's own record, since `integration_thinness.rs:2372-2377` asserts every `commandWindows` contains `powershell` AND `-File`; and re-decoding the mangled text is not a repair, since `璺<U+E21A>緞` re-encoded through CP936 does give `路径` but nothing in the payload says which reading is the true one — a guess dressed as a repair, so it was not taken.",
+        "clause 3 is met: all four launchers changed, and the reason the one that does not work does not work is stated in the commit rather than left to be found.",
+        "the supervisor edited `integrations/codex/scripts/sure-hook.ps1:3` itself, after the hand-back, so its own comment stops implying that the `InputEncoding` line repairs codex's declared invocation. THE EDIT IS KEPT TO ONE LINE ON PURPOSE: the file sits at 39 of the 40-line bound enforced at `crates/sure-testkit/src/integrations.rs:281` (`LauncherTooLarge`), and one line means no cited line number moved, so `integration_thinness.rs:2632` still reads `:5-12`. The supervisor's first version added a line, pushed the file to 40 and moved the `param` block, which would have broken that citation and three sibling cross-references; it was revised and re-verified at 39 lines.",
+        "verified by the supervisor after that edit, not taken from the report: `cargo test -p sure-testkit --test integration_thinness` 54 passed / 0 failed.",
+        "The seven-gate reading over the frozen tree, run by the supervisor: `pwsh -NoProfile -File scripts/gates.ps1 -Label p16-frozen` at `42812fc`, exit 0. `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0 productevals=0`; `result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`; `red: none`; `store identical: True` with the real store unchanged at D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853, 348160 bytes. The gate discloses its own limit in the same reading: `worktree at start: [ M progress/DECISIONS.md;  M progress/HANDOFF.md]` and `worktree: [ M FINAL_REPORT.md; ...]` at the end, because the supervisor corrected two false statements in FINAL_REPORT.md while the run was in progress. No gate reads that document, so the reading stands, but the reading says so itself rather than leaving it to be discovered."
+      ],
+      "notes": "The stale citation is corrected rather than carried: `integration_thinness.rs:2632` cited `integrations/codex/scripts/sure-hook.ps1:3-10` for the `param`-block shape and the inserted lines moved it to `:5-12`, verified against `git show HEAD:` rather than recalled."
     },
     "P16-T012": {
-      "status": "queued",
+      "status": "accepted",
       "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "finished_at": "2026-09-21T12:21:49+08:00",
+      "base_sha": "f34e18b",
+      "head_sha": "b5f44f9",
+      "evidence": [
+        "the two false sentences were both measured from the built binary rather than from source. The closing line named `sure config show`, which EXITS 3 — verified by the supervisor from a cwd outside the project so the store is not refused: `sure config set privacy.full_recording true` exit 0, `sure config show` exit 3, `sure history delete --all` exit 0. `sure config paths` and `sure config validate` also exit 3.",
+        "`crates/sure-cli/src/commands.rs` was NOT changed, and that is the right shape: `IMPLEMENTED` already keeps `config` out so `sure mcp` never tells an agent that `sure config show` answers, and `IMPLEMENTED_IN_PART` holds exactly `[\"config set\"]`. The repaired line now says the same three things that list says, and the new guard asserts the agreement mechanically so the two cannot drift apart silently.",
+        "the `Found` arm repair is a rule and not a better phrase: `claims_container_execution` in `crates/sure-core/src/container.rs` is `claims_local_execution`'s twin, sharing a private `claims_execution` with a second and disjoint place list — `LOCAL_PLACES` at `:703` is \"on this computer\"/\"on this machine\"/\"locally\", `CONTAINER_PLACES` at `:724` is \"in a container\"/\"inside a container\". Sharing the implementation is what matters: clause splitting, which running words count, and how a denial excuses a claim are read identically by both rules, so they cannot disagree about one sentence.",
+        "A FALSE GREEN WAS FOUND IN A GUARD WRITTEN TO PREVENT ONE, and it is recorded in the test rather than quietly fixed. The second mutation — putting the old closing line back as a literal — PASSED the new guard, because the guard measured the constant and not the printed line. The guard gained `assert_eq!(text.lines().last(), Some(CLOSING_LINE))` because of it, and the same mutation then fails with both sentences side by side.",
+        "reddened, not assumed: the old `Found` sentence put back fails `container_isolation_claim` with the sentence printed, and the closing-line mutation fails the new guard after the strengthening above.",
+        "THE SUPERVISOR FIXED THE SAME DEFECT IN A THIRD AND FOURTH PLACE, both found by the lane and reported rather than repaired because they are outside its files: `crates/sure-core/src/doctor.rs:223` printed, twenty lines above the repaired closing line, that settings \"are read by `sure config show`, so that a diagnostic never has a secret to handle\" — the same false reader still inside the report — and the module doc at `:23` named it too. Both now state that no command in this build reads settings back and that `sure config set` writes them. The test comment at `crates/sure-core/tests/doctor.rs:90` was updated with them, since it used the old sentence to explain why the scan looks for module paths rather than the word.",
+        "verified by the supervisor rather than taken from the report: `container_isolation_claim` 6 passed / 0 failed, `sure-core --lib container` 18 passed, `sure-core --test doctor` 9 passed, `sure-cli --lib doctor` 13 passed. `module_call_sites` moved 16 -> 18 and `unwired_call_sites` stayed 0, both declared in the fixture and its README with the 11 -> 16 -> 18 history written down as three separate moves.",
+        "The seven-gate reading over the frozen tree, run by the supervisor: `pwsh -NoProfile -File scripts/gates.ps1 -Label p16-frozen` at `42812fc`, exit 0. `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0 productevals=0`; `result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`; `red: none`; `store identical: True` with the real store unchanged at D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853, 348160 bytes. The gate discloses its own limit in the same reading: `worktree at start: [ M progress/DECISIONS.md;  M progress/HANDOFF.md]` and `worktree: [ M FINAL_REPORT.md; ...]` at the end, because the supervisor corrected two false statements in FINAL_REPORT.md while the run was in progress. No gate reads that document, so the reading stands, but the reading says so itself rather than leaving it to be discovered."
+      ],
+      "notes": "CANNOT CONFIRM, carried by the lane and repeated here: this machine has no docker or podman, so the `Found` sentence was measured from a binary run with a scratch directory holding an empty `docker.exe` prepended to the child's `PATH` — nothing was installed and no runtime was run. What the sentence says about a runtime that actually exists is unverified by observation here; what the rule reads about it is verified by mutation. `sure mcp` was read against `commands::{IMPLEMENTED, IMPLEMENTED_IN_PART}` and not driven end to end."
     }
   },
   "blocked_external": [],

@@ -4560,13 +4560,90 @@ task changes are `lib.rs` (+1), `schedule.rs` (+60) and
   `scripts/`, `crates/`, `integrations/` and `.github/` matches `gates.ps1`
   alone. The header states the exception and its reason where the rule is
   stated.
-- **Cannot confirm: that `scripts/product-evals.mjs` passes on the macOS and
-  Linux matrix legs.** It is added to all three, and the reason to expect it to
-  is a reading of another file rather than a measurement: `PLATFORM_COVERAGE.md`
-  records `target/tmp/release-gate.json` reading `permitted` on the macOS and
-  Linux packaging jobs, so the gate document is produced and is green there.
-  This script compares the document line by line, which is stricter than the
-  decision, so a leg can be `permitted` and still disagree with a line of
-  `PRODUCT_EVALS.md`. The first CI run of this branch is what answers it.
+- **The macOS and Linux legs were the open question, and they are answered
+  rather than assumed.** The reason to expect a pass was a reading of another
+  file: `PLATFORM_COVERAGE.md` records `target/tmp/release-gate.json` reading
+  `permitted` on the macOS and Linux packaging jobs, so the gate document is
+  produced and green there. That was not enough, because this script compares
+  `PRODUCT_EVALS.md` line by line, which is stricter than the `permitted`
+  decision — a leg could be `permitted` and still disagree with a line. The
+  first CI run of this branch is the falsifier and it passed: run `35559588094`
+  on `f34e18b` reports **all five jobs `success`** — `bootstrap-validate-windows`,
+  `rust (windows-latest)`, `rust (macos-latest)`, `rust (ubuntu-latest)` and
+  `shellcheck-secondary`. The seventh gate is green on all three platforms, and
+  the run before it (`35559221587` on `e8ba638`) is the same five `success` with
+  the sixth gate set and no seventh.
 
 
+
+## P16 — T007, T011 and T012 are accepted on one frozen-tree reading, and three supervisor readings are withdrawn
+
+**The reading that accepts all three at once.** `pwsh -NoProfile -File
+scripts/gates.ps1 -Label p16-frozen` at `42812fc`, exit 0, over the tree that
+carries every repair from all three tasks. All seven gates green:
+`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0 productevals=0`;
+`result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`; `red: none`;
+`store identical: True`, with the machine's real store unchanged at
+`D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes.
+This is the first reading that covers the seventh gate, `T011` and `T012` together
+rather than one task at a time.
+
+**Three of the supervisor's own readings were wrong, and all three are withdrawn
+in the record rather than quietly dropped.**
+
+- **`sure config set` does not keep a store.** I had measured it exiting 5 with a
+  store directory that did not exist, concluded it "creates a store and is refused
+  in every state", and wrote a todo to add it as a fourth command to both pages
+  that enumerate which commands keep one. Re-measured cleanly it is **exit 0 in
+  all three states and creates no store** — it never opens one — so the two pages
+  were right as written and **no edit was made**. Three candidate causes for the
+  old reading were tested and all three falsified: a relative `--store-dir` gives
+  exit 2 with its own message; an absolute store inside the project gives exit 0;
+  a `--settings-file` whose parent directory is missing gives exit 0 and creates
+  the parent. **The cause is not established**, so it is recorded as
+  unreproducible rather than given an explanation it has not earned.
+- **Two measurement errors of mine produced that bad table**, and they are worth
+  naming because they are the failure class this phase is about.
+  `... | Select-Object -First 4` **corrupts `$LASTEXITCODE`** — the cmdlet stops
+  the pipeline early — so every exit code in the first table was junk. And the
+  settings file **persisted across the three states**, so two of them answered
+  "Already true" and never reached the store logic at all. A measurement is not a
+  measurement because it printed a table.
+- **The four-target `sure-cli` test failure the defect lane reported does not
+  reproduce here.** It reported `install_flow` (10 failed), `mcp_protocol` (1),
+  `quickstart_flow` (2) and `winget_manifest` (7), all on the execution policy
+  forbidding `.ps1`. On this side `quickstart_flow` is **9 passed; 0 failed** and
+  `Get-ExecutionPolicy -List` shows **Process=Bypass**. Its reading was real for
+  its own process scope and not for mine. What makes that safe rather than lucky
+  is that the harness already measures it: `scripts/gates.ps1:400-435` runs a
+  probe `.ps1` under `powershell.exe -NoProfile -File` in its own process tree and
+  refuses with `policy: REFUSED` if the child cannot load one. The green run
+  prints `policy: measured -- the shell the tests start (...powershell.exe) loaded
+  a local .ps1 (exit 0)`, so **the gate reading carries its own environment check
+  and a green gate cannot come from a scope that would have failed the tests.**
+
+**The gate discloses the one way its own reading is imprecise.** Its `worktree at
+start` line shows `progress/DECISIONS.md` and `progress/HANDOFF.md` modified, and
+its closing `worktree` line adds `FINAL_REPORT.md` — because two false statements
+in that report were corrected while the run was in progress. No gate reads that
+document, so the reading stands; the point is that the reading says so itself.
+The two statements were an **entire bullet duplicated verbatim** (lines 53–56 and
+57–60) and the claim that P16 has **fourteen** tasks when `tasks/tasks.json` and
+`progress/state.json` both say **twelve**. Neither was caught by the report's own
+Markdown check, which verified fences, tables, backticks and list numbering but
+not repeated content; a block-duplication scan over both deliverables found
+exactly one adjacent-block repeat, the one above.
+
+**D1 was red-proved by the supervisor rather than accepted from the report.** With
+the pre-fix pair restored in `human_report.rs`, `verdict_sentence_once` fails with
+*"appears 2 time(s) in the terminal report, and a reader should meet it once"*,
+cargo exit 101; restored, `git status --porcelain` on that file is empty, so it is
+byte-identical to `b55a675`.
+
+**A wider correction was taken than the lane could make.** The lane found the
+over-broad store-refusal promise in two documents and could not touch
+`crates/sure-cli/src/cli.rs`; the supervisor made the same correction there, since
+`sure check --help` was making the identical unconditional promise to a user. Two
+further sites were deliberately left: `tasks/tasks.json:3040` is the task's own
+acceptance line — a record of what was asked, not a claim about the code — and
+`DOGFOOD.md:432` quotes the criticised wording in order to criticise it.

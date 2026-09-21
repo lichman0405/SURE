@@ -88,10 +88,21 @@ jobs:
       # whole-workspace run is also what the evals are: the acceptance corpus's
       # cases are plain `#[test]`s in
       # `crates/sure-core/tests/acceptance_report_runner.rs`, so they are run
-      # here on every platform rather than by a step of their own. The release
-      # *metrics* computed from that report are `release-dry-run.yml`'s and
-      # `scripts/Build-Release.*`'s, and are not what this workflow answers.
+      # here on every platform rather than by a step of their own. That report is
+      # also what the release *gate* is computed from —
+      # `target/tmp/release-gate.json`, the document `release-dry-run.yml` and
+      # `scripts/Build-Release.*` read — and the step below is this workflow's own
+      # reading of it.
       - run: cargo test --workspace --all-features --no-fail-fast
+      # **This step is in this job rather than beside the two node gates in
+      # `bootstrap-validate-windows`, and what decides that is what it reads.**
+      # `scripts/product-evals.mjs` compares `docs/product/PRODUCT_EVALS.md`
+      # against `target/tmp/release-gate.json`, which the step immediately above
+      # wrote; there is no such file in the bootstrap job, and the script refuses
+      # — by name and with the command that produces the reading — rather than
+      # printing a number it did not read. So it runs here, on all three matrix
+      # legs, after the run whose artifact it is.
+      - run: node scripts/product-evals.mjs
 
   shellcheck-secondary:
     runs-on: ubuntu-latest

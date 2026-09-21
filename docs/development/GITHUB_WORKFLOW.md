@@ -51,7 +51,7 @@ requests. Three jobs, and each is the only check of something:
 
 | Job | What nothing else checks |
 | --- | --- |
-| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features --no-fail-fast` |
+| `rust` × windows, macos, ubuntu | `cargo fmt --all -- --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features --no-fail-fast`, `node scripts/product-evals.mjs` |
 | `shellcheck-secondary` | the POSIX shell scripts, on a machine that has `shellcheck` |
 | `bootstrap-validate-windows` | the Windows bootstrap scripts, `validate-bootstrap.mjs` and the task state |
 

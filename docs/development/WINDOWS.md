@@ -144,17 +144,28 @@ execution policy for the machine, for the user, or for the gate.
 ## The gate set, and the runner that takes a reading
 
 Every acceptance in `progress/` quotes a line shaped like
-`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`. The six
-commands behind it are these, run in this order:
+`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`. Readings
+taken since `scripts/product-evals.mjs` became the seventh gate end that line
+with `productevals=<exit>`, appended after those six so that the fields the
+older readings quote keep their names, their values and their positions; the
+readings already in `progress/` are not retro-edited and do not carry it. The
+seven commands behind it are these, run in this order:
 
 ```text
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features --no-fail-fast
+node scripts/product-evals.mjs
 node scripts/validate-bootstrap.mjs
 node scripts/taskctl.mjs validate
 node scripts/check-non-windows.mjs
 ```
+
+`product-evals.mjs` runs fourth, directly after the `cargo test` that writes
+`target/tmp/release-gate.json`, because that file is what it reads. It is the
+only gate whose position in the list is not free to move: before the `test` row
+it would compare the document against an earlier run's artifact, or find none
+and refuse.
 
 The harness that runs them is **`scripts/gates.ps1`**, tracked, and it runs from
 anywhere because it finds the repository root from its own path:

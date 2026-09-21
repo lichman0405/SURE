@@ -4489,4 +4489,84 @@ task changes are `lib.rs` (+1), `schedule.rs` (+60) and
   `ETXTBSY` occurrences, so the falsifier's predicted fix is not required and the
   clause is satisfied by the repair actually made.
 
+## P16 — `scripts/product-evals.mjs` becomes the seventh gate
+
+- **The decision, taken by the supervisor on 2026-09-21.** `scripts/product-evals.mjs`
+  is a row of `scripts/gates.ps1`'s `$GateSet`, named `productevals`, placed after
+  `test`, and a step of `ci.yml`'s `rust` job immediately after that job's
+  `cargo test`. Its row is the only one in the table whose position is
+  constrained: its input is the `test` gate's own artifact, so anywhere before
+  `test` it would read a gate from an earlier run or find none.
+- **Why it can be a gate: 77 ms, and it starts nothing.** Measured,
+  `time node scripts/product-evals.mjs` → `real 0m0.077s`. Node and this checkout
+  are the whole of the requirement — no network, no package install, no
+  administrator rights, and no shell beyond the one that starts `node`.
+- **Its input is measured too, and it is the test gate's.**
+  `cargo test --workspace --all-features --no-fail-fast` runs
+  `crates/sure-core/tests/acceptance_report_runner`, which writes
+  `target/tmp/release-gate.json` in **0.86 s** (14 passed, 0 failed). That was
+  proved rather than assumed: the file was moved aside, the prebuilt binary
+  `target/debug/deps/acceptance_report_runner-aa1fb37670cd60bd.exe` was run, and
+  the file came back **byte-identical** (sha256
+  `5191294006fee7cc88f9b19b3c0489812ab2d65c6b28e3748f6711479209c4d6`). Two runs
+  are byte-identical, which that test binary's own `two_runs_are_byte_identical`
+  asserts.
+- **It refuses rather than guesses, which is what makes it a check rather than a
+  report.** With the gate document absent, or with its `corpus.manifest_digest`
+  disagreeing with `evaluation/acceptance-manifest.json` as the file now stands,
+  it exits 1 and names the command that produces the reading. Its failure mode is
+  a visible error and never a false green.
+- **The hole it closes is a false number in a shipped document, measured rather
+  than argued.** Moving `docs/product/PRODUCT_EVALS.md`'s repair-regression line
+  from `**100%**` to `**99%**` leaves
+  `cargo test -p sure-core --test release_gate_runner` at **16 passed** — the
+  gate side, measured at `P15-T026` — while `node scripts/product-evals.mjs`
+  exits **1** with `WRONG` on the same edit. Until this decision it was wired to
+  nothing: no row of `$GateSet`, no step of any file under
+  `.github/workflows/`. Its absence was therefore not a neutral omission but the
+  exact defect this repository exists to catch.
+- **`P15-T026` had left this open, and wrote its reason down rather than taking
+  it silently.** Its hand-back records: *"It is not added to the gate set: gate
+  membership is the supervisor's, it is a change five CI jobs and every
+  acceptance depend on, and the recommendation is recorded rather than taken
+  inside a worker's hand-back."* The reason is sound — which is why it was a
+  supervisor's decision and not a worker's — and what changed is that the
+  measurements above are now in hand. A check whose input costs 0.86 s of a run
+  that happens anyway, and which costs 77 ms itself, is not a change the five CI
+  jobs have to be asked to weigh.
+- **What it costs elsewhere, said rather than left to be discovered.** The
+  suppression census now reads six files rather than five, and the number on that
+  line is `$CensusRelative.Count`, so it says what it read. Adding the row made
+  visible that the comment above that array had claimed "all six" over an array
+  of five and had called the three node commands among the commands above it
+  "four"; the comment names no total now.
+- **Three pages stated the gate set, and all three were brought level rather than
+  left to be found later.** `docs/development/WINDOWS.md`'s gate-set section said
+  "The six commands behind it are these" over a list of six, and
+  `docs/development/GITHUB_WORKFLOW.md`'s CI table listed four commands for the
+  `rust` job that now runs five; both are edited here. The worker declined both
+  on lane grounds and said so, which is the behaviour the lane rule is for — the
+  two were then edited by the supervisor, who holds those files.
+- **One more field on the `exits:` line, appended and never inserted.** That line
+  is the summary `progress/` quotes, and `gates.ps1`'s own header declares the
+  quoted lines frozen: *"this one adds lines and changes none"*. Leaving it at
+  six fields would have left the seventh gate's exit absent from the one line a
+  reader skims, and the per-gate lines and the `halt:` count do not repair a
+  summary that stops early. It now ends `... nonwindows=0 productevals=0`. The
+  new field goes **last, not in execution position**, so the six fields the
+  record quotes keep their names, their values and their positions and a reading
+  taken before this change still lines up with one taken after it field for
+  field. Nothing parses the line: `grep -rln "result-lines\|exits:"` over
+  `scripts/`, `crates/`, `integrations/` and `.github/` matches `gates.ps1`
+  alone. The header states the exception and its reason where the rule is
+  stated.
+- **Cannot confirm: that `scripts/product-evals.mjs` passes on the macOS and
+  Linux matrix legs.** It is added to all three, and the reason to expect it to
+  is a reading of another file rather than a measurement: `PLATFORM_COVERAGE.md`
+  records `target/tmp/release-gate.json` reading `permitted` on the macOS and
+  Linux packaging jobs, so the gate document is produced and is green there.
+  This script compares the document line by line, which is stricter than the
+  decision, so a leg can be `permitted` and still disagree with a line of
+  `PRODUCT_EVALS.md`. The first CI run of this branch is what answers it.
+
 

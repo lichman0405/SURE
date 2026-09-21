@@ -1,4 +1,4 @@
-# SURE -- the six gates, run from a clone, with the environment they ran under
+# SURE -- the seven gates, run from a clone, with the environment they ran under
 # written down beside the numbers.
 #
 #   pwsh -NoProfile -File scripts/gates.ps1 -Label p16t001-worker
@@ -23,6 +23,18 @@
 # `env:`, `tools:`, `gate-set:`, `policy` (`policy:` and `policy-override:`),
 # `suppression` (the census line and each finding), `counts:`, `preflight-only:`
 # and the closing `halt:`.
+#
+# THE ONE FIELD APPENDED TO A QUOTED LINE, AND WHY THAT IS NOT A BREAK OF THE
+# RULE ABOVE. `exits: ...` now ends with `productevals=...`, appended *after*
+# the six fields the record quotes rather than inserted among them, so those six
+# keep their names, their values and their positions, and a reading taken before
+# the seventh gate still lines up with one taken after it field for field. The
+# rule above protects what a quoted field *means*, and no field's meaning
+# changed. The alternative was a summary line that did not mention the seventh
+# gate's exit at all — the one line in a whole run that could leave a red gate
+# unmentioned in prose. `gate-set:` above it prints the true execution order, in
+# which `productevals` runs fourth, and this line is keyed by name rather than
+# ordered, so the two do not disagree.
 #
 # WHAT `passed=` IS, BECAUSE IT WAS PUBLISHED WRONGLY TWICE. `passed=` is the RAW
 # SUM over every `test result:` line, and it is NOT the number of tests. On
@@ -90,7 +102,7 @@
 # WHAT IT DOES NOT DO. It does not weaken anything to make a reading come out
 # green: no gate command carries an extra flag, no failing target is named in a
 # list of known failures, nothing is skipped, and the suppression census below
-# reads THIS FILE as well as the four it calls. `-ErrorAction <the-silent-one>`
+# reads THIS FILE as well as every file it calls. `-ErrorAction <the-silent-one>`
 # appears nowhere in it, and the census is what would say so.
 
 param(
@@ -106,7 +118,7 @@ $ErrorActionPreference = 'Continue'
 $LASTEXITCODE = 0
 
 # ---------------------------------------------------------------------------
-# The six commands, written once and executed from the same table.
+# The seven commands, written once and executed from the same table.
 #
 # `Command` is the line as a reader types it and as `git grep` finds it; `Argv`
 # is what is run, as an argument array and never as a shell string. The two are
@@ -133,6 +145,18 @@ $GateSet = @(
         Program = 'cargo'
         Argv    = @('test', '--workspace', '--all-features', '--no-fail-fast')
     }
+    # The seventh gate, and the only one whose place in this table is not free:
+    # its input is `target/tmp/release-gate.json`, the artifact the `test` row
+    # above writes, so a run that moved it anywhere before `test` would read a
+    # gate from an earlier run or find none at all. The three node gates below
+    # carry no such constraint. It starts no process, installs nothing and reads
+    # three files, which is why it sits here rather than beside them.
+    [pscustomobject]@{
+        Name    = 'productevals'
+        Command = 'node scripts/product-evals.mjs'
+        Program = 'node'
+        Argv    = @('scripts/product-evals.mjs')
+    }
     [pscustomobject]@{
         Name    = 'bootstrap'
         Command = 'node scripts/validate-bootstrap.mjs'
@@ -153,16 +177,24 @@ $GateSet = @(
     }
 )
 
-# The files this harness is made of: this one, the four commands above that live
-# in the tree, and the instrument it calls. The census reads all six, this file
-# included -- a census that exempted its own subject would be describing the tree
-# rather than testing it.
+# The files this harness is made of: this one, the node commands above that live
+# in the tree (`validate-bootstrap.mjs`, `taskctl.mjs`, `check-non-windows.mjs`
+# and `product-evals.mjs`), and the instrument it calls for the parent figure
+# (`measure-tests.mjs`). This comment names no total on purpose. It named one
+# until `P16` and the total was wrong twice over: it said the census "reads all
+# six" over an array of five, and called the three node commands among the
+# commands above "four". The count is printed by the census line below, which
+# reads `$CensusRelative.Count` rather than a numeral, so no reader has to
+# re-count it the next time this array changes. This file is one of the entries
+# -- a census that exempted its own subject would be describing the tree rather
+# than testing it.
 $CensusRelative = @(
     'scripts/gates.ps1'
     'scripts/validate-bootstrap.mjs'
     'scripts/taskctl.mjs'
     'scripts/check-non-windows.mjs'
     'scripts/measure-tests.mjs'
+    'scripts/product-evals.mjs'
 )
 
 # The two tokens a reading can be suppressed with, spelled in two pieces here so
@@ -330,7 +362,7 @@ if ($Missing.Count -gt 0) {
     )
 }
 
-# 3. The programs the six commands are. `&` on a name that does not resolve
+# 3. The programs the seven commands are. `&` on a name that does not resolve
 #    leaves `$LASTEXITCODE` at whatever it was, which is how a missing tool turns
 #    into a gate that "passed".
 $Programs = @{}
@@ -341,10 +373,10 @@ foreach ($name in @('cargo', 'node', 'git')) {
 }
 if ($Absent.Count -gt 0) {
     Stop-WithRefusal -Code 'tools-missing' -ExitCode $ExitCannotRun -Subject (
-        "the six commands need cargo, node and git on PATH; not found: $($Absent -join ', ')") -Detail @(
-        'cargo runs gates fmt, clippy and test; node runs gates bootstrap, taskctl and nonwindows, and the',
-        'measure-tests instrument this runner calls for the parent figure; git is what names the tree the',
-        'reading was taken from.',
+        "the seven commands need cargo, node and git on PATH; not found: $($Absent -join ', ')") -Detail @(
+        'cargo runs gates fmt, clippy and test; node runs gates bootstrap, taskctl, nonwindows and',
+        'productevals, and the measure-tests instrument this runner calls for the parent figure; git is',
+        'what names the tree the reading was taken from.',
         'docs/development/WINDOWS.md lists the versions the record was taken under.'
     )
 }
@@ -441,10 +473,10 @@ if ($PolicyUsable -eq $false) {
         'one taken from a session that permits scripts.')
 }
 
-# 6. Nothing that suppresses. The census reads this file and the four commands it
-#    calls and counts the two tokens a failure can be hidden behind. The counts
-#    are printed whether or not they are zero, and a non-zero count is a named
-#    line rather than a quiet one.
+# 6. Nothing that suppresses. The census reads this file and every file it calls
+#    and counts the two tokens a failure can be hidden behind. The counts are
+#    printed whether or not they are zero, and a non-zero count is a named line
+#    rather than a quiet one.
 $CensusCounts = @{}
 $CensusFindings = New-Object System.Collections.Generic.List[string]
 foreach ($token in $SuppressionTokens) {
@@ -470,7 +502,7 @@ if ($PreflightOnly) {
     $preflightCode = if ($CensusFindings.Count -gt 0) { $ExitCensus }
     elseif ($PolicyUsable -eq $false) { $ExitPolicy }
     else { 0 }
-    Add-GateLine ("preflight-only: the six gates were NOT run, so nothing in this file is a reading. " +
+    Add-GateLine ("preflight-only: the seven gates were NOT run, so nothing in this file is a reading. " +
         '(summary -> {0})' -f $LogName)
     Add-GateLine ("halt: exit {0} (preflight-only)" -f $preflightCode)
     Get-Content -Path $Log
@@ -478,7 +510,7 @@ if ($PreflightOnly) {
 }
 
 # ---------------------------------------------------------------------------
-# The six gates.
+# The seven gates.
 # ---------------------------------------------------------------------------
 $GateExits = @{}
 foreach ($gate in $GateSet) {
@@ -497,8 +529,8 @@ foreach ($gate in $GateSet) {
     Add-GateLine ("{0,-12} exit {1}  -> {2} ({3} bytes)" -f $gate.Name, $code, (Split-Path $file -Leaf), $size)
 }
 
-Add-GateLine ("exits: fmt={0} clippy={1} test={2} bootstrap={3} taskctl={4} nonwindows={5}" -f
-    $GateExits['fmt'], $GateExits['clippy'], $GateExits['test'], $GateExits['bootstrap'], $GateExits['taskctl'], $GateExits['nonwindows'])
+Add-GateLine ("exits: fmt={0} clippy={1} test={2} bootstrap={3} taskctl={4} nonwindows={5} productevals={6}" -f
+    $GateExits['fmt'], $GateExits['clippy'], $GateExits['test'], $GateExits['bootstrap'], $GateExits['taskctl'], $GateExits['nonwindows'], $GateExits['productevals'])
 
 # ---------------------------------------------------------------------------
 # The counts, both of them, each labelled with what it counts.
@@ -638,7 +670,7 @@ Add-GateLine ('worktree:   [' + $WorktreeEnd + ']')
 # ---------------------------------------------------------------------------
 $Red = @($GateExits.Values | Where-Object { $_ -ne 0 })
 $Halt = if ($Red.Count -gt 0) {
-    @{ Code = $ExitRed; Reason = "{0} of 6 gates exited non-zero" -f $Red.Count }
+    @{ Code = $ExitRed; Reason = "{0} of {1} gates exited non-zero" -f $Red.Count, $GateSet.Count }
 } elseif ($CensusFindings.Count -gt 0) {
     @{ Code = $ExitCensus; Reason = 'a suppression token is in the harness' }
 } elseif (-not $CountsAttributable) {

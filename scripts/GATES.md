@@ -2,7 +2,12 @@
 
 `scripts/gates.ps1` is the tracked copy of the harness that produces the
 `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0` line every
-acceptance in this repository quotes. Before it was tracked that harness lived
+acceptance in this repository quotes. Readings taken since
+`scripts/product-evals.mjs` became the seventh gate end that line with
+`productevals=<exit>`, appended *after* those six so the quoted fields keep
+their positions and an old reading still lines up with a new one field for
+field; the readings already in `progress/` are not retro-edited. Before it was
+tracked that harness lived
 at `target\tmp\gates.ps1` — inside the git-ignored `/target/` — so no clone of
 this repository could reproduce a single reading the record contains, and a
 `cargo clean` would have taken the instrument with it. `target\tmp\measure-run.mjs`
@@ -32,7 +37,7 @@ pwsh -NoProfile -File scripts/gates.ps1 -Label p16t001-worker
   beginning with a letter or a digit; anything else is refused, because a label
   that reaches outside `target/tmp` is a reading written over something else.
 - **`-PreflightOnly`** runs every precondition and the suppression census and
-  stops before the six commands. It writes `gates-<label>-preflight.txt` and
+  stops before the seven commands. It writes `gates-<label>-preflight.txt` and
   never touches `gates-<label>.txt`, so a preflight cannot overwrite a reading.
   Use it to check an environment before spending a build on it.
 - **`-AllowRefusedChildPolicy`** takes the reading anyway when the shell a test
@@ -77,14 +82,14 @@ reads.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | all six gates exited 0, the census is clean, both counts were attributed |
+| 0 | all seven gates exited 0, the census is clean, both counts were attributed |
 | 1 | at least one gate exited non-zero |
 | 2 | a precondition is missing (edition, tree, tools, gate table); no gate ran |
 | 3 | the shell a test target starts cannot load a `.ps1`; no gate ran |
 | 4 | a suppression token was found in the harness |
 | 5 | the test log exists but no count can be attributed from it |
 
-## The six commands
+## The seven commands
 
 Run in this order, each with its own log file:
 
@@ -92,6 +97,7 @@ Run in this order, each with its own log file:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features --no-fail-fast
+node scripts/product-evals.mjs
 node scripts/validate-bootstrap.mjs
 node scripts/taskctl.mjs validate
 node scripts/check-non-windows.mjs
@@ -104,10 +110,40 @@ the preflight compares the two before any gate starts. A change that reaches one
 and not the other refuses with `refused [gate-table]`, naming both lines, rather
 than producing a reading under a command line nobody wrote down.
 
-Three of the six are cargo subcommands and three are scripts the tree already
-carried — `scripts/validate-bootstrap.mjs`, `scripts/taskctl.mjs` and
-`scripts/check-non-windows.mjs`. The sixth gate, `scripts/check-non-windows.mjs`,
-says in its own header why it is a gate and what it cannot reach.
+Three of the seven are cargo subcommands and four are scripts the tree already
+carried — `scripts/validate-bootstrap.mjs`, `scripts/taskctl.mjs`,
+`scripts/check-non-windows.mjs` and `scripts/product-evals.mjs`.
+`scripts/check-non-windows.mjs` was the sixth gate until the seventh was added
+and says in its own header why it is a gate and what it cannot reach.
+
+### The seventh gate, and why its row is not free to move
+
+`node scripts/product-evals.mjs` reads `docs/product/PRODUCT_EVALS.md` against
+`target/tmp/release-gate.json` and exits 1, naming the command that produces the
+reading, rather than printing a number it did not read. Its input is the `test`
+gate's own artifact, and that is the whole reason its row is where it is: move it
+anywhere before `test` and it would compare the document against a gate written
+by an earlier run, or find none and refuse. Its row is the only one in the table
+whose position carries a constraint, and the list above is the order the table
+has, not a preference.
+
+What it costs, measured by the supervisor on 2026-09-21:
+
+- **77 ms**, `time node scripts/product-evals.mjs` → `real 0m0.077s`. Node and
+  the checkout are the whole of the requirement: no network, no package install,
+  no administrator rights, no shell beyond the one that starts `node`.
+- its input is written in **0.86 s** by
+  `crates/sure-core/tests/acceptance_report_runner` (14 passed, 0 failed), which
+  the `test` gate runs as part of
+  `cargo test --workspace --all-features --no-fail-fast`.
+
+It was wired to nothing before this row existed, and that was not a neutral
+omission. `P15-T026` measured the gate side of it: moving the repair-regression
+line of `docs/product/PRODUCT_EVALS.md` from `**100%**` to `**99%**` leaves
+`cargo test -p sure-core --test release_gate_runner` at **16 passed; 0 failed**.
+The other half is what this row changes: `node scripts/product-evals.mjs` exits
+1 with `WRONG` on the same edit. A false number in a shipped product document
+that every automatic check passed is the defect this repository exists to catch.
 
 ## The environment the readings were taken under
 
@@ -233,13 +269,23 @@ redundancy now.
 ## Nothing suppresses, and the census is what says so
 
 The runner reports the count of the two tokens a failure can be hidden behind —
-`-ErrorAction`'s silent one and the workflow one — over the five files the gate
-set is made of: itself, the four commands it calls, and the instrument it calls
-for the parent figure.
+`-ErrorAction`'s silent one and the workflow one — over the six files the gate
+set is made of: itself, the four node commands it calls
+(`scripts/validate-bootstrap.mjs`, `scripts/taskctl.mjs`,
+`scripts/check-non-windows.mjs`, `scripts/product-evals.mjs`) and the instrument
+it calls for the parent figure (`scripts/measure-tests.mjs`).
 
 ```text
-suppression census over 5 files: SilentlyContinue=0 continue-on-error=0
+suppression census over 6 files: SilentlyContinue=0 continue-on-error=0
 ```
+
+That is the line the runner printed on 2026-09-21, taken with
+`-PreflightOnly`; it is not re-typed. The number in it is
+`$CensusRelative.Count`, so the line says how many files the census actually
+read rather than how many somebody remembered there were — which is the
+difference that matters, because the comment above that array claimed "all six"
+over an array of five until this row was added and named the three node commands
+among the commands above it as "four".
 
 **It reads this file too**, which is why the two tokens are spelled in two
 pieces in the source: a file that spells them whole cannot honestly count them
@@ -324,8 +370,9 @@ digest stale with exit 1, and step 2 restores `0 stale` and exit 0.
   and this deliberately does not filter any of it: a suppressed name is a
   failure nobody sees again, which is worse than a count. Whether a named
   failure is new is not a property of one run.
-- It is not in the local gate set as a seventh gate. It *is* the gate set's
-  runner; the repository-shape rules that do run under it —
+- `scripts/gates.ps1` is not itself a row in the gate set. It *is* the gate
+  set's runner, and the seventh row is `node scripts/product-evals.mjs`; the
+  repository-shape rules that do run under it —
   `crates/sure-testkit/tests/source_manifest.rs`,
   `crates/sure-testkit/tests/ci_workflow.rs` and the rest — are `cargo test`
   targets, which is gate 3.

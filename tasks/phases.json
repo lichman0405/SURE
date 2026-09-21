@@ -185,5 +185,16 @@
       "No known false-green regression is introduced.",
       "Documentation matches implemented behavior."
     ]
+  },
+  {
+    "id": "P17",
+    "title": "Post-acceptance repairs",
+    "objective": "Defects the readings taken while closing P16 surfaced afterwards — found by a red CI run rather than by a task, repaired under the same evidence rules.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
   }
 ]

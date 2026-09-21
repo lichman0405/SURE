@@ -334,21 +334,62 @@ fn exchange(mut stream: TcpStream, answer: fn(&str) -> &'static [u8]) -> String 
     line
 }
 
-/// The address of a port nothing is listening on **at the moment it is asked**.
+/// A port nothing is listening on **at the moment it is asked**, checked rather
+/// than assumed.
 ///
-/// Bind, take the number, release. That is a race against whatever else on the
-/// machine might take the port in between, and it is taken knowingly — the same
-/// way `runtime_start.rs` takes it. The alternative is a fixed port, which is a
-/// race against every other run of this suite.
+/// **The sentence above used to be an assumption and is now a measurement.** It
+/// said bind, take the number, release — which establishes nothing about what
+/// happened in between, so a machine that took the port in that gap would have
+/// made the test below a reading of whatever answered. The numbers also came
+/// from the operating system's dynamic range, because a port asked for as `0` is
+/// handed out of it, and that is the range every other `bind(0)` on the host
+/// draws from. `runtime_start.rs` gives that argument in full and removed the
+/// draw; this is the same walk, and `browser_driver.rs` walks it too.
+///
+/// What makes the claim true is the check: a port is returned only after a
+/// connection to it has ended without an answer. Which end that is depends on
+/// the platform and the test below records both — a Unix connect to a closed
+/// loopback port is refused, and on Windows it ends at the bound. Both are an
+/// `Err` here, and both mean nothing answered.
 fn free_port() -> u16 {
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a loopback port must be bindable");
-    let port = listener
-        .local_addr()
-        .expect("a bound listener has an address")
-        .port();
-    drop(listener);
-    port
+    /// Below every default dynamic range, and past the ports a machine's own
+    /// services are actually likely to be on.
+    const LOWEST: u16 = 10_000;
+    const HIGHEST: u16 = 32_000;
+    /// A range this wide cannot be full of listeners, so the walk ends long
+    /// before this on any machine.
+    const TRIES: u16 = 1_000;
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let span = HIGHEST - LOWEST;
+    // A per-process start and a per-test step: two copies of this binary started
+    // together do not walk the same numbers in the same order.
+    let start = (std::process::id() % u32::from(span)) as u16;
+    let step = (NEXT.fetch_add(1, Ordering::Relaxed) % u32::from(span)) as u16;
+
+    for attempt in 0..TRIES {
+        let port = LOWEST + (start.wrapping_add(step).wrapping_add(attempt) % span);
+        let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) else {
+            // Taken, reserved or excluded: skipped rather than handed to a probe
+            // that would then be asking about something else.
+            continue;
+        };
+        drop(listener);
+
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        if TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_err() {
+            return port;
+        }
+    }
+
+    panic!(
+        "all {TRIES} loopback ports this test walked between {LOWEST} and {HIGHEST} had something \
+         listening on them by the time they were tested, so no port could be shown to be one \
+         nothing answers on, and \
+         `a_port_nothing_is_listening_on_is_never_a_pass_and_the_reason_says_what_happened` would \
+         have been reading whatever that was. That is a fact about this machine's load and not \
+         about SURE."
+    );
 }
 
 /// Everything answered with `204`, which is the service a working project has.

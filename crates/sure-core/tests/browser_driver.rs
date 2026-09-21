@@ -78,7 +78,7 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -834,22 +834,68 @@ fn a_wait_that_runs_out_says_the_browser_was_still_running_and_not_how_long_it_t
 }
 
 /// A loopback port with nothing behind it, checked rather than assumed.
+///
+/// **The check is the point and it stays.** A port is returned only after a
+/// connection to it has been refused, or has ended at the bound without an
+/// answer — the two are one `Err` here, and `http_routes.rs` records which
+/// platform does which — so nothing below is ever about whatever else the
+/// machine happens to be running.
+///
+/// **Two things changed, and it took a red run to see either.** The numbers
+/// used to come from the operating system's dynamic range, because a port asked
+/// for as `0` is handed out of it: 49152 and up on this machine, 32768 and up by
+/// default on the platforms this has to port to. That is the same range every
+/// other `bind(0)` on the host draws from, including the ones inside the other
+/// copies of this binary when a whole gate runs, and two asks at the same moment
+/// can be handed the same number. `runtime_start.rs`'s `free_port` removed
+/// exactly that and says why; this walk is the same one, and it is here because
+/// these two helpers are the ones that assert. And a candidate the machine took
+/// is now *replaced* rather than asserted against: on `ubuntu-latest` another
+/// job's process took the drawn port in the gap between releasing the listener
+/// and testing it, which fired the guard below, and the guard was right — the
+/// port really had been taken — so what was wrong was asking the machine for a
+/// single number and treating a collision as a fact about SURE.
+///
+/// Every candidate is still required to be empty before it is returned. The
+/// panic at the end is the assertion that got moved, not one that got weakened.
 fn a_port_nothing_is_listening_on() -> u16 {
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a loopback port must be bindable");
-    let port = listener
-        .local_addr()
-        .expect("a bound listener has an address")
-        .port();
-    drop(listener);
+    /// Below every default dynamic range, and past the well-known and registered
+    /// ports that a machine's own services are actually likely to be on.
+    const LOWEST: u16 = 10_000;
+    const HIGHEST: u16 = 32_000;
+    /// A range this wide cannot be full of listeners, so the walk ends long
+    /// before this on any machine.
+    const TRIES: u16 = 1_000;
 
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    assert!(
-        TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_err(),
-        "something is listening on {address} after the listener was released, \
-         so this test would be about whatever that is"
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let span = HIGHEST - LOWEST;
+    // A per-process start and a per-test step, the same shape `runtime_start.rs`
+    // uses: two copies of this binary started together do not walk the same
+    // numbers in the same order.
+    let start = (std::process::id() % u32::from(span)) as u16;
+    let step = (NEXT.fetch_add(1, Ordering::Relaxed) % u32::from(span)) as u16;
+
+    for attempt in 0..TRIES {
+        let port = LOWEST + (start.wrapping_add(step).wrapping_add(attempt) % span);
+        let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) else {
+            // Taken, reserved or excluded: skipped rather than handed on to a
+            // caller that would then be testing something else.
+            continue;
+        };
+        drop(listener);
+
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        if TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_err() {
+            return port;
+        }
+    }
+
+    panic!(
+        "all {TRIES} loopback ports this test walked between {LOWEST} and {HIGHEST} had something \
+         listening on them by the time they were tested, so no port could be shown to have nothing \
+         behind it and every reading below would be about whatever that was. That is a fact about \
+         this machine's load and not about SURE."
     );
-    port
 }
 
 /// **The program SURE would run is not one the project could have written.**

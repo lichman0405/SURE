@@ -4,78 +4,149 @@
 
 > **AI says it's done. Be SURE.**
 
-SURE is a local-first project checking layer for software built with AI coding tools.
+[English](README.md) · [中文](README.zh-CN.md)
 
-It helps an individual builder or a small team answer:
+SURE checks software that was built with AI coding tools, and tells you what is
+actually true about it — in plain language, with evidence behind every claim.
+
+It answers three questions:
 
 1. **Can this project actually work?**
 2. **Is anything clearly broken, unsafe, fake or incomplete?**
 3. **Can the AI's claims about what it completed be confirmed?**
 
-When SURE finds a real problem, it explains the consequence in plain language, creates a bounded repair contract, hands that contract back to the user's existing coding agent, and checks again after the repair.
+When SURE finds a real problem, it explains the consequence, writes a bounded
+repair contract you can hand back to your coding agent, and checks again after
+the repair. When it cannot confirm something, it says "cannot confirm" instead
+of guessing. **A false "all clear" is treated as more serious than a visible
+error.**
 
-## Product rule
+SURE works beside the tool you already use. Claude Code users keep using Claude
+Code. Cursor users keep using Cursor. Codex users keep using Codex.
 
-> **Never replace the harness. Sit beside it.**
+## Status: working v0.1, no download yet
 
-Claude Code users keep using Claude Code. Cursor users keep using Cursor. Codex users keep using Codex.
+Read this before anything else.
 
-## Two modes
+- **The v0.1 development plan is complete** — 204 of 204 planned tasks, each
+  verified. The checker runs, the CLI works, and the checks are real.
+- **There is nothing to download.** No GitHub release, no `winget` package, no
+  installer you can fetch. The only way to get SURE today is to build it from
+  source, below.
+- **It is a bootstrap build.** `sure version` prints `0.0.0-bootstrap`. It is an
+  honest v0.1, not a finished product. `FINAL_REPORT.md` lists exactly what it
+  can and cannot do, with measurements.
 
-### Check this project
+## Install on Windows
 
-Works even if SURE did not observe the development session.
+You need two things on the machine that builds SURE:
 
-It can inspect the current project, run approved checks, identify obvious incomplete/fake implementation and produce a plain-language report.
+- **Rust** — install [rustup](https://rustup.rs); the repository's
+  `rust-toolchain.toml` pins the version, so rustup installs the right one for
+  you.
+- **Visual Studio Build Tools** with the "Desktop development with C++"
+  workload.
 
-It **cannot** claim that the project matches the user's original request unless that request/goal was supplied or observed.
+Then, from the root of this repository, in PowerShell:
 
-### Full-session checking
+```powershell
+# 1. The release gate — SURE's own acceptance tests. Takes a few minutes.
+cargo test -p sure-core --test acceptance_report_runner
 
-With a supported harness plugin/hook, SURE also records selected development facts and can compare the AI's completion claims with what actually happened.
+# 2. Build and package the archive. Also a few minutes.
+& .\scripts\Build-Release.ps1 -Phase All
 
-## Current repository status
+# 3. Install for your user account. No administrator, no PATH change.
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.0.0-bootstrap-x86_64-pc-windows-msvc.zip
 
-This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
+# 4. Check that it works.
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
+```
 
-- **Progress:** `progress/state.json` is the authoritative record and `node
-  scripts/taskctl.mjs status` prints it. No count is restated here, because a
-  hand-copied one is wrong the day after it is written — the line that stood here
-  claimed 92 of 166 tasks at phase P9 while the file held 199 at phase P16.
-- **Branch for active work:** `claude/v0.1-autonomous`.
-- **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
+The program lands at `%LOCALAPPDATA%\SURE\bin\sure.exe`. To remove it later:
+`& .\scripts\Uninstall-Sure.ps1` — it never deletes `sure.db`, the file where
+your check history lives.
 
-Implemented so far:
+The full walk is `docs/development/QUICKSTART_WINDOWS.md`; the installer
+reference is `docs/development/INSTALL_WINDOWS.md`.
 
-- Multi-ecosystem project discovery (Node, Python, Rust) and component graph.
-- Static checks: config references, environment completeness, dependency state, database migration consistency.
-- Runtime checks: local service smoke tests, HTTP route probes, browser-driven flow probes, with cancellation and cleanup.
-- False-completion analysis: candidate scanner for TODO/mock/stub/placeholder patterns, production-path/context filter, no-op/fake-success heuristics, hard-coded demo-data heuristics, frontend/backend route consistency, UI-action completeness bridge, grounded semantic-analysis request/response contract, project-intent versus implementation comparison, and a candidate aggregator that deduplicates by evidence anchor and prioritizes user impact over style noise.
-- Finding model: four-level severity, `AssessmentSource`, `SeverityRationale`, concrete evidence anchors including intent/claim/model, a builder that refuses unsupported `MustFix` sources, and a plain-language finding contract (`what`/`impact`/`severity`/`next action`).
-- Coverage and not-checked summary: joins a scheduled check plan to its run report, counts checked/skipped/could-not-run checks, surfaces critical gaps, and reports the adapter support level in plain language.
-- Overall project verdict: assembles findings, aggregate result, coverage gaps, capability level, and intent into a `ProjectVerdict`, then renders a plain-language summary with independent false-green protection.
-- Terminal human report: renders a `ProjectVerdict` to plain text for a standard terminal, with no ANSI codes by default, material findings first, coverage gaps, and escaped attacker-controlled text.
-- Stable JSON report: deterministic, versioned, schema-validated JSON output from a `ProjectVerdict` for downstream tools, with safe handling of control characters.
-- Portable Markdown/HTML reports: self-contained reports from a `ProjectVerdict` with HTML entity escaping, control-character escaping, and no external resources.
-- Plain-language golden tests: integration tests lock down exact user-facing wording across terminal, Markdown, HTML, and JSON reports, including false-green protection and after-the-fact caveat cases.
-- Evidence-grounded reporting with plain-language verdicts and `Cannot confirm` as a valid result.
-- Versioned harness event ingestion: validates handshake, document kind, and schema before accepting a harness event, with plain-language diagnostics for version mismatches and malformed payloads.
-- Session/event persistence: stores harness events bound to project/session/time/capability source in the local SQLite store, with retention metadata, idempotent ingestion, and redaction before storage.
-- Standard recording projection: summarizes tool/command/git/file/build-test/outcome activity from harness events and stores the privacy-conscious summary without the full transcript.
-- Full recording opt-in projection: retains raw transcript/terminal payloads only under explicit opt-in, with a distinct storage marker, redaction before storage, and short retention.
-- Observed ProjectIntent capture path: converts harness `user.request` events into `ObservedUserRequest` requirements when full recording is granted, redacts credential-shaped prompt text before storage, and retains the raw event only under explicit full-recording consent.
-- Agent completion-claim extraction: validates harness `agent.claim` events, redacts credential-shaped `claim_text`, and stores a `Claim` document with `assessment: cannot_confirm` plus original event provenance.
-- Deterministic claim checkers: checks stored `Claim` documents against recorded harness events via the standard recording projection. `test_ran`, `file_changed`, `git_state`, and `current_code` claims can be `Confirmed` when evidence exists, `CannotConfirm` when it does not, or `NotCheckable` for unknown/missing types; the checker never treats absence of evidence as `Contradicted`.
-- Stale test/result evidence detection: `test_ran` and `current_code` claims are downgraded to `CannotConfirm` when a later file write/delete or relevant git operation supersedes the proof event, so a passing run before the latest code changes is not reported as proof of the current version.
-- Capability/blind-spot reporting from recorded events: `report_from_events` derives an honest [`CapabilityReport`] from stored harness events, reporting the tier as `Snapshot` when no events exist and `Observed` otherwise (events alone cannot prove pre-action control), and listing blind spots for missing user-request, agent-claim, tool/command, failure, file, or git visibility rather than trusting an adapter's self-reported capability.
-- AI-claim report section: checked agent claims flow into `ProjectVerdict::claim_checks` and are rendered in terminal, Markdown, HTML, and JSON reports with escaped attacker-controlled text, assessment labels, and plain-language reasons or fallback explanations; the JSON report schema version advanced to 2 with an optional `claim_checks` array.
-- Idempotent/concurrent hook event ingestion: a unique index on sessions and `INSERT OR IGNORE` ordering in `SessionEventStore::persist` make duplicate event ids and concurrent session creation deterministic; duplicate events return `AlreadyExists`, and racing writers for the same harness session reuse a single session row.
-- Repair contract domain/schema: `RepairContract` carries problem, impact, evidence, required fix, preserve, acceptance, recheck, and forbidden-shortcuts fields; the JSON schema now declares the full wire surface including `id` and `recheck`.
-- Repair contract generation: `RepairContract::from_finding` generates a bounded, actionable contract from a grounded finding, rejecting ungrounded findings and empty re-check lists so acceptance conditions stay observable and no unobserved facts are invented.
-- Harness-neutral repair envelope: `RepairEnvelope` wraps a `RepairContract` with a version and optional `target_harness`, so the same bounded contract can be delivered to Claude, Cursor, Codex, or any future adapter without changing the contract itself.
-- Impacted-check selection: `select_impacted_checks` chooses the checks to re-run after a repair by combining the contract's `recheck` list, checks whose reason overlaps the repair evidence, and serious deterministic regression checks that run project code.
-Start with `START_HERE.md` for the Windows bootstrap and development workflow.
+## macOS and Linux
 
-## Development bootstrap
+No published archives here either — build from source:
 
-Primary v0.1 development host: **Windows 11 x64 / native MSVC**. See `START_HERE.md`.
+```sh
+cargo install --path crates/sure-cli   # installs `sure` into ~/.cargo/bin
+```
+
+That is also where the Unix launcher scripts look for it. The Rust core is
+portable and CI-tested on both platforms; `docs/development/MACOS.md` and
+`docs/development/LINUX.md` state the support boundaries.
+
+## Use it
+
+```powershell
+# Is SURE itself set up correctly on this machine?
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+
+# Check a project. The path must be absolute.
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\path\to\your\project"
+```
+
+Read the exit status as the answer:
+
+| status | meaning |
+| --- | --- |
+| `0` | clean — every check that ran passed, and nothing was skipped |
+| `1` | checked, and not clean — findings, or not enough could be checked |
+| `5` | the run did not finish — bad path, unreadable project |
+| `2` | the command line itself was wrong |
+
+**Expect `1` on your first runs.** With no AI model configured — the default —
+SURE runs its deterministic checks but marks the model-assessment stage "not
+checked", and a run with any stage not checked is never reported as clean. That
+is the tool being honest, not your project failing.
+
+Other commands worth knowing:
+
+- `sure repair` — turn findings into a repair contract for your coding agent
+- `sure recheck` — check again after a repair, and compare with last time
+- `sure history` — see (and delete) what SURE has recorded on this machine
+- add `--format json` to any command for machine-readable output
+
+A first check writes nothing to your machine: SURE opens your history only if
+one already exists.
+
+## Connect it to your AI coding tool
+
+SURE can also record a coding session (only with your consent) and compare the
+AI's "done" claims against what actually happened. That needs the plugin for
+your harness:
+
+```powershell
+# Claude Code — copies the plugin to %LOCALAPPDATA%\claude-plugins\sure
+& .\integrations\claude-code\scripts\install.ps1 -ForceCopy
+```
+
+Loading the plugin into Claude Code is Claude Code's own step;
+`integrations/claude-code/README.md` explains it. Cursor and Codex packages
+follow the same layout — see `docs/integrations/INSTALLATION_MATRIX.md`. The
+Copilot package is a template today; nothing installs it.
+
+No plugin? The CLI still checks projects. Claim-checking then reports "cannot
+confirm", which is the honest answer rather than a missing feature.
+
+## Where SURE keeps things
+
+`%LOCALAPPDATA%\SURE\` on Windows — the program, and `sure.db`, your evidence
+history. SURE is local-first: everything stays on your machine and nothing is
+sent anywhere.
+
+## Read more
+
+- `FINAL_REPORT.md` — what this v0.1 is and is not, with measurements
+- `docs/` — architecture, security, integrations, development
+- `START_HERE.md` — if you want to work on SURE itself
+
+## License
+
+Apache-2.0. See `LICENSE`.

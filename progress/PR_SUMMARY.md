@@ -18,8 +18,10 @@ including to the supervisor who was building it.
 
 ## What is in it
 
-- **201 tasks across 18 phases, every one of them `accepted`**, with the readings
-  for each held in `progress/state.json`. Nothing is in flight.
+- **204 tasks across 18 phases, every one of them `accepted`**, with the readings
+  for each held in `progress/state.json`. Nothing is in flight and nothing is
+  `queued`: `node scripts/taskctl.mjs ready` prints nothing, which is this
+  repository's definition of the graph being closed.
 - **A working CLI** — `sure check`, `repair`, `recheck`, `doctor`, `hook ingest`,
   `mcp`, `config`, `history` — with a human report, a machine frame, Markdown and
   HTML forms, and a re-check loop that closes a finding only when every check its

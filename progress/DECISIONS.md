@@ -4647,3 +4647,61 @@ over-broad store-refusal promise in two documents and could not touch
 further sites were deliberately left: `tasks/tasks.json:3040` is the task's own
 acceptance line — a record of what was asked, not a claim about the code — and
 `DOGFOOD.md:432` quotes the criticised wording in order to criticise it.
+
+## P16 — T003, T008 and T009 are accepted, and with them the twelve P16 tasks are closed
+
+**The last three acceptances, and what each of them asked for.** `T003` asked for
+the Windows/macOS/Linux jobs green at the final commit — `ci` run `35560764305` on
+`a314c0a` is `conclusion: success` with **all five jobs `success`**. `T008` asked
+that `FINAL_REPORT.md` cover ten named things — every one of them is a section,
+sized 47 to 269 lines. `T009` asked for a clean tree, every accepted commit
+present, the branch pushed, and a PR-ready summary — all four checked
+mechanically: nine of nine accepted `head_sha`s are ancestors of HEAD, 0 missing.
+
+**A reading taken only at the end cannot say that the pushes before it were red,
+and CI had been red for nine consecutive pushes.** That is the whole reason
+`T003` exists and why its ordering was corrected mid-phase. The correction
+produced the reading it was for, and it also produced a smaller lesson worth
+keeping: **a green run is a reading over a whole tree, not over a diff**, so the
+green at `a314c0a` retroactively covers every P16 commit beneath it — which is
+what closed the six deferred acceptances, none of which had arranged a reading
+of its own.
+
+**The supervisor re-took the two `gh` readings the report itself flagged as
+unrepeated**, because `§8`'s strongest blocker rested on a pre-compaction reading
+and an inherited reading is not a reading. All four agree: `release.yml` is not
+in `git ls-tree origin/main --name-only .github/workflows/`, `gh workflow list
+--all` shows only `ci`, `release-dry-run` and `Dependabot Updates`, `git tag` is
+empty, and `gh api repos/lichman0405/SURE/releases --jq length` answers `0`.
+
+**Two false statements were found in the deliverable by the supervisor, and the
+report's own Markdown check caught neither** — an entire bullet duplicated
+verbatim, and "P16 had fourteen tasks" against twelve in both `tasks/tasks.json`
+and `progress/state.json`. Both are corrected at `a314c0a`. The check verified
+fences, pipe-table cell counts, backtick parity and list numbering; none of those
+can see repeated content. A block-duplication scan over both deliverables then
+found exactly one adjacent-block repeat, the one already known, and none in
+`DOGFOOD.md`.
+
+**One correction to `T012`'s record, because a lane withdrew a finding it should
+have kept.** The `T012` lane sent a hand-back withdrawing its finding that
+`sure-core/src/doctor.rs` still named `sure config show` as a reader, on the
+ground that the file is "unmodified relative to HEAD `f34e18b`" and already
+carried the corrected text. **The diff settles it and the withdrawal is half
+wrong**: `git diff --stat f34e18b b5f44f9 -- crates/sure-core/src/doctor.rs` is
+`1 file changed, 5 insertions(+), 3 deletions(-)`, and those edits ARE the two
+repairs. Finding (a) was true of `f34e18b`; the lane re-measured **after** the
+repair had landed and read the post-repair bytes as though they had always been
+there. Its "one unexplained fact" — an mtime of 12:08:54 on a file it believed
+byte-identical to HEAD — is explained rather than unexplained: **the supervisor
+is the agent that wrote that file, in `b5f44f9`**. The withdrawal is recorded as
+mistaken rather than accepted, because accepting it would write into the record
+the false claim that the text was never wrong — and that text is exactly what the
+task repaired. The lane's finding (c) stands as it corrected it, verified at
+`doctor.rs:170`.
+
+**A PR-ready summary was prepared and `gh pr create` was deliberately not run.**
+`T009` asks for a summary prepared; opening a pull request creates a durable,
+outward-facing artefact the owner would then have to manage, and whether to open
+it is the owner's. Preparing and opening are different acts and only the first
+was asked for. `progress/PR_SUMMARY.md` says so on its face.

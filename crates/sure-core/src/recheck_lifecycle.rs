@@ -101,6 +101,78 @@ pub fn case_rule_for(project_root: &str) -> CaseSensitivity {
     crate::paths::case_rule_of_volume_or_sensitive(Path::new(project_root))
 }
 
+/// Whether two spellings name the same project directory.
+///
+/// The question [`case_rule_for`] answers half of. `case_rule_for` says what
+/// this project's volume does with case; this says whether two
+/// `project_root` strings name one directory, given that answer. Both are here
+/// so that SURE has **one** answer to *when are two paths one project*: the
+/// tier a project's events earn ([`crate::capability_report::for_project`]) and
+/// the earlier findings a re-check compares against ([`previous_open_findings`])
+/// are two readers of one store asking that one question about one field, and a
+/// second rule would let them disagree about the same two rows.
+///
+/// **What it asks.** [`crate::paths::compare::same_path_case`], which is the
+/// repository's *are these the same location* predicate and touches no
+/// filesystem, plus `case` for the part of it that is a fact about the volume.
+/// Everything that is not a case question is decided by the path itself and is
+/// therefore decided the same way on every machine:
+///
+/// - separators: `C:\work\mine` and `C:/work/mine` are one spelling to
+///   `Path`'s own parser on Windows, and Windows resolves both;
+/// - a trailing separator: `C:\work\mine\` names the directory it is inside;
+/// - a `.` segment: `C:\work\.\mine` names `C:\work\mine`;
+/// - a `..` segment: folded where it can be, so `C:\work\mine\..\mine` is
+///   `C:\work\mine` and `C:\work\mine\..` is **not** — it is `C:\work`;
+/// - the drive letter's case: lowercased unconditionally, because Windows has
+///   no uppercase `C:` distinct from `c:` and this is not a case-sensitivity
+///   decision ([`crate::paths::compare`] says so where it does it);
+/// - a verbatim prefix: `\\?\C:\work` and `C:\work` are one location.
+///
+/// Everything that *is* a case question is `case`'s, and `case` comes from the
+/// volume rather than from this machine's name for itself — see
+/// [`case_rule_for`] and [`crate::paths::volume`].
+///
+/// **What it is not.** Not a containment test. `same_path_case` requires both
+/// paths to be the same length in components, so `C:\work` is not
+/// `C:\work\mine`, `C:\work\mine` is not `C:\work\mine2`, and neither is
+/// its own parent. A prefix comparison would match all three, and each of those
+/// three is a genuinely different directory whose events would then be counted
+/// as this project's.
+///
+/// **What it does when the two paths cannot be resolved.** Every `&str` is a
+/// path, so there is no unresolved case at this level; what can fail is the
+/// volume probe, and `case` is where that has already been decided. When the
+/// volume cannot be asked — a `project_root` that is a file, that does not
+/// exist, that cannot be listed, or that holds nothing whose case can be
+/// flipped — [`case_rule_for`] answers [`CaseSensitivity::Sensitive`]. A stored
+/// root that cannot be told apart from this one, and two stored roots that
+/// differ only in case, are then two projects.
+///
+/// **Which way that errs.** Toward counting fewer events, never toward counting
+/// another project's. The two mistakes are not symmetric, and this is the one
+/// place in the product where the asymmetry is a verdict rather than a line:
+///
+/// - answering [`CaseSensitivity::Insensitive`] about a volume that keeps case
+///   makes two genuinely different projects compare equal. This run's report
+///   would then count **another project's** session as its own, the tier would
+///   rise on evidence that is not about this project at all, and the counted
+///   sentence would name it. That is a false green in the product's own voice,
+///   and `CLAUDE.md` ranks it above every visible error;
+/// - answering [`CaseSensitivity::Sensitive`] about a volume that folds means a
+///   project SURE has a session for is reported as one it has never seen — the
+///   tier falls to 0 and the notice names the events it did not count, so a
+///   careful reader can diagnose it.
+///
+/// The second is a defect and the first is a false green, so an answer that
+/// cannot be had is the second. The two answers agree wherever the volume is
+/// the platform's default, which is why the direction costs nothing on the
+/// machines this repository runs on.
+#[must_use]
+pub fn same_project_root(a: &str, b: &str, case: CaseSensitivity) -> bool {
+    crate::paths::compare::same_path_case(Path::new(a), Path::new(b), case)
+}
+
 /// The form of a path a [`FindingKey`] is built from, under `case`.
 ///
 /// **What it asks**: `case` is the project's volume's answer to *are these two
@@ -494,6 +566,17 @@ impl std::error::Error for HistoryReadError {
 /// newer row wins; on a volume that keeps it they are two, because they are two
 /// files.
 ///
+/// # Which rows are this project's
+///
+/// A row is this project's when its stored `project_root` and this run's
+/// `project_root` name one directory, which is [`same_project_root`]'s question
+/// rather than a string comparison — the same spelling rule, and the same
+/// `case`, that the deduplication below matches findings by. A run started from
+/// `C:/projects/sendmail` after one started from `C:\projects\sendmail` is the
+/// same project asked about twice, and answering it with "no earlier run left
+/// anything open" would be the same false statement about the store that
+/// `crate::capability_report` refuses to make about the tier.
+///
 /// # Why there is no project-state filter
 ///
 /// There was one, and it could never fire: it skipped a record whose
@@ -572,7 +655,16 @@ fn previous_open_findings_within(
     let mut seen: HashSet<FindingKey> = HashSet::new();
     let mut findings = Vec::new();
     for record in records {
-        if record.project_root.as_deref() != Some(project_root) {
+        // Which rows are this project's is decided by [`same_project_root`], the
+        // same rule and the same `case` the deduplication below matches findings
+        // by: two readers of one store asking *when are two paths one project*
+        // must not answer it two ways, or a row this filter took as another
+        // project's would be a row the reader was owed.
+        if !record
+            .project_root
+            .as_deref()
+            .is_some_and(|recorded| same_project_root(recorded, project_root, case))
+        {
             continue;
         }
         let finding: Finding = record.decode()?;
@@ -1381,6 +1473,75 @@ mod tests {
             "two files' findings were deduplicated into one"
         );
         assert_eq!(keeping[0].title, keeping[1].title);
+    }
+
+    /// **The same question, answered the same way as the tier's reader.**
+    ///
+    /// Which rows are this project's is decided by [`same_project_root`], and
+    /// that is only worth anything if it is one rule: a row this filter took as
+    /// another project's is a finding the reader was owed, and `capability_report`
+    /// asks the identical question about the identical field of the identical
+    /// rows when it counts a session's events. Two readers of one store that
+    /// answered *when are two paths one project* two ways would let a run be
+    /// `(capability tier 1, observed)` for its session and simultaneously owe
+    /// nothing it had found open.
+    ///
+    /// So the two spellings here are the same directory under **every** rule —
+    /// a trailing separator and a `.` segment, one of which every platform folds
+    /// itself and neither of which is the case question. That is deliberate: a
+    /// spelling whose answer depended on the volume would make this test's
+    /// assertion a claim about the machine rather than about the filter, and the
+    /// case question is already pinned by
+    /// `two_spellings_of_one_file_are_one_finding_when_the_volume_folds_them` and
+    /// its opposite beside it. The last reading is the direction that must not be
+    /// traded: a genuinely different directory is still another project's.
+    #[test]
+    fn a_run_stored_under_one_spelling_of_the_project_is_this_projects_history() {
+        let store = store_in("recheck-lifecycle-project-spelling");
+        let recorded = "C:/projects/sendmail";
+        store_run(
+            &store,
+            recorded,
+            &fingerprint(),
+            &[
+                finding_with("Email not sent", "src/email/send.rs", FindingStatus::Open),
+                finding_with(
+                    "Retry loop never ends",
+                    "src/email/retry.rs",
+                    FindingStatus::Open,
+                ),
+            ],
+            &[],
+        )
+        .expect("the run is stored");
+
+        let titles = |project: &str| -> Vec<String> {
+            previous_open_findings(&store, project, CaseSensitivity::Sensitive)
+                .expect("the history reads")
+                .into_iter()
+                .map(|finding| finding.title)
+                .collect()
+        };
+
+        for spelling in [
+            "C:/projects/sendmail/",
+            "C:/projects/./sendmail",
+            "C:/projects/x/../sendmail",
+        ] {
+            let mut open = titles(spelling);
+            open.sort();
+            assert_eq!(
+                open,
+                ["Email not sent", "Retry loop never ends"],
+                "{spelling} is {recorded}, so its run's open findings are this project's, \
+                 and the reader was handed a history that said otherwise"
+            );
+        }
+
+        assert!(
+            titles("C:/projects/sendmail2").is_empty(),
+            "a different directory was handed this project's open findings"
+        );
     }
 
     /// The refusal's own text, which is what a reader is handed.

@@ -192,6 +192,15 @@ pub struct ProjectCapability {
 /// would stop counting at the first edit, and a project whose session was
 /// recorded would be reported as a project nobody ever recorded.
 ///
+/// **What "compared against" means is the directory's identity, not the
+/// spelling.** Two `project_root` strings are one project when they name one
+/// directory, decided by [`crate::recheck_lifecycle::same_project_root`] under
+/// the rule this project's volume gives for case
+/// ([`crate::recheck_lifecycle::case_rule_for`]). A record whose
+/// `project_root` is `None` is never this project's, and the rule errs toward
+/// counting fewer events — see `same_project_root` for the direction and why it
+/// is that one.
+///
 /// # What this adds to [`report_from_events`]
 ///
 /// Two things, and they are here rather than at the call site because both are
@@ -233,9 +242,33 @@ pub fn for_project(store: Option<&Store>, project_root: &str) -> ProjectCapabili
     };
     let truncated = records.len() == EVENT_SCAN_LIMIT;
 
-    let (mine, others): (Vec<StoredRecord>, Vec<StoredRecord>) = records
-        .into_iter()
-        .partition(|record| record.project_root.as_deref() == Some(project_root));
+    // The volume is asked once, here, and the one answer decides which rows are
+    // this project's. The question *is this record about this project* is a
+    // question about a directory, and the answer is the identity of that
+    // directory rather than a spelling of it: `C:\work\mine`, `C:/work/mine`,
+    // `C:\work\mine\` and `C:\work\.\mine` are one directory on Windows, and a
+    // user who copied a path out of a tool that writes forward slashes is
+    // checking the project SURE has a session for. Comparing the two strings
+    // instead reported `(capability tier 0, snapshot) SURE counted no session
+    // events for this project: SURE's store holds none for it` — a confident,
+    // specific and false statement about the store, for the four spellings out
+    // of five a real `sure check` was measured with.
+    //
+    // The rule is `recheck_lifecycle::same_project_root` rather than one written
+    // here, because the re-check asks the same question about the same field of
+    // the same rows (`previous_open_findings`) and two rules would let the tier
+    // and the comparison disagree. `recheck_lifecycle::case_rule_for` is the
+    // other half: the volume decides the case question, and it answers
+    // `Sensitive` when it cannot be asked, which counts fewer events rather
+    // than another project's. See `same_project_root` for what the rule asks,
+    // what it does when it cannot tell, and which way it errs.
+    let case = crate::recheck_lifecycle::case_rule_for(project_root);
+    let (mine, others): (Vec<StoredRecord>, Vec<StoredRecord>) =
+        records.into_iter().partition(|record| {
+            record.project_root.as_deref().is_some_and(|recorded| {
+                crate::recheck_lifecycle::same_project_root(recorded, project_root, case)
+            })
+        });
 
     let events = match parse_event_records(&mine) {
         Ok(events) => events,
@@ -384,6 +417,7 @@ mod tests {
     use sure_protocol::event::EventEnvelope;
 
     use crate::harness_event::IngestedEvent;
+    use crate::paths::CaseSensitivity;
 
     fn event(event_type: &str) -> IngestedEvent {
         let envelope = EventEnvelope::new("claude-code", event_type, "2026-09-14T09:10:56.827Z");
@@ -687,6 +721,233 @@ mod tests {
         assert_eq!(report.tier, CapabilityTier::Observed);
         assert!(!report.pre_action_control);
         assert_ne!(report.tier_number(), 2);
+    }
+
+    // --- one directory, several spellings ----------------------------------
+
+    /// A real directory under `target/tmp` whose volume can be asked, and the
+    /// project recorded against it.
+    ///
+    /// The directory has to exist: the case rule comes from the volume, and a
+    /// `project_root` that is not there cannot be probed, so a test that used an
+    /// invented path could only ever exercise the `Sensitive` fallback and would
+    /// say nothing about the arm this machine is actually on.
+    fn scratch_project(name: &str) -> std::path::PathBuf {
+        let directory = crate::store::scratch_root().join(format!(
+            "capability-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&directory).expect("a scratch project directory");
+        // A name with a case to flip, which is what the volume probe reads.
+        std::fs::write(directory.join("Cargo.toml"), b"[package]\n").expect("a project file");
+        directory
+    }
+
+    /// What a report counted, as the three things this module's tests assert.
+    fn counted(report: &CapabilityReport) -> (CapabilityTier, usize, usize) {
+        let evidence = report
+            .evidence
+            .as_ref()
+            .expect("a read that happened is accounted for");
+        (report.tier, evidence.events, evidence.elsewhere)
+    }
+
+    /// **Every spelling of one directory is one project**, measured through
+    /// [`for_project`] rather than argued about.
+    ///
+    /// This is the defect `P15-T030` was minted from, and the shape of it is
+    /// why this test exists beside
+    /// `a_project_with_its_own_events_reports_the_tier_they_earn`: that test
+    /// records the session with the same `root` string it later checks, so both
+    /// sides of the comparison are one spelling and **any** normalisation passes
+    /// it. Here the store holds one session against one spelling and the report
+    /// is asked about others.
+    ///
+    /// A session of four Codex events is recorded for the directory as it is
+    /// spelt on disk, and the report is asked about:
+    ///
+    /// - the forward-slash spelling, which is what a path copied out of a tool
+    ///   that writes `/` looks like;
+    /// - the spelling with a trailing separator;
+    /// - the spelling with a `.` segment inside it.
+    ///
+    /// Each of those names the directory the session was recorded for on every
+    /// platform, so each is asserted on every platform: the tier is the observed
+    /// tier, four events were counted, and none was attributed to another
+    /// project.
+    ///
+    /// **The upper-case spelling is the one that is not universal, and this test
+    /// says what it is asking.** Whether `.../DEMOPROJ` and `.../demoproj` are
+    /// one directory is a fact about the volume and not about the operating
+    /// system — CI run `35544579833` measured macOS and Linux answering
+    /// differently in one workflow — so the volume is asked here, with
+    /// [`crate::paths::case_rule_of_volume`], and the assertion is made against
+    /// **the answer that came back**:
+    ///
+    /// - a volume that folds case: the upper-case spelling is this project, and
+    ///   the report counts the four events for it — the understating defect this
+    ///   task is about, gone;
+    /// - a volume that keeps case: the upper-case spelling is a different
+    ///   directory, and the report counts nothing for it and says it read four
+    ///   events for other projects. That is the safe direction, asserted rather
+    ///   than assumed, and it is also what the mechanism does when it cannot
+    ///   tell.
+    ///
+    /// **What it does if the volume cannot be asked**: it fails. Accepting the
+    /// `Sensitive` fallback would make the case-keeping arm below pass without
+    /// the volume having been asked anything, which is a test passing for the
+    /// wrong reason — the same rule
+    /// `recheck_lifecycle`'s volume test states for the same call.
+    #[test]
+    fn every_spelling_of_one_directory_is_one_project() {
+        let store = store_in("project-spellings");
+        let directory = scratch_project("project-spellings");
+        let root = directory.to_string_lossy().into_owned();
+        for event_type in [
+            "user.request",
+            "agent.claim",
+            "tool.completed",
+            "command.failed",
+        ] {
+            record(&store, &root, &timed(event_type, "2026-09-14T09:10:56.827Z"));
+        }
+
+        let separators = if cfg!(windows) { '\\' } else { '/' };
+        let forward_slashed = root.replace('\\', "/");
+        let trailing_separator = format!("{root}{separators}");
+        let with_a_dot_segment = directory
+            .parent()
+            .expect("the scratch directory has a parent")
+            .join(".")
+            .join(directory.file_name().expect("it has a name"))
+            .to_string_lossy()
+            .into_owned();
+
+        for spelling in [
+            forward_slashed.clone(),
+            trailing_separator.clone(),
+            with_a_dot_segment.clone(),
+        ] {
+            assert_eq!(
+                counted(&for_project(Some(&store), &spelling).report),
+                (CapabilityTier::Observed, 4, 0),
+                "the project named {spelling:?} is the directory the session was recorded for, \
+                 and the report did not count its events"
+            );
+        }
+
+        // The volume is asked before the one spelling whose answer is not the
+        // same everywhere, and the answer is what the arm below asserts.
+        let case = crate::paths::case_rule_of_volume(&directory).unwrap_or_else(|| {
+            panic!(
+                "the volume holding {} could not be asked, so this test could not say which \
+                 answer it was asserting",
+                directory.display()
+            )
+        });
+        assert_eq!(
+            crate::recheck_lifecycle::case_rule_for(&root),
+            case,
+            "the rule the report is made with is not the rule this volume gave"
+        );
+
+        let upper_case = root.to_uppercase();
+        match case {
+            CaseSensitivity::Insensitive => {
+                assert_eq!(
+                    counted(&for_project(Some(&store), &upper_case).report),
+                    (CapabilityTier::Observed, 4, 0),
+                    "this volume folds case, so {upper_case:?} is the directory the session was \
+                     recorded for, and the report did not count its events"
+                );
+                let line = for_project(Some(&store), &upper_case).report.summary();
+                assert!(
+                    line.contains("SURE counted 4 session events recorded for this project"),
+                    "a spelling Windows treats as this directory is reported as a project SURE \
+                     has never seen: {line}"
+                );
+            }
+            CaseSensitivity::Sensitive => {
+                assert_eq!(
+                    counted(&for_project(Some(&store), &upper_case).report),
+                    (CapabilityTier::Snapshot, 0, 4),
+                    "this volume keeps case, so {upper_case:?} is a different directory and its \
+                     events are not this project's"
+                );
+            }
+        }
+    }
+
+    /// **Two directories that are not one are never one project**, and the
+    /// events of one are never counted for the other.
+    ///
+    /// This is the other direction, and it is the one that must not be traded
+    /// for the first: a normalisation eager enough to fold `C:\work\mine` into
+    /// its sibling would make this project's report count another project's
+    /// session as its own, raise the tier on evidence that is not about it, and
+    /// name it in the counted sentence — a false green in the product's own
+    /// voice, which `CLAUDE.md` ranks above every visible error.
+    ///
+    /// The five paths below are the shapes an eager normalisation gets wrong,
+    /// and every one of them is a genuinely different directory:
+    ///
+    /// - a **sibling** whose name starts with this one's (`mine`, `mine2`): a
+    ///   prefix comparison, or a `starts_with` on the text, matches these;
+    /// - a **child** (`mine\sub`) and this project's **parent** (`work`): a
+    ///   containment test matches both;
+    /// - this project with a `..` segment (**`mine\..`**, which names `work`): a
+    ///   normalisation that strips the last component, or that folds `..` into
+    ///   the wrong level, matches this;
+    /// - this project in **upper case** while the volume cannot be asked.
+    ///
+    /// That last one is the measured half of the safe direction. These paths do
+    /// not exist, so no volume can be probed and
+    /// [`crate::recheck_lifecycle::case_rule_for`] answers
+    /// [`CaseSensitivity::Sensitive`] — two spellings are two projects, and the
+    /// report counts nothing and says how many events it read for other
+    /// projects. `every_spelling_of_one_directory_is_one_project` above asserts
+    /// the same fallback through a real directory on a volume that keeps case;
+    /// this asserts it on every machine, because no machine needs a volume to
+    /// answer *there is nothing here to ask*.
+    ///
+    /// The last reading is the control: the spelling the session was recorded
+    /// under does count, so a report that counted nothing for everything would
+    /// not satisfy this test either.
+    #[test]
+    fn two_directories_that_are_not_one_are_never_one_project() {
+        let store = store_in("project-not-one");
+        let root = "C:\\work\\mine";
+        for event_type in [
+            "user.request",
+            "agent.claim",
+            "tool.completed",
+            "command.failed",
+        ] {
+            record(&store, root, &timed(event_type, "2026-09-14T09:10:56.827Z"));
+        }
+
+        for other in [
+            "C:\\work\\mine2",
+            "C:\\work\\mine\\sub",
+            "C:\\work",
+            "C:\\work\\mine\\..",
+            "C:\\work\\MINE",
+            "C:/other/mine",
+        ] {
+            assert_eq!(
+                counted(&for_project(Some(&store), other).report),
+                (CapabilityTier::Snapshot, 0, 4),
+                "{other:?} is a different directory from {root:?}, and the report counted this \
+                 project's events for it"
+            );
+        }
+
+        assert_eq!(
+            counted(&for_project(Some(&store), root).report),
+            (CapabilityTier::Observed, 4, 0),
+            "the control: the spelling the session was recorded under does count"
+        );
     }
 
     #[test]

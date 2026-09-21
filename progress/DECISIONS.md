@@ -4794,3 +4794,81 @@ statement in the record, and the whole point of this repository is that a record
 which is true-but-misleading is the thing to avoid. `validate-bootstrap.mjs` does
 not read the field, so nothing in the gate set depends on this choice; it is a
 statement to a human reader, and it is explained rather than assumed.
+
+## An incident, recorded because the margin was one line of Markdown
+
+**What I did.** To mint a task I ran `node -e "<script>"` from the Bash tool, with
+the script body inside a double-quoted shell string. That body quoted this
+repository's own prose, and this repository's prose is full of backticked paths.
+**Inside double quotes a backtick is command substitution**, so the shell did not
+hand those words to `node`: it stopped, executed them, and substituted whatever
+they printed into the argument. `node` never ran at all.
+
+**What the shell did with each one, which is not the same thing for all of them.**
+A name with no slash in it — `FINAL_REPORT.md`, `SHA256SUMS.txt` — is a PATH
+lookup, and Git Bash's PATH does not contain this directory, so it answered
+`command not found` and **never opened the file**. A name containing a slash is a
+path, and the shell ran it. What that meant depended on what the file was:
+
+- `crates/sure-core/tests/spawn_sites.rs`, `fixtures/privacy/manifest.json`,
+  `crates/sure-cli/tests/privacy_suite.rs`, `docs/product/PRODUCT_EVALS.md`,
+  `evaluation/acceptance-manifest.json`, `docs/architecture/CLI.md` and
+  `target/tmp/release-gate.json` were fed to the shell line by line. Rust, JSON and
+  Markdown are not executable, so every line became an attempted command and every
+  one answered `command not found`. **Nothing in them ran.**
+- `scripts/gates.ps1` was handed to the shell too, and it **failed to parse** on
+  `param(` at line 108, so the shell refused the file and no line of it ran.
+- `scripts/GATES.md` was a script the shell could parse. Line 3 named
+  `scripts/gates.ps1`, which is the parse failure above. **Line 6 named
+  `scripts/product-evals.mjs`, and that file opens `#!/usr/bin/env node`** — so the
+  kernel read the shebang and `node` ran it. It is the one program of this whole
+  event that executed. It runs `cargo test -p sure-core --test
+  acceptance_report_runner`, which is where every line of cargo output in the
+  transcript came from, and where `target/tmp/acceptance-report.json` and
+  `target/tmp/release-gate.json` were written at `12:55`.
+
+**The recursion is what made this larger than one mistake.** A file the shell is
+executing gets its *own* backticked paths substituted in turn. That is how
+`spawn_sites.rs` reached `privacy_suite.rs`, and how files that neither I nor the
+shell was ever told about — `fixtures/privacy/manifest.json`,
+`docs/architecture/CLI.md`, `evaluation/acceptance-manifest.json` — came to be read
+as shell.
+
+**Where it stopped.** The shell blocked on line 6 of `scripts/GATES.md` waiting for
+`product-evals.mjs`, which was waiting for cargo. It was killed there, and never
+reached the later parts of my own command string.
+
+**What did not happen, each checked rather than assumed.**
+
+- `git status --porcelain` is empty. HEAD and `origin/claude/v0.1-autonomous` are
+  both `6159b0b`. The reflog holds only my own commits, no reset and no rebase.
+  **0 tags.** `origin/main` is still `0c85181`.
+- The real store `C:\Users\lishi\AppData\Local\SURE\sure.db` is still
+  `D171755690549D3A59F1949E85C124B1F06B5CC7F84B8E395F176A8031D67853`, 348160 bytes,
+  mtime `2026-09-18T23:12:15`.
+- `%APPDATA%\SURE` is absent; `%LOCALAPPDATA%\claude-plugins` and
+  `%LOCALAPPDATA%\agent-plugins` are absent.
+- No file in this repository outside `target/` was modified, and the only things
+  written under the home directory in that window belong to unrelated running
+  programs.
+- No `cargo.exe`, no test binary and no `sure.exe` was left running.
+
+**What nearly happened, which is the reason this is written down rather than quietly
+absorbed.** `scripts/GATES.md:355-357` is a fence holding `cargo run -p
+sure-testkit --bin source-manifest -- --write` and a `git add`;
+`scripts/Publish-Bootstrap.ps1:36` is `git push -u origin main`;
+`scripts/Build-Release.sh` and `scripts/Assemble-Release.sh` hold `rm -rf`. **None of
+those files was reached**, and that was checked rather than assumed: none of those
+script names occurs anywhere in the files the shell did execute, so none was
+substituted. But the margin was **one line of a Markdown file** and one slow child
+process. Had `product-evals.mjs` returned promptly, the shell would have carried on
+down `GATES.md` and into line 355.
+
+**The rule I am keeping from it.** Never pass a `node -e`, `python -c` or `sh -c`
+body from the Bash tool. Write the script to a file and run the file. The rule is
+not "avoid backticks in prose" — the prose was fine and the file it should have
+reached was never opened. The rule is that **a quoted shell string is an interpreter
+for whatever is inside it, and this repository's text is not shell.** The evidence
+is the same work done twice: the identical minting script, written to
+`target/tmp/mint-p17t002.mjs` and run as `node target/tmp/mint-p17t002.mjs`, minted
+`P17-T002` and changed nothing else.

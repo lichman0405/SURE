@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P15",
-  "last_updated": "2026-09-21T01:04:41.272Z",
+  "last_updated": "2026-09-21T01:40:27.000Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -2786,22 +2786,37 @@
       "notes": "`P15-T019` is titled *\"Make the program a test executes one that nothing is still writing\"* and it is the fourth attempt to close a class of Linux-only CI flake that has been on this record since `P5-T003`. What made this one different is that it was **re-opened before it was dispatched**. Criterion 1 named `grep -rn \"fs::copy\" crates/*/tests/` as the search that finds every site of the class, and the tree already contained a site that command cannot reach: `crates/sure-core/src/analysis_provider/mod.rs:591` writes its program with `fs::write`, copies nothing, and lives in a `#[cfg(test)]` module inside `src/` rather than in `tests/`. A task dispatched against the original wording would have closed having left a known instance unfixed and reported the class fixed — the failure mode this repository exists to refuse, in the shape of an enumeration that stopped at its own search. `6ca551c` widened the criterion from the mechanism to the property and gave criterion 2 the reverse direction that occurrence measured. The re-open is the first commit of this task and it is not a rewrite of anything.\n\nThe answer to the widened criterion is **five program sites, and exactly one of them the named search could not find**. Four are `fs::copy` calls the search does find — `runtime_start.rs:397` (`Fixture::python`), `service_supervisor.rs:180` (`as_python`), `process_runner.rs:691`, and `winget_manifest.rs:1078`'s `Links/sure.exe` alias, which the launcher is then asked to start and which this record had never named. The fifth is `analysis_provider/mod.rs:591`. The correction is in the count as well as the list: the record named two fixtures, and the tree has five sites. Two further fixed paths inside `src/` test modules — `container.rs`'s stand-in and `approval.rs`'s `Scratch::new` — were repaired for the **overwrite** hazard, are not executed by anything, and are additional to that count rather than part of it.\n\n**The mechanism is the kernel's, and the fix addresses one direction of it.** `ETXTBSY` is raised at `execve` when the inode being executed is open for writing by any process, not by the caller and not by the process doing the executing; `fork` duplicates the child's whole descriptor table, which is how one thread's copy descriptor comes to be held by another thread's about-to-`execve` child; and `O_CLOEXEC`, which Rust sets on everything it opens, closes that descriptor at the child's own `execve` — the instant *after* the window that matters. `write_program` and `copy_program` close that direction by ordering, and they close it as a property of inodes and names rather than by shrinking a window: the executed path is only ever published by a `rename` after the descriptor on the temporary name is dropped, and the descriptor an in-flight write holds names a temporary file the executing side never computes. They do **not** close the reverse direction — `open(O_WRONLY|O_CREAT|O_TRUNC)` refused because the inode it would truncate is, at that moment, the text of a running process — which is the direction `:591` measured and the direction the record had been missing until `P15-T005`'s acceptance added it. That one is closed by the destination being unique per caller, which is why `echoing_program`, `container.rs` and `approval.rs` were each given a directory of their own. Which part of the change addresses which direction is stated rather than left to the reader.\n\n**No retry, no `#[ignore]`, no sleep, and no product change.** Criterion 4 asks that any retry be bounded, named and deliberately placed, and says in as many words that a retry in product code existing so that a test can pass is not an answer. There is no retry anywhere, in product code or in a fixture, searched for rather than taken on the hand-back's word; all nine hunks inside the three `src/` files are within `mod tests`; and the product still reports what the operating system said. Criterion 3's window is argued from the mechanism and not from the failure having become rarer.\n\n**The worker was wrong three times in its own record, and right once against the supervisor.** The three defects were numeric and each was sent back rather than repaired silently: the call-site attribution; an arithmetic sentence — *\"five sites … names three / two it cannot name\"* — that contradicted the table three rows above it, which named four and one; and the attribution of a pre-existing local failure to `a_service_that_outlives_…` when the eleven historical failures belong to `a_service_that_runs_past_its_own_budget_…`, as the same hand-back's own section 8 says two sections later. It also self-reported and repaired a defect it had itself introduced: a hard newline splitting a `P5-T003` table row, now absent, with zero broken rows in either file. Against the supervisor it was right: the revision request demanded *\"21 call sites\"* and the true number is 21 **lines naming** the two functions with five of them a doc link or a comment, leaving 16 calls — 4 `copy_program` and 12 `write_program`. It pushed back with the arithmetic instead of writing the number it had been told to write, which is the behaviour the dispatch asks for and the opposite of the compliance that would have made the record wrong in the supervisor's name. Both counts are on the record as a result.\n\n**What is not established, stated as not established.** Windows raises no `ETXTBSY`, so the platform that fails is one this loop cannot run, and no occurrence of this task's failure was reproduced anywhere; every statement about the eleven CI occurrences is a reading of their logs, and two of them were opened directly to check it. Criterion 6 asks for a number of green ubuntu executions of *this change*, and that number is **0**: the change was unpushed while the criterion was answered. What was measured instead is the rate the change inherits — 59 executions of the ubuntu test step among the 60 most recent `ci` runs on this branch, 47 clean on the first attempt, 11 on `Text file busy (os error 26)` and nothing else, 1 unrelated, and 1 (`35438699664`) that never reached its tests because it was red at clippy with the test step `skipped`. That is a rate and not a fix, and the existing closing sentence stands unchanged: a flake that has stopped appearing has not thereby been explained. The one collision actually produced on this machine is `approval.rs`'s fixed store directory under two concurrent `cargo test` processes — the same shape, a different failure, no errno involved — and it is recorded as that.\n\n**One gate was red, and the red is in the record rather than replaced by the green.** The first gate over this tree failed the test gate alone on a load-sensitive assertion already on record from `P14-T006`–`P14-T008`, and it was measured against the base tree — 1 failure in 10 there against 2 in 10 here, the same test every time — before it was accepted as pre-existing rather than caused by this change. Its line moved `1184 → 1193` only because this change adds nine lines at `runtime_start.rs:397`. The stashed tree was restored and proved restored, byte for byte, before the stash was dropped. The gate this acceptance rests on is the green re-run over the committed tree.\n\n**Left on the record rather than in a worker's head:** five fixed-path sites that carry neither hazard and were deliberately not repaired — `fixture_apps.rs:1616`, `adversarial_fixture_detection.rs:982`, the `control_corpus` roots in `acceptance_report_runner.rs:783` and `release_gate_runner.rs:864`, `acceptance_report_runner.rs:96,105`, and `acceptance_report.rs:1520` — each listed with the reason it is not a program another test executes. Two of them are exactly the shape that demonstrably fails in `approval.rs` and would fail the same way under two concurrent processes; they are listed so the decision to leave them is visible, not so that it is forgotten. `P15-T019` depended on nothing. The next task is **`P15-T007`**."
     },
     "P15-T020": {
-      "status": "in_progress",
-      "started_at": "2026-09-21T01:04:41.272Z",
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-21T09:04:54+08:00",
+      "finished_at": "2026-09-21T09:38:56+08:00",
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
+      "head_sha": "723195e7045b6fc021e879fa9167189ca8f2002d",
+      "evidence": [
+        "clause 1, the decision, taken against the other two rather than for this one. `SHA256SUMS.txt` stays and gains a reader that can fail: `crates/sure-testkit/tests/source_manifest.rs`, a `cargo test` target, so it is local gate 3 and the CI rust matrix step BY CONSTRUCTION and there is nothing for a contributor to remember. Removal was rejected on what it costs: four files in the release path explain in prose that the release checksum is deliberately not this file, and `crates/sure-testkit/tests/ci_workflow.rs:1015-1073` is a live, mutation-checked rule that fails if `release.yml` ever names it. A working-tree reader was not a choice either -- measured, it reports ten correct files stale on every fresh clone, and a check that is red on a clean checkout gets weakened.",
+        "clause 2, the semantics are forced rather than preferred. `.gitattributes` sets `* text=auto eol=lf` and `*.ps1 text eol=crlf`, and `eol` is applied on checkout and never to the object -- so the index blob is LF and identical on all three platforms while the working tree here is CRLF. Measured in a fresh clone: 185 of 195 entries match the disk, 195 of 195 match the index. The file was hand-maintained from BOTH forms before this commit.",
+        "clause 3, the falsifier run rather than asserted. With one digest overwritten in place: `195 listed, 194 match the index, 1 stale, 0 not in the index`, naming `.cargo/config.toml`, printing both digests and the repair command, exit 1. The supervisor re-ran it and got the recorded digest `688121b6...a90caf` and a byte-identical restore to `07fae843...faec2` -- digit for digit the values the worker reported, from a different direction.",
+        "clause 4, the writer is committed too, `crates/sure-testkit/src/bin/source-manifest.rs`, so regeneration lives in the tree rather than in the git-ignored `target/tmp/regen-sums.mjs` this task was minted from. The reader test is 15 passed, 0 failed.",
+        "clause 5, a change the task did not ask for and the tree did. `crates/sure-core/tests/spawn_sites.rs` is a census of every file under `crates/*/src` that builds a `Command`, and the new module builds two. The rule was answered the way it demands rather than weakened: the site is named in `THE_SPAWN_SITES` with the argument written beside it, staged diff +23 and 0 removed. The census did not grow quietly.",
+        "`SHA256SUMS.txt` measured: 195 entries, 19199 bytes, no trailing newline (last byte `0x6e`), 0 malformed, 0 entries naming itself. Five digests moved and no path was added or removed; two of the five are `integrations/agent-plugin/scripts/install.ps1` and `uninstall.ps1`, which moved from the disk form to the index form -- the fix rather than a side-effect.",
+        "CANNOT CONFIRM: macOS and Linux execution of the reader. The `nonwindows` gate clippy-checks both targets but cannot run them, and the worker named that gap rather than arguing it away. The `read_blobs` limit -- `let _ = child.wait();` discards `git cat-file`'s exit status -- is a limit the worker flagged as CHOSEN rather than measured; it is recorded and not closed here."
+      ],
+      "notes": "base_sha is `edb2b00`, the tip the batch was dispatched on; `edb2b00` is itself this task's in-progress mark and rides in `723195e`'s ancestry. started_at is that commit's own commit time and finished_at is this task's work commit's own commit time, both read from git rather than estimated. The worker's report states line counts of 635/122/450 for the three new files; measured at acceptance they are 674/132/486, and its \"195 lines ... (trailing newline preserved)\" describes the opposite of the last byte. The report's numbers are stale; the tree's are what is recorded."
     },
     "P15-T021": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-21T09:04:54+08:00",
+      "finished_at": "2026-09-21T09:38:59+08:00",
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
+      "head_sha": "c611b319d8bf970505e75ed38e2ee0224b6c450f",
+      "evidence": [
+        "clause 1, the instrument was built, used and LOST, which is a stronger argument than if it had never existed. `target/tmp/measure-run.mjs` is gone: `Test-Path` returns False, `git ls-files --error-unmatch` fails, and `git grep measure-run` over tracked files returns prose in `progress/HANDOFF.md`, `progress/state.json` and `tasks/tasks.json` and no code. The record shows it was used -- eight recorded invocations -- and its loss is silent, because the figures it produced are still quoted as evidence. The decision is to keep a script, committed, at `scripts/measure-tests.mjs`.",
+        "clause 2, two instruments rather than one, because they answer different questions: the parent figure (`test <name> ... ok` lines, one per test a parent ran) and the raw sum (every `test result:` line). The difference is produced by children that re-run a parent's test in a second process, so the second instrument is a different question rather than a cross-check.",
+        "clause 3, it refuses rather than guesses, and the refusal was exercised. Two gate logs in the record end mid-suite (`gates-p15t005-post-test.txt` has 49 suite headers and 48 `test result:` lines); the instrument refuses both BY NAME, prints no count that can be read as a number of tests, and exits 1. The supervisor re-ran the refusal over that log and got REFUSED with exactly that reason.",
+        "clause 4, it is not wired into the gate set and the reason is in the file, as the sixth gate's own header does for the choice it made: it measures a log another command produced and cannot produce one, so wiring it in changes the test step's command rather than adding a check beside it. Measured cost 0.068 s on a 236 KB log.",
+        "clause 5, and the deliverable caught an error the SUPERVISOR PUBLISHED TWICE, within minutes of being written. `target/tmp/gates.ps1` prints `passed=` as the RAW SUM: on `gates-p15t035-accept-test.txt` the raw sum is 2754 and the parent figure is 2744, difference 10 -- the ten children `crates/sure-core/tests/store_concurrency.rs` spawns with `--exact`. `passed=2754` was published in `1052316` (P15-T035's acceptance) and `b34ad94` (P15-T036's mint) as though it were a count of tests. THE CORRECT FIGURE IS 2744. The rule had been written down three times and the fourth occurrence was on the branch when this script was written. Pushed history is not rewritten and the correction is carried in this acceptance as a dated statement. The `headers (case-sensitive): 76` figure quoted in the same messages is correct and unaffected.",
+        "Owed at the top of target/tmp/owed-findings.md section 1, and it is the largest instance of this task's own defect class: `target/tmp/gates.ps1` is UNTRACKED and GITIGNORED (`git ls-files | grep -iE gates` empty; `git check-ignore -v` names `.gitignore:1:/target/`), it is 3952 bytes, and `git grep -l gates\\.ps1` returns only `progress/HANDOFF.md` and `progress/state.json` -- prose. It is the harness that produces the `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0` line EVERY acceptance in this repository quotes, so NO CLONE OF THIS REPOSITORY CAN REPRODUCE ANY GATE READING THE RECORD CONTAINS. The gate SET itself exists nowhere in the tree either. Not minted inside this batch; owed at the next acceptance."
+      ],
+      "notes": "base_sha is `edb2b00`; started_at that commit's own commit time, finished_at this work commit's own commit time, both read from git rather than estimated. The `passed=2754` -> `2744` correction is owed to this acceptance and is stated in the acceptance commit message as well as here. Of the three historical re-derivations the worker reports, the third (`P13-C007`, 2525/2515) CANNOT be re-derived from a log -- its capture is gone and no CI run was ever made on `9eda950` -- and is re-derived from the message's own arithmetic plus two independent measurements; it is recorded as such and not presented as a log reading. The 122-log sweep (120 agree, 2 refuse) is the worker's report; the two refusals were re-run by the supervisor and are genuine."
     },
     "P15-T022": {
       "status": "queued",
@@ -2813,13 +2828,20 @@
       "notes": ""
     },
     "P15-T023": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-21T09:04:54+08:00",
+      "finished_at": "2026-09-21T09:38:57+08:00",
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
+      "head_sha": "102d2c044de9773bf4bff16c83441d168cc6e348",
+      "evidence": [
+        "clause 1, the false sentence is gone from the page rather than qualified. Section 5 said `grep -rn copilot crates/ --include=*.rs` returns nothing. Measured 2026-09-21 it returns eleven lines in four files, and the replacement names all four and says what each hit is: a test, a test's message, or a comment. None is a branch that reads a Copilot event -- and the narrower command, over `crates/sure-core/src/normalizer/` and `crates/sure-cli/src/hook.rs`, returns nothing and exits 1. That is the command that settles it and it is now printed beside the broad one.",
+        "clause 2, the decision: the package stays a TEMPLATE, and the README's first paragraph says so in bold and says what follows from it. Nothing installs it, `sure doctor` does not offer it, and `sure hook ingest --source copilot` exits 5 for every event `hooks/hooks.json` wires -- so a session that loaded the manifest would have every tool call denied while SURE recorded no evidence for any of them. The manifest's own `description` says do not load it, and the fail-open section is retitled in its first sentence as a requirement on a future adapter rather than a description of this package.",
+        "clause 3, the tier claim withdrawn. The README said a Copilot adapter is Observed (Tier 1); this package observes nothing, now claims no tier, and Observed is scoped to a future adapter that answers at least one event.",
+        "clause 4, the trap found and not weakened around. A cell naming TWO backticked tests makes the table's own checker yield ZERO names: the parser strips the cell's outer backticks (`hook_failure_semantics.rs:635`) and `bare_names` then pairs the backticks that remain, so a two-name cell desynchronises and the `!bare_names(&row.evidence).is_empty()` assertion fails. Every evidence cell was put back to a single name and the process-level test name moved into the prose. `git diff` on that file is empty -- the checker was not touched.",
+        "clause 5, the measured disagreement, recorded because the supervisor's first reading of it was wrong. The task's note records four hits in two files at `cbcc0be`; the tree now has eleven in four. Re-measured: at `cbcc0be` the command returned exactly four hits in exactly two files, at exactly the lines the note records, and the two files the note did not list had none. The note was ACCURATE AND HAS BEEN OVERTAKEN, not wrong, and the page says \"Measured 2026-09-21\" so it cannot be read as contradicting it.",
+        "Known and left open, owed in target/tmp/owed-findings.md: `docs/security/THREAT_MODEL.md:66-68` records one unresolved case -- `integrations/copilot/` promises to fail open while `--source copilot` exits 5 for every event -- which this task closed; and `docs/development/QUICKSTART_WINDOWS.md:200` claims the installation matrix covers Copilot, which it does not (its sections are Claude Code, Cursor, Codex, CLI-only fallback)."
+      ],
+      "notes": "base_sha is `edb2b00`; started_at that commit's own commit time, finished_at this work commit's own commit time, both read from git rather than estimated. The two documents this task names as still carrying the old claim are recorded in `target/tmp/owed-findings.md` section 2 with the commands that showed them; they are not this task's diff."
     },
     "P15-T024": {
       "status": "queued",
@@ -2864,22 +2886,38 @@
       "notes": ""
     },
     "P15-T026": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-21T09:04:54+08:00",
+      "finished_at": "2026-09-21T09:38:58+08:00",
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
+      "head_sha": "f60e1f46b77a9cccde3812e95cdc40d06164713f",
+      "evidence": [
+        "clause 1, two numbers were computed by nothing, and mutation proves the gate could not tell. `secret redaction mandatory fixtures: 100%` and the two counts in `tasks/SUMMARY.md` had no instrument: writing a false `99%` on the repair-regression line, and putting `100%` back on the redaction line, each leave `cargo test -p sure-core --test release_gate_runner` at `16 passed; 0 failed`.",
+        "clause 2, verified by the supervisor by READING THE CODE rather than by re-running the mutation. `crates/sure-core/tests/release_gate_runner.rs:283-288`'s `Unmeasured` arm asserts only that the claim is NAMED in `unmeasured_metrics` -- a property of the gate and not of the document -- so any number on an unmeasured line passes; and `compared >= 3` is a floor, so the remaining lines are already covered by the budget. The outcome is forced by the structure, which is why it was not re-measured.",
+        "clause 3, what replaced them. The redaction line now states what the eval measures -- every case in `fixtures/privacy/manifest.json`, each release-blocking, driven by `cargo test -p sure-cli --test privacy_suite` -- and keeps no number. The two `tasks/SUMMARY.md` counts defer to the two gates that print them, `validate-bootstrap.mjs` and `taskctl validate`, which are already gate 4 and gate 5. The four numbers that stayed are the gate's own values and are compared against the corpus by `release_gate_runner`.",
+        "clause 4, `scripts/product-evals.mjs` compares the document against the gate and refuses to report any number from a stale corpus: it recomputes the corpus digest from the corpus's own bytes, and with one case added it refuses rather than printing a figure taken over a corpus that has moved.",
+        "clause 5, the script is NOT added to the gate set. Gate membership is the supervisor's, it is a change five CI jobs and every acceptance depend on, and the recommendation is recorded rather than taken inside a worker's hand-back.",
+        "A sentence that was false of two of its seven lines. \"Required release metrics on the curated acceptance corpus\" described the redaction line, which is about a different corpus, and the jargon line, which is about no corpus. It now names each line's cases, and the opening paragraph names both corpora before the list.",
+        "Owed and left open, target/tmp/owed-findings.md section 3: the `release_gate_runner` tolerance is closed for one document and the test itself is still tolerant; and one claim has two denominators -- the module report reads false-green `0 of 12` where the shipped `target/tmp/release-gate.json` reads `0 of 13`, because the module report cannot observe `repair-regression`."
+      ],
+      "notes": "base_sha is `edb2b00`; started_at that commit's own commit time, finished_at this work commit's own commit time, both read from git rather than estimated. The tolerance hole in `release_gate_runner.rs` is supervisor-verified by reading, and is recorded as a live gap rather than as closed by this task."
     },
     "P15-T027": {
-      "status": "queued",
-      "started_at": null,
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": ""
+      "status": "accepted",
+      "started_at": "2026-09-21T09:04:54+08:00",
+      "finished_at": "2026-09-21T09:38:59+08:00",
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
+      "head_sha": "c776736abb6b3d7f0a630e23be690a35a0adfb87",
+      "evidence": [
+        "clause 1, the budget is left alone and the measurement is why. The figure that motivated both earlier raises measures THE BUDGET AND NOT THE BROWSER, and that is true by construction: `launch.rs:341-342` sets `waiting_since` and `deadline = waiting_since + budget`, line 395 tests against that deadline, and line 404 reports `waited = waiting_since.elapsed()`. `waited` is bounded above by the budget it was handed, so a figure reading `29.999916` is the machine saying it was given thirty seconds and used them and CANNOT be evidence that thirty was too few. The budget is the caller's remainder, not a fresh one: `session.rs` passes `limits.timeout().saturating_sub(started.elapsed())`.",
+        "clause 2, the tautology is replaced rather than requalified. The old sentence read `/usr/bin/chromium ran for 29.999912 seconds without reporting a debugging port`, read verbatim off run `35430022867` -- it reports SURE's budget under a phrase that invites the reader to hear the browser's. `NeverOpened` now carries the child's state and the port file observed at the deadline, and says it had not reported a port after N seconds OF WAITING and that the program was still running, so how close it was is not known.",
+        "clause 3, the contract is unchanged. `opened()` is byte-identical -- `git diff -U0` hunks land at 99, 120, 129, 173 and 757, none inside 426-457 -- and still panics on the one machine state where the acceptance sentence is never exercised. No absence, no skip and no continue-on-error was introduced anywhere.",
+        "clause 4, and the task's own count is wrong. Swept all 301 runs on the branch with `--log-failed` over the 129 failures: the task names FOUR occurrences and SIXTEEN exist, across three budget ceilings (10, 20, 30 seconds -- `394a7f7`, `90a7bc6`, `853d7de`). The supervisor re-fetched the one occurrence the task never named, run `35430022867`, and found `29.999912` at `browser_driver.rs:397:53`, digit for digit. No macOS occurrence exists in the branch's history, and that is the bound of the search rather than a claim about macOS.",
+        "A standing open item is closed by the same reading: `crates/sure-core/tests/browser_driver.rs:397:53` has sat on the unowned list with no note of what it was. It is the panic site of this family, confirmed from the API on a run whose log carries both the panic location and the `ran for 29.999912 seconds` detail on consecutive lines.",
+        "Owed and not fixed, target/tmp/owed-findings.md section 5: `ci.yml` runs three browser launches CONCURRENTLY in one libtest binary (`cargo test --workspace --all-features --no-fail-fast`, no `--test-threads` override), and on run `35351409364` two thirty-second-budget tests failed 68 ms apart. That is the strongest candidate explanation this batch produced for the browser_driver family and it has nothing to do with the budget -- which is exactly why leaving the budget at 30 s is right. Serialising that target is a change to CI configuration and was correctly left alone.",
+        "Recorded because a hand-back that reported only the final green would have hidden it: the worker introduced a bug -- `waited` evaluated inside the struct literal, i.e. after `terminate::stop()` and `remove_dir_all()`, so a 50 ms wait printed `0.800` seconds -- CAUGHT IT, and reported it. That is a measurement of SURE's own teardown masquerading as a measurement of the browser: the same defect class as the one this task exists to fix, found in the act of fixing it. Browser-tree teardown costs ~0.6-0.75 s per failed launch on Windows, measured as a side effect."
+      ],
+      "notes": "base_sha is `edb2b00`; started_at that commit's own commit time, finished_at this work commit's own commit time, both read from git rather than estimated. The task file names four occurrences where sixteen were measured; `tasks/tasks.json` is the supervisor's and the correction is carried here rather than by editing the tree's history. The dbus timeline reading is reported by the worker as a reading of the log and not a measurement of the mechanism, and whether Chromium on that runner emits dbus noise on runs where it does start is CANNOT CONFIRM, because `launch.rs` discards the child's stderr after a successful start."
     },
     "P15-T028": {
       "status": "queued",
@@ -3006,13 +3044,13 @@
       "notes": ""
     },
     "P15-T034": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-21T09:04:54+08:00",
       "finished_at": null,
-      "base_sha": null,
+      "base_sha": "edb2b004de6b9347fa7e86df6e1243b07c71b3e0",
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Dispatched in the same parallel batch as P15-T020/T021/T023/T026/T027 and still running when those five landed; it owns `crates/sure-core/tests/runtime_start.rs`, which is not in SHA256SUMS.txt, so its edits do not move the manifest. base_sha is `edb2b00`, the tip the batch was dispatched on."
     },
     "P15-T035": {
       "status": "accepted",

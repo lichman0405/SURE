@@ -553,7 +553,7 @@ jobs:
       # archives and their `.sha256` files have unique names, so nothing can
       # collide. The `sure-*` pattern deliberately does not match the four
       # `logs-*` artifacts.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: sure-*
           path: target/tmp/release

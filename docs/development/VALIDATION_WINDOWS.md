@@ -46,8 +46,8 @@ Measured during step A, not transcribed from a specification:
 | Node | v25.8.1, npm 11.11.0 |
 | Git | `2.55.0.windows.3` |
 | Long paths | `LongPathsEnabled = 0`; `git config --get core.longpaths` unset (exit 1) |
-| Console code page | `chcp` reports `936`; `[Console]::InputEncoding` and `[Console]::OutputEncoding` are both `gb2312` |
-| Execution policy | `LocalMachine RemoteSigned`; machine, user, process and current-user scopes all `Undefined` |
+| Console code page | a console started fresh reports `936`, which is this machine's registry `ACP`/`OEMCP`; `[Console]::InputEncoding` and `[Console]::OutputEncoding` are both `gb2312` there |
+| Execution policy | `LocalMachine RemoteSigned`; machine, user and current-user scopes `Undefined` |
 | Main repository | `C:\Users\lishi\code\SURE` (24 characters) |
 | Second checkout | `C:\Users\lishi\code\SURE\target\tmp\windows-validation\路径 with spaces 校验\sure repo` (82 characters) |
 
@@ -782,15 +782,19 @@ exactly like one where nothing has happened yet.
 `scripts\Test-SureEnvironment.ps1` has a `Zone.Identifier` alternate data stream
 with `ZoneId=3`; `scripts\Build-Release.ps1`, `scripts\Install-Sure.ps1` and
 `integrations\claude-code\scripts\install.ps1` have no alternate data streams at
-all. With `LocalMachine = RemoteSigned` and every other scope `Undefined`, that
-file is refused from any shell whose process-scope policy is not set:
+all. With `LocalMachine = RemoteSigned` and the `Process` scope unset, that file
+is refused from any shell whose process-scope policy is not `Bypass`:
 
 ```text
-SecurityError: 无法加载文件 C:\Users\lishi\code\SURE\scripts\Test-SureEnvironment.ps1，
-因为在此系统上禁止运行脚本。
+SecurityError: 无法加载文件 C:\Users\lishi\code\SURE\scripts\Test-SureEnvironment.ps1。
+文件 C:\Users\lishi\code\SURE\scripts\Test-SureEnvironment.ps1 未进行数字签名。无法在当前系统上运行此脚本。
+有关运行脚本和设置执行策略的详细信息，请参阅 https://go.microsoft.com/fwlink/?LinkID=135170
+处的 about_Execution_Policies。
 ```
 
-Exit `1`. PowerShell's own message names the policy and links
+Exit `1`. The message is RemoteSigned's *unsigned-file* one and not Restricted's
+"running scripts is disabled on this system" — the two are different policies and
+quoting the wrong one would describe a machine this is not. The message links
 `about_Execution_Policies`.
 
 This is the one command in this record that was refused, and the refusal is
@@ -799,9 +803,13 @@ explicitly out of bounds for this task, and it would have been the wrong fix in
 any case — the file is unsigned, and the difference between it and its
 neighbours is the zone stamp, not the code. The same script from the step-H clone
 runs and exits `0`, because `git clone` does not copy alternate data streams.
-Step A's run succeeded because the session that started it had a process-scope
-policy in effect; that is also why the same command from a shell without one is
-refused. **A new clone is not affected; the working copy on this machine is.**
+Step A's run succeeded because the session that started it carried
+`PSExecutionPolicyPreference=Bypass`: that variable is **inherited**, and a child
+`pwsh` takes it as its own `Process` scope, so the child ran the file — while the
+same child given `-ExecutionPolicy RemoteSigned` refuses it. The scope belongs to
+the environment a shell was started in and not to the machine, which is why one
+command answers differently in two sessions on one computer. **A new clone is not
+affected; the working copy on this machine is.**
 
 ### 5. The two archives do not carry the same `sure.exe`
 
@@ -810,7 +818,7 @@ Built from the same commit on the same machine, at two paths:
 | | main tree | hostile path |
 | --- | --- | --- |
 | archive `sha256` | `7410b4f2c9b8cefe9376a51690251ee29c466bbcdda7a13b743b041a2edfea4f` | `b3f41c19a8d4d3f911540137089ff2c972fb5ebd11d86994a942359ad9805b16` |
-| archive size | 4,194,987 bytes | 4,164,993 bytes |
+| archive size | 4,194,987 bytes | 4,195,044 bytes |
 | `sure.exe` size | 9,483,264 bytes | 9,483,264 bytes |
 | `sure.exe` `sha256` | `314ac21f96998b6851cc61b7f165808885e2ff79813df28b55201e5fc99338de` | `6bdc574acdd2aed9d7817756f79c3bb0b66870a0ff5213f49964bd3be07c4641` |
 

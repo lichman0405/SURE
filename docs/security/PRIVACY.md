@@ -27,6 +27,12 @@ Explicit opt-in may store:
 - full terminal output;
 - detailed tool payloads/edit history.
 
+The opt-in is `privacy.full_recording`, off by default. **Only the user's own
+settings file can turn it on** — a project naming it is a request its own file
+cannot grant — and the report prints the answer on every run that reaches one,
+including a run that stopped before a verdict, so a session that kept a full
+transcript says so rather than leaving it to be discovered afterwards.
+
 ## External analysis
 
 Three modes, named in `sure.yaml` as `privacy.mode`. What each one permits,
@@ -47,11 +53,15 @@ The mode in effect is the stricter of the two settings files — the project's
 loosen what the user set.
 
 **The report states which mode was in effect and whether a model was
-consulted**, on every run that reads settings, including a run that stopped. The
-no-model case is stated rather than omitted: silence would read both as "nothing
-left this machine" and as "SURE did not look". In this release no check asks for
-model-backed analysis, so the answer is always that no model was consulted — and
-a run that cannot support even that says so instead.
+consulted**, on every run that gets past reading its settings, including a run
+that stopped before a verdict. The no-model case is stated rather than omitted:
+silence would read both as "nothing left this machine" and as "SURE did not
+look". In this release no check asks for model-backed analysis, so the answer is
+always that no model was consulted — and a run that cannot support even that says
+so instead. A run that **cannot accept** a settings file is the one case with no
+mode to state: it stops, names the setting it could not honour, and exits 5
+without a privacy section, because the mode in effect is not something such a run
+ever established.
 
 ## Deletion
 
@@ -96,6 +106,20 @@ Three properties are part of the promise, not of the implementation:
   [CONFIG_REFERENCE.md](../architecture/CONFIG_REFERENCE.md#privacy); the rule
   is [CONFIG_AUTHORITY.md](../architecture/CONFIG_AUTHORITY.md#restrictions-the-stricter-of-the-two-wins).
 
-What a delete does **not** do: it does not touch the project's files, its
-configuration, or any record of another project. A user asking SURE to forget
-something must not find out later that it forgot more than it said.
+What a delete does **not** do: it does not touch the project's files or the
+project's configuration. **It does not always spare another project's records
+either** — the scope is what decides that, and `--all` is "every session in this
+store" in the command's own words, so it reaches one project's sessions and every
+other project's alike. A user asking SURE to forget something must not find out
+later that it forgot more than it said, which is why the breadth is the scope's
+word to give and never a default.
+
+**A delete removes sessions, and a session is not the whole store.** What it
+reaches is what the sessions own: their `session_events`, the `records` those
+events point at, and the recordings and decisions joined to them by event id.
+Rows no session event points at — a recorded goal, a standard projection, an
+approval — are not session records, so not even `--all` reaches them, and nothing
+a user can run removes them in this release. That is a limit on the promise above
+rather than a defect in the delete, and it is stated because a user reading
+"every session in this store" is entitled to know that the store and its sessions
+are not the same thing.

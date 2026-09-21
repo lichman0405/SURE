@@ -63,9 +63,18 @@ A protection hook crashes and the user incorrectly assumes the action was blocke
 
 Addressed per harness and per event in `docs/integrations/HOOK_FAILURE_SEMANTICS.md`,
 which keeps "what SURE emits" (measured here) apart from "what the harness does
-with it" (quoted upstream, or `cannot confirm`). It records one unresolved case
-rather than closing it: `integrations/copilot/` promises to fail open while
-`--source copilot` exits 5 for every event.
+with it" (quoted upstream, or `cannot confirm`). The case where the two used to
+disagree — `integrations/copilot/` promising to fail open while `--source
+copilot` exits 5 for every event — was **decided rather than left open**, and
+that section records the decision: the package's own words now say it is a
+template that does not answer, its fail-open sentence is marked as a requirement
+on a future adapter, and the exit 5 stays, because Copilot's documented rule for
+`preToolUse` is fail-closed and a package promising the opposite while denying
+every tool call would be this threat in its worst form. What is still open on
+that harness is the wiring and not the disagreement: nothing installs the
+package, `sure doctor` does not offer it as a source, and the manifest wires two
+event names the Copilot reference does not define — `afterFileEdit` and `stop` —
+which is why those rows say `cannot confirm` rather than quoting a rule.
 
 ## T19 — local event tampering
 Project code or an agent modifies SURE history/evidence to fabricate a pass.

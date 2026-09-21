@@ -810,7 +810,11 @@ mod tests {
             "tool.completed",
             "command.failed",
         ] {
-            record(&store, &root, &timed(event_type, "2026-09-14T09:10:56.827Z"));
+            record(
+                &store,
+                &root,
+                &timed(event_type, "2026-09-14T09:10:56.827Z"),
+            );
         }
 
         let separators = if cfg!(windows) { '\\' } else { '/' };

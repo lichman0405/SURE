@@ -75,11 +75,8 @@ fn a_project_of_our_own(what: &str) -> PathBuf {
     // `README.md` is the cased entry the probe flips. A project with nothing in
     // it at all could not be probed, and this test would then be measuring the
     // fallback rather than the answer.
-    std::fs::write(
-        project.join("main.py"),
-        "def main():\n    print('hello')\n",
-    )
-    .unwrap_or_else(|error| panic!("cannot write into {}: {error}", project.display()));
+    std::fs::write(project.join("main.py"), "def main():\n    print('hello')\n")
+        .unwrap_or_else(|error| panic!("cannot write into {}: {error}", project.display()));
     project
 }
 
@@ -218,10 +215,7 @@ fn reading_of(frame: &Value) -> Reading {
 /// rather than a number.
 fn spellings_that_are_universal(root: &Path) -> Vec<(String, String)> {
     let root_text = root.to_string_lossy().into_owned();
-    let mut spellings = vec![(
-        "as the hook recorded it".to_owned(),
-        root_text.clone(),
-    )];
+    let mut spellings = vec![("as the hook recorded it".to_owned(), root_text.clone())];
     // On Windows both separators are separators to `Path`'s own parser and to
     // the volume; on Unix this is the same string, because there is no second
     // spelling of a separator there. Either way it names this directory.
@@ -235,8 +229,7 @@ fn spellings_that_are_universal(root: &Path) -> Vec<(String, String)> {
     ));
     spellings.push((
         "with a `.` segment inside it".to_owned(),
-        root
-            .parent()
+        root.parent()
             .expect("the scratch directory has a parent")
             .join(".")
             .join(root.file_name().expect("and a name"))

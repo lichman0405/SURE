@@ -4872,3 +4872,143 @@ for whatever is inside it, and this repository's text is not shell.** The eviden
 is the same work done twice: the identical minting script, written to
 `target/tmp/mint-p17t002.mjs` and run as `node target/tmp/mint-p17t002.mjs`, minted
 `P17-T002` and changed nothing else.
+
+## An untracked directory that appears at the repository root during gate runs, and the first-hand account of the writer that has since been given
+
+`git status --short` has twice shown `?? Microsoft/` at the repository root, and
+the directory is not empty: it holds exactly one 3221-byte file at
+
+    Microsoft/Windows/PowerShell/ModuleAnalysisCache
+
+which is **Windows PowerShell 5.1's module analysis cache**. The name identifies
+the writer's *intent* — PowerShell computes that path by appending
+`Microsoft\Windows\PowerShell\ModuleAnalysisCache` to the local application data
+folder — and the fact that it is **relative** says the folder came back empty, so
+the join produced a relative path and the file landed wherever the process was
+started from. That much is a reading of the artifact. **Everything past it is
+not**, and this entry exists so the next session starts from the measurements
+rather than from the investigation.
+
+**When it appeared.** mtimes `13:30` and `13:47` on 2026-09-21, both inside
+windows when tests or gates were running, and the second was noticed by the
+`P17-T004` worker while it held the cargo lock — it did not create it and
+correctly left it standing rather than delete another lane's file.
+
+**What was tested, and what it rules out.** Seven attempts to reproduce it in a
+scratch directory, none of which created the tree: `LOCALAPPDATA` and `APPDATA`
+**emptied**; the same **unset** with `env -u`; both set to a *relative* value
+(`nowhere`, `.`); a fully cleared environment with `env -i`; each of those with
+and without `-NoProfile`; with `-Command 'exit 0'`, with `-Command 'Get-Module
+-ListAvailable'` to force module analysis, and with `-File` on a real launcher
+from `integrations/`. So none of the obvious shapes is the writer.
+
+**What is established about the mechanism, from a sibling artifact.**
+`target/tmp/p17t003-nowhere/`, created in the same minute as the first one, holds
+`AppData/Roaming/` and `Microsoft/Windows/Caches/` — so when a PowerShell process
+is started with the user-profile environment variables **redirected**, it does
+write its per-user caches under the redirected value. That was the
+`P17-T003` worker's own scratch probe, whose source has since been rewritten: the
+directory it names today is `sure-p17t003-probe-nowhere`, and the artifact on
+disk is `p17t003-nowhere`, so the exact invocation that produced these is gone
+with an earlier revision of that file. **A probe that redirects `LOCALAPPDATA`
+is therefore a plausible writer of the class and is not a demonstrated writer of
+this instance.**
+
+**The one correlation that narrows it, added after the second observation.**
+It did **not** appear during the gate run at `13:56`, and that run is the first
+one taken after `crates/sure-testkit/tests/p17t003_probe.rs` was deleted from the
+tree. Both of its appearances fall inside windows when that file was present:
+`13:47` is inside the `P17-T004` worker's gate run, which compiled and ran it,
+and `13:30` is inside the window in which the same probe was being iterated. The
+probe is untracked but `cargo test` still builds anything under `tests/`, so the
+`test` gate ran it; the probe spawns PowerShell launchers **with the
+user-profile environment redirected**, and the sibling artifact described above
+is that same run's leftovers. So the probe is the **likeliest writer and is not
+a proven one** — the revision that wrote this has been rewritten and its source
+is gone, and the current revision passes an absolute path, which reproduces
+nothing. Naming it as the cause would be exactly the overclaim this repository
+refuses; naming it as the correlation is worth more than repeating "unexplained",
+because it is falsifiable and it says where to look first.
+
+**The writer has since been named, by the process that ran it, and the account
+is recorded as a claim rather than promoted to a measurement.** The `P17-T003`
+worker, in the same hand-back in which it disclosed the probe, reported that the
+`13:47` artifact was written by **one of its own PowerShell children**, with
+`LOCALAPPDATA` relocated and **the repository root as the working directory**.
+That is a different kind of evidence from everything above: it is first-hand,
+it is specific, and it is the account of the agent that held the process. It is
+**not** a measurement taken here — a subagent's report is model output, and this
+repository does not turn agent text into deterministic fact — so what it earns
+is the label *the worker's own account*, and what it closes is the search rather
+than the question.
+
+It does fit, including where the seven probes above were aimed wrong. Every one
+of them varied `LOCALAPPDATA` by **emptying it, unsetting it, or making it
+relative**. None varied it by **pointing it at a different real directory**, and
+that is the one shape with a sibling artifact on disk: the probe's own
+`target/tmp/p17t003-nowhere/` holds `AppData/Roaming/` and
+`Microsoft/Windows/Caches/` from the same minute, which is exactly what a
+*relocated* value produces and is not what an emptied one produces. So the
+account and the artifact agree on the variable, and the agreement is why the
+account is worth recording even though it is not independently reproduced here.
+The `13:30` observation has no such account and stays unattributed.
+
+**What a reader should do.** Nothing urgent, and nothing clever. The file is
+untracked, 3 KB, holds no repository content, and cannot enter a commit —
+`target/tmp/sup-commit.mjs` stages only the paths it is given. It is recorded
+here as **observed, correlated, and accounted for by the process that ran it but
+not independently reproduced**, rather than given a cause it has not earned, in
+the same way `P17-T001`'s loopback flake was recorded as unreproducible rather
+than explained. The cheap decisive experiment, if anyone wants it closed, is to
+keep the tree's `tests/` directories free of scratch probes during a gate run
+and see whether it still appears — which is now also a thing this repository
+wants for its own reasons, since a probe that lives in `tests/` is compiled by
+every gate run and reddens fmt, clippy and nonwindows until it is deleted, which
+is what happened to `P17-T004`'s worker mid-task. **The tree currently carries
+none of it**: `Microsoft/` is absent, `find` returns no `ModuleAnalysisCache`
+anywhere outside `target/`, and the gate runs at `13:56` and `13:59` — the first
+two taken after the probe was deleted — produced none. That is the counter-
+observation the earlier framing of this entry was missing, and it is why the
+correlation is written down as a correlation.
+
+## A `.ps1` launcher reported to hang on an unstartable binary, not reproduced
+
+The `P17-T003` worker recorded, as a finding it disclosed and did not chase, that
+a `.ps1` launcher with a `SURE_BIN` that **exists but cannot start** "can hang
+past 60 seconds" — its sweep gauge TIMEOUTed that row in 3 of 4 runs and then 1
+of 4, while all three `.sh` launchers exit 126 immediately on the same input. A
+hook that blocks a session instead of failing open is worth knowing about, so it
+was measured here rather than recorded as a mystery.
+
+**It did not reproduce, in the shape described or in the shape its own mechanism
+implies.** `target/tmp/p17t003-ps1-stdin.sh` runs `claude-code`'s
+`sure-hook.ps1` against a `SURE_BIN` that is a text file named `broken.exe`, under
+a 20-second timeout, varying only what the writer does with standard input:
+
+    sends an event, then closes        256 ms   exit 1
+    sends an event, holds open         286 ms   exit 1
+    sends NOTHING, holds open          235 ms   exit 1
+
+The third row is the one that should have hung. The script reads the event twice
+— `$input` (line 13), then `[Console]::In.ReadToEnd()` (line 14) if that came back
+blank — and `ReadToEnd()` on an open pipe with nothing on it is a read that cannot
+return. It returned in 235 ms, so on this machine and this PowerShell the
+parse-time drain the worker measured leaves the console at EOF rather than
+waiting. That is a reading of one machine, not a rule about the class.
+
+**Recorded as not reproduced, with the shapes named**, in the same form as
+`P17-T001`'s loopback flake and the `exit 101` `P15-T017` reported: not
+"flake-free", not "explained", and not promoted to a task. The reason it is not
+minted is that the evidence for it is a timeout in the reporter's own gauge —
+which is a statement about that gauge until something else produces it — and no
+CI run and no other process has. If it recurs, the shape to try first is the one
+above with the third row's writer, since that is where the mechanism has to live.
+
+**One asymmetry the same probe did establish, which is not a defect.** The same
+condition — a binary that exists and cannot start — exits **126** through every
+`.sh` launcher and **1** through `sure-hook.ps1` here. Both are non-zero, both are
+non-blocking under the harness contracts `docs/integrations/HOOK_FAILURE_SEMANTICS.md`
+already records (exit 1 is not Claude Code's blocking status, which is 2), and
+neither is a green. The two families simply disagree about which non-zero code to
+use, and nothing reads the difference. Written down because a reader comparing
+the two launchers' exit codes on this path will meet it.

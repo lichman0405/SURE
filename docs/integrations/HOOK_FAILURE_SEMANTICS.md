@@ -154,6 +154,28 @@ an empty directory. It is a property of the environment and not of the failure,
 which is why the test that pins the silence gives the child `/usr/bin:/bin`: an
 empty `PATH` there would have measured the test's setup instead of the launcher.
 
+The drain is not only about silence. The harness is the writer of that event, so
+a launcher that exits without reading kills the harness's write — SIGPIPE on
+Unix, a broken pipe on Windows — while answering exit 0, which loses the event
+under a success. All three `.sh` launchers drain on the missing-binary branch
+(`claude-code/scripts/sure-hook.sh:22`, `cursor/scripts/sure-hook.sh:13`,
+`codex/scripts/sure-hook.sh:17`); `claude-code`'s was the third, repaired
+2026-09-21 under `P17-T003` after the test began writing an event larger than a
+pipe buffer (1 MiB, against a measured 69632-byte Windows anonymous pipe and
+Linux's 64 KiB), because a payload the pipe cannot buffer is the only one whose
+write cannot land on a launcher that never read it — measured before the repair
+at 50/50 runs failing and after it at 0/50, where the old 200-byte payload had
+failed 0/50 either way.
+
+One exit in those three files still leaves the event unread: when `exec` itself
+fails, the shell exits 126 with the write broken (measured 2026-09-21: writer
+141, exit 126, all three). Reading the event to a temporary file and re-feeding
+it to the exec would close that hole, and it is rejected on cost rather than on
+impossibility: it would put a write of unbounded size to disk on every
+invocation — the success path, which runs on every harness event — to protect a
+path that already reports failure. Nothing is hidden from the harness either
+way: it reads a hook that failed.
+
 ### 2.3 A project root SURE cannot use, and what happens to a `SessionStart`
 
 A way a hook event stops before it answers that SURE chose rather than suffered.

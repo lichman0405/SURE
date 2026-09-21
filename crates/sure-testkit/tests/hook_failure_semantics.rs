@@ -325,8 +325,10 @@ fn run_launcher(
             #[cfg(windows)]
             command.env("PATH", &nowhere);
             // Unix: the system utility directories instead, because the `.sh`
-            // launchers are not in that position. Two of the three drain standard
-            // input with `cat` (`cursor/scripts/sure-hook.sh:13`,
+            // launchers are not in that position. All three drain standard input
+            // with `cat` on their missing-binary branch
+            // (`claude-code/scripts/sure-hook.sh:22`,
+            // `cursor/scripts/sure-hook.sh:13`,
             // `codex/scripts/sure-hook.sh:17`), so an empty `PATH` hides `cat`
             // from them as well as hiding `sure`, and the shell writes its own
             // `cat: command not found` to stderr. Measured 2026-09-19 under Git
@@ -334,6 +336,31 @@ fn run_launcher(
             // whose missing-binary branch writes nothing at all, and it fails the
             // one assertion that says so. The launcher is right; the test's
             // `PATH` was wrong.
+            //
+            // That drain is why this was written two launchers ago and why it is
+            // stated again: `claude-code/scripts/sure-hook.sh` was the third, and
+            // it went without until `P17-T003`. It is not tidiness either — the
+            // writer on that path is the harness, and a hook that exits 0 with
+            // standard input unread hands it a broken pipe and takes the event
+            // with it. `no_launcher_blocks_the_session_when_sure_cannot_be_found`
+            // writes an event past a pipe buffer's capacity for exactly this
+            // reason, so a launcher that skips the drain fails there by name
+            // rather than in whichever run loses the race. A `.sh` launcher that
+            // cannot find `cat` reads nothing, so it is that same failure.
+            //
+            // One exit in all three still closes standard input unread: when
+            // `exec` itself fails — a `SURE_BIN` that is executable and cannot
+            // start, `#!/nonexistent-interpreter` — the shell exits 126 with the
+            // event unread. Measured 2026-09-21 under Git Bash, all three
+            // launchers, a 1 MiB event: writer 141, exit 126. Buffer-and-refeed
+            // would close it — read the event to a temporary file, then
+            // `exec "$BIN" ... < "$tmpfile"` — and that is rejected on cost, not
+            // on impossibility: it moves a write of unbounded size to disk onto
+            // every invocation, the success path, to protect a path that already
+            // reports failure to the harness. Nothing is hidden there either way,
+            // because 126 is not success. Recorded and named here because a rule
+            // stated for two files and left standing in the third is how this
+            // task's own defect survived (`P17-T001`).
             #[cfg(unix)]
             {
                 assert_sure_cannot_be_found(UNIX_UTILITY_PATH);
@@ -341,7 +368,23 @@ fn run_launcher(
             }
         }
     }
-    run_configured(command, payload)
+    run_configured(command, script, payload)
+}
+
+/// The package a launcher belongs to, read off its path.
+///
+/// `integrations/<harness>/scripts/sure-hook.<ext>` is the shape the packages
+/// have and the shape [`hook_launchers_named`] reads the harness off, so a
+/// failure message and the list of launchers under test cannot disagree about
+/// which harness a file belongs to. A path that is not that shape names itself,
+/// which is the most a message can do with a file it cannot place.
+fn harness_of(script: &Path) -> String {
+    script
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| script.display().to_string())
 }
 
 /// Start a launcher that has already been configured, hand it the event on
@@ -353,19 +396,80 @@ fn run_launcher(
 /// child, still starts a launcher through this one path. A second copy of these
 /// eight lines is a second place the pipes can be wired differently, and the
 /// whole point of that test is that it measures what this one measures.
-fn run_configured(mut command: Command, payload: &str) -> Output {
+///
+/// `script` is here to name the launcher in a failure and nothing else; the
+/// measurement does not depend on it. See
+/// [`the_event_did_not_reach_the_launcher`] for why the write's failure is
+/// reported rather than left to `expect`.
+fn run_configured(mut command: Command, script: &Path, payload: &str) -> Output {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn().expect("spawn the launcher");
-    child
-        .stdin
-        .take()
-        .expect("the pipe")
-        .write_all(payload.as_bytes())
-        .expect("write the event");
-    child.wait_with_output().expect("the launcher exits")
+    let mut pipe = child.stdin.take().expect("the pipe");
+    let written = pipe.write_all(payload.as_bytes());
+    // Closed before the wait, and on both paths: a launcher that drains the
+    // event reads until this end is shut, so a child waiting for the end of its
+    // input would otherwise be waiting for a process that is waiting for it.
+    drop(pipe);
+    let output = child.wait_with_output().expect("the launcher exits");
+    match written {
+        Ok(()) => output,
+        Err(error) => panic!(
+            "{}",
+            the_event_did_not_reach_the_launcher(script, payload, &error, &output)
+        ),
+    }
+}
+
+/// What a reader is told when the event never reached the launcher.
+///
+/// This used to be the bare `expect` on the write — `write the event` — and that
+/// cost a real morning: the CI log named neither the launcher nor the stream, so
+/// the first question ("which of the four launchers did this?") had to be
+/// answered by re-running the probe by hand. A failure that names the file, the
+/// stream and the launcher's own status answers it in the log.
+///
+/// What it says, in the order a reader needs it: the harness, the file, the
+/// stream the write went to, how many bytes were offered, the error, what the
+/// launcher did instead — and then what the shape means, what the repair is, and
+/// why the reading is a property rather than a race.
+fn the_event_did_not_reach_the_launcher(
+    script: &Path,
+    payload: &str,
+    error: &std::io::Error,
+    output: &Output,
+) -> String {
+    let harness = harness_of(script);
+    let stdout = text(&output.stdout);
+    let stderr = text(&output.stderr);
+    format!(
+        "{harness}: the event never reached the launcher, and what failed is the writer — this \
+         test, standing in for the harness — not the launcher's own status.\n\
+         \n\
+         The write was {} bytes to the standard input of {}, and it failed: {error:?}.\n\
+         The launcher exited {:?}. What it wrote to stdout:\n{stdout}and to stderr:\n{stderr}\n\
+         \n\
+         That is a launcher which closed standard input without reading the event. On Unix the \
+         writer is killed by SIGPIPE, and a harness writing the same event from another process \
+         sees a broken pipe — from a hook whose own status is 0, so the event is lost and the \
+         harness is told the hook succeeded. The repair belongs in the launcher and not here: \
+         every path that can exit without forwarding the event has to drain standard input \
+         first, which is the `cat >/dev/null` that \
+         `integrations/cursor/scripts/sure-hook.sh` and \
+         `integrations/codex/scripts/sure-hook.sh` carry on their missing-binary branch.\n\
+         \n\
+         This is a property and not a race: the payload is past what a pipe can hold \
+         (`EVENT_BYTES`), so a launcher that reads nothing cannot accept it however the two \
+         processes are scheduled. If this failure names a launcher whose branch does drain \
+         standard input, the drain is not reaching the event — an empty `PATH` under a `.sh` \
+         launcher hides `cat` as readily as it hides `sure` (see the Unix arm of \
+         `run_launcher`) — and the launcher's stderr above is where the shell says so.",
+        payload.len(),
+        script.display(),
+        output.status.code(),
+    )
 }
 
 /// The `PATH` a `.sh` launcher is given when SURE must not be findable.
@@ -439,6 +543,82 @@ fn an_event(harness: &str) -> String {
         }),
     };
     event.to_string()
+}
+
+/// The size of the event the missing-binary test writes, and the reason it is
+/// this number.
+///
+/// **The size is the instrument, not decoration.** A payload that fits in a pipe
+/// buffer is accepted by the kernel whether or not anybody reads it, so with a
+/// small event the only way a launcher that never reads can be caught is the
+/// race the writer happens to lose — the child exiting between the spawn and the
+/// parent's write. That race is what went red on `ubuntu-latest` at `2ddad6b`:
+///
+/// ```text
+/// no_launcher_blocks_the_session_when_sure_cannot_be_found
+/// panicked at crates/sure-testkit/tests/hook_failure_semantics.rs:367:10:
+/// write the event: Os { code: 32, kind: BrokenPipe, message: "Broken pipe" }
+/// ```
+///
+/// The launcher it caught was `claude-code/scripts/sure-hook.sh`, whose
+/// missing-binary branch printed its note and exited 0 with nothing reading
+/// standard input — the same branch its two POSIX peers drained with `cat`. What
+/// made it a race rather than a red test was the payload: measured on this
+/// machine on 2026-09-21 with the blocking `write_all` these tests use, 50 runs
+/// of a 200-byte event against that launcher produced **no** writer failure at
+/// all, while 50 runs of the event below produced 50. A payload larger than the
+/// buffer cannot be accepted without a reader: the writer fills the buffer,
+/// blocks, and fails when the child exits. That is a reading of "did this
+/// launcher read the event", and no timing enters it.
+///
+/// 1 MiB is chosen for margin rather than for precision. A Linux pipe holds
+/// 64 KiB by default — the platform the CI run was lost on — and the anonymous
+/// pipe `Stdio::piped()` creates on this machine accepted 69632 bytes from a
+/// child that never reads (measured 2026-09-21); macOS is 16 KiB. The number has
+/// to be past every platform's default by a wide margin, because the margin is
+/// the only thing between this test and the race it exists to replace — and the
+/// kernel's buffer is not this repository's to hold still. `P1-T008` is the
+/// repository's precedent for the technique (`progress/DECISIONS.md`: "the test
+/// writes a megabyte into the pipe and requires it to fail with a broken pipe").
+///
+/// **On Windows this assertion is held by the interpreter, not by the launcher,
+/// and that is worth knowing before the next reader trusts it there.** Measured
+/// on this machine on 2026-09-21 with this same blocking write: a `-File` script
+/// that exits without reading and whose text says nothing about `$input` fails
+/// the write at 1 MiB — but the *same script* with the launcher's `$input` line
+/// left in it just below the exit accepted the whole megabyte, three runs out of
+/// three: Windows PowerShell drains the redirected event for a script that
+/// mentions `$input`, at parse time and whether or not the line runs. So none of
+/// the four `.ps1` launchers can exhibit the defect this test is about, however
+/// their missing-binary branches are written, and their rows here are not
+/// evidence about their own reads. The reading comes from the `.sh` launchers —
+/// through `sh`, which is the host the Unix arm of [`run_launcher`] uses and the
+/// one that has no such pump: 50 runs of the event below against
+/// `claude-code/scripts/sure-hook.sh` before `P17-T003` fixed it produced 50
+/// writer failures, where 50 runs of an event the size [`an_event`] builds —
+/// some two hundred bytes — produced none.
+const EVENT_BYTES: usize = 1024 * 1024;
+
+/// One harness's event, padded past what a pipe can hold. See [`EVENT_BYTES`].
+///
+/// Built out of [`an_event`] rather than beside it, so that the harness-specific
+/// shape stays in one place: what this adds is size, and the field it adds it in
+/// is named for what it is. The result is still one line of valid JSON, which is
+/// what the launchers that drain it are reading.
+fn an_event_that_does_not_fit_in_a_pipe(harness: &str) -> String {
+    let mut event: Value =
+        serde_json::from_str(&an_event(harness)).expect("an_event builds a JSON object");
+    event["padding"] = Value::String("x".repeat(EVENT_BYTES));
+    let payload = event.to_string();
+    assert!(
+        payload.len() > EVENT_BYTES,
+        "the event handed to the pipe is {} bytes, which is not past the {} this test needs it to \
+         be: a payload that fits in a pipe buffer is accepted without a reader, and the launcher \
+         this test is about would pass by not reading it",
+        payload.len(),
+        EVENT_BYTES
+    );
+    payload
 }
 
 /// The event-kind argument the package's own manifest passes, if it passes one.
@@ -674,6 +854,12 @@ fn no_launcher_blocks_the_session_when_sure_cannot_be_found() {
     // these exits 0 so the harness proceeds, and the ones that say anything say
     // it on stderr, where it cannot be read as a decision by a harness that
     // parses stdout.
+    //
+    // The event this hands each launcher is `an_event_that_does_not_fit_in_a_pipe`
+    // rather than `an_event`, and that is the half of the property the small
+    // payload could not see: exit 0 is not enough if the launcher took the event
+    // with it, because the harness's *write* is what fails then. See `EVENT_BYTES`
+    // for why the size is the size.
     let scratch = scratch("hook-missing-bin");
     let launchers = hook_launchers();
     assert!(
@@ -693,7 +879,7 @@ fn no_launcher_blocks_the_session_when_sure_cannot_be_found() {
             script,
             None,
             event_kind(harness),
-            &an_event(harness),
+            &an_event_that_does_not_fit_in_a_pipe(harness),
         );
         let stdout = text(&output.stdout);
         let stderr = text(&output.stderr);
@@ -876,7 +1062,7 @@ fn a_host_that_cannot_run_scripts_is_named_rather_than_reported_as_a_launcher_fa
             command.arg(kind);
         }
         command.env("SURE_BIN", &bin);
-        let output = run_configured(command, &an_event(harness));
+        let output = run_configured(command, script, &an_event(harness));
         let stderr = text(&output.stderr);
 
         assert_ne!(

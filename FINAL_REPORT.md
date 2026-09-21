@@ -848,29 +848,29 @@ it is not a document a reader can read end to end. That is a real cost of the
 way this repository keeps evidence: the readings are all there, and finding any
 one of them means knowing what to search for.
 
-**13. The suppression census does not read the shipped integration launchers,
-and every one of them opens with the token it counts.** `scripts/gates.ps1`'s
-`$CensusRelative` array (lines 191–198) names six files — `scripts/gates.ps1`,
+**13. The suppression census's zero was true of the harness and read as a
+statement about the tree — repaired at `P17-T002`.** `scripts/gates.ps1`'s
+`$CensusRelative` array names six files — `scripts/gates.ps1`,
 `scripts/validate-bootstrap.mjs`, `scripts/taskctl.mjs`,
 `scripts/check-non-windows.mjs`, `scripts/measure-tests.mjs` and
-`scripts/product-evals.mjs`. All six are the harness. The tree, meanwhile,
+`scripts/product-evals.mjs` — all six of them the harness, while the tree
 contains **five files under `integrations/` that open with
 `$ErrorActionPreference='SilentlyContinue'`**: all four
 `integrations/*/scripts/sure-hook.ps1` at line 1, and
-`integrations/claude-code/scripts/sure-mcp.ps1:7`. So the census reports a count
-of zero **about a tree that contains five**, and the census line is quoted in
-every reading this repository records. Both sides have to be stated or the
-finding is unfair. **The token is defensible where it sits**: a hook that throws
-can break the agent session it was installed into, and
-`Get-Command sure -EA SilentlyContinue` is a probe whose expected answer is "not
-found". What is not defensible is that nothing counts it there. T011 then
-measured the consequence: a codex payload with a non-ASCII `project_root` under
-code page 936 returns **exit 0, `stored: 0`, and nothing on stderr** — and a
-silent failure in a shipped package is exactly what a suppression token
-predicts. This is a **finding, not a repair**: widening the census to
-`integrations/` would redden on the five above, and changing what they do with
-errors is a decision about the launchers' error policy rather than about the
-census.
+`integrations/claude-code/scripts/sure-mcp.ps1:7`. The census therefore
+reported a count of zero **about a tree that contains five** — and, worse, the
+line was quoted on its own in every reading this repository records, where the
+paragraph qualifying it does not travel with it. **The tokens are defensible
+where they sit**: a hook that throws can break the session it was installed
+into, and `Get-Command sure -EA SilentlyContinue` is a probe whose expected
+answer is "not found", so no launcher is edited. **What was repaired is the
+misreading**: the census line now states its scope inside the line, and a
+second, non-failing line carries the tree's own figure — measured at `4a0c456`,
+`SilentlyContinue` in 57 lines across 25 files and `continue-on-error` in 39
+across 7, over 605 tracked files. T011 measured the tokens' consequence: a
+codex payload with a non-ASCII `project_root` under code page 936 returns
+**exit 0, `stored: 0`, and nothing on stderr** — and the five are one class
+among many, since the tree's own figure is an order of magnitude larger.
 
 ### External blockers
 

@@ -21,8 +21,8 @@
 # this one adds lines and changes none. Every added line carries a prefix no
 # quoted line carries, so a reader can tell them apart by the first token alone:
 # `env:`, `tools:`, `gate-set:`, `policy` (`policy:` and `policy-override:`),
-# `suppression` (the census line and each finding), `counts:`, `preflight-only:`
-# and the closing `halt:`.
+# `suppression` (the census line, the tree figure, its notes and each finding),
+# `counts:`, `preflight-only:` and the closing `halt:`.
 #
 # THE ONE FIELD APPENDED TO A QUOTED LINE, AND WHY THAT IS NOT A BREAK OF THE
 # RULE ABOVE. `exits: ...` now ends with `productevals=...`, appended *after*
@@ -188,6 +188,19 @@ $GateSet = @(
 # re-count it the next time this array changes. This file is one of the entries
 # -- a census that exempted its own subject would be describing the tree rather
 # than testing it.
+#
+# WHAT THIS ARRAY IS THE SCOPE OF, AND WHAT IT IS NOT. It is the scope of the
+# census that can fail a run: these are the files every reading in the record is
+# produced by, so a token here is a failure able to hide inside the instrument
+# that would have reported it. It is not the tree, and a zero over it is not a
+# zero over the tree -- which is how it was read for as long as the census line
+# has been printed. `FINAL_REPORT.md` section 8 item 13 is the record of that.
+# Its own sentence about the line above is "the census reports a count of zero
+# **about a tree that contains five**", and those five were launchers this array
+# never asked about. The repair for a number travelling without its scope is a
+# second number with its scope inside it, so the census prints the tree's own
+# figure beside this array's. That second line cannot fail a run, and the
+# argument for the asymmetry is written beside it.
 $CensusRelative = @(
     'scripts/gates.ps1'
     'scripts/validate-bootstrap.mjs'
@@ -207,7 +220,7 @@ $SuppressionTokens = @(('Silently' + 'Continue'), ('continue-on-' + 'error'))
 $ExitRed = 1        # at least one gate exited non-zero
 $ExitCannotRun = 2  # a precondition is missing; no gate was run
 $ExitPolicy = 3     # the shell a test would start cannot load a script; no gate was run
-$ExitCensus = 4     # a suppression token was found in the harness
+$ExitCensus = 4     # a suppression token was found in a file `$CensusRelative` names; the tree figure printed beside the census is not this
 $ExitCounts = 5     # the test log exists but no count can be attributed from it
 
 # ---------------------------------------------------------------------------
@@ -473,10 +486,37 @@ if ($PolicyUsable -eq $false) {
         'one taken from a session that permits scripts.')
 }
 
-# 6. Nothing that suppresses. The census reads this file and every file it calls
-#    and counts the two tokens a failure can be hidden behind. The counts are
-#    printed whether or not they are zero, and a non-zero count is a named line
-#    rather than a quiet one.
+# 6. Nothing that suppresses, and the tree figure printed beside that claim.
+#
+# The first line is the census and it is a condition: the two tokens a failure
+# can be hidden behind, counted over the files this harness is made of, printed
+# whether or not they are zero, named per file when they are not, and failing the
+# run with `$ExitCensus` when they are not.
+#
+# The second line is a different scope and a different kind of line: the same two
+# tokens counted over the tracked tree. WHY IT DOES NOT FAIL THE RUN. Because the
+# census's subject is the harness -- the files every reading in the record is
+# produced by -- and because the tree's figure is not a finding about the tree.
+# What it counts is LINES CONTAINING THE TEXT. This repository's own prose quotes
+# the token: `FINAL_REPORT.md` section 8 item 13, `progress/HANDOFF.md`, and this
+# file's own census line quoted into every gate log. And a per-cmdlet probe whose
+# expected answer is "not found" (`Get-Command sure -EA`) is a deliberate local
+# choice rather than a hidden failure -- `FINAL_REPORT.md` section 8 item 13 says
+# so about the launcher that carries it. A run that went red over that would be
+# red on a repository that had done nothing wrong, and a red like that is what
+# teaches a reader to skip the line -- worse than a line nobody reads, because it
+# is one they have learned to ignore. What the line is FOR is the misreading
+# `P17-T002` is about: the zero above, quoted on its own, read as a statement
+# about the tree. So it says what it counts and why it is printed, inside the
+# line, and it cannot travel without its scope the way the census line did. It is
+# a reading and not a constant in one further sense worth knowing before someone
+# compares two logs: the figure includes the repository's own sentences about the
+# token, so writing this finding down moves it.
+#
+# It asks `git ls-files` through the git this file already resolved rather than
+# walking anything, because `target/` is untracked and enormous. The tokens are
+# the array above, never respelled here. The files above are left out of this
+# count so that nothing is counted twice.
 $CensusCounts = @{}
 $CensusFindings = New-Object System.Collections.Generic.List[string]
 foreach ($token in $SuppressionTokens) {
@@ -492,10 +532,57 @@ foreach ($token in $SuppressionTokens) {
     }
     $CensusCounts[$token] = $total
 }
-Add-GateLine ("suppression census over {0} files: {1}" -f $CensusRelative.Count, (($SuppressionTokens |
+Add-GateLine ("suppression census over {0} files (the gate harness): {1}" -f $CensusRelative.Count, (($SuppressionTokens |
             ForEach-Object { '{0}={1}' -f $_, $CensusCounts[$_] }) -join ' '))
 foreach ($finding in $CensusFindings) {
     Add-GateLine ('suppression: ' + $finding)
+}
+
+# The tree's own figure, and not a condition: nothing below can move an exit
+# code, for the reason argued in the block above. `git` is on PATH here or the
+# tools check above refused the run, so there is no branch for a null path.
+$TreeLines = @{}
+$TreeFiles = @{}
+foreach ($token in $SuppressionTokens) {
+    $TreeLines[$token] = 0
+    $TreeFiles[$token] = 0
+}
+$TreeRead = 0
+$TreeUnread = 0
+$Listed = @(& $Git -C $RepoRoot ls-files 2>&1)
+if ($LASTEXITCODE -ne 0 -or $Listed.Count -eq 0) {
+    Add-GateLine ("suppression across the tree: cannot confirm -- git ls-files exited {0} and listed {1} file(s), so not one tracked file was read and the tree has no figure here. The line above is about the harness and is not a claim about the tree either." -f
+        $LASTEXITCODE, $Listed.Count)
+} else {
+    $Tracked = @($Listed | ForEach-Object { $_.ToString() } | Where-Object { $_.Length -gt 0 })
+    foreach ($relative in $Tracked) {
+        if ($CensusRelative -contains $relative) { continue }
+        # The separator is the platform's, because a path this file built with a
+        # backslash is a path `Test-Path` cannot find on the other two, and the
+        # `continue` below would then read as "this file carries nothing".
+        $path = Join-Path $RepoRoot ($relative -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $TreeUnread++; continue }
+        $TreeRead++
+        foreach ($token in $SuppressionTokens) {
+            $found = @(Select-String -LiteralPath $path -Pattern $token -SimpleMatch -CaseSensitive)
+            if ($found.Count -gt 0) {
+                $TreeLines[$token] += $found.Count
+                $TreeFiles[$token]++
+            }
+        }
+    }
+    Add-GateLine ('suppression across the tree: ' + (($SuppressionTokens | ForEach-Object {
+                    '{0} {1} line(s) in {2} file(s)' -f $_, $TreeLines[$_], $TreeFiles[$_] }) -join '; ') +
+        ("; {0} tracked files outside the harness were read." -f $TreeRead))
+    Add-GateLine ('suppression-tree-note: this counts LINES CONTAINING THE TEXT and is not a count of suppressions. This repository''s own prose quotes the token -- the census line above is quoted in every gate log, in `FINAL_REPORT.md` and in `progress/HANDOFF.md` -- and a per-cmdlet probe whose expected answer is "not found" is a deliberate local choice, not a hidden failure.')
+    Add-GateLine ('suppression-tree-note: it is printed so the harness zero above cannot be read as a claim about the tree. It is not a pass/fail condition on purpose -- the census''s subject is the harness that produces every reading, and a figure that merges prose with deliberate local probes is a red on a repository that has done nothing wrong, which is a line a reader learns to skip.')
+    if ($TreeUnread -gt 0) {
+        # Single-quoted, like the two note lines above. Inside a double-quoted
+        # PowerShell string a backtick is an escape, so this line printed
+        # `worktree at start:` with its backticks missing while the two above
+        # kept theirs. Found by running this branch rather than reading it.
+        Add-GateLine ('suppression-tree-note: {0} tracked file(s) are not in the working tree, so this figure does not cover them; `worktree at start:` names the ones whose deletion is not staged.' -f $TreeUnread)
+    }
 }
 
 if ($PreflightOnly) {

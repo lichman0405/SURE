@@ -268,31 +268,71 @@ redundancy now.
 
 ## Nothing suppresses, and the census is what says so
 
-The runner reports the count of the two tokens a failure can be hidden behind —
-`-ErrorAction`'s silent one and the workflow one — over the six files the gate
-set is made of: itself, the four node commands it calls
+The runner prints two figures over two scopes, each with its scope inside the
+line, so that neither can be quoted as though it were the other.
+
+The first is the census proper: the count of the two tokens a failure can be
+hidden behind — `-ErrorAction`'s silent one and the workflow one — over the six
+files the gate set is made of: itself, the four node commands it calls
 (`scripts/validate-bootstrap.mjs`, `scripts/taskctl.mjs`,
 `scripts/check-non-windows.mjs`, `scripts/product-evals.mjs`) and the instrument
-it calls for the parent figure (`scripts/measure-tests.mjs`).
+it calls for the parent figure (`scripts/measure-tests.mjs`). It is a pass/fail
+condition: a non-zero count names the file and the count, and the run exits 4.
+
+The second is the same two tokens counted over the tracked tree — every file
+`git ls-files` lists, read through the git path the runner already resolved, so
+`target/` is never walked. **It fails nothing**, and the argument is in the
+runner beside it: the census's subject is the harness that produces every
+reading in the record, and the tree's figure is not a finding about the tree.
+What it counts is lines containing the text. This repository's own prose quotes
+the token — `FINAL_REPORT.md` section 8 item 13 records the census saying "a
+count of zero **about a tree that contains five**" — and a per-cmdlet probe
+whose expected answer is "not found" is a deliberate local choice rather than a
+hidden failure. A run reddened over that would be red on a repository that had
+done nothing wrong, which is a line a reader learns to skip. What the tree
+figure is for is the misreading: the zero on the first line, quoted on its own,
+read as a statement about the tree.
 
 ```text
-suppression census over 6 files: SilentlyContinue=0 continue-on-error=0
+suppression census over 6 files (the gate harness): SilentlyContinue=0 continue-on-error=0
+suppression across the tree: SilentlyContinue 57 line(s) in 25 file(s); continue-on-error 39 line(s) in 7 file(s); 605 tracked files outside the harness were read.
+suppression-tree-note: this counts LINES CONTAINING THE TEXT and is not a count of suppressions. This repository's own prose quotes the token -- the census line above is quoted in every gate log, in `FINAL_REPORT.md` and in `progress/HANDOFF.md` -- and a per-cmdlet probe whose expected answer is "not found" is a deliberate local choice, not a hidden failure.
+suppression-tree-note: it is printed so the harness zero above cannot be read as a claim about the tree. It is not a pass/fail condition on purpose -- the census's subject is the harness that produces every reading, and a figure that merges prose with deliberate local probes is a red on a repository that has done nothing wrong, which is a line a reader learns to skip.
 ```
 
-That is the line the runner printed on 2026-09-21, taken with
-`-PreflightOnly`; it is not re-typed. The number in it is
-`$CensusRelative.Count`, so the line says how many files the census actually
-read rather than how many somebody remembered there were — which is the
-difference that matters, because the comment above that array claimed "all six"
-over an array of five until this row was added and named the three node commands
-among the commands above it as "four".
+Those are the lines the runner printed on 2026-09-21, taken with
+`pwsh -NoProfile -File scripts/gates.ps1 -Label p17t002-worker-preflight
+-PreflightOnly` on the tree at `4a0c456` and copied out of
+`target/tmp/gates-p17t002-worker-preflight-preflight.txt`; they are not
+re-typed. The number in the first line is `$CensusRelative.Count`, so that line
+says how many files the census actually read rather than how many somebody
+remembered there were — which is the difference that matters, because the
+comment above that array claimed "all six" over an array of five until this row
+was added and named the three node commands among the commands above it as
+"four".
 
-**It reads this file too**, which is why the two tokens are spelled in two
-pieces in the source: a file that spells them whole cannot honestly count them
-in itself. Measured: appending one `-ErrorAction`-silent token to
-`scripts/validate-bootstrap.mjs` in a clone makes the census read `1`, name the
-file and the count — `suppression: SilentlyContinue x1 in
-scripts/validate-bootstrap.mjs` — and exit 4.
+**The tree figure is a reading and not a constant, because the repository's own
+sentences are inside what it counts.** Four readings of the same tracked tree
+while this row was written: 53 lines in 25 files and 36 in 7, then 55 in 25 and
+37 in 7 as the record gained sentences about the task, then 56 in 25 and 38 in 7
+once this section's block was in the file, then the run quoted above at 57 in 25
+and 39 in 7 once the sentence further down that re-measures the census spelled
+the census line again to show what it prints when it fires. No file entered or
+left the count at any of the four: each step was one more sentence quoting the
+text. So a later log that disagrees with the block above on the tree figure is
+not evidence that anything regressed; the question to ask is what was written.
+
+**It reads `scripts/gates.ps1` itself too**, which is why the two tokens are
+spelled in two pieces in the source: a file that spells them whole cannot
+honestly count them in itself. Measured: appending one `-ErrorAction`-silent
+token to `scripts/validate-bootstrap.mjs` in a clone makes the census read `1`,
+name the file and the count — `suppression: SilentlyContinue x1 in
+scripts/validate-bootstrap.mjs` — and exit 4. Re-measured at `P17-T002` in a
+scratch tree under `target/tmp/`, because the tree line changed the code around
+this condition: the same edit reads `suppression census over 6 files (the gate
+harness): SilentlyContinue=1 continue-on-error=0`, names the file, and exits 4;
+with the token moved into a file the harness does not call, the tree line counts
+it and the run exits 0. The scratch tree was removed afterwards.
 
 Case-sensitivity is not decoration here either. `Select-String` is
 case-insensitive by default; measured at `P14-T004`, a pattern meant to count

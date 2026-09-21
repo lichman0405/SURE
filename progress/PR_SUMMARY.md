@@ -27,6 +27,13 @@ including to the supervisor who was building it.
 - **Seven local gates** in `scripts/gates.ps1`, run from PowerShell. CI runs six of
   the seven on all three platforms; the seventh, `check-non-windows.mjs`, is local
   only, because its subject is the *other* platform's shape.
+- **The suppression census says what it counted, and prints the tree's own figure
+  beside it** — repaired at `P17-T002`. The census's `SilentlyContinue=0` was true
+  of the six harness files and was quoted on its own in every gate log ever taken,
+  while the tree contains **five launchers that open with
+  `$ErrorActionPreference='SilentlyContinue'`** and 57 lines naming the token. Both
+  figures now print, each with its scope inside the line, and the tree's line fails
+  nothing — the argument for that asymmetry sits beside it in the runner.
 - **`FINAL_REPORT.md`** (1049 lines) — the deliverable, naming the exact commit its
   readings were taken at, and carrying ten sections including a "what this report
   did not measure" section.
@@ -66,10 +73,6 @@ read them before deciding:
   path hands SURE `??` and stores 0 rows; and codex's declared `-File` invocation
   still mangles a non-ASCII payload. Both are measured, both have their reason for
   being carried rather than fixed.
-- **The suppression census reports zero about a tree that contains five.** All four
-  shipped hook launchers open with `$ErrorActionPreference='SilentlyContinue'`;
-  the census reads six harness files and none of them is a launcher. The zero is
-  true of the census's six and false of the tree.
 
 ## The corrections this branch made to its own record
 

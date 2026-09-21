@@ -791,6 +791,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sure-core",
  "sure-protocol",
  "sure-testkit",

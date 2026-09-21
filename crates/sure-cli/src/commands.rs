@@ -93,7 +93,7 @@ impl<'a> Named<'a> {
     }
 }
 
-use crate::cli::Command;
+use crate::cli::{Command, ConfigAction};
 use crate::report::{NotYet, Report};
 
 /// The commands this build carries out.
@@ -121,6 +121,38 @@ use crate::report::{NotYet, Report};
 pub const IMPLEMENTED: &[&str] = &[
     "check", "doctor", "history", "hook", "mcp", "protocol", "recheck", "repair", "version",
 ];
+
+/// Invocations that work while the command they belong to does not.
+///
+/// [`IMPLEMENTED`] holds command *names*, and a name is a claim about a whole
+/// documented surface: `sure check` is in it because every form of `sure check`
+/// this build accepts does what `docs/architecture/CLI.md` says it does. `sure
+/// config set` is the first invocation in this build for which that is not true
+/// — it writes one setting and answers in its own words, and `sure config`,
+/// `sure config paths`, `sure config show` and `sure config validate` still
+/// answer [`Report::Unavailable`].
+///
+/// So `config` is **not** in [`IMPLEMENTED`], and the reason is not tidiness.
+/// That list is what `sure mcp` reports to an agent as `commands_implemented`
+/// and what every tool description reads to decide whether to say its command
+/// works. Putting `config` there would tell an agent that `sure config show`
+/// answers, and an agent that believed it would ask a question this build
+/// refuses — SURE's own false green, told to the caller least able to check it.
+/// Leaving it out is the same fact in the safe direction, and this constant is
+/// where the safe direction is made precise rather than merely cautious: the
+/// invocation below really does work, and a reader who wants to know which one
+/// asks here instead of concluding that nothing in `config` does.
+///
+/// # What keeps this honest
+///
+/// A list of invocations that work is exactly the kind of list that goes stale
+/// silently, so a test drives each entry through [`Command::report`] and fails
+/// unless it is a report this build produced rather than a refusal —
+/// `an_invocation_this_build_implements_in_part_really_answers`. The same test
+/// proves every entry's command name is absent from [`IMPLEMENTED`] (so an entry
+/// here can never be a weaker duplicate of a claim there) and present in the
+/// grammar (so a literal here is tied to a command that exists).
+pub const IMPLEMENTED_IN_PART: &[&str] = &["config set"];
 
 /// The implemented commands that this build's own tests must not ask.
 ///
@@ -208,11 +240,28 @@ impl Command {
             // command line, and the answers live in `sure_core` where the rest of
             // the store's callers can reach them too.
             Self::History { action } => crate::history::run(action.as_ref(), named.store),
-            Self::Config { .. } => not_yet(
-                self,
-                "show the settings in effect and which layer each one came from",
-                "No configuration was read.",
-            ),
+            // The two halves of a surface that is half-built, and the split is
+            // the point rather than an accident of this match: `sure config set`
+            // writes one setting into a file the user owns, and the three
+            // read-only subcommands still refuse. Naming `config` in
+            // [`IMPLEMENTED`] would be SURE's own false green told to an agent —
+            // `sure mcp` reads that list out as `commands_implemented` and into
+            // every tool description — so the implemented invocation is recorded
+            // in [`IMPLEMENTED_IN_PART`] instead, where it is a fact about one
+            // invocation rather than a claim about a command. See that constant
+            // for the whole of the argument.
+            Self::Config { action } => match action {
+                Some(ConfigAction::Set { setting, value }) => {
+                    crate::settings::set(setting, value, named)
+                }
+                None | Some(ConfigAction::Paths | ConfigAction::Show | ConfigAction::Validate) => {
+                    not_yet(
+                        self,
+                        "show the settings in effect and which layer each one came from",
+                        "No configuration was read.",
+                    )
+                }
+            },
             Self::Hook { action } => crate::hook::run(action, named),
 
             // A command this build carries out, and the first one that runs for
@@ -445,7 +494,15 @@ mod tests {
                 // `hook allow-once` writes a row, so no invocation of it belongs
                 // in a list this test holds to leaving the machine as it found
                 // it. Its own tests cover the write, against stores they name.
+                // `Settings` joins them for a third version of the same reason:
+                // `config set` writes a file, and it writes the *user's own*
+                // — which for a caller that named no `--settings-file` is the
+                // one the person running the suite really uses. No invocation
+                // of it can belong in `every_command`, and the entry in
+                // [`IMPLEMENTED_IN_PART`] is driven against a settings file the
+                // test names instead.
                 Report::Check(_)
+                | Report::Settings(_)
                 | Report::Failed(_)
                 | Report::Mcp(_)
                 | Report::McpSession(_)
@@ -604,6 +661,90 @@ mod tests {
             );
         }
         assert_eq!(implemented, expected);
+    }
+
+    #[test]
+    fn an_invocation_this_build_implements_in_part_really_answers() {
+        // [`IMPLEMENTED_IN_PART`] is a claim that one invocation works while its
+        // command name is absent from [`IMPLEMENTED`]. Both halves are checked
+        // here, because either one alone is a way to be wrong quietly: a list of
+        // names nothing drives is a wish, and a name in both lists is a
+        // contradiction a reader would resolve in whichever direction suited
+        // them.
+        //
+        // Driven through the dispatch with a settings file and a store this test
+        // names, both under the workspace's git-ignored `target/tmp`, so that
+        // the entry is proved by running it rather than by reading the match.
+        // The setting it writes is one a machine with no file does not already
+        // have — `host_confirmed` against the `inspect_only` default — so the
+        // report is a write rather than a no-op, which is the ending that
+        // actually touches the file the test made.
+        let directory = sure_testkit::scratch::directory("sure commands", "config-set");
+        let settings = directory.join("SURE").join("sure.yaml");
+        let project = directory.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        for entry in IMPLEMENTED_IN_PART {
+            let mut words = entry.split(' ');
+            let name = words.next().expect("an entry names a command");
+            let setting = words.next();
+            assert!(
+                !IMPLEMENTED.contains(&name),
+                "{entry} is in IMPLEMENTED_IN_PART and its command {name} is in IMPLEMENTED, so \
+                 one of the two lists is saying something the other denies"
+            );
+            assert!(
+                words.next().is_none() && setting.is_some(),
+                "{entry} is not `<command> <subcommand>`, which is the only shape this test knows \
+                 how to drive"
+            );
+
+            // The name is asked of the grammar rather than trusted as a string:
+            // a literal here that no command answers to would be a claim about
+            // nothing.
+            assert_eq!(
+                Command::Config {
+                    action: Some(ConfigAction::Set {
+                        setting: "execution.mode".to_owned(),
+                        value: "host_confirmed".to_owned(),
+                    }),
+                }
+                .name(),
+                name,
+                "{entry} names a command the grammar does not have"
+            );
+
+            let report = Command::Config {
+                action: Some(ConfigAction::Set {
+                    setting: "execution.mode".to_owned(),
+                    value: "host_confirmed".to_owned(),
+                }),
+            }
+            .report(Named {
+                store: Some(&directory.join("store")),
+                settings_file: Some(&settings),
+            });
+
+            match &report {
+                Report::Settings(_) => {}
+                other => panic!(
+                    "{entry} is listed as implemented in part and answered {other:?}, which is \
+                     what this build says about work it did not do"
+                ),
+            }
+            assert_eq!(
+                report.command(),
+                *entry,
+                "the frame does not name the invocation that was run"
+            );
+            assert_eq!(report.exit_code(), crate::report::exit::OK);
+            assert!(
+                std::fs::read_to_string(&settings)
+                    .expect("the entry is implemented, so it wrote the file it was given")
+                    .contains("host_confirmed"),
+                "{entry} answered without writing what it was asked for"
+            );
+        }
     }
 
     #[test]

@@ -27,6 +27,12 @@ mistake. `Config::load_file` reads a file at exactly the path it is given;
 `Config::load` reads `sure.yaml` from a project root. Which layer a setting came
 from is `docs/architecture/CONFIG_AUTHORITY.md`.
 
+That second path has a writer in this build, and only one: `sure config set`,
+which writes a setting into the user's own file on request and never into a
+project's. What it will and will not write is
+[below](#the-users-own-file-and-what-writes-it), and what it prints is in
+[CLI.md](CLI.md#sure-config-set-setting-value).
+
 ## Rules that apply to every setting
 
 1. **An unknown setting stops the run.** SURE does not warn and continue. A
@@ -261,6 +267,51 @@ that did not happen is never mistaken for a check that passed:
 | `checks.start_local_services: never` | local services were not started |
 | `checks.browser_probe: never` | the interface was not checked in a browser |
 
+## The user's own file, and what writes it
+
+The file at `Paths::user_config_file()` — `%APPDATA%\SURE\sure.yaml` on Windows —
+is the layer that **grants**. Every request in the table above is inert until
+that file agrees, and two settings are its alone: `privacy.full_recording` and
+any `execution.mode` other than `inspect_only`
+([CONFIG_AUTHORITY.md](CONFIG_AUTHORITY.md), `Layer::can_grant`).
+
+`sure config set SETTING VALUE` is the only writer of that file in this build.
+How it behaves, what it prints and what it does about a file it cannot read are
+in [CLI.md](CLI.md#sure-config-set-setting-value). What belongs here is which
+settings it will write and which it refuses, because that list is a fact about
+the schema rather than about the command.
+
+**It writes the eight settings a run reads from the user's own layer:**
+`execution.mode`, `execution.allow_dependency_install`, `execution.allow_network`,
+`execution.allow_project_write`, `privacy.full_recording`,
+`privacy.full_recording_retention_days`, `privacy.mode` and `protection.mode`.
+The accepted values for the four enums are the product's own `ALL` lists rather
+than a second copy of them, so a mode added to a table above is a value the
+command accepts without anybody remembering to change it.
+
+**It refuses the settings a run reads from somewhere else, and says which
+somewhere:**
+
+| Setting | Why it is not written |
+| --- | --- |
+| `privacy.telemetry` | nothing in this release implements telemetry — no code path sends usage data anywhere — so the setting could not take effect whatever it said. A file saying `telemetry: false` would look like a decision the person had made and be read by nothing |
+| `analysis.*` | the provider, endpoint and model are read from the checked project's own file. What the user's file decides about analysis is whether a project's request for an external provider is allowed at all |
+| `project_intent.*` | the goal and the spec path are read from the project, and the place for the user's own words is `sure check --goal` |
+| `checks.*` | which optional checks run is read from the project, which may switch its own checks off |
+| `report.*` | the report format is decided by `--format` on the command line, and nothing reads this setting from any file |
+| `redaction.*` | the redaction that runs is the built-in one; no settings file builds a redactor |
+
+Each refusal gives its reason, and a value the schema accepts but this release
+does not — `privacy.mode: cloud_enhanced`, `protection.mode: custom` — is refused
+in `Config::from_yaml`'s own words, so the command cannot come to accept
+something a run would reject.
+
+**It writes no other file, and never a project's `sure.yaml`.** The path comes
+from `Paths::user_config_file()` and from nowhere else, and
+`Paths::ensure_settings_outside` refuses a settings file inside the project being
+checked before anything is written — the same refusal, from the same function,
+that a run makes about the file it reads.
+
 ## Contradictions
 
 Each of these is refused, naming both settings and saying why they cannot both
@@ -294,6 +345,16 @@ Nothing here restates them; this file can only narrow them or ask for them.
 reaching a message. It lives at the crate root rather than here because
 `diagnostics` applies it to every recorded field as well; see
 `docs/architecture/DIAGNOSTICS.md`.
+
+`crates/sure-cli/src/settings.rs` is the only writer of the user's own file, and
+it holds its own list — `WRITABLE`, the eight settings above with the value kind
+each one takes, and `NOT_WRITABLE`, the refusal families with the reason the
+command prints. Two of its tests are what keep that list from drifting away from
+the reader: `every_writable_setting_is_one_the_product_reads_from_the_users_own_file`
+loads a file containing each of them through `Authority::load` and requires the
+value to come back from the user's layer, and `every_hint_points_at_a_writable_setting`
+requires every remedy the report module can suggest to be a setting this command
+will actually write.
 
 `crates/sure-core/tests/config_loading.rs` covers the filesystem path — spaces
 and non-ASCII directory names, byte-order marks, CRLF, a non-UTF-8 file, the

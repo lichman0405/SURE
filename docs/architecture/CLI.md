@@ -54,6 +54,7 @@ store directory cannot.
 | `sure history [list\|show\|delete\|export]` | show what SURE has recorded | works, except `export`: the sessions this machine has recorded, one session's events, and the delete |
 | `sure doctor` | report where SURE keeps its files on this machine, and what it found there | works |
 | `sure config [paths\|show\|validate]` | show the settings in effect and which layer each came from | recognised, not implemented |
+| `sure config set SETTING VALUE` | write one setting into your own settings file, the one outside every project | works: only the settings a run reads from that file, only on request, and never a project's own `sure.yaml` |
 | `sure hook ingest` | record one event from a coding harness | works; for a pre-action event it also answers with the action SURE would take and a sentence saying why |
 | `sure hook allow-once --tool NAME (--command WORDS \| --path PATH) [--project DIR] [--minutes N]` | record a one-time allowance for one request SURE would otherwise hold | works; SURE reads the settings in force and the tool name, and if together they leave a request naming that tool that this project could be held for, it writes the grant to its store and says which acts that covers, read off the settings in force at the moment it writes. If they leave none — the default configuration does, for every tool, and strict-on-its-own does for any tool that is not a read — it refuses, names the tool, and writes nothing, because a grant no matching request could spend is a promise SURE cannot keep. What the sentence offers with it is the change that would make the grant spendable — a setting, where a setting is what stands in the way — which for a tool whose action would change the project's own files is `execution.allow_project_write: true` in the user's own settings file, together with `protection.mode: strict` where the protection in force would otherwise allow the change outright; a project's `sure.yaml` cannot grant that permission, and the sentence says so. Where no setting in this build is the cause the sentence says that instead of naming one, because naming one would be advice to change the wrong thing — and there is no such tool in this build, so that arm is kept for a build in which a permission is once again out of reach rather than deleted. Either way the sentence says the request that spends it has to be one SURE *holds*, rather than promising that the next matching request is let through — see `docs/security/PROTECTION_MODE.md` |
 | `sure explain [ID]` | explain one recorded result in plain language | recognised, not implemented |
@@ -77,6 +78,14 @@ one sentence what it did not do. Nothing is half-done and nothing is reported as
 done. `check`, `recheck`, `repair` and `history` have left that list; `sure
 config` and `sure explain` are still on it, and so is `sure history export`,
 which is one action of a command whose other three work.
+
+`sure config set` is one action of `sure config` and it is not on that list: it
+writes, it exits 0 or 5 and never 3, and it is documented in its own section
+below. The row above it stays marked "not implemented" because `paths`, `show`
+and `validate` still are — the three of them are a reader, and what a person
+reaches for when a setting is not in force is a writer. Marking the whole command
+implemented because one action arrived would be this document's own defect: a
+table that says a command works is read by scripts and by harnesses.
 
 Where a command is scheduled is `tasks/tasks.json`. That file is not quoted here
 on purpose: a phase number in a message a user reads is a promise the command
@@ -498,9 +507,200 @@ gives: a relative path resolves against whatever directory SURE happened to be
 started in, and whether it was inside the project would then depend on that. A
 file that is not there is not an error: SURE reads the defaults and records the
 refused requests, exactly as it does on a machine that has no settings file at
-all. A file that is there and will not parse is a run whose settings SURE does not
-know, and the answer is the same one the default gives: the lesser setting, never
-the more permissive one.
+all, and the report says in that many words that no file was found.
+
+A file that is there and will not parse is **two different answers**, and this
+paragraph said one of them for as long as it was wrong. Both readings come from
+`Authority::load`, whose rule is that one bad file stops the read rather than
+being skipped: a file SURE cannot read is not a file that declared nothing, and
+carrying on would run under defaults while the user believes their settings are
+in force.
+
+- **A check, a recheck or a repair stops.** Status 5, with the parse error and
+  the path in it, and no verdict about the project — because the execution mode
+  every dynamic check is authorised under is a setting that file decides, so a
+  run that could not read it has nothing to check with. The status is 5 and not
+  3 for this document's own reason: 3 means *this build cannot do that*, and this
+  build can; the file is the thing that could not be read.
+- **A hook falls back, and falls back downwards.** `hook ingest` answers a
+  harness event, and a harness is waiting: the event is still recorded, and what
+  the run decides with is `inspect_only`, an inspect-only permission set and
+  `protection.mode: strict` — the least permissive answer SURE has, never the
+  project's ask and never a default that happens to be looser. The same fallback
+  is what reads the recording settings, so a file that asks for a full recording
+  and does not parse gets the event and no transcript: one run measured here
+  wrote `event` and nothing else, where the same event under a granting file that
+  *does* parse wrote `event` and `recording`. See
+  `docs/integrations/HOOK_FAILURE_SEMANTICS.md` for why a refusal there is not
+  the same act as a refusal at a command line.
+
+Either way nothing was silently given up: the difference between the two is that
+one of them has somebody waiting and the other does not.
+
+## `sure config set SETTING VALUE`
+
+Write one setting into **your own settings file** — the one outside every project,
+the file `--settings-file` names when a caller names one and
+`%APPDATA%\SURE\sure.yaml` on Windows otherwise. It is the only writer of that
+file in this build, and it exists because the rule it serves had no remedy
+without it.
+
+The rule: full recording and every execution mode other than `inspect_only` are
+granted by the user's own settings file and by **no other layer**
+(`Authority::full_recording`, `Authority::execution_mode`, and
+`Layer::can_grant` in `docs/architecture/CONFIG_AUTHORITY.md`). A project's
+`sure.yaml` may ask for either and can never grant it, because a file the agent
+under test can write cannot be the authority for what SURE may do. Before this
+command, a person read *"asked for, and not in force"* and had nowhere to go: the
+file had no writer and nothing told them where it would be. A rule a user cannot
+satisfy is a refusal with no remedy, so the refusal now names the file and the
+command, and the command writes the file.
+
+```
+sure config set privacy.full_recording true
+
+sure config set wrote your settings file.
+
+  Setting    privacy.full_recording
+  Written    true
+  File       C:\Users\you\AppData\Roaming\SURE\sure.yaml
+
+That file is your own, and it is the only one that can grant this: a project's sure.yaml may ask for something and can never grant itself anything, because a file the agent under test can write cannot be the authority for what SURE may do. It is outside every project you check.
+```
+
+Run again with nothing left to change, it prints a **different sentence**:
+
+```
+sure config set wrote nothing.
+
+  Setting    execution.mode
+  Already    host_confirmed
+  File       C:\Users\you\AppData\Roaming\SURE\sure.yaml
+
+That file already said this, so it was left exactly as it was — not rewritten, not reformatted, and its comments are all still there. This is not a failure: what you asked for was already true.
+```
+
+And a third, when it will not write what was asked:
+
+```
+sure config set wrote nothing, and here is why.
+```
+
+Three different openings, on purpose: a person has to be able to tell a write
+from a no-op from a refusal without opening the file, and a status alone is not
+enough — a no-op and a write are both 0, because both did what was asked. A
+refusal is status 5, never 3: this build can write the file, and the answer is
+that it will not write *this*.
+
+### What it will write
+
+Exactly the settings a **run** reads from that file, and it proves each one while
+it works. There are eight, and every one of them is read from the user's own
+layer by `Authority`:
+
+| Setting | Values |
+| --- | --- |
+| `execution.mode` | the execution modes this build knows, from `ExecutionMode::ALL` |
+| `execution.allow_dependency_install` | `true`, `false` |
+| `execution.allow_network` | `true`, `false` |
+| `execution.allow_project_write` | `true`, `false` |
+| `privacy.full_recording` | `true`, `false` |
+| `privacy.full_recording_retention_days` | `0` or more |
+| `privacy.mode` | the privacy modes this build knows, from `PrivacyMode::ALL` |
+| `protection.mode` | the protection modes this build knows, from `ProtectionMode::ALL` |
+
+The value lists are the product's own — read out of those `ALL` lists rather than
+copied into the command — so a mode added to the product is a mode this command
+accepts, and a mode removed from it is not.
+
+**A setting this command will not write is refused with its reason**, not
+silently skipped and not written anyway. `privacy.telemetry` is the one that
+matters most: nothing in this release implements it, no code path sends usage data
+anywhere, so a file saying `telemetry: false` would look like a decision the
+person had made and be read by nothing. The others are family refusals —
+`analysis.`, `project_intent.`, `checks.`, `report.`, `redaction.` — for settings
+whose value a run reads from the *checked project's* file. Writing one into the
+user's file would be writing a setting with no effect, and a person who then read
+that file would believe something about their machine that was not true. The
+refusal says which of the two it is.
+
+**A value the release refuses is refused too, in the product's own words.** The
+text is `Config::from_yaml`'s — the same message a run would give if the file had
+been edited by hand — so the command cannot drift into accepting something a run
+would reject. `privacy.mode: cloud_enhanced` is the case this is for: it is in
+the schema and not in this release, and what the person reads is why.
+
+One consequence worth stating rather than leaving for a person to notice: that
+text was written about a *project's* file, so where it says "would let a project
+file claim a privacy arrangement SURE does not actually provide" it is naming a
+danger that does not apply to the file being edited. The reason it gives is the
+same either way — this release does not implement that mode — and the command
+prefers one honest message from the reader to a second copy of the refusal,
+hand-written here, that could drift from it. Two refusals that disagree about why
+a value is refused would be the worse defect.
+
+### What it will not touch
+
+**A project's `sure.yaml` is unreachable from every path of this command.** The
+file it writes is the one `Paths::user_config_file()` names, and before it writes
+anything it asks `Paths::ensure_settings_outside` the same question a run asks
+about the file it reads: a settings file inside the project being judged is status
+5, with the reasoning, and nothing is written. So a person standing in a project
+who names the file that is right there is refused, and a project whose own
+`sure.yaml` names the very setting being written gets a file that is byte-for-byte
+what it was.
+
+That is the whole of the third acceptance criterion of the task this arrived
+with, and it is checked as bytes rather than as intent:
+`no_path_of_a_config_write_reaches_the_projects_own_sure_yaml` in
+`crates/sure-cli/tests/cli_contract.rs` walks the project's files before and
+after, and `a_settings_file_inside_the_project_is_refused_and_nothing_is_written`
+does the same for the refusal.
+
+**It creates the directory, and nothing else.** A settings file whose parent
+directory does not exist yet is written into a directory created for it — the
+first run on a machine that has never had one has nowhere to put it otherwise —
+and the file is written to `<file>.yaml.sure-new` beside it and then renamed into
+place, so a run that fails half way through leaves the previous file exactly as it
+was rather than a truncated one. The temporary is removed when the rename fails.
+
+**It edits rather than re-renders.** A settings file is a file a person owns and
+may have commented, and re-serialising it would be this command reformatting
+somebody's file to change one value. So the value's own line is rewritten in
+place, everything else is left as it was, and a trailing comment on that line
+survives (`# changed on 2026-01-02` stays where it was). The one cosmetic change
+is that the whitespace before a trailing comment is normalised to a single space.
+A file that already says what was asked says nothing at all: it is not rewritten,
+not reformatted, not even touched — that is the no-op sentence above, and it is
+checked as bytes.
+
+**It is not a way to make SURE accept a file it cannot read.** If the existing
+file will not parse, the command refuses and leaves it alone. The reason is visible
+rather than subtle: what it writes is checked against `Config::from_yaml` *and*
+compared against the same file with only the leaf changed, before anything is
+written, so an edit that did not mean what it looked like meaning is a refusal
+rather than a file that silently says something else.
+
+### What it tells you afterwards
+
+The confirmation names the file in the operating system's own terms — the path
+`Explorer` would show on Windows — and the report continues into the same grants
+section every run carries (see below), read back through `Authority::load`, which
+is the reader every run and every hook uses. So the machine form of the command
+carries `details.granted`: the mode, the permissions, whether a full recording is
+on, the retention, the protection mode, and what was refused, exactly as a check
+reports it. A command that wrote a file and a run that reads the same file cannot
+disagree about what it says, because it is one function reading it.
+
+```
+
+{"command":"config set","details":{"granted":{"execution_mode":"host_confirmed", …},"setting":"privacy.full_recording","settings_file":"…","state":"written","value":"true"},"exit_code":0,"outcome":"ok"}
+```
+
+`state` is a closed set — `written`, `already_said`, `refused` — so a script can
+tell the three apart without reading the sentence, and `granted_error` is filled
+in instead of `granted` when the file was written and the read-back could not be
+done: the file *was* changed, and saying so is more important than the read-back.
 
 ## Two output paths, and no third
 
@@ -666,16 +866,71 @@ model-backed analysis, so external model use cannot be observed happening, and
 `consulted` is unreachable. What the run states is a fact about its
 configuration and its own record, not a report of traffic.
 
+### What a run says about your own settings, and what they allow
+
+A check or recheck report carries one more section, and it exists for the reason
+`sure config set` exists: full recording and every execution mode other than
+`inspect_only` come from the user's own file and from no other layer, so a person
+cannot tell from a verdict alone whether that file was read, whether it was there
+at all, or why a project's own `sure.yaml` asking for the same thing did not get
+it.
+
+```
+Your own settings, and what they allow
+
+  Your settings file: C:\Users\you\AppData\Roaming\SURE\sure.yaml
+    There is no file there. SURE is using its own defaults together with this project's own sure.yaml, and a project's file cannot grant itself anything below: only your own file can, and `sure config set <setting> <value>` writes it for you.
+  Execution mode: inspect_only
+    SURE will read your project's files only. Nothing in your project will be run.
+  Permissions: read this project's files and nothing else
+  Full recording: off — no full transcript of the session is kept. Your own file is the only one that can turn it on: `sure config set privacy.full_recording true`.
+  Full recording kept for: 3 days
+  Protection: standard
+
+  Asked for, and not in force
+    run this project's own commands on this computer, asked by this project's own sure.yaml. It was not granted, and that is the whole of what not granting it means: SURE did not do it.
+      Only your own settings file can allow it, and it is C:\Users\you\AppData\Roaming\SURE\sure.yaml
+      `sure config set execution.mode host_confirmed` writes that grant there.
+```
+
+The machine form carries `details.grants`: `settings_file`, `settings_file_read`,
+`execution_mode`, `permissions`, `full_recording`, `full_recording_retention_days`,
+`protection`, `granted` and `refused` (each refused row a `request` and the layers
+that `asked_by` it).
+
+Three rules, each of which a test holds:
+
+- **It is about the arbitrated answer, not about the project's file.** The mode
+  is `Authority::execution_mode()`'s, and a request the project made and the
+  user's layer did not grant is reported as refused rather than applied — the
+  same pair `a_setting_only_a_users_own_file_can_grant_is_written_and_a_later_run_reports_it_in_force`
+  drives in both directions in `crates/sure-cli/tests/cli_contract.rs`.
+- **No file at all is stated, and stated differently from a file that says
+  nothing.** The first line either says SURE read the file or says there is no
+  file there; `settings_file_read` carries the same distinction to a script. The
+  two are different answers, and a person whose settings are not in force needs
+  to know which of them they have.
+- **A refusal comes with its remedy.** Every request that was not granted names
+  the file that could grant it and the `sure config set` line that writes it
+  there. Where no setting in this build grants the request — an external
+  analysis provider's own settings, which a run reads from the project — the
+  section says so instead of naming a command that would not help. A refusal
+  without a remedy is what this section was added to stop.
+
+`sure config set` prints the same section, from the same function, reading the
+file back through `Authority::load`. A command that writes the file and a run
+that reads it therefore cannot describe it differently.
+
 ## Exit statuses
 
 | Status | Meaning | Who returns it |
 | --- | --- | --- |
-| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version`; `hook ingest` when the action it answered with is allow or warn, so a launcher is not stopped; `hook allow-once` when the grant was written |
+| 0 | the command did what it says it does | `version`, `protocol`, `doctor` when it found nothing wrong, `history` — including a listing with nothing in it and a delete whose scope matched nothing — `--help`, `--version`; `hook ingest` when the action it answered with is allow or warn, so a launcher is not stopped; `hook allow-once` when the grant was written; `config set` when it wrote the setting, and when the file already said it — a no-op is not a failure, and its sentence is a different one |
 | 1 | the command ran, and the answer is not a clean one | `doctor` when it found something wrong; `check`, `recheck` and `repair` when the project was checked and is not clean; `hook ingest` when the action it answered with is a block, which is the answer a launcher relays |
 | 2 | the command line was wrong | the parser, including a bare `sure` |
 | 3 | the command exists, and this build cannot carry it out | everything in the table above marked "not implemented"; `sure protocol --speaks` for a version this build does not speak |
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
-| 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written; `mcp serve` when its stream could not be read or written; `history show` for an id that is not in the store, and any history command when the store is there and cannot be read; `hook allow-once` when it declines to write the grant — a window it does not record, or a project and tool whose settings leave no request naming that tool an allowance could be spent on; anything, including a result that could not be written out |
+| 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written — including when the user's own settings file is there and will not parse; `mcp serve` when its stream could not be read or written; `history show` for an id that is not in the store, and any history command when the store is there and cannot be read; `hook allow-once` when it declines to write the grant — a window it does not record, or a project and tool whose settings leave no request naming that tool an allowance could be spent on; `config set` when it will not write what was asked — a setting that cannot take effect, a value this release refuses, or a file inside the project it would be writing the authority from; anything, including a result that could not be written out |
 
 **A check reaches 0 only through the pipeline's own answer**, and in this build
 no run does: a project SURE can plan for has stage 5 recorded as `unknown`
@@ -783,6 +1038,14 @@ anything about output or status: both are SURE's, and both have one home.
 | `sure doctor` says whether the location is the platform's or the caller's | same file, `a_doctor_report_says_which_store_location_the_run_is_using` |
 | Nothing a project can write decides where the store goes | same file, `nothing_a_project_can_write_decides_where_the_store_goes` |
 | Every command is reached by the location the caller named | same file, `every_command_is_reached_by_the_location_the_caller_named` |
+| `sure config set` writes a setting only the user's own file can grant, and a later run reports it in force | `crates/sure-cli/tests/cli_contract.rs`, `a_setting_only_a_users_own_file_can_grant_is_written_and_a_later_run_reports_it_in_force` and `a_full_recording_granted_by_the_users_own_file_is_one_a_real_run_keeps` |
+| A write, a no-op and a refusal print three different sentences, and only the write changes the file | same file, `a_write_a_no_op_and_a_refusal_are_three_different_sentences` |
+| No path of `sure config set` reaches the project's own `sure.yaml`, and a setting a project's file decides is refused | same file, `no_path_of_a_config_write_reaches_the_projects_own_sure_yaml` and `a_settings_file_inside_the_project_is_refused_and_nothing_is_written`; `crates/sure-cli/src/settings.rs`, `a_project_level_setting_is_refused_and_no_project_file_is_written` and `a_settings_file_inside_the_project_is_refused` |
+| A setting that cannot take effect, and a value this release refuses, are refused with the reason and leave no file behind | same file, `a_setting_that_cannot_take_effect_is_refused_with_its_reason`; `crates/sure-cli/src/settings.rs`, `a_refused_value_or_setting_leaves_the_file_alone` |
+| Every setting `sure config set` will write is one a run reads from the user's own layer, and every remedy a refusal names is one of them | `crates/sure-cli/src/settings.rs`, `every_writable_setting_is_one_the_product_reads_from_the_users_own_file` and `every_hint_points_at_a_writable_setting` |
+| An edit keeps every other line of the file, and a no-op does not rewrite one | same file, `an_edit_keeps_every_other_line_of_the_file`, `a_no_op_does_not_rewrite_a_differently_spelled_value` and `a_file_the_product_cannot_read_is_not_edited` |
+| A run reports what is in force as the user's own, and names the file and the command that would grant what is missing | `crates/sure-cli/tests/cli_contract.rs`, `a_run_reports_a_grant_as_the_users_own_and_the_absence_of_one_as_the_projects_request` |
+| A user settings file that will not parse stops a check and is never more permissive for a hook | same file, `a_settings_file_that_will_not_parse_is_never_more_permissive_than_no_file_at_all`; `crates/sure-cli/src/check.rs`, `a_user_settings_file_that_cannot_be_read_stops_the_run_rather_than_being_ignored` |
 | A new command cannot ship with no answer about whether it works | the exhaustiveness of `Command::report` — see below |
 
 The last row has no test, because it does not need one: `Command::report` and

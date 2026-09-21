@@ -1693,6 +1693,819 @@ fn an_mcp_session_refuses_a_settings_file_named_on_its_command_line() {
     assert_untouched(&machine, "by a session that refused a settings file");
 }
 
+// ---------------------------------------------------------------------------
+// P15-T022 — the grants only the person in front of the machine can make
+// ---------------------------------------------------------------------------
+//
+// Full recording and every execution mode other than `inspect_only` are granted
+// by the user's own settings file and by nothing else: a checked project's
+// `sure.yaml` may ask for both and can never grant either (`Layer::can_grant`).
+// Until `sure config set` existed that sentence had no remedy — the file had no
+// writer, so a person read "not in force" and had nothing to do about it — and
+// these tests are the remedy checked from outside the process: commands this
+// build ships, run against a file that is not there, and then what a later run
+// says about what is in force.
+//
+// Every settings file here is a path under `target/tmp` handed to
+// `--settings-file`. **Nothing in this file reads or writes the settings file of
+// the person running the suite**, and no test asserts anything about its
+// contents: the runs below name their own file, which is what the flag is for.
+
+/// The settings file of a person who has never made one: a path, and no file.
+///
+/// Nothing here creates it. The whole question is what a machine with no
+/// settings file at all can reach, so every test below starts from a path that
+/// is not there and reads what the commands did with it.
+fn a_settings_file_nobody_has_written_yet() -> PathBuf {
+    a_directory_of_our_own("settings-nobody-wrote").join("sure.yaml")
+}
+
+/// A project whose own `sure.yaml` asks for the two things only the user's file
+/// may grant.
+///
+/// The asking is the point. What a run has to be able to say — before and after —
+/// is the difference between *this project asked* and *the user granted*, and
+/// these are the two settings that distinction is made of: `privacy.full_recording`
+/// and `execution.mode`, the two answers `Authority` gives the user's layer and
+/// no other.
+///
+/// The project's file asks for exactly those two and nothing else, so that the
+/// refused list below is a list this fixture controls rather than a list the
+/// project happened to make longer.
+fn a_project_that_asks_for_what_only_a_users_file_can_grant() -> PathBuf {
+    let project = a_project_of_our_own();
+    std::fs::write(
+        project.join("sure.yaml"),
+        "execution:\n  mode: host_confirmed\nprivacy:\n  full_recording: true\n",
+    )
+    .unwrap_or_else(|error| panic!("cannot write into {}: {error}", project.display()));
+    project
+}
+
+/// One `sure config set`, run **from inside** the project.
+///
+/// The working directory is the project because that is where a person is
+/// standing when they are trying to make their machine do something about it,
+/// and because it is the condition P15-T022's third clause is written in: a
+/// write run from inside a project must not reach that project's files.
+fn config_set(store: &Path, settings: &Path, project: &Path, setting: &str, value: &str) -> Run {
+    let mut command = sure_in_a_store(store);
+    command
+        .current_dir(project)
+        .arg("--settings-file")
+        .arg(settings)
+        .args(["config", "set", setting, value]);
+    Run::of(
+        &command
+            .output()
+            .unwrap_or_else(|error| panic!("could not run {SURE}: {error}")),
+    )
+}
+
+/// One `sure check --format json`, run from inside the project, with the frame.
+///
+/// A check rather than a direct call to the reader: what these tests have to
+/// show is what a *run* says, from outside the process, and the process is the
+/// only place that answer exists. A check of a project this small is not green,
+/// which is not what any assertion below is about — they read `details.grants`,
+/// which is there whatever the verdict was.
+fn check_frame(store: &Path, settings: &Path, project: &Path) -> serde_json::Value {
+    let mut command = sure_in_a_store(store);
+    command
+        .current_dir(project)
+        .arg("--settings-file")
+        .arg(settings)
+        .args(["--format", "json", "check"]);
+    let run = Run::of(
+        &command
+            .output()
+            .unwrap_or_else(|error| panic!("could not run {SURE}: {error}")),
+    );
+    serde_json::from_str(run.stdout.trim()).unwrap_or_else(|error| {
+        panic!(
+            "`sure --format json check` is not one frame: {error}\nstdout:\n{}\nstderr:\n{}",
+            run.stdout, run.stderr
+        )
+    })
+}
+
+/// The grants block of a check's frame: what is in force, and what was refused.
+fn grants_of(frame: &serde_json::Value) -> &serde_json::Value {
+    &frame["details"]["grants"]
+}
+
+/// The requests a check reported as asked for by somebody who could not grant
+/// them.
+fn refused_requests(grants: &serde_json::Value) -> Vec<&str> {
+    grants["refused"]
+        .as_array()
+        .expect("a grants block carries the requests it refused as a list")
+        .iter()
+        .filter_map(|row| row["request"].as_str())
+        .collect()
+}
+
+/// The first line of what a command printed, which is the sentence a person
+/// reads before anything else.
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or_default()
+}
+
+#[test]
+fn a_setting_only_a_users_own_file_can_grant_is_written_and_a_later_run_reports_it_in_force() {
+    // P15-T022, clauses 0, 1, 2 and 5, as one story a person could live: a
+    // machine with no settings file, a project asking in its own `sure.yaml` for
+    // an execution mode and a full recording, the commands this build ships, and
+    // a run afterwards that reports both as in force because the *user* said so.
+    //
+    // The "before" half is what makes the "after" half mean something. A run
+    // that reported `host_confirmed` on its own would be a run whose answer came
+    // from somewhere else — a default that moved, a project's request being
+    // honoured, a flag that was already in force — and on this fixture the two
+    // answers are opposite by construction: the project asks and the run refuses,
+    // and only a file the test writes in between can change that.
+    let store = a_store_of_our_own();
+    let project = a_project_that_asks_for_what_only_a_users_file_can_grant();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+    assert!(
+        !settings.exists(),
+        "this test starts from a machine with no settings file, and {} is already there. Nothing \
+         in this suite writes the settings file of the person running it, so a file at a path \
+         under this test's own `target/tmp` directory came from somewhere else.",
+        settings.display()
+    );
+
+    let before = check_frame(&store, &settings, &project);
+    let grants = grants_of(&before);
+    assert_eq!(
+        grants["settings_file_read"],
+        serde_json::json!(false),
+        "the run says it read a settings file this test never wrote: {grants}"
+    );
+    assert_eq!(
+        grants["execution_mode"],
+        serde_json::json!("inspect_only"),
+        "a project's own `sure.yaml` asking for `host_confirmed` produced that mode with no \
+         settings file anywhere. Only the user's own file may grant an execution mode, and before \
+         P15-T022 there was no command that wrote one: {grants}"
+    );
+    let refused = refused_requests(grants);
+    assert!(
+        refused.contains(&"run_project_code") && refused.contains(&"full_recording"),
+        "the run did not report the project's two requests as asked for and not in force, so the \
+         run after the write would not be showing a grant taking effect: {refused:?}"
+    );
+
+    // The write, from inside the project, naming a file that is not there yet.
+    for (setting, value) in [
+        ("execution.mode", "host_confirmed"),
+        ("privacy.full_recording", "true"),
+    ] {
+        let run = config_set(&store, &settings, &project, setting, value);
+        assert_eq!(
+            run.status, 0,
+            "`sure config set {setting} {value}` did not finish, so a person on a machine with no \
+             settings file has no way to reach one:\n{}\n{}",
+            run.stdout, run.stderr
+        );
+        // Clause 1: the location in the operating system's own terms. The
+        // assertion is against the path the test handed in, spelled by
+        // `Path::display` for the machine this is running on, which on Windows
+        // is the form Explorer shows. A relative path, a platform path the test
+        // did not name, or `%APPDATA%` spelled out would all fail here.
+        assert!(
+            run.stdout.contains(&settings.display().to_string()),
+            "the confirmation does not name {} as this machine spells it:\n{}",
+            settings.display(),
+            run.stdout
+        );
+        // Clause 5, the write half: what it says after changing something.
+        assert!(
+            first_line(&run.stdout).contains("wrote your settings file"),
+            "the confirmation does not say a write happened:\n{}",
+            run.stdout
+        );
+    }
+    assert!(
+        settings.is_file(),
+        "the command reported a write and {} is not a file",
+        settings.display()
+    );
+    assert!(
+        !settings.starts_with(&project),
+        "the settings file this test asked for is inside the project, which makes every assertion \
+         below about a different question than the one P15-T022 asks"
+    );
+
+    // The read-back, through a process and not through this test: one run later,
+    // of a command that was already there.
+    let after = check_frame(&store, &settings, &project);
+    let grants = grants_of(&after);
+    assert_eq!(
+        grants["settings_file_read"],
+        serde_json::json!(true),
+        "the run after the write does not say it read the settings file that was written: {grants}"
+    );
+    assert_eq!(
+        grants["execution_mode"],
+        serde_json::json!("host_confirmed"),
+        "the setting the command wrote is not the one in force. This is the pair clause 2 is \
+         about: the same `Authority::execution_mode` answer, first refused as a project's request \
+         and now granted as the user's own: {grants}"
+    );
+    assert_eq!(
+        grants["full_recording"],
+        serde_json::json!(true),
+        "the second of the two answers only the user's file can give, reported as not in force \
+         after the command that wrote it: {grants}"
+    );
+    assert!(
+        grants["granted"]
+            .as_array()
+            .expect("a grants block carries what was granted as a list")
+            .contains(&serde_json::json!("run_project_code")),
+        "the run does not report the project's request as granted, so what changed is the file this \
+         test wrote and not the request being met: {grants}"
+    );
+    assert!(
+        refused_requests(grants).is_empty(),
+        "requests are still reported as not in force after the user's file granted them: {:?}",
+        refused_requests(grants)
+    );
+    assert_eq!(
+        after["details"]["mode"],
+        serde_json::json!("host_confirmed"),
+        "the grants block and the verdict disagree about the mode this run was under: {}",
+        after["details"]["mode"]
+    );
+
+    assert_untouched(
+        &machine,
+        "by a command that wrote a settings file of its own",
+    );
+}
+
+#[test]
+fn a_run_reports_a_grant_as_the_users_own_and_the_absence_of_one_as_the_projects_request() {
+    // Clause 2's contrast, and clause 1's second half, on one fixture and in one
+    // direction each. The same project asks the same question twice; the only
+    // difference is whether the user's file says yes.
+    //
+    // A person reads the answer rather than a JSON field: what the run prints
+    // when a setting they asked for is not in force has to name the file that
+    // would grant it and the command that writes it there. Without that, the
+    // "not in force" is a refusal with no remedy — which is what P15-T022 was
+    // opened about, and the reason a passing test here has to check the remedy
+    // and not only the refusal.
+    let store = a_store_of_our_own();
+    let project = a_project_that_asks_for_what_only_a_users_file_can_grant();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+
+    let mut command = sure_in_a_store(&store);
+    command
+        .current_dir(&project)
+        .arg("--settings-file")
+        .arg(&settings)
+        .arg("check");
+    let run = Run::of(
+        &command
+            .output()
+            .unwrap_or_else(|error| panic!("could not run {SURE}: {error}")),
+    );
+    assert!(
+        run.stdout.contains("Asked for, and not in force"),
+        "a run that could not honour a request did not say so where a person would read it:\n{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains(&settings.display().to_string()),
+        "the run says a grant is missing and does not name the file where it would go ({}):\n{}",
+        settings.display(),
+        run.stdout
+    );
+    // The remedy, named as the command a person can run. `run_project_code` is
+    // the request the fixture's own `sure.yaml` makes, and the mode that would
+    // grant it is the one this build's own command writes.
+    assert!(
+        run.stdout.contains("sure config set execution.mode"),
+        "the run names what is missing and not what would fix it:\n{}",
+        run.stdout
+    );
+    // Both halves of the same paragraph, so the sentence is about the user's own
+    // file rather than about settings in general.
+    assert!(
+        run.stdout.contains("your own settings file"),
+        "the refusal does not say whose file the missing grant belongs in:\n{}",
+        run.stdout
+    );
+
+    // Both requests, because the fixture makes both: a run that reports one of
+    // them still refused is a different statement from the one this test is
+    // making, and an assertion that only glanced at the first would not notice.
+    for (setting, value) in [
+        ("execution.mode", "host_confirmed"),
+        ("privacy.full_recording", "true"),
+    ] {
+        let written = config_set(&store, &settings, &project, setting, value);
+        assert_eq!(
+            written.status, 0,
+            "writing {setting} from the run's own remedy did not finish:\n{}\n{}",
+            written.stdout, written.stderr
+        );
+    }
+    let after = check_frame(&store, &settings, &project);
+    assert!(
+        refused_requests(grants_of(&after)).is_empty(),
+        "the grants written by the commands the previous run named did not take the requests off \
+         the refused list: {}",
+        grants_of(&after)
+    );
+
+    assert_untouched(&machine, "by a run that named a settings file of its own");
+}
+
+#[test]
+fn a_full_recording_granted_by_the_users_own_file_is_one_a_real_run_keeps() {
+    // Clause 0's other half and clause 2's strongest form: not a sentence in a
+    // report but a file on disk. `privacy.full_recording` is the setting a
+    // person reaches for, and what they get for it has to be an actual recording
+    // — so the observation is a store this test reads afterwards, written by a
+    // hook run in a store of its own, with the same event either side of one
+    // command.
+    //
+    // Both directions are needed. A recording after the write shows the file was
+    // read; no recording before it shows the write is what changed the answer,
+    // and not a default, a build, or an event that records nothing anyway — the
+    // event is in both stores, which is asserted below.
+    let granting_store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+
+    let before = ingest_one_event(&granting_store, &project, Some(&settings), "p15t022-before");
+    assert!(
+        before.succeeded(),
+        "the hook run before the write did not finish:\n{}",
+        before.stderr
+    );
+    assert_eq!(
+        recordings_in(&granting_store),
+        0,
+        "a full recording was kept with no settings file anywhere, so this setting is not the \
+         user's to grant and the write below proves nothing"
+    );
+
+    let written = config_set(
+        &granting_store,
+        &settings,
+        &project,
+        "privacy.full_recording",
+        "true",
+    );
+    assert_eq!(
+        written.status, 0,
+        "`sure config set privacy.full_recording true` did not finish:\n{}\n{}",
+        written.stdout, written.stderr
+    );
+
+    let after = ingest_one_event(&granting_store, &project, Some(&settings), "p15t022-after");
+    assert!(
+        after.succeeded(),
+        "the hook run after the write did not finish:\n{}",
+        after.stderr
+    );
+    assert_eq!(
+        recordings_in(&granting_store),
+        1,
+        "the settings file this build wrote is not the file a run reads: the run kept {} \
+         recording(s), and the same command wrote one when the same settings were written by hand \
+         (`a_named_settings_file_is_the_one_a_real_run_reads_and_no_other`)",
+        recordings_in(&granting_store)
+    );
+    assert_eq!(
+        events_in(&granting_store),
+        2,
+        "the two events did not both land in the store, so the count of recordings above is about \
+         runs that did not happen"
+    );
+
+    assert_untouched(
+        &machine,
+        "by a hook run under a settings file this build wrote",
+    );
+}
+
+#[test]
+fn a_settings_file_that_will_not_parse_is_never_more_permissive_than_no_file_at_all() {
+    // The failure direction of the reader `sure config set` writes for, and the
+    // reason the `--settings-file` section has two answers rather than one:
+    // `Authority::load`'s rule is that one bad file stops the read, because a
+    // file SURE cannot read is not a file that declared nothing, and carrying on
+    // would run under defaults while the person believes their settings are in
+    // force.
+    //
+    // The two files differ by one key, and both ask for the same full recording.
+    // That is the shape worth testing: a run that fell back to "whatever I could
+    // read out of it" would keep a recording out of a file SURE could not read —
+    // a grant made by writing a typo — and this pair is what rules it out in
+    // both directions at once.
+    let project = a_project_of_our_own();
+    let machine = the_store_on_this_machine();
+    let readable = a_settings_file_of_our_own("privacy:\n  full_recording: true\n");
+    let unreadable = a_settings_file_of_our_own("privacy:\n  full_recording: true\n  nope: 1\n");
+
+    // A hook first, because it is the command that has somebody waiting on it:
+    // the event is still recorded, and what it is decided with is the least
+    // permissive answer SURE has.
+    let machine_checked = a_store_of_our_own();
+    let bad = ingest_one_event(
+        &machine_checked,
+        &project,
+        Some(&unreadable),
+        "p15t022-unreadable",
+    );
+    assert!(
+        bad.succeeded(),
+        "a hook under a settings file that will not parse did not answer:\n{}",
+        bad.stderr
+    );
+    assert_eq!(
+        events_in(&machine_checked),
+        1,
+        "the event was not recorded, so the fallback is not 'carry on without the settings' but \
+         'drop the event'"
+    );
+    assert_eq!(
+        recordings_in(&machine_checked),
+        0,
+        "a full recording was kept out of a settings file SURE could not read. A file with a typo \
+         in it would then be a grant, which is the one direction this reader must never fail in"
+    );
+
+    let readable_store = a_store_of_our_own();
+    let good = ingest_one_event(
+        &readable_store,
+        &project,
+        Some(&readable),
+        "p15t022-readable",
+    );
+    assert!(
+        good.succeeded(),
+        "the hook under the readable file did not finish:\n{}",
+        good.stderr
+    );
+    assert_eq!(
+        recordings_in(&readable_store),
+        1,
+        "the readable file did not grant the recording either, so the pair above shows nothing \
+         about the unreadable one"
+    );
+
+    // A check, which has nobody waiting on it and therefore stops: the execution
+    // mode every dynamic check is authorised under is a setting that file
+    // decides, so a run that could not read it has nothing to check with.
+    let check_store = a_store_of_our_own();
+    let mut command = sure_in_a_store(&check_store);
+    command
+        .current_dir(&project)
+        .arg("--settings-file")
+        .arg(&unreadable)
+        .arg("check");
+    let checked = Run::of(
+        &command
+            .output()
+            .unwrap_or_else(|error| panic!("could not run {SURE}: {error}")),
+    );
+    assert_eq!(
+        checked.status, 5,
+        "a check under a settings file that will not parse exited {} rather than 5. It is not 3 — \
+         this build can check a project — and it is not 0 or 1, which would be a verdict about a \
+         project the run had no authority to check:\n{}\n{}",
+        checked.status, checked.stdout, checked.stderr
+    );
+    assert!(
+        checked.stderr.contains(&unreadable.display().to_string()),
+        "the run does not name the file it could not read, which is the one thing a person has to \
+         fix:\n{}",
+        checked.stderr
+    );
+    assert!(
+        checked.stdout.is_empty(),
+        "a run that stopped wrote an answer to standard output:\n{}",
+        checked.stdout
+    );
+
+    assert_untouched(
+        &machine,
+        "by runs under a settings file that will not parse",
+    );
+}
+
+#[test]
+fn a_write_a_no_op_and_a_refusal_are_three_different_sentences() {
+    // Clause 5. What the command prints when it changed something has to be a
+    // different sentence from what it prints when it changed nothing, or a person
+    // cannot tell a write from a no-op without opening the file — and the third
+    // case, a refusal, must not be mistaken for either.
+    //
+    // The assertions are on the *first line* of each run and on the three being
+    // distinct, not on the words: what the sentence says is SURE's to change, and
+    // the clause is about a person being able to tell them apart.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+
+    let write = config_set(
+        &store,
+        &settings,
+        &project,
+        "execution.mode",
+        "host_confirmed",
+    );
+    assert_eq!(
+        write.status, 0,
+        "the write did not finish:\n{}",
+        write.stderr
+    );
+    let first_write = first_line(&write.stdout).to_owned();
+
+    let wrote = std::fs::read(&settings).unwrap_or_else(|error| {
+        panic!(
+            "the write reported success and {} cannot be read: {error}",
+            settings.display()
+        )
+    });
+
+    // The same command again, which has nothing left to change.
+    let no_op = config_set(
+        &store,
+        &settings,
+        &project,
+        "execution.mode",
+        "host_confirmed",
+    );
+    assert_eq!(
+        no_op.status, 0,
+        "a no-op is not a failure — what was asked for was already true — and this one exited {}:\n{}",
+        no_op.status, no_op.stderr
+    );
+    let first_no_op = first_line(&no_op.stdout).to_owned();
+    assert_ne!(
+        first_write, first_no_op,
+        "a write and a no-op print the same sentence, so a person cannot tell from the terminal \
+         whether the command changed anything:\n{first_write}"
+    );
+    assert!(
+        first_no_op.contains("nothing"),
+        "the no-op's sentence does not say that nothing was written:\n{first_no_op}"
+    );
+    let after_no_op =
+        std::fs::read(&settings).unwrap_or_else(|error| panic!("{}: {error}", settings.display()));
+    assert!(
+        wrote == after_no_op,
+        "the command that reported changing nothing rewrote the file anyway: {} bytes became {}",
+        wrote.len(),
+        after_no_op.len()
+    );
+
+    // A setting this command will not write, which is the third answer. A
+    // refusal is not an answer, so its human form goes to standard error and
+    // standard output stays empty — the rule the rest of this file checks for
+    // every command this build refuses, applied to the one command where the
+    // refusal is about a file rather than about the command itself.
+    let refused = config_set(&store, &settings, &project, "checks.existing_tests", "true");
+    assert_eq!(
+        refused.status, 5,
+        "a refusal exited {} rather than 5. It is not 2 — the command line was understood — and it \
+         is not 0, which would be a report of success for a file that was not written:\n{}",
+        refused.status, refused.stderr
+    );
+    assert!(
+        refused.stdout.is_empty(),
+        "a refusal wrote to standard output, which is the stream a script reads an answer \
+         from:\n{}",
+        refused.stdout
+    );
+    let first_refused = first_line(&refused.stderr).to_owned();
+    assert_ne!(
+        first_refused, first_write,
+        "a refusal and a write print the same sentence:\n{first_refused}"
+    );
+    assert_ne!(
+        first_refused, first_no_op,
+        "a refusal and a no-op print the same sentence, so a person cannot tell a setting SURE \
+         will not write from one it had nothing to do about:\n{first_refused}"
+    );
+    let after_refusal =
+        std::fs::read(&settings).unwrap_or_else(|error| panic!("{}: {error}", settings.display()));
+    assert!(
+        wrote == after_refusal,
+        "a refused command changed the settings file anyway"
+    );
+
+    assert_untouched(
+        &machine,
+        "by a command that wrote a settings file of its own",
+    );
+}
+
+#[test]
+fn no_path_of_a_config_write_reaches_the_projects_own_sure_yaml() {
+    // Clause 3, both halves, against one project whose own `sure.yaml` names one
+    // of the settings being written.
+    //
+    // That is the sharpest fixture for this clause: the project has a file, the
+    // file is exactly where a naive implementation would write, and the setting
+    // is one the file already mentions. If any path of the command reached it,
+    // the bytes would differ — and if a write were redirected there, the project
+    // would have granted itself what only the user may grant.
+    //
+    // The second half is the other direction: a request that names a setting a
+    // *project* may make is refused rather than written anywhere, because the
+    // user's file is not the layer that decides it and writing it there would be
+    // a decision with no effect.
+    let store = a_store_of_our_own();
+    let project = a_project_that_asks_for_what_only_a_users_file_can_grant();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+    let before = bytes_under(&project);
+
+    let written = config_set(
+        &store,
+        &settings,
+        &project,
+        "execution.mode",
+        "host_confirmed",
+    );
+    assert_eq!(
+        written.status, 0,
+        "the write did not finish:\n{}\n{}",
+        written.stdout, written.stderr
+    );
+
+    let refused = config_set(&store, &settings, &project, "checks.existing_tests", "true");
+    assert_eq!(
+        refused.status, 5,
+        "a setting a project's own file decides was not refused:\n{}\n{}",
+        refused.stdout, refused.stderr
+    );
+    assert!(
+        refused.stderr.contains("checks.existing_tests"),
+        "the refusal does not name the setting it refused:\n{}",
+        refused.stderr
+    );
+
+    let after = bytes_under(&project);
+    assert!(
+        before == after,
+        "the project's files are not byte-for-byte what they were. `sure config set` writes one \
+         file — the user's own, outside every project — and every path of it goes through the same \
+         `Paths::ensure_settings_outside` a run asks about the file it reads:\nbefore: {:?}\nafter: {:?}",
+        before
+            .iter()
+            .map(|(path, bytes)| (path, bytes.len()))
+            .collect::<Vec<_>>(),
+        after
+            .iter()
+            .map(|(path, bytes)| (path, bytes.len()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !settings.starts_with(&project) && settings.is_file(),
+        "the file that was written is not the file that was named, or is inside the project"
+    );
+    assert!(
+        bytes_under(&store).is_empty(),
+        "a command about settings wrote something into the store"
+    );
+
+    assert_untouched(&machine, "by a write from inside a project");
+}
+
+#[test]
+fn a_settings_file_inside_the_project_is_refused_and_nothing_is_written() {
+    // Clause 3's edge, and the one a person is most likely to hit: naming the
+    // file that is right there in the project they are standing in. It is
+    // refused, because a settings file a project could have written is not the
+    // user's own word — and the refusal has to leave the project exactly as it
+    // was, which on this fixture means no file at all, since the project has
+    // none.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let inside = project.join("sure.yaml");
+    let machine = the_store_on_this_machine();
+    let before = bytes_under(&project);
+
+    let run = config_set(
+        &store,
+        &inside,
+        &project,
+        "execution.mode",
+        "host_confirmed",
+    );
+    assert_eq!(
+        run.status, 5,
+        "a settings file inside the project was not refused:\n{}\n{}",
+        run.stdout, run.stderr
+    );
+    assert!(
+        run.stderr.contains(&inside.display().to_string()),
+        "the refusal does not name the file it refused:\n{}",
+        run.stderr
+    );
+    assert!(
+        !inside.exists(),
+        "the refused command created {} inside the project it was judging",
+        inside.display()
+    );
+    assert!(
+        before == bytes_under(&project),
+        "the refused command changed the project's files"
+    );
+
+    // A relative path never reaches that question at all: it is a wrong command
+    // line, refused at the grammar, because whether it was inside the project
+    // would depend on which directory SURE happened to be started in.
+    let mut command = sure_in_a_store(&store);
+    command.current_dir(&project).args([
+        "--settings-file",
+        "sure.yaml",
+        "config",
+        "set",
+        "execution.mode",
+        "host_confirmed",
+    ]);
+    let relative = Run::of(
+        &command
+            .output()
+            .unwrap_or_else(|error| panic!("could not run {SURE}: {error}")),
+    );
+    assert_eq!(
+        relative.status, 2,
+        "a relative settings file is a wrong command line and exited {}:\n{}",
+        relative.status, relative.stderr
+    );
+    assert!(
+        !project.join("sure.yaml").exists(),
+        "the run that named a relative settings file created one in the project"
+    );
+
+    assert_untouched(&machine, "by a refused write inside a project");
+}
+
+#[test]
+fn a_setting_that_cannot_take_effect_is_refused_with_its_reason() {
+    // Clause 4. Two shapes of setting that cannot do anything, and the answer
+    // must not be a silent write: `telemetry`, which nothing in this release
+    // implements — a file saying `telemetry: false` would look like a decision
+    // the person had made and be read by nothing — and a value the release
+    // refuses, where the reason is the product's own.
+    //
+    // The refusal is also the one case where "nothing was written" has to be
+    // true of a file that does not exist yet, so the assertion is that the path
+    // is still not there: a command that created an empty settings file while
+    // refusing to put anything in it would leave a person with a file they did
+    // not ask for and could not explain.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let settings = a_settings_file_nobody_has_written_yet();
+    let machine = the_store_on_this_machine();
+
+    for (setting, value) in [
+        ("privacy.telemetry", "false"),
+        ("privacy.mode", "cloud_enhanced"),
+        ("execution.mode", "no_such_mode"),
+    ] {
+        let run = config_set(&store, &settings, &project, setting, value);
+        assert_eq!(
+            run.status, 5,
+            "`sure config set {setting} {value}` exited {} rather than 5. A setting that cannot \
+             take effect is not a wrong command line (2) and is certainly not a success \
+             (0):\n{}\n{}",
+            run.status, run.stderr, run.stdout
+        );
+        assert!(
+            run.stderr.contains(setting),
+            "the refusal does not name the setting it refused, and a person who typed the setting \
+             has no way to know which of it SURE is answering about:\n{}",
+            run.stderr
+        );
+        assert!(
+            !settings.exists(),
+            "`sure config set {setting} {value}` was refused and created {} anyway. A setting that \
+             cannot take effect must not be written silently, and a file left behind by a refusal \
+             is the same defect with an empty value in it:\n{}",
+            settings.display(),
+            run.stderr
+        );
+    }
+
+    assert_untouched(&machine, "by three refused writes");
+}
+
 #[test]
 fn a_delete_without_a_scope_or_with_two_is_a_wrong_command_line() {
     // The non-interactive decision, checked where a user meets it. Nothing

@@ -226,6 +226,18 @@ pub struct CheckReport {
     /// a run that could not write it is a [`Report::Failed`] and never reaches
     /// this type.
     pub recorded_goal: Option<GoalRecorded>,
+    /// What this machine's own settings allowed this run to do, and what they
+    /// refused.
+    ///
+    /// Held on the report for the reason `privacy` above is: it is the
+    /// *arbitrated* answer — the user's own file against the project's — and a
+    /// renderer that read a file itself would report one layer's answer as
+    /// though it were the policy in force. The difference from `privacy` is what
+    /// it is for: the privacy statement says what may be kept and what may leave
+    /// the machine, and this says what the run was allowed to *do*. Both were
+    /// reachable from the frame and neither was in the words a person reads,
+    /// which is what `crate::grants` exists to fix.
+    pub grants: crate::grants::Grants,
 }
 
 impl CheckReport {
@@ -306,6 +318,70 @@ pub struct HookAllowance {
     /// when the answer is empty, so this is non-empty in every report that
     /// carries it.
     pub acts: Vec<sure_core::hook_protection::Danger>,
+}
+
+/// What `sure config set` did to the user's own settings file.
+///
+/// # Why the three endings are one type
+///
+/// Because a person cannot tell them apart from the file. A written setting, a
+/// setting that was already there, and a setting this build refused all leave the
+/// same bytes on disk when the refusal is correct — nothing written — and the
+/// difference between the first two is invisible even to a reader of the file. So
+/// the difference is carried here, where the renderer has to state it, rather
+/// than left for a person to work out by opening the file and comparing it with
+/// what they remember.
+///
+/// # Why the grants are on it
+///
+/// The command's answer is not "the file changed", it is "this is what your
+/// settings now allow", and that second half is read back through the same
+/// reader every run uses. It is `Option` because the reading back is a separate
+/// step that can fail after a write succeeded, and the one thing this report may
+/// not do is make a failed read look like a successful one: the error is carried
+/// and stated, so "SURE wrote it and could not tell you what it now allows" is
+/// a thing a person can read rather than a silence they can misread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsChange {
+    /// The command the user typed, so the frame names it — `config set`.
+    pub command: &'static str,
+    /// The setting, as the user typed it.
+    pub setting: String,
+    /// The value, as the user typed it or as SURE read it back.
+    pub value: String,
+    /// The file, in the operating system's own terms.
+    pub settings_file: String,
+    /// Which of the three things happened.
+    pub outcome: SettingsOutcome,
+    /// What the user's settings allow, read back through `Authority::load`.
+    pub grants: Option<crate::grants::Grants>,
+    /// Why the reading back failed, when it did.
+    pub grants_error: Option<String>,
+}
+
+/// Which of the three things `sure config set` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsOutcome {
+    /// The setting was written, and the file now says what the user asked for.
+    Written,
+    /// The file already said it, and was left byte-for-byte as it was.
+    ///
+    /// Not a failure, and not a write: a command that rewrote a file to say what
+    /// it already said would be a command that loses somebody's comments the
+    /// first time they run it twice.
+    AlreadySaid,
+    /// Nothing was written, and this is why.
+    ///
+    /// `what` is a sentence SURE wrote about itself and `detail` is whatever it
+    /// was told, kept apart for [`Failed`]'s reason: a reader deciding whether
+    /// to file a bug should not have to parse prose to find out.
+    Refused {
+        /// The sentence a person is owed, in SURE's own words.
+        what: String,
+        /// The underlying reason, when there is one to quote — the reader's own
+        /// complaint about the file, or the operating system's about the write.
+        detail: Option<String>,
+    },
 }
 
 /// One Model Context Protocol message, on its way to the caller.
@@ -428,6 +504,13 @@ pub enum Report {
     /// renderings free to drift. Which command the user typed is on the report,
     /// so the frame names the command that was run rather than the group.
     History(Box<crate::history::HistoryReport>),
+    /// `sure config set`, carrying what it wrote and what the settings now allow.
+    ///
+    /// Its own variant rather than a [`Self::Failed`] for a refusal, because the
+    /// three endings are three different answers about a file the user owns and
+    /// the person reading them has to be able to tell which one happened: a
+    /// write, a no-op, and a refusal are not "worked" and "did not work".
+    Settings(Box<SettingsChange>),
     /// A command whose work lands in a later phase.
     Unavailable(NotYet),
     /// A command that tried and did not finish.
@@ -512,6 +595,18 @@ impl Report {
             // never looks at one. A history command that could not finish is a
             // [`Self::Failed`], which is the arm below.
             Self::History(_) => "ok",
+            // A settings write is a report about a file the user owns, never
+            // about a project: like a history report, and unlike a check, it is
+            // never `not_green` — that is a statement about a project, and this
+            // command looks at one only to know which file must *not* be
+            // written. A refusal is `failed` rather than `unavailable`, which is
+            // the distinction the statuses document: the command was understood
+            // and this build declined to carry this one out, which is a thing to
+            // look at rather than a newer build to fetch.
+            Self::Settings(change) => match change.outcome {
+                SettingsOutcome::Written | SettingsOutcome::AlreadySaid => "ok",
+                SettingsOutcome::Refused { .. } => "failed",
+            },
             Self::Unavailable(_) => "unavailable",
             // A command that did not finish has not answered, and saying
             // `not_green` would read as "the project has problems" — which is a
@@ -605,6 +700,22 @@ impl Report {
             // unreadable, a row that would not go — and that is a
             // [`Self::Failed`], below.
             Self::History(_) => exit::OK,
+            // 0 for both of the endings where the file says what the user asked
+            // for — including the no-op, because what the user asked for is
+            // true either way and a script that ran `config set` twice must not
+            // read the second run as a failure. 5 for a refusal: SURE was asked
+            // to do something, understood it, and did not do it.
+            //
+            // **Not 4.** `exit::REFUSED` is reserved for a refusal that is a
+            // decision about authority, and this command exists on the other
+            // side of that decision: it is how a user *makes* the grant that
+            // `REFUSED` documents the absence of. Spending the code here would
+            // make "your project asked for something it cannot have" and "you
+            // asked for a setting this build will not write" the same status.
+            Self::Settings(change) => match change.outcome {
+                SettingsOutcome::Written | SettingsOutcome::AlreadySaid => exit::OK,
+                SettingsOutcome::Refused { .. } => exit::FAILED,
+            },
             Self::Unavailable(_) => exit::UNAVAILABLE,
             Self::Failed(_) => exit::FAILED,
             // 0 for allow/warn so the launcher does not block the operation.
@@ -670,6 +781,14 @@ impl Report {
             // went are the point of the command, and a person who piped them
             // meant to keep them.
             Self::History(_) => true,
+            // A write and a no-op are both answers: `sure config set … >
+            // note.txt` has to put the sentence in the file, because the
+            // sentence is the whole of what the command was asked for and there
+            // is no other record of which of the two happened. A refusal is a
+            // complaint, by the same rule every other refusal on this surface
+            // follows: there is nothing to file, and a person who piped the
+            // output meant to read why.
+            Self::Settings(change) => !matches!(change.outcome, SettingsOutcome::Refused { .. }),
             Self::Unavailable(_) | Self::Failed(_) => false,
             // A hook decision is an answer: the command ran and produced a result.
             Self::HookDecision(_) => true,
@@ -728,6 +847,13 @@ impl Report {
             // it.
             Self::Check(report) => crate::check::human(report, out),
             Self::History(report) => crate::history::human(report, out),
+            // The command's own module renders it, for the reason `doctor` and
+            // `check` above do, and one more that is particular to this one:
+            // the sentence that says whether the file was written is the
+            // acceptance criterion for the command, so it belongs beside the
+            // code that decided which of the three things happened rather than
+            // in a renderer that has to reconstruct it.
+            Self::Settings(change) => crate::settings::human(change, out),
             Self::Failed(failure) => {
                 writeln!(
                     out,
@@ -995,6 +1121,10 @@ impl Report {
             // gives, and built from the same values the human form renders, so
             // that a script and a person are reading one result.
             Self::History(report) => frame["details"] = crate::history::machine(report),
+            // What was written and what the settings now allow, built by the
+            // command's own module so that the shape a script reads is decided
+            // beside the prose a person reads.
+            Self::Settings(change) => frame["details"] = crate::settings::machine(change),
             // The failure's own words. `what` is a sentence SURE wrote about
             // itself and `detail` is whatever went wrong, kept apart here for
             // the same reason they are apart in the struct: a reader deciding
@@ -1083,6 +1213,13 @@ impl Report {
             // for all three would not name the one that was run — which matters
             // most for the one that deletes.
             Self::History(report) => report.command,
+            // The command the user typed, taken from the report rather than
+            // fixed here: the frame names `config set` rather than `config`,
+            // for the same reason the arm above names `history delete` rather
+            // than `history`. The rest of `sure config` still refuses, and a
+            // frame that said `config` for a write would name a surface that
+            // does not exist.
+            Self::Settings(change) => change.command,
             Self::Unavailable(not_yet) => not_yet.command,
             Self::Failed(failure) => failure.command,
             Self::HookDecision(_) => "hook",
@@ -1314,6 +1451,7 @@ mod tests {
             privacy: no_settings_file(),
             model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: Some(a_recorded_goal()),
+            grants: no_grants(),
         }))
     }
 
@@ -1331,6 +1469,7 @@ mod tests {
             privacy: no_settings_file(),
             model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: None,
+            grants: no_grants(),
         }))
     }
 
@@ -1357,6 +1496,7 @@ mod tests {
             privacy: no_settings_file(),
             model_use: sure_core::privacy::ModelUse::NoProvider,
             recorded_goal: None,
+            grants: no_grants(),
         }))
     }
 
@@ -1376,6 +1516,24 @@ mod tests {
             project_mode: PrivacyMode::default(),
             provider: AnalysisProvider::default(),
         }
+    }
+
+    /// What the settings allow on a machine with no settings file.
+    ///
+    /// Built through [`crate::grants::Grants::of`] rather than written out field
+    /// by field, because the value these tests are about is the one the product
+    /// derives: a literal here would be a second answer to "what does a machine
+    /// with nothing configured allow", free to disagree with the first.
+    fn no_grants() -> crate::grants::Grants {
+        let authority = sure_core::config::Authority::new(
+            None,
+            sure_core::config::LoadedConfig {
+                config: sure_core::config::Config::default(),
+                source: sure_core::config::ConfigSource::NoFile,
+                searched: std::path::PathBuf::from("sure.yaml"),
+            },
+        );
+        crate::grants::Grants::of(&authority, std::path::Path::new("sure.yaml"))
     }
 
     /// A command that tried and did not finish.

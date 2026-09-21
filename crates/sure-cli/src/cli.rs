@@ -293,6 +293,38 @@ pub enum ConfigAction {
     Show,
     /// Report problems in the configuration without checking the project.
     Validate,
+    /// Write one setting into your own settings file, outside every project.
+    ///
+    /// # Why this exists, and why it is here rather than in a file editor
+    ///
+    /// Full recording and every execution mode other than `inspect_only` are
+    /// granted by the user's own settings file and by nothing else: a checked
+    /// project's `sure.yaml` may ask for them and can never grant them
+    /// (`Layer::can_grant`). Before this command there was no way for a person
+    /// to act on that sentence — the file had no writer, and nothing told them
+    /// where it would be. A rule a user cannot satisfy is not a rule, it is a
+    /// refusal with no remedy, and SURE would report a setting as not in force
+    /// and name no way to put it in force.
+    ///
+    /// This command writes **only that file**, only on request, and only the
+    /// settings it can prove a run reads from it. Whether the path it writes is
+    /// even allowed is the same question a run asks about the file it reads
+    /// (`Paths::ensure_settings_outside`), so no path of this command reaches a
+    /// project's own `sure.yaml`, and a setting whose value a run reads from the
+    /// project's file is refused rather than written where it would do nothing.
+    /// The reasoning per setting, and the edit's safety net, are in
+    /// `crate::settings`.
+    Set {
+        /// The setting to write, as `<group>.<name>` — `execution.mode`, for
+        /// instance. `sure config set` with no settings refuses and lists the
+        /// ones it will write.
+        #[arg(value_name = "SETTING")]
+        setting: String,
+        /// What to set it to: `true` or `false`, one of a setting's own words,
+        /// or a whole number of days.
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
 }
 
 /// What a harness can ask `sure mcp` to do.

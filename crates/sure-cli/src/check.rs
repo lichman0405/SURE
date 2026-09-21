@@ -286,6 +286,11 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
     // that would ask a model — not a second opinion about the configuration.
     let model_use = ModelUse::of(privacy.provider, &run);
 
+    // What the settings in force allowed, from the same `authority` every
+    // decision above was made with — not from a second read of the two files,
+    // which could differ from the one the run actually used.
+    let grants = crate::grants::Grants::of(&authority, &paths.user_config_file());
+
     Report::Check(Box::new(CheckReport {
         command: purpose.as_str(),
         project: project.display().to_string(),
@@ -293,6 +298,7 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         privacy,
         model_use,
         recorded_goal: recorded,
+        grants,
     }))
 }
 
@@ -489,6 +495,13 @@ fn finished(
     lifecycle(run, out)?;
     stages(outcome, out)?;
     privacy(&report.privacy, report.model_use, out)?;
+    // What the run was allowed to do, from the arbitrated settings in force. The
+    // section is printed after the privacy one because the two are the same
+    // question asked twice — what may leave this machine, and what may it do
+    // here — and a person reading them together can see that a run in
+    // `inspect_only` with full recording on is one answer rather than two
+    // contradictory ones.
+    report.grants.human(out)?;
     if let Some(recorded) = &report.recorded_goal {
         what_was_recorded(recorded, out)?;
     }
@@ -670,6 +683,14 @@ fn stopped(report: &CheckReport, out: &mut impl Write) -> io::Result<()> {
     // answer about what this run was allowed to send. Saying nothing here would
     // be the one shape of silence that reads as "nothing left the machine".
     privacy(&report.privacy, report.model_use, out)?;
+    // The other half of the same answer, and for the same reason: a run's
+    // permissions are not derivable from anything else it prints, so a run that
+    // said nothing about them would leave a person to read "no file was found"
+    // as "nothing was allowed" — which is true here and is not what the report
+    // says. Rendered by `crate::grants`, the same value `sure config set` prints
+    // after a write, so the two commands cannot come to mean different things by
+    // the same words.
+    report.grants.human(out)?;
     if let Some(recorded) = &report.recorded_goal {
         what_was_recorded(recorded, out)?;
     }
@@ -823,6 +844,12 @@ pub fn machine(report: &CheckReport) -> Value {
             "provider": report.model_use.provider().as_str(),
         },
     });
+
+    // Unconditional, unlike `mode` below: a run that stopped never reached a
+    // stage that could set a mode, but it was still under settings, and a script
+    // asking "was this machine allowed to run project code" has an answer either
+    // way.
+    details["grants"] = report.grants.machine();
 
     match &outcome.run {
         Some(run) => {

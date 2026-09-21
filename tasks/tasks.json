@@ -2914,7 +2914,10 @@
     "title": "Run final cross-platform core gates",
     "required": true,
     "depends_on": [
-      "P15-T010"
+      "P15-T010",
+      "P16-T006",
+      "P16-T007",
+      "P16-T010"
     ],
     "acceptance": [
       "Required Windows/macOS/Linux jobs green for final commit."
@@ -3116,5 +3119,20 @@
       "The place that says how to invoke the gate set and under what environment"
     ],
     "notes": "Minted 2026-09-21 from `target/tmp/owed-findings.md` section 1, which has led that list since P15-T021 put its sibling instrument in the tree and found this one was untracked. `required: false` deliberately: this is a defect of the DEVELOPMENT harness and not of the product, so it must not expand what \"done\" means. It is nonetheless the largest instance of a defect class this repository has already paid for once — `target/tmp/measure-run.mjs` was LOST, eight of its invocations are in the record, and the figures it produced are still quoted as evidence. `target/tmp/gates.ps1` is 5969 bytes at mtime 2026-09-21 09:45:59 and is named by nothing in the tree but prose in `progress/HANDOFF.md` and `progress/state.json`. The six commands it runs are `cargo fmt --check`, `cargo clippy --workspace --all-features --all-targets -- -D warnings`, `cargo test --workspace --all-features --no-fail-fast`, `node scripts/validate-bootstrap.mjs`, `node scripts/taskctl.mjs validate` and `node scripts/check-non-windows.mjs` — five of the six already live in `scripts/` and ARE tracked; only the runner is missing."
+  },
+  {
+    "id": "P16-T010",
+    "phase": "P16",
+    "title": "Repair the doctor sentence that names a fallback this build does not perform",
+    "required": true,
+    "depends_on": [
+      "P16-T005"
+    ],
+    "acceptance": [
+      "No output of the built binary, and no sentence the library offers for an absent container runtime, says a check runs on this computer: measured by running `sure doctor` with neither `docker` nor `podman` on PATH and reading every line rather than the one that changed.",
+      "The test that pins the absence sentence asserts the claim that sentence makes, not the presence of a phrase: a sentence claiming a host fallback fails it, and the worker shows that by running the guard against a sentence that makes the false claim and reporting that it reddens."
+    ],
+    "outputs": [],
+    "notes": "Minted by the supervisor from P16-T005, which found the defect while writing the pages. `crates/sure-cli/src/doctor.rs`'s `container_in_words` answers `Availability::Absent` with \"none found, so checks run on this computer\", and `crates/sure-core/src/container.rs`'s `explain` answers it with \"No container runtime was found, so checks run on this computer instead. SURE looked for {} on PATH.\" Neither is true of this build: `sure_core::enforce` says no *check* drives on the road to `Enforcement::admitted()`, and `support::CEILING` is `InspectOnly` for the same reason, so no check runs anywhere. Both sentences are pinned by assertions whose own message is \"absence must say what happens instead, not only what is missing\" — so the guard is green and the claim is false, because what it checks is that a phrase is present and not that the phrase is true. The module doc at `container.rs:24-32` and the `Availability::Absent` doc at `:147-152` carry the same claim and are part of the repair. The pages already say the true thing after P16-T005, so this commit moves the product to agree with them and does not move the pages."
   }
 ]

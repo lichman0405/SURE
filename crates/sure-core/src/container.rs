@@ -35,11 +35,14 @@
 //! one, and each is recorded as unknown rather than passed. `crate::support`'s
 //! `CEILING` is `InspectOnly` for the same reason. **A sentence that says the
 //! checks run on this computer instead is therefore false of this build**, and
-//! [`claims_local_execution`] is the rule that keeps one out of the sentences
-//! below. A caller cannot forget to handle an absence, because the only way to
-//! get a [`Runtime`] out is to match. **An error would have made a normal machine
-//! a broken one**, and the failure mode of that is a user told their setup is
-//! wrong when it is not.
+//! so is one that says they run in a container: [`claims_local_execution`] and
+//! [`claims_container_execution`] are the two rules that keep one out of the
+//! sentences below, and the answer *with* a runtime is held to the second for
+//! the reason `docs/architecture/EXECUTION_SAFETY.md` gives — the answer with no
+//! runtime is the answer with one. A caller cannot forget to handle an absence,
+//! because the only way to get a [`Runtime`] out is to match. **An error would
+//! have made a normal machine a broken one**, and the failure mode of that is a
+//! user told their setup is wrong when it is not.
 //!
 //! # Where "limited isolation" is, and why it is not marketing
 //!
@@ -218,16 +221,30 @@ impl Availability {
 
     /// What to tell a user, in one sentence, either way.
     ///
-    /// Both arms are held to [`claims_local_execution`]: neither may say that a
-    /// check runs on this computer, because none does. The absence arm used to
-    /// say *"No container runtime was found, so checks run on this computer
-    /// instead."* — which was false of this build, and which the guard that was
-    /// supposed to catch it asked for by phrase rather than by claim.
+    /// **Both arms are held to both rules** — [`claims_local_execution`] and
+    /// [`claims_container_execution`] — because neither may say that a check
+    /// runs, on this computer or inside a container, and in this build none does
+    /// either way. Each arm was false once, one in each direction, and each was
+    /// false for the same reason: the sentence answered a question about the
+    /// machine as though it were a question about the checks.
+    ///
+    /// - The absence arm said *"No container runtime was found, so checks run on
+    ///   this computer instead."*
+    /// - The arm with a runtime said *"Checks can run in a container: docker was
+    ///   found at …"*.
+    ///
+    /// The two sentences below are therefore the same sentence with one clause
+    /// moved, which is what
+    /// `docs/architecture/EXECUTION_SAFETY.md` means by *the answer with no
+    /// runtime is the answer with one*. What a runtime changes is where a check
+    /// **would** run; it does not change whether one runs.
     #[must_use]
     pub fn explain(&self) -> String {
         match self {
             Self::Found { runtime, program } => format!(
-                "Checks can run in a container: {} was found at {}.",
+                "{} was found at {}, and that changes nothing: this build runs no check, in a \
+                 container or on this computer, and each check is recorded as unknown rather \
+                 than passed.",
                 runtime.as_str(),
                 program.display()
             ),
@@ -676,12 +693,13 @@ const RUNNING_WORDS: &[&str] = &[
 
 /// The places that make a running word a claim about *this* computer.
 ///
-/// Every entry is a place on this machine and none of them is a container. That
-/// asymmetry is deliberate: what this rule is about is the **fallback** claim —
-/// that the checks ran here because a runtime was missing — which is the one
-/// this build made falsely. Whether a sentence may say a check runs inside a
-/// container is the other half of the same question, it is a different sentence
-/// with a different defect behind it, and this list does not decide it.
+/// Every entry is a place on this machine and none of them is a container. What
+/// this rule is about is the **fallback** claim — that the checks ran here
+/// because a runtime was missing — which is the one this build made falsely.
+/// Whether a sentence may say a check runs inside a container is the other half
+/// of the same question, it is a different sentence with a different defect
+/// behind it, and [`CONTAINER_PLACES`] is the list that decides it rather than
+/// this one.
 const LOCAL_PLACES: &[&str] = &[
     "on this computer",
     "on your computer",
@@ -690,6 +708,25 @@ const LOCAL_PLACES: &[&str] = &[
     "on the local machine",
     "locally",
     "here",
+];
+
+/// The places that make a running word a claim about *inside a container*.
+///
+/// The twin of [`LOCAL_PLACES`], and **the two lists are disjoint on purpose**:
+/// *"in a container"* is not a place on this computer, so [`LOCAL_PLACES`] could
+/// not read the sentence this one is for, and one list deciding both questions
+/// would have to contain a place that is not where the check would have run.
+///
+/// It holds phrases rather than the words `container`, `docker` or `podman`,
+/// which are the words the whole module is written in: a rule over those would
+/// read *"the runtime is not in the container image"* — a sentence about where a
+/// program was found — as a claim about a check.
+const CONTAINER_PLACES: &[&str] = &[
+    "in a container",
+    "in containers",
+    "in the container",
+    "inside a container",
+    "inside the container",
 ];
 
 /// The words that deny a running word in the clause it sits in.
@@ -738,6 +775,15 @@ const NOT_RUNNING_WORDS: &[&str] = &[
 ///
 /// # What it deliberately cannot tell
 ///
+/// - **It reads words, not subjects.** A clause that names something running and
+///   a place on this computer is read as a claim whether or not the subject is a
+///   check. The list of analysis providers in `sure_core::doctor` says a provider
+///   needs *"a command your settings name, run on this machine"*, and this rule
+///   reads that as a claim — held as a value in
+///   `the_local_execution_rule_tells_a_claim_from_a_denial`, so that it is a
+///   measurement rather than a worry. Whether that sentence should say something
+///   else is its own file's question, and a guard that scanned a whole report
+///   with this rule would be answering that one instead of this one.
 /// - **Two clauses between the halves.** *"Checks run, quickly, on this
 ///   computer"* has a clause between the running word and the place, and neither
 ///   adjacent pair holds both. A sentence that reads as a claim to a person and
@@ -747,8 +793,79 @@ const NOT_RUNNING_WORDS: &[&str] = &[
 ///   checks run on this computer"* is read as a denial, exactly as
 ///   [`overclaims`] reads the same shape. The cheap, checkable rule is worth
 ///   more than the clever one, and this limit is stated rather than papered over.
+///
+/// The last two are [`claims_execution`]'s, which this asks with [`LOCAL_PLACES`]
+/// rather than deciding again: the twin rule below shares them, and a sentence
+/// this one cannot read is one that rule cannot read either.
 #[must_use]
 pub fn claims_local_execution(sentence: &str) -> bool {
+    claims_execution(sentence, LOCAL_PLACES)
+}
+
+/// Whether `sentence` claims that a check runs inside a container.
+///
+/// # The claim
+///
+/// This build admits the checks and runs none of them — in a container as much
+/// as on this computer. [`ContainerPlan`] is a value nothing shipped builds, the
+/// stage after a container mode reports that *"none of them ran and each is
+/// recorded as unknown rather than passed"*, and `crate::support`'s `CEILING` is
+/// `InspectOnly` for the same reason. So an answer to the question *is there a
+/// container runtime here* that says a check runs in one tells a reader their
+/// project was checked when nothing was.
+///
+/// # Why this exists when [`claims_local_execution`] already asks the same shape
+///
+/// **Because that rule does not read this sentence, and `P16-T012` measured
+/// it.** The arm of [`Availability::explain`] that has a runtime said *"Checks
+/// can run in a container: docker was found at …"* — a claim that a check runs,
+/// in a build where none can. The local rule is about the **fallback** claim,
+/// so it requires a place on this computer, and *"in a container"* is not one;
+/// the sentence therefore went unread by every rule in this module while it
+/// named the one thing this build cannot do. A wording change would not have
+/// fixed that: the next person to reword it would have been writing into the
+/// same unread space, which is why the answer is a second rule and not a
+/// second sentence.
+///
+/// It shares [`claims_execution`] with the local rule, so the two differ only in
+/// the places they read — one rule, asked two questions.
+///
+/// # What it deliberately cannot tell
+///
+/// - **It is a rule about this build, and its subject is the check, not the
+///   container.** A container is not a thing a check may not run in; it is a
+///   thing no check runs in *yet*. The tests that call this are written to fail
+///   on the day the container mode is wired in, rather than to accommodate it,
+///   because on that day this sentence becomes true for a run whose mode grants
+///   it and the rule has to be re-decided rather than quietly satisfied.
+/// - **A heading is read as a claim.** *"Running a check in a container"* is one
+///   clause with a running word and a container place and no denial, so this
+///   reads it as a claim, and `sure doctor` prints exactly that as a section
+///   heading. A heading names a topic rather than answering a question, which is
+///   why the guards that use this rule read the report's rows and not its
+///   headings — see `crates/sure-cli/src/doctor.rs` — and why this is written
+///   down here instead of being left for whoever next reads a red test.
+/// - **A container named some other way is not a place this rule knows.**
+///   *"the check runs in docker"* defeats it, and so does *"under the daemon"*.
+///   The list above is where that is extended, for the reason the lists are in
+///   this module rather than in a test.
+/// - **The two structural limits [`claims_local_execution`] states**, which are
+///   [`claims_execution`]'s: two clauses between the running word and the place
+///   is not read as one claim, and a denial anywhere in the pair excuses it.
+#[must_use]
+pub fn claims_container_execution(sentence: &str) -> bool {
+    claims_execution(sentence, CONTAINER_PLACES)
+}
+
+/// The reading both rules above are: a clause naming something running, together
+/// with a clause naming a place, and nothing in those clauses denying it.
+///
+/// Written once because the two rules differ in one argument — *where* the check
+/// would have run — and two copies of a rule are two rules. The arm of
+/// [`Availability::explain`] that has a runtime and the arm that does not are
+/// asked the same two questions of this function, so a sentence the module
+/// accepts cannot be one either rule rejects.
+fn claims_execution(sentence: &str, places: &[&str]) -> bool {
     let clauses = clauses(sentence);
     for (index, clause) in clauses.iter().enumerate() {
         if !mentions_running(clause) {
@@ -758,7 +875,7 @@ pub fn claims_local_execution(sentence: &str) -> bool {
             Some(clause) => clause,
             None => &[],
         };
-        let names_a_place = LOCAL_PLACES
+        let names_a_place = places
             .iter()
             .any(|place| names(clause, place) || names(next, place));
         if names_a_place && !(denies_running(clause) || denies_running(next)) {
@@ -1107,6 +1224,11 @@ mod tests {
              — not here and not in a container: {sentence}"
         );
         assert!(
+            !claims_container_execution(&sentence),
+            "an absence must not claim that a check runs in a container either, for the same \
+             reason and in the other direction: {sentence}"
+        );
+        assert!(
             denies_that_anything_runs(&sentence),
             "absence must say what happens instead, not only what is missing, and what happens \
              is that nothing runs: {sentence}"
@@ -1213,13 +1335,18 @@ mod tests {
                     "`{phrase}` is used as a claim in: {sentence}"
                 );
             }
-            // The other claim this module may not make, checked over the same
-            // three sentences because it is the same kind of rule: an overclaim
-            // and a claim that a check ran here are both sentences that tell a
-            // user something this build does not do.
+            // The other claims this module may not make, checked over the same
+            // three sentences because they are the same kind of rule: an
+            // overclaim, a claim that a check ran on this computer and a claim
+            // that one ran in a container are all sentences that tell a user
+            // something this build does not do.
             assert!(
                 !claims_local_execution(sentence),
                 "this sentence claims a check runs on this computer, and none does: {sentence}"
+            );
+            assert!(
+                !claims_container_execution(sentence),
+                "this sentence claims a check runs in a container, and none does: {sentence}"
             );
         }
     }
@@ -1294,6 +1421,99 @@ mod tests {
                  {silent}"
             );
         }
+
+        // **The limit that is about the subject rather than the wording.** This
+        // rule reads words, so a sentence about a program someone *else* would
+        // run is read as a claim about a check: a clause naming something running
+        // and a place on this computer. `sure doctor` prints exactly one —
+        // `sure_core::doctor`'s provider list says a provider needs *"a command
+        // your settings name, run on this machine"* — and `P16-T012` recorded
+        // that here as a value and left the sentence to its own file, which is
+        // where a decision about what a provider's row should say belongs. What
+        // this line measures is the rule's reach: a guard in another crate that
+        // scanned a whole report with this rule would be reading that sentence
+        // too, which is why the guards that use it ask about the part of a report
+        // they are about.
+        assert!(
+            claims_local_execution("a command your settings name, run on this machine"),
+            "a sentence whose subject is a program a provider would run is read as a claim about \
+             a check, because this rule reads words and not subjects"
+        );
+    }
+
+    #[test]
+    fn the_container_execution_rule_tells_a_claim_from_a_denial() {
+        // The twin of the test above, written as its own function because it is
+        // its own rule and because the sentence it was written for is the other
+        // half of the same defect: one arm of `explain()` said the check runs
+        // here when a runtime was missing, and the other said the check runs in
+        // a container when one was found. The second was shipped, was read by
+        // every guard in this module, and was read by none of them as a claim —
+        // `claims_local_execution` wants a place on this computer and *"in a
+        // container"* is not one.
+        //
+        // **The first claim is the shipped sentence**, kept here as a value
+        // rather than only in the commit message, exactly as the local rule keeps
+        // the one it was written for: it was false, it was green, and a rule
+        // relaxed back to where it does not read it is what this list fails on.
+        for claim in [
+            "Checks can run in a container: docker was found at C:\\Program Files\\Docker\\docker.exe.",
+            "With docker installed, the checks run in a container.",
+            "The checks are executed inside a container when a runtime is present.",
+            "No docker here, so the check ran in the container instead.",
+            "Checks run, in a container.",
+            "The project's commands are performed in containers.",
+        ] {
+            assert!(
+                claims_container_execution(claim),
+                "a claim about a check running in a container went unnoticed: {claim}"
+            );
+        }
+        for denial in [
+            "This build runs no check, in a container or on this computer.",
+            "Nothing runs in a container, with a runtime or without one.",
+            "No check runs inside a container.",
+            "An absent runtime does not mean the checks run in a container.",
+            "SURE will never run your project's commands in a container.",
+            // The limit the local rule states, held here as a value so that a
+            // future edit cannot quietly turn it into a claim: two clauses
+            // between the halves are not read as one.
+            "Checks run, quickly and quietly, in a container.",
+        ] {
+            assert!(
+                !claims_container_execution(denial),
+                "a denial or a sentence that names no place was read as a claim: {denial}"
+            );
+        }
+
+        // The two lists are disjoint, and this is where that is measured rather
+        // than asserted in prose — the fallback claim is not this rule's, and
+        // the container claim is not the other's. If either list ever grows to
+        // hold the other's places, one of these two lines fails.
+        assert!(
+            !claims_container_execution(
+                "No container runtime was found, so checks run on this computer instead."
+            ),
+            "the fallback claim is on this computer, not in a container"
+        );
+        assert!(
+            !claims_local_execution(
+                "Checks can run in a container: docker was found at C:\\Program Files\\Docker\\docker.exe."
+            ),
+            "the container claim is not on this computer — which is why the arm that made it \
+             needed a rule of its own"
+        );
+
+        // **The limit, as a value.** This rule reads a heading as a claim, and
+        // `sure doctor` prints this one: a clause with a running word, a
+        // container place and no denial. A heading names a topic rather than
+        // answering a question, which is why the guards that ask this rule ask it
+        // about the report's rows — and the limit is asserted here so that it
+        // cannot be discovered by surprise.
+        assert!(
+            claims_container_execution("Running a check in a container"),
+            "a heading is read as a claim by this rule, and this is where that is written down"
+        );
     }
 
     #[test]

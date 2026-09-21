@@ -42,9 +42,32 @@ it has to do three things at once — say what was not found, say that **nothing
 runs**, with a runtime and without one, and name what was looked for — or a
 person reading it cannot act on it.
 
-**That sentence used to read *"No container runtime was found, so checks run on
-this computer instead."*, and this README used to explain the requirement in the
-same false way.** The guard was green because it asked the sentence for a phrase
+Ask a path that holds a file named `docker` and SURE answers the other way, in a
+sentence built the same way:
+
+```
+docker was found at <the file that was found>, and that changes nothing: this
+build runs no check, in a container or on this computer, and each check is
+recorded as unknown rather than passed.
+```
+
+**The two answers are one sentence with one clause moved, and since `P16-T012`
+that is asserted rather than intended.**
+`crates/sure-core/tests/container_isolation_claim.rs` holds both arms to the same
+clause word for word, and to the rules that read a claim of running whatever
+wording it uses. The arm with a runtime is the one that was wrong: it read
+*"Checks can run in a container: docker was found at …"*, and **no rule in the
+module read it** — `sure_core::container::claims_local_execution` is about the
+fallback claim and needs a place on this computer, and *"in a container"* is not
+one. So a machine with a runtime on it was told its check could run, in a build
+that runs nothing. `sure_core::container::claims_container_execution` is the
+twin rule written for it; the two share one implementation and differ in the list
+of places they read, which is why the sentence could be wrong on one side of the
+question without the other side noticing.
+
+**The absence sentence used to read *"No container runtime was found, so checks
+run on this computer instead."*, and this README used to explain the requirement
+in the same false way.** The guard was green because it asked the sentence for a phrase
 rather than for a true claim, and the phrase it asked for — a fallback onto this
 computer — was false of a build in which no check runs anywhere: `sure_core::enforce`
 says no check drives on the road to `Enforcement::admitted()`, and
@@ -83,8 +106,12 @@ would have looked for, that the sentence it produces is non-empty and carries no
 overclaim, and, when it reports having found nothing, that the sentence is this
 fixture's sentence word for word. Nothing else about it is asserted, because
 nothing else about it is a fact about SURE — in particular the words of the
-sentence a machine *with* a runtime gets are not asserted anywhere, since on such
-a machine that would be a test of the machine.
+sentence *the probe* produces on a machine that has a runtime are not asserted
+anywhere, since on such a machine that would be a test of the machine. The
+sentence a run of the control produces is asserted, and that is a different
+thing: it is built from a search path the test wrote, and the one part of it the
+test cannot fix — the path of the program that was found — is substituted into
+the declaration before the two are compared.
 
 ## What the mode is allowed to say about itself
 
@@ -103,17 +130,35 @@ too much is expensive.
 ## The limit, recorded rather than repaired
 
 **Container execution is not reachable from the pipeline or the command line.**
-`crates/sure-core/src/container.rs` is declared in `crates/sure-core/src/lib.rs`
-and nothing else in the shipped tree calls it: across the non-test Rust files
-under `crates/`, no line of code outside the module itself names `container::` or
-`Availability::` — only comments do.
+`crates/sure-core/src/container.rs` is declared in `crates/sure-core/src/lib.rs`,
+the diagnostic asks it what is on the search path it was handed, and nothing that
+ships can turn a check into a container command.
+
+Those are two claims, and the fixture declares one number for each rather than
+one number for both:
+
+| Declared | What it counts |
+| --- | --- |
+| `module_call_sites: 18` | lines of shipped code under `crates/` that name `container::` or `Availability::` |
+| `unwired_call_sites: 0` | among those lines, the ones naming `ContainerPlan` or `PlanError` — the type a container command is built from, and the error building one can fail with |
+
+The first is not zero, and it is not meant to be: since `P15-T001` the diagnostic
+reports what is on the search path a caller handed it, and the guards that read
+the sentences it prints name the module too. The second is the limit, and it is
+zero: no line of shipped code can build a container command, so no check can be
+told to run in one. **A number that moved is not a limit that changed**, which is
+why both are declared and both are compared. `P16-T010` moved the first from 11
+to 16 with five assertions, and `P16-T012` moved it from 16 to 18 with two more —
+each time because a guard learned to name the module, and never because anything
+became reachable. The second number has never moved.
 
 The test measures that rather than describing it: it walks the tree with the
 product's own scanner, asserts the walk was complete and non-trivial, strips
-line comments, and compares the list of call sites against the number this
-fixture declares (`unwired_call_sites: 0`). Wired in and recorded as unwired
-would fail here; deleted and recorded as wired would fail here too. This entry is
-what will have to change, deliberately, when a later phase wires the mode in.
+line comments, and compares both lists against the numbers this fixture declares.
+Deleting the diagnostic's answer would fail on `module_call_sites`; wiring a
+container command in would fail on `unwired_call_sites`, and on the assertion
+above it that prints the line that did it. This entry is what will have to
+change, deliberately, when a later phase wires the mode in.
 
 Consequences worth stating plainly, because they are what a reader would
 otherwise assume away:

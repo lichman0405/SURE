@@ -42,7 +42,7 @@
 //!   `no_sentence_this_module_produces_carries_an_overclaim`, which asks the same
 //!   function about `isolation_claim()` and both `Availability::explain()` arms.
 //!
-//! # The second claim, and the rule that reads it
+//! # The second claim, and the rules that read it
 //!
 //! `P16-T010` found a sentence this file's own subject had left alone: the
 //! absent-runtime answer said *"checks run on this computer instead"*, and no
@@ -52,12 +52,22 @@
 //! that a sentence saying a check runs here fails in any wording, and
 //! [`denies_that_anything_runs`] is the other half: an absence must say that
 //! nothing runs, not only that something is missing.
+//!
+//! **`P16-T012` found the same claim in the other direction.** The arm of
+//! `Availability::explain` that has a runtime said *"Checks can run in a
+//! container: docker was found at …"*, and [`claims_local_execution`] does not
+//! read it: that rule is about the fallback claim, so it requires a place on
+//! this computer, and *"in a container"* is not one. [`claims_container_execution`]
+//! is the twin rule, and both arms are held to both of them here, because the
+//! two sentences are one sentence with one clause moved — which is what
+//! `docs/architecture/EXECUTION_SAFETY.md` means by *the answer with no runtime
+//! is the answer with one*.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sure_core::container::{
-    Availability, OVERCLAIMS, claims_local_execution, denies_that_anything_runs, isolation_claim,
-    overclaims,
+    Availability, OVERCLAIMS, Runtime, claims_container_execution, claims_local_execution,
+    denies_that_anything_runs, isolation_claim, overclaims,
 };
 use sure_core::scan::{ScanOptions, scan};
 
@@ -288,6 +298,10 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
         "the absence claims that a check runs on this computer, and none does: {sentence}"
     );
     assert!(
+        !claims_container_execution(&sentence),
+        "the absence claims that a check runs in a container, and none does: {sentence}"
+    );
+    assert!(
         denies_that_anything_runs(&sentence),
         "an absence has to say what happens instead of only what is missing, and what happens \
          is that nothing runs: {sentence}"
@@ -302,4 +316,81 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
             "absence is not a moment to claim anything: {sentence}"
         );
     }
+}
+
+/// The clause both arms of the answer carry, word for word.
+///
+/// The second acceptance sentence's other half, and the reason this test asserts
+/// a *shared* clause rather than two sentences: the fact that no check runs is
+/// the one fact about a check that neither machine state changes, so an arm that
+/// dropped it would be saying something different about the project rather than
+/// something different about the computer. It is one constant because it is one
+/// claim in two sentences.
+const NOTHING_RUNS: &str = "this build runs no check, in a container or on this computer, and each \
+                            check is recorded as unknown rather than passed";
+
+#[test]
+fn the_answer_with_a_runtime_says_the_same_thing_as_the_answer_without_one() {
+    // `docs/architecture/EXECUTION_SAFETY.md`: *"the answer with no runtime is
+    // the answer with one: the checks this build admits and never runs."* That
+    // sentence is about the product, and this is it as a measurement.
+    //
+    // **The arm with a runtime was the one that did not say it.** It said
+    // *"Checks can run in a container: docker was found at …"*, which is a claim
+    // that a check runs, in a build where none does — and it was read by no rule
+    // at all until `P16-T012`, because the rule that exists for this kind of
+    // sentence requires a place on this computer and *"in a container"* is not
+    // one. Nothing about the machine changed between the two arms: what changed
+    // is whether a program named `docker` or `podman` is on the search path, and
+    // that is not a fact about whether the project was checked.
+    let found = Availability::Found {
+        runtime: Runtime::Docker,
+        program: std::path::PathBuf::from("/usr/local/bin/docker"),
+    };
+    let sentence = found.explain();
+    assert!(
+        sentence.contains("docker") && sentence.contains("/usr/local/bin/docker"),
+        "the answer has to say what was found and where, or a reader cannot act on it: {sentence}"
+    );
+    assert!(
+        !claims_local_execution(&sentence),
+        "an answer with a runtime claims that a check runs on this computer, and none does: \
+         {sentence}"
+    );
+    assert!(
+        !claims_container_execution(&sentence),
+        "an answer with a runtime claims that a check runs in a container — which is the claim \
+         this arm used to make — and none does: {sentence}"
+    );
+    assert!(
+        denies_that_anything_runs(&sentence),
+        "the answer has to say what happens instead of only what was found, and what happens is \
+         that nothing runs: {sentence}"
+    );
+    for phrase in OVERCLAIMS {
+        assert!(
+            !overclaims(&sentence, phrase),
+            "a machine with a runtime is not a moment to claim anything: {sentence}"
+        );
+    }
+
+    // And the two arms together: one claim, in both sentences, whichever way the
+    // machine answered. This is the assertion a rewording of either arm has to
+    // keep — a sentence that answered the question about the computer and
+    // dropped the one about the checks fails here rather than in a reader's
+    // belief that their project was checked.
+    let absent = Availability::Absent.explain();
+    for (which, text) in [("with a runtime", &sentence), ("without one", &absent)] {
+        assert!(
+            text.contains(NOTHING_RUNS),
+            "the answer {which} does not carry the one clause neither arm may drop: {text}"
+        );
+    }
+    assert!(
+        !claims_local_execution(&absent)
+            && !claims_local_execution(&sentence)
+            && !claims_container_execution(&absent)
+            && !claims_container_execution(&sentence),
+        "one of the two answers makes a claim about a check running:\n{absent}\n{sentence}"
+    );
 }

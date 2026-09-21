@@ -20,7 +20,8 @@
 //! something is there. `docs/architecture/DIAGNOSTICS.md` requires that a secret
 //! never have to be handled in order to be reported, and the way to keep that
 //! true is for the diagnostic never to open the file that may hold one. Reading
-//! settings is `sure config show`, which is where that question belongs. There
+//! settings back is not implemented in this build — `sure config show` refuses,
+//! which is where that question belongs. There
 //! is a test in `tests/doctor.rs` that reads this file and fails if it grows a
 //! reference to the settings module.
 //!
@@ -220,8 +221,9 @@ const NOT_CHECKED: &[(&str, &str)] = &[
     ),
     (
         "what is in your settings files",
-        "those are read by `sure config show`, so that a diagnostic never has a \
-         secret to handle. This report says where the file is and nothing more.",
+        "no command in this build reads them back — `sure config show` refuses — \
+         so that a diagnostic never has a secret to handle. This report says where \
+         the file is and nothing more; `sure config set` writes them.",
     ),
     (
         "which analysis provider your settings choose",

@@ -3038,6 +3038,15 @@
         "CANNOT CONFIRM: nothing material is outstanding on this task, and that is said plainly rather than hedged. The two non-Windows jobs were RUN, not reasoned about -- `35547540998` executed the two repaired tests on macOS and Ubuntu and they passed by name, which is the measurement that this task existed to obtain. What is NOT measured is off-Windows behavior of the refusal outside this test: no macOS or Linux machine is available to this loop for interactive work, so the decision's behavior for a harness that sends a relative root on those platforms is held by the CI run's own execution of the new test and by nothing else. The upstream question of what each harness DOES with a refusal is recorded as *cannot confirm* for codex in section 2.3 and is not upgraded here"
       ],
       "notes": ""
+    },
+    "P15-T036": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
     }
   },
   "blocked_external": [],

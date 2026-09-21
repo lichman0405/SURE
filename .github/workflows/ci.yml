@@ -25,7 +25,7 @@ jobs:
   bootstrap-validate-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -41,7 +41,7 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.1
@@ -107,7 +107,7 @@ jobs:
   shellcheck-secondary:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
       # `scripts/Build-Release.sh` is invoked as `sh scripts/Build-Release.sh` by
       # all three artifact jobs in `release-dry-run.yml`, so `sh` is the shell it

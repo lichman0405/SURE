@@ -30,7 +30,7 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.1
@@ -119,7 +119,7 @@ jobs:
     name: macOS Apple Silicon artifact (aarch64-apple-darwin)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -286,7 +286,7 @@ jobs:
     name: macOS Intel artifact (x86_64-apple-darwin)
     runs-on: macos-26-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -495,7 +495,7 @@ jobs:
     name: Linux x64 artifact (x86_64-unknown-linux-gnu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:

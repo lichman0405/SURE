@@ -229,7 +229,7 @@ jobs:
     name: Windows x64 artifact (x86_64-pc-windows-msvc)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -334,7 +334,7 @@ jobs:
     name: macOS Apple Silicon artifact (aarch64-apple-darwin)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -401,7 +401,7 @@ jobs:
     name: macOS Intel artifact (x86_64-apple-darwin)
     runs-on: macos-26-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -460,7 +460,7 @@ jobs:
     name: Linux x64 artifact (x86_64-unknown-linux-gnu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -535,7 +535,7 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The tag has to be in the checkout for the check below, and
           # `actions/checkout`'s default is a single commit with no tags in it.

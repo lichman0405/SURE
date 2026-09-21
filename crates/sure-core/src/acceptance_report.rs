@@ -974,7 +974,7 @@ fn observe(
         Some(Recipe::ExternalService) => external_service(repository_root, fixtures_root, id),
         Some(Recipe::Claim) => claim_recording(repository_root, fixtures_root, id),
         Some(Recipe::Intent) => intent(fixtures_root, id),
-        Some(Recipe::ExecutionRefusal) => execution_refusal(fixtures_root, id),
+        Some(Recipe::ExecutionRefusal) => execution_refusal(repository_root, fixtures_root, id),
         Some(Recipe::CheckerFailure) => checker_failure(fixtures_root, id),
         Some(Recipe::Action(danger)) => action(fixtures_root, id, danger),
         Some(Recipe::DeclarationOnly) => Ok(declaration_only(fixtures_root, id)),
@@ -1506,24 +1506,133 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
     })
 }
 
-/// The fixture project, through the pipeline under the authority its own
-/// configuration resolves to.
-fn execution_refusal(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
-    let root = fixtures_root.join(id);
-    // A configuration root under the scratch directory, which is created here
-    // and never in the machine's own configuration directory. `Paths::from_roots`
-    // validates both roots and creates neither, so this module has to make them
-    // — and it makes them empty: the file that asks for more is the fixture's
-    // own `sure.yaml`, which is what the case is about.
-    let scratch = root
+/// The scratch configuration root one drive is given, under the repository's
+/// own `target/tmp`.
+///
+/// # Where it is
+///
+/// `<repository_root>/target/tmp/acceptance report configuration/<id>`, holding
+/// the `data` and `config` roots the case hands to [`Paths::from_roots`].
+/// `target/tmp` is the repository's scratch directory: git-ignored, and on the
+/// same volume as the checkout. It is built with [`PathBuf::join`] and never by
+/// assembling a string, and one of its components has spaces in it on purpose,
+/// which is the same path pressure `target/tmp` already carries. The machine's
+/// own configuration directory — `Paths::discover`'s answer, the file a person's
+/// own `sure.yaml` lives in — is never read and never written by this module.
+///
+/// # Why it is not inside the fixture, which is where it was
+///
+/// This directory used to be `fixtures_root/<id>/target/tmp/…`, inside the
+/// fixture the case measures, and that was a defect rather than a preference:
+///
+/// - **The fixture is shipped bytes.** The discipline this repository states for
+///   its fixtures is `crates/sure-core/tests/repair_fixture_e2e.rs`'s — *"It does
+///   not run the shipped directory, and it does not write to it: every run
+///   happens on a copy under `target/tmp`."* This module wrote to it.
+/// - **The residue was invisible and is not ignored.** Nothing under
+///   `fixtures/` carries a `.gitignore`, and the repository root's `/target/`
+///   entry is anchored, so it does not reach a `target/` inside a fixture. What
+///   kept the directories out of `git status` was that they were *empty*: git
+///   tracks files and describes a directory through them, so a directory holding
+///   no file reads as nothing at every verbosity, while one holding a file reads
+///   as `?? dir/` or, under `--untracked-files=all`, as the files inside it.
+///   Nothing was ever written into these, so no reading of `git status` had
+///   anything to report and no `.gitignore` entry was doing any work.
+/// - **The case stopped measuring the same thing twice.** The directory the
+///   drive made was inside the project the drive then read, so the second run
+///   over that fixture measured a project the first run had changed.
+///
+/// # Why the root comes from the argument rather than from `env!`
+///
+/// `crates/sure-core/src/store/mod.rs`'s `scratch_root` reaches this same
+/// `target/tmp` from `env!("CARGO_MANIFEST_DIR")` "rather than the working
+/// directory, so a test gives the same answer wherever it was started from".
+/// That answer is about *one* checkout — the one the crate was compiled in — and
+/// it is test-only (`#[cfg(test)] pub(crate)`), which this module is not: it is
+/// shipped code, and the shipped library may not name test infrastructure or
+/// bake the path of the machine it was built on into a binary that ships to
+/// someone else. This module is handed the tree it is measuring, so it takes the
+/// scratch directory of *that* tree. Nothing is duplicated from the test helper;
+/// the derivation is not the helper, the argument is.
+///
+/// # Why the name carries no process id, though two precedents' do
+///
+/// `store/mod.rs`'s `scratch_root` and the test-module `scratch` helpers beside
+/// it put the process id in the name, and their reason is written out where they
+/// are: a name another process cannot compute is a name another process cannot
+/// delete, so freshness does not depend on a deletion succeeding on Windows.
+/// That reason is about a directory that is **written to and cleared**. Nothing
+/// here writes and nothing here clears — the two roots are made and then read,
+/// and the one file read out of them is one that does not exist — so a process
+/// id would buy protection against a writer there is none of, at the price of a
+/// directory per run under `target/tmp`, which is residue of the family this
+/// change exists to stop producing. Two processes driving this recipe at the
+/// same time therefore converge on these two directories rather than racing over
+/// them: `create_dir_all` is idempotent, and no step here removes what another
+/// step is reading.
+///
+/// # Why nothing is cleared before use, and what is measured instead
+///
+/// `crates/sure-core/tests/doctor.rs` clears its scratch path before using it,
+/// and its own header records that the concurrency mechanism that clear rests on
+/// *"was not confirmed"* — so a clear here would be an unconfirmed mechanism
+/// guarding against a writer that does not exist. What would matter if these
+/// roots were not empty is not staleness but the measurement, and the caller
+/// measures it: see the emptiness check in [`execution_refusal`].
+fn scratch_for(repository_root: &Path, id: &str) -> PathBuf {
+    repository_root
         .join("target")
         .join("tmp")
-        .join("acceptance report configuration");
+        .join("acceptance report configuration")
+        .join(id)
+}
+
+/// The fixture project, through the pipeline under the authority its own
+/// configuration resolves to.
+fn execution_refusal(
+    repository_root: &Path,
+    fixtures_root: &Path,
+    id: &str,
+) -> Result<Measurement, CorpusError> {
+    let root = fixtures_root.join(id);
+    // A configuration root under the repository's own scratch directory, which
+    // is created here and never in the machine's own configuration directory.
+    // `Paths::from_roots` validates both roots and creates neither, so this
+    // module has to make them — and it makes them empty: the file that asks for
+    // more is the fixture's own `sure.yaml`, which is what the case is about.
+    // `scratch_for` says where the directory is and why it is there rather than
+    // inside the fixture.
+    let scratch = scratch_for(repository_root, id);
     let data = scratch.join("data");
     let configuration = scratch.join("config");
     for directory in [&data, &configuration] {
         std::fs::create_dir_all(directory)
             .map_err(|error| unreadable(directory, error.to_string()))?;
+        // Made, and then read rather than assumed empty. Nothing in this module
+        // writes here, so a file in either root is not this report's doing and
+        // is not a condition to carry on through: a settings file in the
+        // configuration root is a second asker beside the fixture's own, and
+        // `Authority::load` below would resolve an authority this case is not
+        // about. A case that cannot say which authority it measured is a case
+        // that has stopped measuring the fixture's own `sure.yaml`.
+        if let Some(entry) = std::fs::read_dir(directory)
+            .map_err(|error| unreadable(directory, error.to_string()))?
+            .next()
+        {
+            let entry = entry
+                .map_err(|error| unreadable(directory, error.to_string()))?
+                .file_name();
+            return Err(CorpusError::Malformed {
+                path: directory.display().to_string(),
+                message: format!(
+                    "this case's configuration root holds `{}` before the drive begins, and every \
+                     file in it changes the authority the case resolves to. Nothing in this report \
+                     writes here, so the directory is not this run's, and the drive is refused \
+                     rather than run under an authority nobody chose",
+                    entry.to_string_lossy()
+                ),
+            });
+        }
     }
     let paths = Paths::from_roots(data, configuration)
         .map_err(|error| unreadable(&scratch, error.to_string()))?;

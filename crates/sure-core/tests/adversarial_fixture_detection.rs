@@ -146,6 +146,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use sure_core::acceptance_report::{AcceptanceReport, CaseRow, acceptance_report};
 use sure_core::aggregation::{NOTHING_CAME_BACK, RunReport, aggregate_run};
 use sure_core::candidate_scanner::CandidateScanner;
 use sure_core::checks::rust::RustChecks;
@@ -6507,5 +6508,366 @@ fn every_recorded_detector_severity_is_what_the_detector_produces_today() {
         unmet.len(),
         13,
         "the number of rows whose requirement their detector does not meet changed. Rows: {unmet:?}"
+    );
+}
+
+// --- P15-T028: what a report run leaves in the tree it drives -----------------
+//
+// `sure_core::acceptance_report` drives machinery over the shipped fixtures, and
+// one of its recipes — `execution_refusal`, the case `dynamic-not-authorized` —
+// needs a configuration root, because the file that asks for execution and
+// cannot grant it is the fixture's own `sure.yaml`. That root used to be made
+// inside the fixture being measured:
+//
+//   fixtures/adversarial/dynamic-not-authorized/target/tmp/
+//     acceptance report configuration/{config,data}
+//
+// Five directories, every one of them empty, and invisible: git describes a
+// directory only through the files inside it, and a directory holding no file
+// has none, so `git status --untracked-files=all` reports a tree holding them as
+// clean — as does every other setting. They were on disk on every machine that
+// had run this report, and the next run over that fixture measured a project the
+// previous one had put them in.
+//
+// This is the check that a run adds nothing to that tree. It has two
+// instruments, and they watch for different shapes:
+//
+// - [`tree_paths`] walks the fixture and reads back EVERY directory and file
+//   under it. It is the only instrument here that can see a directory at all,
+//   and an empty directory is precisely the shape this case's residue had.
+// - `git status --untracked-files=all` is run over the same path. It is the
+//   instrument that watches for a FILE, which is the shape git can describe and
+//   the shape the residue becomes the moment anything writes into the
+//   configuration root this recipe hands to `Paths::from_roots` — the one event
+//   that would turn an invisible directory into a change to a tracked tree.
+//
+// It watches two trees, because on this machine one of them is blind and the
+// reason is worth stating rather than leaving a reader to find:
+//
+// - **The shipped fixture**, with a report run over the real corpus. This is the
+//   tree the case is about. It already holds the five directories described
+//   above, left there by builds before this change, so a run that re-created
+//   them would add nothing to this walk and the walk could not tell such a run
+//   from one that leaves nothing. What the shipped tree holds beyond a checkout
+//   of it is printed below as a READING and not asserted, because removing it is
+//   not this check's to do: a check that deleted inside a shipped fixture tree
+//   would be doing to that tree exactly what this change stops the module doing,
+//   and nothing in this repository writes there.
+// - **A fresh checkout of the corpus** under `target/tmp`, built from the files
+//   git tracks — which is every file a checkout of this repository has, and none
+//   of the directories the residue is made of, because git tracks neither. A
+//   report is run over that tree as well, and this is the instrument that
+//   reddens when the scratch moves back under `fixtures_root`: nothing has ever
+//   been run over it, so anything a run leaves there is new to it.
+//
+// The two runs' rows for the case are compared as well. The case has to measure
+// the same thing in a tree a report has been run over and in one it has not,
+// which is the other half of what the residue would have cost.
+//
+// Both readings are printed, so `cargo test -- --nocapture` shows what each
+// instrument saw on a green run as well as on a red one.
+
+/// Every directory and every file under `root`, as paths relative to it, sorted.
+///
+/// A directory carries a trailing `/`. That is not decoration: it is what keeps
+/// the reading of a directory apart from the reading of a file of the same name,
+/// and a directory is the one shape this walk sees that `git status` can see only
+/// by accident — as the files inside it, or not at all when it holds none.
+fn tree_paths(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", directory.display()))
+        {
+            let path = entry.expect("a directory entry").path();
+            let relative = path
+                .strip_prefix(root)
+                .expect("an entry under the directory being walked")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                found.push(format!("{relative}/"));
+                stack.push(path);
+            } else {
+                found.push(relative);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// `git status --untracked-files=all` over one path inside the checkout.
+///
+/// The machine's own Git, run in the repository, with the path as a pathspec so
+/// that what it describes is that path and nothing else in the working tree —
+/// which is also why this is read in its `--porcelain` form. The long form
+/// prints the branch and how far ahead of its upstream it is, and that is a fact
+/// about the repository rather than about the path: another commit landing
+/// between the two readings would move it, and this check would report a run
+/// that wrote a file when what happened is that somebody else committed. In the
+/// porcelain form a path with nothing to report reads as empty, and a file that
+/// appeared under it reads as one `??` line naming it.
+///
+/// A file is the one shape this instrument watches for, and it is paired with
+/// [`tree_paths`] for the reason `--untracked-files=all` is on the command line.
+/// Git tracks files. A directory it describes only as the file it could not
+/// descend into: at the default verbosity a wholly untracked directory reads as
+/// `?? full-dir/`, and `--untracked-files=all` replaces that with the files
+/// inside it (`?? full-dir/a.txt`). A directory holding no file therefore reads
+/// as nothing at either setting — which is precisely the residue this task is
+/// about, since the old location was reached by `create_dir_all` and never
+/// written to. No invocation of `git status` at any verbosity would have shown
+/// it, and that is why the walk, not this, is the instrument the red proof
+/// turns on.
+fn untracked_text(relative: &str) -> String {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(sure_testkit::repository_root())
+        .args(["status", "--untracked-files=all", "--porcelain", "--"])
+        .arg(relative)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "this check needs Git on the path (trying to run `git status --untracked-files=all \
+                 --porcelain -- {relative}`): {error}"
+            )
+        });
+    assert!(
+        output.status.success(),
+        "`git status --untracked-files=all --porcelain -- {relative}` failed with {:?}\nstdout: \
+         {}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The lines `after` has that `before` did not, in the order they appear.
+fn appeared(before: &[String], after: &[String]) -> Vec<String> {
+    after
+        .iter()
+        .filter(|line| !before.contains(line))
+        .cloned()
+        .collect()
+}
+
+/// One instrument's reading, before and after, asserted equal.
+///
+/// `what` names the instrument and the tree, so a failure says which of the two
+/// instruments saw something and where — and not merely that two lists differ.
+fn assert_nothing_appeared(what: &str, before: &[String], after: &[String]) {
+    if before == after {
+        return;
+    }
+    panic!(
+        "{what}: the reading changed, so a run left something in a tree it was only supposed to \
+         read. It gained {:?} and lost {:?}.\n  before: {before:?}\n  after:  {after:?}",
+        appeared(before, after),
+        appeared(after, before),
+    );
+}
+
+/// Every file git tracks under one of `paths`, as repository-relative paths.
+///
+/// The definition of a checkout used by [`fresh_corpus`], and taken from git
+/// rather than by excluding names from a copy: git tracks no directory, so this
+/// is exactly the file set a fresh checkout has and exactly nothing of the
+/// untracked residue a previous run can leave beside them.
+fn tracked_files(repository: &Path, paths: &[&str]) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repository)
+        .args(["ls-files", "-z", "--"])
+        .args(paths)
+        .output()
+        .unwrap_or_else(|error| panic!("this check needs Git on the path: {error}"));
+    assert!(
+        output.status.success(),
+        "`git ls-files -- {paths:?}` failed with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut found: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect();
+    found.sort();
+    found
+}
+
+/// A fresh checkout of the corpus, under `target/tmp`.
+///
+/// `evaluation/` and `fixtures/adversarial/` are what a report reads, and the
+/// tracked files under them are what a checkout of this repository has. The
+/// directory is left in place for a reader, as `release_gate_runner.rs`'s
+/// control corpora are: it is a build artefact under the repository's ignored
+/// `target/tmp`, and `cargo clean` removes it. Nothing here is asserted about
+/// the copy after the run except through the fixture the case is about.
+///
+/// The pool's name carries a space and a non-ASCII character on purpose, the way
+/// `sure_testkit`'s other pools do: the report is run over this tree, so the
+/// scratch directory the module derives from it is derived under a path that is
+/// not plain ASCII — which is the path pressure this repository's own
+/// instructions ask for, and the thing a `String` would have been unable to
+/// carry.
+fn fresh_corpus() -> PathBuf {
+    let repository = sure_testkit::repository_root();
+    let corpus = sure_testkit::scratch::directory("acceptance report fixture 指纹", "corpus");
+    let tracked = tracked_files(&repository, &["evaluation", "fixtures/adversarial"]);
+    assert!(
+        !tracked.is_empty(),
+        "git tracks no file under `evaluation/` or `fixtures/adversarial/` in {}, so the fresh \
+         checkout this check builds from them would be empty and every reading below would be \
+         about nothing",
+        repository.display()
+    );
+    for relative in &tracked {
+        let from = repository.join(relative);
+        let to = corpus.join(relative);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|error| panic!("cannot create {}: {error}", parent.display()));
+        }
+        std::fs::copy(&from, &to).unwrap_or_else(|error| {
+            panic!(
+                "cannot copy {} to {}: {error}",
+                from.display(),
+                to.display()
+            )
+        });
+    }
+    corpus
+}
+
+/// The report's own row for one case.
+fn report_row<'a>(report: &'a AcceptanceReport, id: &str) -> &'a CaseRow {
+    report
+        .cases
+        .iter()
+        .find(|row| row.id == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "the report has no row for `{id}`; it has {:?}",
+                report.cases.iter().map(|row| &row.id).collect::<Vec<_>>()
+            )
+        })
+}
+
+#[test]
+fn the_report_leaves_the_fixture_it_measures_holding_nothing_new() {
+    let id = "dynamic-not-authorized";
+    let repository = sure_testkit::repository_root();
+    let shipped = fixture(id);
+    assert!(
+        shipped.is_dir(),
+        "the {id} fixture directory is missing: {}",
+        shipped.display()
+    );
+    let inside = format!("fixtures/adversarial/{id}");
+
+    // The shipped tree's two readings, taken before anything has run.
+    let shipped_walk_before = tree_paths(&shipped);
+    let shipped_git_before: Vec<String> =
+        untracked_text(&inside).lines().map(str::to_owned).collect();
+
+    // The fresh checkout, and its reading. Built before either run, so what the
+    // copy holds is what git tracks rather than what a run has just left.
+    let fresh = fresh_corpus();
+    let fresh_fixture = fresh.join("fixtures").join("adversarial").join(id);
+    assert!(
+        fresh_fixture.is_dir(),
+        "the fresh checkout has no {id} fixture, so nothing below would be a reading of the case \
+         this check is about: {}",
+        fresh_fixture.display()
+    );
+    let fresh_walk_before = tree_paths(&fresh_fixture);
+
+    // The reading that is printed and not asserted: what the shipped tree holds
+    // beyond a checkout of it. On a machine that has run the builds this task
+    // changed, this is the five empty directories, and it is reported here so
+    // that the difference between the two trees is a reading rather than
+    // something a reader has to know to look for.
+    let beyond_a_checkout = appeared(&fresh_walk_before, &shipped_walk_before);
+
+    // The two runs. Both are the module's own entry point: the copy is what a
+    // fresh checkout measures, the shipped tree is what the corpus measures.
+    let over_fresh = acceptance_report(&fresh).unwrap_or_else(|error| {
+        panic!(
+            "the report did not run over the fresh checkout at {}: {error}",
+            fresh.display()
+        )
+    });
+    let over_shipped = acceptance_report(&repository).unwrap_or_else(|error| {
+        panic!(
+            "the report did not run over the repository at {}: {error}",
+            repository.display()
+        )
+    });
+
+    // The same two readings, taken again.
+    let fresh_walk_after = tree_paths(&fresh_fixture);
+    let shipped_walk_after = tree_paths(&shipped);
+    let shipped_git_after: Vec<String> =
+        untracked_text(&inside).lines().map(str::to_owned).collect();
+
+    println!(
+        "{id}: the report ran over a fresh checkout and over the shipped corpus. The walk of the \
+         fresh checkout's fixture gained {:?}; the walk of the shipped fixture gained {:?}; `git \
+         status --untracked-files=all` over the shipped fixture gained {:?}. The shipped fixture \
+         holds {beyond_a_checkout:?} that a checkout of this repository does not, which is reported \
+         rather than asserted: those directories were left by the builds before this change, and \
+         nothing in this repository removes files from a shipped fixture.",
+        appeared(&fresh_walk_before, &fresh_walk_after),
+        appeared(&shipped_walk_before, &shipped_walk_after),
+        appeared(&shipped_git_before, &shipped_git_after),
+    );
+
+    // The instrument that reddens when the scratch goes back under
+    // `fixtures_root`, because this tree has never had a report run over it.
+    assert_nothing_appeared(
+        "the walk of the fixture inside a fresh checkout — the instrument that sees DIRECTORIES, \
+         which `git status` sees only through the files inside them and not at all when they hold \
+         none, over a tree no run has been over",
+        &fresh_walk_before,
+        &fresh_walk_after,
+    );
+    // The shipped tree, the one the case is about. Blind here to a run that
+    // re-creates the directories already in it, and sharp on a checkout that
+    // does not hold them yet, which is the second sentence of this task's
+    // acceptance.
+    assert_nothing_appeared(
+        "the walk of the shipped fixture — the tree the case measures",
+        &shipped_walk_before,
+        &shipped_walk_after,
+    );
+    // The instrument that watches for a FILE, which is the shape git can
+    // describe and the shape the residue would take the moment anything wrote
+    // into the configuration root this recipe hands to `Paths::from_roots`.
+    // It is here as the second reading a reader asked for, and it is the weaker
+    // of the two over this particular residue: the directories the old location
+    // made were empty, and a directory holding no file reads as nothing to git
+    // at every verbosity. The walk above is what reddens.
+    assert_nothing_appeared(
+        "`git status --untracked-files=all` over the shipped fixture — the instrument that sees \
+         FILES",
+        &shipped_git_before,
+        &shipped_git_after,
+    );
+
+    // The other half of what the residue would have cost: the case has to
+    // measure the same thing in a tree a report has been run over and in one it
+    // has not. A difference here is the fixture being read differently because
+    // of what an earlier run left in it, which is the idempotence the residue
+    // took away and the reason this is asserted rather than described.
+    assert_eq!(
+        report_row(&over_fresh, id),
+        report_row(&over_shipped, id),
+        "{id}: the case measures different things in a fresh checkout and in the shipped tree, so \
+         what the run found is being decided by the tree rather than by the fixture"
     );
 }

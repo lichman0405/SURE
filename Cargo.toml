@@ -101,7 +101,7 @@ regex = "1.11.1"
 # Synchronous HTTP client for the user-owned OpenAI-compatible analysis provider.
 # A blocking client keeps the `Analyzer` trait synchronous, and the provider is
 # the only place in this crate that reaches the network directly.
-ureq = { version = "2.12.1", features = ["json"] }
+ureq = { version = "3.4.2", features = ["json"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

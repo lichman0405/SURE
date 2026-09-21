@@ -836,6 +836,7 @@ name = "sure-testkit"
 version = "0.0.0-bootstrap"
 dependencies = [
  "serde_json",
+ "sha2",
  "sure-domain",
  "toml",
 ]

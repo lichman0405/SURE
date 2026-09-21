@@ -13,6 +13,7 @@
 pub mod integrations;
 pub mod program;
 pub mod scratch;
+pub mod source_manifest;
 pub mod workspace;
 
 pub use integrations::{IntegrationFile, ThinnessFinding};

@@ -42,6 +42,24 @@
 //! `tests/browser_probe.rs`'s rule five, which was written to fail on the day an
 //! adapter landed and is what had to move when this one did.
 //!
+//! **The count is five since `P15-T020`, and the fifth is the one that is not a
+//! way for the product to run anything.** `sure-testkit/src/source_manifest.rs`
+//! runs `git ls-files --stage` and `git cat-file --batch` — both read-only —
+//! over **this repository's own index**, because that is what the digests in
+//! `SHA256SUMS.txt` are of, and a manifest with no reader is a manifest nobody
+//! can check. It is in the list rather than excused from it for rule one's own
+//! reason: the fact worth keeping is that the list *cannot grow quietly*, and a
+//! rule with a door cut in its side for the entries somebody did not want to
+//! argue for is exactly the growth rule one exists to catch. What separates it
+//! from the four above is where it sits rather than how it reads:
+//! `sure-testkit` is the crate `repository_shape.rs`'s
+//! `nothing_depends_on_the_testkit_in_production` keeps out of the product, so
+//! no ship path reaches this line, and every caller gives it
+//! `sure_testkit::repository_root()` — the checkout it was compiled in, never a
+//! directory SURE was pointed at. `support::CEILING` is justified by no
+//! *project* code running from a product path, and this runs `git` over SURE's
+//! own tree.
+//!
 //! **Two: nothing outside [`MAY_NAME_A_PROCESS_REQUEST`] mentions
 //! [`ProcessRequest`].** This is the tightest of the three, and until `P3-T009`
 //! it was the whole of the claim `process/mod.rs` used to make in its own words
@@ -114,6 +132,11 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
         "sure-core/src/browser_driver/launch.rs",
         "a browser this machine has, headless and sandboxed, for the page check — \
          reachable only from a `browser_driver::Browser`, which no product path builds",
+    ),
+    (
+        "sure-testkit/src/source_manifest.rs",
+        "system Git, read-only, over this repository's own index, so `SHA256SUMS.txt` \
+         has a reader that can fail — a dev-only crate, which no ship path depends on",
     ),
 ];
 

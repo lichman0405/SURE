@@ -45,6 +45,19 @@
 //! assertion is made against the answer that came back — and the test fails
 //! rather than falling back when the volume cannot be asked, because a fallback
 //! would let the case-keeping arm pass without anything having been asked.
+//!
+//! # The case-keeping arm asserts the ABSENCE of a verdict, and that is a
+//! # correction rather than the original design
+//!
+//! Asking the volume which case rule it keeps is not the same as knowing what
+//! answer the other rule produces, and the first version of this file confused
+//! the two: it asserted `(0, 0, 4)` — a different directory that exists — for a
+//! spelling that on a case-keeping volume names nothing at all. Nothing on the
+//! machine it was written on could reach that arm, so it shipped unexecuted,
+//! and CI run `35554370747` reached it on `ubuntu-latest` and failed it. What
+//! the arm asserts now is the property it was always for — SURE does not fold a
+//! spelling that names nothing into the project — and the `(0, 0, 4)` reading is
+//! measured on the second test, where the other directory really is there.
 
 // The workspace forbids `unwrap`, `expect` and `panic` in shipped code, because
 // a panic is a message nobody chose. A test is the one place they are the point:
@@ -147,13 +160,21 @@ fn record_a_codex_session(store: &Path, project: &str) {
     }
 }
 
-/// Run one `sure check` against `project` and hand back the run's frame.
+/// Run one `sure check` against `project` and hand back its frame, whatever the
+/// frame says.
 ///
 /// The machine form rather than the sentence, because the four numbers this
 /// task is about — the tier, the events counted, the events attributed to other
 /// projects, and whether the run finished at all — are fields in it, and a
 /// reader of a human report would have to parse prose to get them.
-fn check(store: &Path, project: &str) -> Value {
+///
+/// Split out from [`check`] because **"did not reach a verdict" is itself an
+/// answer some arms have to assert**, not a failure of the test asking. The
+/// case-keeping arm below is the one that needs it: on a case-keeping volume an
+/// upper-cased spelling does not exist, and a run that refuses to discover a
+/// project there is SURE behaving correctly, so a helper that panicked on it
+/// would be a test forbidding the right answer.
+fn check_raw(store: &Path, project: &str) -> Value {
     let output = Command::new(SURE)
         .arg("check")
         .arg("--format")
@@ -165,13 +186,21 @@ fn check(store: &Path, project: &str) -> Value {
         .output()
         .unwrap_or_else(|error| panic!("cannot start {SURE} to check {project:?}: {error}"));
     let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
-    let frame: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
+    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
         panic!(
             "`sure check {project:?}` did not write one JSON object ({error}).\n\
              stdout: {stdout}\nstderr: {}",
             String::from_utf8_lossy(&output.stderr)
         )
-    });
+    })
+}
+
+/// Run one `sure check` against `project`, requiring that it reached a verdict.
+///
+/// The arms that assert a tier want [`check`]; the arm that asserts the ABSENCE
+/// of one wants [`check_raw`].
+fn check(store: &Path, project: &str) -> Value {
+    let frame = check_raw(store, project);
     assert_eq!(
         frame["details"]["state"], "finished",
         "the run did not reach a verdict for {project:?}, so it says nothing about the tier: {}",
@@ -280,9 +309,9 @@ fn the_project_named_the_ways_windows_treats_as_one_directory_reports_one_tier()
             project.display()
         )
     });
-    let reading = reading_of(&check(&store, &upper_case));
     match case {
         CaseSensitivity::Insensitive => {
+            let reading = reading_of(&check(&store, &upper_case));
             assert_eq!(
                 (reading.tier, reading.events, reading.elsewhere),
                 (1, 4, 0),
@@ -292,11 +321,46 @@ fn the_project_named_the_ways_windows_treats_as_one_directory_reports_one_tier()
             );
         }
         CaseSensitivity::Sensitive => {
+            // On a case-keeping volume the upper-cased spelling is not a
+            // differently-spelt name for this directory — it is a path that does
+            // not exist, and the two are different assertions.
+            //
+            // This arm asserted `(0, 0, 4)` — the answer for a DIFFERENT
+            // directory that DOES exist — and it was never executed on the
+            // machine the task was written on, because that volume folds case.
+            // CI run `35554370747` reached it for the first time and it failed,
+            // for the reason the arm could not have been right: the run stopped
+            // at discovery instead of reaching a verdict, so the helper's
+            // `finished` assertion fired and the tier assertion was never even
+            // the thing being tested.
+            //
+            // `a_different_directory_is_never_this_project` below already
+            // measures `(0, 0, 4)`, on a second directory that really exists.
+            // What is asserted here instead is the thing this arm is FOR: SURE
+            // must not fold a spelling that names nothing into the project. A
+            // report that counted the project's four events would be that fold.
+            let frame = check_raw(&store, &upper_case);
+            assert_ne!(
+                frame["details"]["state"], "finished",
+                "this volume keeps case, so {upper_case:?} does not exist and is not the directory \
+                 the session was recorded for — yet SURE reached a verdict about it: {frame}"
+            );
+            assert_eq!(
+                frame["details"]["stopped_at"], "discover",
+                "the run over the non-existent spelling {upper_case:?} stopped somewhere other \
+                 than discovery, so this arm has stopped measuring what it says it measures: \
+                 {frame}"
+            );
+
+            // The control, and the reason the assertion above is worth making: a
+            // run that refused EVERY path would satisfy it. The project is still
+            // read by its own spelling, and must still count its own session.
+            let reading = reading_of(&check(&store, &project.to_string_lossy()));
             assert_eq!(
                 (reading.tier, reading.events, reading.elsewhere),
-                (0, 0, 4),
-                "this volume keeps case, so {upper_case:?} is a different directory and its \
-                 events are not this project's. It said: {}",
+                (1, 4, 0),
+                "asking about a spelling that names nothing changed what this project's own \
+                 report says. It said: {}",
                 reading.summary
             );
         }

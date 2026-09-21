@@ -985,6 +985,148 @@ fn the_release_gate_over_this_report_permits_the_release_and_is_written_beside_i
     assert!(out.is_file(), "the gate was written to {}", out.display());
 }
 
+/// The two artefacts over this corpus, measured against each other.
+///
+/// Two documents describe one corpus and read two decisions. The gate
+/// `crates/sure-core/tests/release_gate_runner.rs` computes over the module's
+/// own report reads `Blocked`, with one blocker, `repair-regression`, at
+/// `Agreement::CannotConfirm`; the gate this file writes to
+/// `target/tmp/release-gate.json` reads `permitted`. The false-green rate splits
+/// the same way, `0 of 12` against `0 of 13`, because the module's report cannot
+/// observe the thirteenth case. Read one document at a time, the shipped one is
+/// the more permissive of the two — which is the shape of a false green, and is
+/// why what has to be established is that both are over *one* corpus and differ
+/// only in what each could observe.
+///
+/// That is not a property either document can be read for. It is a relation
+/// between two values, so both readings are built here, in this binary, and the
+/// comparison is between two reports rather than between two files: nothing
+/// here reads `target/tmp/release-gate.json`, and nothing here depends on
+/// whether the other binary has run.
+#[test]
+fn the_two_readings_are_of_one_corpus_and_differ_only_in_what_each_could_observe() {
+    let shipped = the_report();
+    let module = the_module_report();
+
+    // What is the same. The whole corpus block — the contract's path, its
+    // digest, the fixtures directory, the case count and the release-blocking
+    // count — is one value rather than two that happen to agree today, because
+    // the supplied measurement is the only input that differs between the two
+    // calls: `acceptance_report` is `acceptance_report_with` with nothing
+    // supplied. If this ever fails, the two denominators and the two decisions
+    // are two facts about two contracts, and the shipped document is a reading
+    // of a corpus the other gate never saw.
+    assert_eq!(
+        module.corpus, shipped.corpus,
+        "the two readings name different corpora: {:#?}\nagainst\n{:#?}",
+        module.corpus, shipped.corpus
+    );
+    assert_eq!(module.corpus.manifest, MANIFEST_FILE);
+    assert_eq!(module.corpus.fixtures, FIXTURES);
+    assert_eq!(module.corpus.cases, 20);
+    assert_eq!(module.corpus.release_blocking, 13);
+
+    // The rows are the corpus's, in the same order, and exactly one of them
+    // reads differently.
+    let ids = |report: &AcceptanceReport| {
+        report
+            .cases
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<String>>()
+    };
+    assert_eq!(
+        ids(&module),
+        ids(&shipped),
+        "the two readings do not hold the same rows"
+    );
+    let differing: Vec<&str> = module
+        .cases
+        .iter()
+        .zip(&shipped.cases)
+        .filter(|(left, right)| left != right)
+        .map(|(left, _)| left.id.as_str())
+        .collect();
+    assert_eq!(
+        differing,
+        [REPAIR_REGRESSION],
+        "the two readings differ on a row other than the one measurement this file supplies, so the \
+         difference between the two decisions is not the difference this test is about"
+    );
+
+    // And the difference is reach rather than corpus: the same thirteen
+    // release-blocking cases, counted the same way on both sides.
+    assert_eq!(
+        shipped.totals.release_blocking,
+        module.totals.release_blocking
+    );
+    assert_eq!(shipped.totals.release_blocking_observed, 13);
+    assert_eq!(shipped.totals.release_blocking_cannot_confirm, 0);
+    assert_eq!(module.totals.release_blocking_observed, 12);
+    assert_eq!(module.totals.release_blocking_cannot_confirm, 1);
+
+    // The thirteenth case, on both sides, as the two rows a reader would see.
+    let unobserved = row(&module, REPAIR_REGRESSION);
+    assert_eq!(unobserved.agreement, Agreement::CannotConfirm);
+    assert!(unobserved.release_blocking);
+    let Observation::CannotConfirm { missing, .. } = &unobserved.observed else {
+        panic!("the module observed `{REPAIR_REGRESSION}`, so this test's premise has moved");
+    };
+    assert!(
+        missing.contains("sure_core::process"),
+        "the module's row does not say what observing this case would take: {missing}"
+    );
+    let observed = row(&shipped, REPAIR_REGRESSION);
+    assert_eq!(observed.agreement, Agreement::Met);
+    assert!(observed.release_blocking);
+
+    // The two decisions, over one corpus, parting on that one row.
+    let module_gate = release_gate(&module);
+    let shipped_gate = release_gate(&shipped);
+    assert_eq!(module_gate.decision, Decision::Blocked);
+    assert_eq!(
+        module_gate
+            .blocked_by
+            .iter()
+            .map(|case| (case.id.as_str(), case.agreement))
+            .collect::<Vec<_>>(),
+        vec![(REPAIR_REGRESSION, Agreement::CannotConfirm)],
+        "the module's gate does not block on exactly the case this file measured"
+    );
+    assert_eq!(shipped_gate.decision, Decision::Permitted);
+    assert!(shipped_gate.blocked_by.is_empty());
+    assert_eq!(
+        module_gate.corpus.manifest_digest, shipped_gate.corpus.manifest_digest,
+        "the two decisions were taken against different contracts, which is the one thing that would \
+         make the shipped document a reading of a corpus the other gate never saw"
+    );
+
+    // The rate, which is where the two denominators are visible. The numerator
+    // is `0` in both readings, so the document's line — which states the
+    // numerator — cannot be where the split shows; the split is in the
+    // denominator, and the denominator is the release-blocking rows the reading
+    // could observe. Thirteen are in the corpus and twelve of them carry an
+    // observation here, so the narrower reading is the more demanding
+    // denominator rather than the more permissive one.
+    let false_green = |gate: &sure_core::release_gate::ReleaseGate| {
+        gate.metrics
+            .iter()
+            .find(|metric| metric.claim.contains("false green rate"))
+            .map(|metric| match &metric.value {
+                MetricValue::Rate {
+                    numerator,
+                    denominator,
+                } => (*numerator, *denominator),
+                MetricValue::Unmeasured { .. } => {
+                    panic!("the false-green rate read unmeasured on a corpus of thirteen")
+                }
+            })
+            .expect("the gate carries the document's first metric")
+    };
+    assert_eq!(false_green(&shipped_gate), (0, 13));
+    assert_eq!(false_green(&module_gate), (0, 12));
+}
+
 /// A severity by its wire name, for the rows the report carries.
 fn severity_of(name: &str) -> Severity {
     match name {

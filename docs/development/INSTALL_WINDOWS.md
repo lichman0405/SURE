@@ -274,12 +274,38 @@ surrounding sentences are this script's.
 
 Named as limits rather than left to be assumed:
 
-* **The tests install a staged archive, not a release build.** They build the
-  documented layout around the binary cargo just compiled, because
-  `Build-Release.ps1` refuses to package without the release gate and takes
-  minutes. The installer reads a real ZIP with real bytes; what is not exercised
-  is a `Build-Release.ps1` artifact specifically. `P15-T002`'s verification of
-  that artifact is separate from this.
+* **The tests install two archives: a staged one, and the build's own.** Most of
+  `install_flow.rs` stages the documented layout around the binary cargo just
+  compiled, because `Build-Release.ps1` refuses to package without the release
+  gate and takes minutes to run a release build. A fixture written beside the
+  installer cannot disagree with it, so `P15-T031` added
+  `the_installer_installs_the_archive_the_build_produced`: it installs
+  `target/tmp/release/sure-*-x86_64-pc-windows-msvc.zip` — or whatever
+  `SURE_RELEASE_ARCHIVE` names — and holds the installer's own records against
+  the build's. What it reads is the `.sha256` line's format, the archive's single
+  top-level directory, the payload names and their bytes, the digest, byte count
+  and target the archive's own `RELEASE.txt` states for `sure.exe`, the digests
+  and sizes the manifest records,
+  and the version, target and running-from the installed program reports. **It is
+  `#[ignore]`d, and `release.yml`'s `package-windows` job is what runs it**, by
+  name and with `--ignored`, in a step immediately after the
+  `Build-Release.ps1 -Phase All` whose output it installs. That label is the
+  decision and not an oversight: `ci.yml` packages a Windows archive nowhere, and
+  each packaging job in `release.yml` runs `cargo test --workspace` *before* it
+  packages, so a default-run test that needs an artifact and reports its absence
+  by failing would be a permanent red in two workflows that cannot do anything
+  differently — and the six gates would redden on exactly the fresh checkout they
+  are run on. Run it by hand with
+  `cargo test -p sure-cli --test install_flow -- --ignored`; point
+  `SURE_RELEASE_ARCHIVE` at an archive the build produced elsewhere and it reads
+  that instead. It costs about 1.5 seconds when the archive is there, and **when
+  it is run with no archive present it fails rather than skips:** a checkout that
+  has never run `& .\scripts\Build-Release.ps1 -Phase All` gets one red test
+  whose message names that command and the variable. Read from
+  `.github/workflows/` rather than run: that is why the check is in the
+  packaging job and not in `ci.yml`. **What is still not covered:** no test runs
+  the packager itself, and the staged archive the other tests use is still not a
+  `Build-Release.ps1` artifact.
 * **The SmartScreen warning is not exercised.** No test runs an unsigned binary
   through a download-marked file and observes the prompt. The claim is limited
   to: the build carries no Authenticode signature — which

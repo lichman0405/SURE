@@ -24,17 +24,36 @@
 //! what they resolve is the install this test made. That is the only place the
 //! store of whoever runs the suite could be edited from, and it is not reached.
 //!
-//! # The archive these tests install
+//! # The two archives these tests install
 //!
-//! `P15-T002`'s archive is produced by `scripts/Build-Release.ps1`, which refuses
-//! to package without the release gate and takes minutes to run a release build.
-//! A test cannot depend on that, so this file stages the *documented layout* —
-//! one top-level directory named `sure-<version>-x86_64-pc-windows-msvc` holding
-//! `sure.exe`, `LICENSE` and `RELEASE.txt`, with a `sha256sum`-format
-//! `<archive>.sha256` beside it — around the binary cargo just built. What the
-//! installer reads is a real ZIP with real bytes in it; what it is not is the
-//! release build, and this comment is where that difference is stated rather
-//! than left for a reader to assume.
+//! Most of this file stages an archive of its own. `P15-T002`'s archive comes
+//! from `scripts/Build-Release.ps1`, which refuses to package without the release
+//! gate and takes minutes to run a release build, so those tests write the
+//! *documented layout* — one top-level directory named
+//! `sure-<version>-x86_64-pc-windows-msvc` holding `sure.exe`, `LICENSE` and
+//! `RELEASE.txt`, with a `sha256sum`-format `<archive>.sha256` beside it —
+//! around the binary cargo just built. That archive is a real ZIP with real
+//! bytes, but it is written by the same hand as the installer's expectations and
+//! therefore cannot disagree with them: a drift in what `Build-Release.ps1`
+//! emits would leave every one of those tests green.
+//!
+//! `the_installer_installs_the_archive_the_build_produced` stages nothing. It
+//! installs the archive the build actually produced — `target/tmp/release/
+//! sure-*-<target>.zip`, or whatever `SURE_RELEASE_ARCHIVE` names — and holds
+//! the installer's own records against the build's. It is `#[ignore]`d, because
+//! the workspace run has no archive to give it on a fresh runner: `ci.yml`
+//! packages nothing at all, and every packaging job in `release.yml` runs
+//! `cargo test --workspace` *before* it packages, so a test that needs an
+//! artifact and says so by failing would be a permanent red in two workflows
+//! that cannot do anything about it. It is run where the artifact exists —
+//! `release.yml`'s `package-windows` job invokes it by name, with `--ignored`,
+//! right after `Build-Release.ps1 -Phase All` — and by hand with `cargo test -p
+//! sure-cli --test install_flow -- --ignored`. When it is run and this checkout
+//! has no such archive it **fails**, naming the command that makes one and the
+//! variable that points this test at one made elsewhere. A check that quietly
+//! does nothing when the artifact is absent is the defect this test exists to
+//! remove, so there is no path through it that reports a pass without having
+//! installed an archive `Build-Release.ps1` wrote.
 
 // The whole flow is Windows-only: a per-user `%LOCALAPPDATA%` install, a
 // PowerShell script, and launchers that resolve `%LOCALAPPDATA%\SURE\bin`.
@@ -51,7 +70,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use serde_json::json;
+use serde_json::{Value, json};
 use sure_cli::mcp::PROTOCOL_VERSION;
 use sure_core::paths::STORE_FILE;
 
@@ -301,6 +320,563 @@ fn uninstall(host: &Path, root: &Path, extra: &[&str]) -> Run {
     let mut arguments = vec!["-InstallRoot", root.as_str()];
     arguments.extend_from_slice(extra);
     run_script(host, &uninstall_script(), &arguments)
+}
+
+// --- The archive the build produced --------------------------------------
+
+/// The target whose name part every Windows archive carries, and the target
+/// `scripts/Build-Release.ps1` packages for by default.
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
+
+/// Names an archive for anything that packaged one somewhere else.
+const RELEASE_ARCHIVE_VARIABLE: &str = "SURE_RELEASE_ARCHIVE";
+
+/// Where `scripts/Build-Release.ps1` leaves what it packaged.
+fn the_builds_release_directory() -> PathBuf {
+    repository_root().join("target").join("tmp").join("release")
+}
+
+fn the_build_release_script() -> PathBuf {
+    repository_root().join("scripts").join("Build-Release.ps1")
+}
+
+/// The archive `scripts/Build-Release.ps1` produced, when this checkout has one.
+///
+/// The rule is the build's own (`scripts/Build-Release.ps1:985-992`): exactly one
+/// `sure-*-<target>.zip` in the output directory. None, or more than one, and
+/// there is no archive to install — an ambiguous directory is not guessed at,
+/// which is what `-Phase Verify` does with the same input.
+///
+/// `SURE_RELEASE_ARCHIVE` wins when it is set, so that a job which packaged into
+/// another directory can hand this test that artifact instead of moving it.
+fn the_archive_the_build_produced() -> Option<PathBuf> {
+    if let Some(named) = std::env::var_os(RELEASE_ARCHIVE_VARIABLE) {
+        let named = PathBuf::from(named);
+        assert!(
+            named.is_file(),
+            "{RELEASE_ARCHIVE_VARIABLE} names {}, and there is no file there",
+            named.display()
+        );
+        return Some(named);
+    }
+    let directory = the_builds_release_directory();
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&directory)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.ends_with(&format!("-{WINDOWS_TARGET}.zip")))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    assert!(
+        found.len() <= 1,
+        "{} archives match *-{WINDOWS_TARGET}.zip in {}; which one to install is ambiguous, and \
+         `-Phase Verify` refuses that directory for the same reason. Leave one, or name one with \
+         {RELEASE_ARCHIVE_VARIABLE}",
+        found.len(),
+        directory.display()
+    );
+    found.pop()
+}
+
+/// What `WINDOWS_TARGET` says about the program inside an archive, as
+/// `sure doctor` reports it: `(arch, os, target_env)`.
+///
+/// Read out of the one constant rather than written again, because the claim
+/// being tested is that the program inside `sure-<version>-<target>.zip` is a
+/// build *for* `<target>` — two spellings of the same fact could agree with each
+/// other while both disagreeing with the binary.
+fn parts_of_the_target() -> (String, String, String) {
+    let (arch, rest) = WINDOWS_TARGET
+        .split_once('-')
+        .expect("a target triple is <arch>-<vendor>-<os>-<env>");
+    let (_, rest) = rest
+        .split_once('-')
+        .expect("a target triple is <arch>-<vendor>-<os>-<env>");
+    let (os, environment) = rest
+        .split_once('-')
+        .expect("a target triple is <arch>-<vendor>-<os>-<env>");
+    (arch.to_owned(), os.to_owned(), environment.to_owned())
+}
+
+/// A reader for a release archive, written into a scratch directory and run by
+/// a host PowerShell.
+///
+/// This package depends on no ZIP reader and no SHA-256, and its `Cargo.toml` is
+/// not this task's to change, so the two readings this test needs of the
+/// archive's insides — the payload it holds and the digest of the program in it
+/// — are taken the way the scripts take them: `System.IO.Compression` and
+/// `System.Security.Cryptography`, in the host the flow already runs under. The
+/// same two classes, and the same `BitConverter` spelling of the digest, as
+/// `Install-Sure.ps1`'s `Get-Sha256`.
+///
+/// It reports lines, not a formatted sentence, because what it reports is read
+/// back by name on the Rust side.
+const UNPACK_AND_REPORT: &str = r#"
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string] $Archive,
+    [Parameter(Mandatory)][string] $Into
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $Into | Out-Null
+[System.IO.Compression.ZipFile]::ExtractToDirectory($Archive, $Into)
+$top = @(Get-ChildItem -LiteralPath $Into -Directory)
+if ($top.Count -ne 1) { throw "$Into holds $($top.Count) top-level directories; the layout promises exactly one" }
+Write-Output "top $($top[0].Name)"
+$exe = Join-Path $top[0].FullName 'sure.exe'
+if (-not (Test-Path -LiteralPath $exe)) { throw "the archive holds no sure.exe under $($top[0].Name)" }
+$stream = [System.IO.File]::OpenRead($exe)
+try { $hasher = [System.Security.Cryptography.SHA256]::Create(); try { $hash = $hasher.ComputeHash($stream) } finally { $hasher.Dispose() } } finally { $stream.Dispose() }
+Write-Output ("exe-sha256 {0}" -f (([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()))
+"#;
+
+/// Unpack `archive` under `scratch`, and report what is inside it.
+///
+/// Returns the archive's single top-level directory and the SHA-256 of the
+/// `sure.exe` in it.
+fn unpacked(host: &Path, archive: &Path, scratch: &Path) -> (PathBuf, String) {
+    let program = scratch.join("unpack-and-report.ps1");
+    // `run_script` hands this path to PowerShell and PowerShell starts it, so it
+    // is a program and is put at its path by the door for programs, as
+    // `a_release_archive` does with its own.
+    sure_testkit::write_program(&program, UNPACK_AND_REPORT.as_bytes(), 0o755)
+        .expect("the reading script can be written");
+    let into = scratch.join("unpacked");
+    let archive_text = archive.to_string_lossy().into_owned();
+    let into_text = into.to_string_lossy().into_owned();
+    let run = run_script(
+        host,
+        &program,
+        &["-Archive", &archive_text, "-Into", &into_text],
+    );
+    assert_eq!(
+        run.status,
+        0,
+        "reading {} failed:\n{}",
+        archive.display(),
+        run.everything()
+    );
+    let mut top = None;
+    let mut digest = None;
+    for line in run.stdout.lines() {
+        if let Some(name) = line.strip_prefix("top ") {
+            top = Some(name.trim().to_owned());
+        }
+        if let Some(hex) = line.strip_prefix("exe-sha256 ") {
+            digest = Some(hex.trim().to_owned());
+        }
+    }
+    let top = top.unwrap_or_else(|| {
+        panic!(
+            "the reader reported no top-level directory:\n{}",
+            run.everything()
+        )
+    });
+    let digest = digest.unwrap_or_else(|| {
+        panic!(
+            "the reader reported no digest for sure.exe:\n{}",
+            run.everything()
+        )
+    });
+    (into.join(top), digest)
+}
+
+/// What the build's own `RELEASE.txt` says about the program in the archive.
+struct Stated {
+    digest: String,
+    bytes: u64,
+    target: String,
+}
+
+/// Read that statement out of `release_text`, field by field.
+///
+/// The header block, not the prose below it: the three fields are read by name
+/// and by position (the byte count is the line under the digest), so the
+/// sentences that explain what the artifact is cannot satisfy this. Two
+/// independent statements about the same file — a digest and a size — plus the
+/// target the header names, each held against the archive's own bytes and its
+/// own name by the caller.
+fn the_build_states(release_text: &str) -> Option<Stated> {
+    let lines: Vec<&str> = release_text.lines().map(str::trim).collect();
+    let target = lines
+        .iter()
+        .find_map(|line| line.strip_prefix("target"))
+        .map(str::trim)?
+        .to_owned();
+    let (index, digest) = lines.iter().enumerate().find_map(|(index, line)| {
+        line.strip_prefix("sure.exe")?
+            .trim()
+            .strip_prefix("SHA-256")
+            .map(|digest| (index, digest.trim().to_owned()))
+    })?;
+    let bytes = lines
+        .get(index + 1)?
+        .strip_suffix(" bytes")?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Stated {
+        digest,
+        bytes,
+        target,
+    })
+}
+
+/// The names of the files in `directory`, sorted, so that two listings can be
+/// compared.
+fn file_names(directory: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("cannot list {}: {error}", directory.display()))
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Why this checkout has no archive for the installer to be driven against,
+/// with the build's own answer pasted in.
+///
+/// Not a skip and not a silence: this is the text of a failing test. It names
+/// what was not checked, what would have to happen for it to be checked, and
+/// what `Build-Release.ps1` itself says when it is asked to verify a directory
+/// it has packaged nothing into — a measurement, rather than this file's
+/// opinion about why the archive is absent.
+///
+/// That last step runs the build's `-Phase Verify` against the release
+/// directory, which creates that directory and a `logs\` inside it when they
+/// are not there. Both are under the git-ignored `target/tmp`, and both are
+/// where the build itself puts them.
+fn no_archive_was_here() -> String {
+    let directory = the_builds_release_directory();
+    let (label, host) = a_host();
+    let directory_text = directory.to_string_lossy().into_owned();
+    let refusal = run_script(
+        &host,
+        &the_build_release_script(),
+        &["-Phase", "Verify", "-OutputDirectory", &directory_text],
+    );
+    format!(
+        "there is no *-{WINDOWS_TARGET}.zip in {}, so the installer was never driven against an \
+         archive the build produced. This is a failure, not a skip: the other tests in this file \
+         install an archive they stage themselves, and a fixture cannot disagree with the code it \
+         was written beside.\n\
+         Make one with:\n    & .\\scripts\\Build-Release.ps1 -Phase All\n\
+         (it refuses without target\\tmp\\release-gate.json and runs a release build, which takes \
+         minutes), or point {RELEASE_ARCHIVE_VARIABLE} at an archive the build produced \
+         elsewhere.\n\
+         {label} running `Build-Release.ps1 -Phase Verify -OutputDirectory {}` exits {} and says:\n{}",
+        directory.display(),
+        directory.display(),
+        refusal.status,
+        refusal.everything().trim(),
+    )
+}
+
+/// The installer, against the archive `scripts/Build-Release.ps1` produced.
+///
+/// Every other test in this file installs an archive staged beside it in the
+/// layout those tests already believe in — a fixture that cannot disagree with
+/// the installer it is written for. This one installs the artifact the build
+/// emits and holds the two sides against each other where they meet: the
+/// `.sha256` line the build wrote, the single top-level directory and the
+/// payload names the installer looks for, the digest the build states for its
+/// own `sure.exe` in `RELEASE.txt`, the digest and byte counts the installer
+/// records in its manifest, and what the installed program says about itself
+/// when it is run. A drift on either side reddens here, and nothing in this
+/// file outside this test can see the build at all.
+///
+/// **It is `#[ignore]`d, and the label is half the honest answer to "where does
+/// an archive come from".** `cargo test --workspace` — `ci.yml`'s whole test
+/// step, and the step every packaging job in `release.yml` runs *before* it
+/// packages — has no archive to give this test on a fresh runner, and `ci.yml`
+/// packages nothing anywhere, so a test that needs one and fails without it
+/// would be a permanent red in two workflows that cannot fix it by doing
+/// anything differently. It runs where the artifact exists instead:
+/// `release.yml`'s `package-windows` job invokes it by name with `--ignored`
+/// immediately after the step that writes the archive it reads. Locally,
+/// `cargo test -p sure-cli --test install_flow -- --ignored` runs it and
+/// `scripts/Build-Release.ps1 -Phase Verify` is the same shape for the same
+/// reason: it refuses rather than skips when there is no archive, and it is not
+/// wired into the default test run either. The label is not a weakening: it is
+/// what lets the job that has an artifact run this test while leaving two
+/// workflows that never package a Windows archive green, and it is what keeps
+/// the six gates green on a checkout that has never packaged.
+///
+/// **What it does when it is run and there is no archive: fails.** A checkout
+/// that has never packaged gets one red test whose message carries the command
+/// that makes an archive and the variable that points this test at one made
+/// elsewhere. What it never does is pass without having installed an archive
+/// `Build-Release.ps1` wrote.
+#[test]
+#[ignore = "installs the archive a packaging run just wrote (target/tmp/release, or \
+            $SURE_RELEASE_ARCHIVE): release.yml's `package-windows` job runs it by name after \
+            `Build-Release.ps1 -Phase All`, and nothing that runs `cargo test --workspace` has an \
+            archive to give it. `cargo test -p sure-cli --test install_flow -- --ignored` runs it."]
+fn the_installer_installs_the_archive_the_build_produced() {
+    let (_, host) = a_host();
+    let Some(archive) = the_archive_the_build_produced() else {
+        panic!("{}", no_archive_was_here());
+    };
+    let scratch = a_directory_of_our_own("the-builds-archive");
+
+    // The name is the contract `docs/development/RELEASE_PROCESS.md` records and
+    // `scripts/Build-Release.ps1` assembles — `sure-<version>-<target>.zip` —
+    // and the version in it is the one the program inside is expected to report.
+    let name = archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| panic!("{} has no file name", archive.display()))
+        .to_owned();
+    let stem = archive
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| panic!("{} has no file stem", archive.display()))
+        .to_owned();
+    let version = stem
+        .strip_prefix("sure-")
+        .and_then(|rest| rest.strip_suffix(&format!("-{WINDOWS_TARGET}")))
+        .unwrap_or_else(|| {
+            panic!(
+                "{} is not named sure-<version>-{WINDOWS_TARGET}.zip, which is the name \
+                 `scripts/Build-Release.ps1` builds and the installer's own reader expects",
+                archive.display()
+            )
+        })
+        .to_owned();
+
+    // The checksum file, read the way `sha256sum -c` reads it: no BOM, one line,
+    // no CR, a newline at the end, 64 lowercase hex, two spaces, the archive's
+    // own name. `Install-Sure.ps1` checks all of that itself and refuses an
+    // archive whose `.sha256` fails any of it, so this reading is what turns the
+    // install's exit 0 into a statement about the format the *build* wrote.
+    let checksum = PathBuf::from(format!("{}.sha256", archive.display()));
+    let checksum_bytes = std::fs::read(&checksum).unwrap_or_else(|error| {
+        panic!(
+            "{} cannot be read ({error}); `sha256sum -c` and the installer both want it beside \
+             the archive",
+            checksum.display()
+        )
+    });
+    assert_ne!(
+        checksum_bytes.first(),
+        Some(&0xEF),
+        "the checksum file starts with a BOM, which sha256sum reads as part of the digest"
+    );
+    assert!(
+        !checksum_bytes.contains(&b'\r'),
+        "the checksum file contains a CR, which sha256sum reads as part of the file name"
+    );
+    assert_eq!(
+        checksum_bytes.last(),
+        Some(&b'\n'),
+        "the checksum file does not end with a newline, which `sha256sum -c` warns about"
+    );
+    let checksum_text = String::from_utf8(checksum_bytes).expect("the checksum file is ASCII");
+    let line = checksum_text
+        .strip_suffix('\n')
+        .expect("checked just above");
+    assert!(
+        !line.contains('\n'),
+        "the checksum file holds more than one line, and the installer refuses one that does"
+    );
+    let (stated_digest, stated_name) = line.split_once("  ").unwrap_or_else(|| {
+        panic!("the checksum line is not '<64 lowercase hex><two spaces><file name>': {line}")
+    });
+    assert_eq!(
+        stated_name, name,
+        "the checksum file names a different archive than the one beside it"
+    );
+    assert_eq!(
+        stated_digest.len(),
+        64,
+        "the checksum file's digest is not 64 characters: {stated_digest}"
+    );
+    assert!(
+        stated_digest
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "the checksum file's digest is not lowercase hexadecimal: {stated_digest}"
+    );
+
+    let root = scratch.join("SURE");
+    let run = install(&host, &archive, &root, &[]);
+    assert_eq!(
+        run.status,
+        0,
+        "the installer refused the archive the build produced:\n{}",
+        run.everything()
+    );
+
+    // What the archive holds, read out of the archive itself rather than
+    // assumed, and what the installer put on disk.
+    let (payload, payload_digest) = unpacked(&host, &archive, &scratch);
+    assert_eq!(
+        payload.file_name().and_then(|name| name.to_str()),
+        Some(stem.as_str()),
+        "the archive's single top-level directory is not the archive's own name without `.zip`, \
+         which is the directory the installer takes its payload from"
+    );
+    let payload_names = file_names(&payload);
+    let expected = ["LICENSE", "RELEASE.txt", "sure.exe"]
+        .map(str::to_owned)
+        .to_vec();
+    assert_eq!(
+        payload_names, expected,
+        "the archive the build produced does not hold the payload the installer's documentation \
+         and tests name"
+    );
+    let bin = root.join("bin");
+    assert_eq!(
+        file_names(&bin),
+        payload_names,
+        "what the installer installed is not what the archive holds: a missing file or one the \
+         archive does not carry"
+    );
+    for entry in &payload_names {
+        assert_eq!(
+            std::fs::read(bin.join(entry)).expect("the installed file can be read"),
+            std::fs::read(payload.join(entry)).expect("the archive's file can be read"),
+            "the installed {entry} is not the bytes the archive holds"
+        );
+    }
+
+    // The build's own statement about its program, held against the bytes it
+    // shipped beside that statement: the digest, the byte count, and the target
+    // the header names — which is also the target the archive's own name claims.
+    let release_text = std::fs::read_to_string(payload.join("RELEASE.txt"))
+        .expect("the archive holds a RELEASE.txt");
+    let stated = the_build_states(&release_text).unwrap_or_else(|| {
+        panic!(
+            "the RELEASE.txt in the archive does not state the target, the \
+             `sure.exe SHA-256 <digest>` line and the byte count under it, so the bytes in the \
+             archive cannot be held against what the build said they were:\n{release_text}"
+        )
+    });
+    assert_eq!(
+        payload_digest, stated.digest,
+        "the digest the archive's RELEASE.txt states for sure.exe is not the digest of the \
+         sure.exe the archive holds"
+    );
+    assert_eq!(
+        stated.target, WINDOWS_TARGET,
+        "the RELEASE.txt in the archive names a target the archive's own name does not"
+    );
+    let payload_exe = std::fs::metadata(payload.join("sure.exe"))
+        .expect("the archive's sure.exe can be measured")
+        .len();
+    assert_eq!(
+        stated.bytes, payload_exe,
+        "the RELEASE.txt in the archive states a byte count for sure.exe that is not the size of \
+         the sure.exe the archive holds"
+    );
+
+    // The installer's record, held against both of the build's own documents:
+    // the digest in the `RELEASE.txt` beside the program, and the digest in the
+    // `.sha256` line beside the archive.
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("install-manifest.json"))
+            .expect("the install writes a manifest"),
+    )
+    .expect("the manifest is JSON");
+    assert_eq!(manifest["kind"], "sure-install-manifest");
+    assert_eq!(
+        manifest["archive_sha256"], stated_digest,
+        "the installer recorded a different digest for the archive than the checksum file beside \
+         it states, so the two are not describing the same file"
+    );
+    let files = manifest["files"]
+        .as_array()
+        .expect("the manifest lists the files it installed");
+    let recorded = |path: &str| {
+        files
+            .iter()
+            .find(|file| file["path"] == path)
+            .and_then(|file| file["sha256"].as_str().map(str::to_owned))
+    };
+    assert_eq!(
+        recorded(r"bin\sure.exe"),
+        Some(stated.digest.clone()),
+        "the installer's record of the program it installed is not the digest the build states \
+         for that program"
+    );
+    for entry in &payload_names {
+        let path = format!(r"bin\{entry}");
+        let found = files
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap_or_else(|| {
+                panic!("the manifest does not record {path}, so an uninstall could not know it is the install's")
+            });
+        let on_disk = std::fs::metadata(bin.join(entry))
+            .expect("the installed file can be measured")
+            .len();
+        assert_eq!(
+            found["bytes"].as_u64(),
+            Some(on_disk),
+            "the manifest records a different size for {path} than what is on disk"
+        );
+    }
+
+    // And the artifact is a program, not only bytes: it runs, and it reports the
+    // build the archive's own name claims. `--store-dir` is pointed at a scratch
+    // path, so this run cannot reach the store of whoever runs the suite.
+    let installed = bin.join("sure.exe");
+    let doctor = Command::new(&installed)
+        .arg("doctor")
+        .arg("--format")
+        .arg("json")
+        .arg("--store-dir")
+        .arg(scratch.join("a store this test never made"))
+        .output()
+        .unwrap_or_else(|error| panic!("the installed program does not start: {error}"));
+    assert_eq!(
+        doctor.status.code(),
+        Some(0),
+        "the installed program exited {}:\n{}",
+        doctor.status,
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let frame: Value = serde_json::from_slice(&doctor.stdout).unwrap_or_else(|error| {
+        panic!(
+            "the installed program's doctor frame is not JSON ({error}):\n{}",
+            String::from_utf8_lossy(&doctor.stdout)
+        )
+    });
+    assert_eq!(
+        frame["sure_version"],
+        version.as_str(),
+        "the installed program reports a version the archive's own name does not"
+    );
+    let build = &frame["details"]["build"];
+    assert_eq!(build["version"], version.as_str());
+    let (arch, os, environment) = parts_of_the_target();
+    assert_eq!(
+        build["arch"],
+        arch.as_str(),
+        "the program in {name} was not built for the architecture that name carries"
+    );
+    assert_eq!(build["os"], os.as_str());
+    assert_eq!(build["target_env"], environment.as_str());
+    let running_from = build["running_from"]
+        .as_str()
+        .expect("the installed program reports where it is running from");
+    assert_eq!(
+        std::fs::canonicalize(running_from).expect("the reported path exists"),
+        std::fs::canonicalize(&installed).expect("the installed path exists"),
+        "the installed program reported it was running from somewhere other than what the \
+         installer wrote"
+    );
 }
 
 // --- Criterion 1 and 3: it installs, and the launchers find it ------------

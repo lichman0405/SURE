@@ -57,6 +57,30 @@ install location, the checksum, the unsigned-build warning, what is and is not
 put on `PATH`, and what the uninstaller does with the user's evidence. `P15-T004`
 references it.
 
+`P15-T031` closes the loop between this script and that flow, because until it
+landed the install tests staged their own archive in the layout they already
+believed in — a fixture that cannot disagree with the installer it was written
+beside. `crates/sure-cli/tests/install_flow.rs`'s
+`the_installer_installs_the_archive_the_build_produced` now installs the
+`sure-*-x86_64-pc-windows-msvc.zip` in `target/tmp/release/` (or the one
+`SURE_RELEASE_ARCHIVE` names) and holds the installer's records against this
+script's output: the `.sha256` line's format, the archive's single top-level
+directory, the three payload names, the `sure.exe SHA-256` line this script
+writes into `RELEASE.txt`, the manifest's digests and byte counts, and the
+version and `running_from` the installed program reports. **It is `#[ignore]`d,
+and `release.yml`'s `package-windows` job is what runs it**, by name and with
+`--ignored`, in a step immediately after `Build-Release.ps1 -Phase All` — the
+step whose output it installs. The label is the decision rather than an
+oversight: `ci.yml` packages a Windows archive nowhere, and each packaging job
+here runs `cargo test --workspace` *before* it packages, so a test that needs an
+artifact and reports its absence by failing would be a permanent red in two
+workflows that cannot do anything differently — and the six gates would redden on
+exactly the fresh checkout they are run on. Locally,
+`cargo test -p sure-cli --test install_flow -- --ignored` runs it. **When it runs
+and there is no such archive it fails rather than skips**, naming
+`& .\scripts\Build-Release.ps1 -Phase All` in the failure. Cost: about 1.5
+seconds when the archive is there.
+
 A future user-friendly installer may use MSIX/WiX or another appropriate Windows packaging system after CLI behavior stabilizes. Do not add installer complexity before core acceptance.
 
 ## Cross-platform artifacts

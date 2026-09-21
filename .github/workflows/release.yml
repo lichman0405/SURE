@@ -278,6 +278,27 @@ jobs:
         shell: pwsh
         run: ./scripts/Build-Release.ps1 -Phase All -OutputDirectory (Join-Path $env:GITHUB_WORKSPACE 'target/tmp/release')
 
+      # The installer, against the archive the step above just wrote — which is
+      # the one thing no other step in either workflow can do, because no other
+      # step has an artifact to hand it. The test is `#[ignore]`d in
+      # `crates/sure-cli/tests/install_flow.rs`, and this job is the thing that
+      # invokes it: `ci.yml` packages a Windows archive nowhere, and this job's
+      # own `cargo test --workspace` above runs *before* anything is packaged,
+      # so a default-run test that needs an archive would be a red on every push
+      # in both workflows with nothing either could do about it. The checksum is
+      # written by the step above rather than by a step of its own —
+      # `Build-Release.ps1 -Phase All` writes `<archive>.sha256` beside the
+      # archive — so this step follows the whole packaging phase. It reads the
+      # same `target/tmp/release` that step wrote into, and it fails rather than
+      # skips if what it finds there is not an archive the build produced, which
+      # is also what makes this step the guard on the packaging step's output
+      # path: move the archive and this reddens instead of passing on nothing.
+      # Single-line so a reader — and the command reader in
+      # `ci_workflow.rs` — can see what it runs.
+      - name: Install the archive this job just packaged
+        shell: pwsh
+        run: cargo test -p sure-cli --test install_flow -- --ignored the_installer_installs_the_archive_the_build_produced
+
       # The evidence first, and unconditionally: a run that failed is the run
       # whose logs someone needs, and an upload that only happens on success is
       # missing exactly when it matters. The `logs-` prefix keeps these out of

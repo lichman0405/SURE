@@ -9,6 +9,7 @@
 //! run stays auditable even after a finding is closed.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::Path;
 
 use sure_domain::finding::{Finding, FindingStatus};
@@ -303,19 +304,165 @@ fn clone_for_state(
 /// far more runs than any project accumulates between two checks, and a store
 /// that reaches it has something wrong with it.
 ///
+/// # The stronger fix, and why it is not this one
+///
+/// Spending the budget on other projects' rows is the underlying waste, and
+/// [`HistoryFilter`](crate::store::HistoryFilter) is why it happens: the filter
+/// carries `project_fingerprint` and **no `project_root`**, so this read cannot ask
+/// the store for its own project's rows and must filter them in Rust afterwards.
+/// Pushing `project_root` into the query would make this bound count *this
+/// project's* records and shrink the truncation to a project nobody has 4096
+/// findings about. It is deliberately **not** taken here, and this is the paragraph
+/// that says so:
+///
+/// - **It does not remove the need for the check above.** One project's own rows
+///   can pass any bound, and the failure direction has to be right whatever the
+///   number counts — which is this task's acceptance, not that change's.
+/// - **It is a change to a type used well beyond this module.**
+///   `git grep -l 'HistoryFilter' crates/` names 19 files — 13 under
+///   `sure-core/src`, two core test files and four under `sure-cli` — and each of
+///   them would have to decide whether it means a project-scoped scan now.
+/// - **It re-decides the number rather than only the plumbing.** A bound of 4096
+///   *rows in the store* and a bound of 4096 *rows for one project* are different
+///   quantities with different reasons, and the paragraph above argues for the
+///   first.
+///
+/// So it belongs in its own task, with its own number and its own acceptance.
+/// Riding along with this one would have changed what every other caller's filter
+/// does under cover of a task about failure direction.
+///
 /// **That is where the resemblance to `allowance::SCAN_LIMIT` ends, and this
 /// paragraph used to claim otherwise.** `Store::spend_allowance` reads its bound
 /// and then acts on it — `store/mod.rs:583` returns `None` when the scan
 /// saturates, and `None` means spend nothing, so an exhausted allowance fails
-/// **closed**. [`previous_open_findings`] has no equivalent check and returns
-/// `Ok` whether or not the scan saturated, so an empty list here means "nothing
-/// was left open" and "I did not read far enough to know" at the same time. The
-/// number is the same and the failure direction is opposite: a bound that fails
-/// in `spend_allowance` makes SURE *do* less, and a bound that fails here makes
-/// SURE *claim* less is wrong, which is a false green rather than a refusal. The
-/// 4096 is a judgement about scale and no fixture or test was found that reaches
-/// it; the direction is owned by `P15-T029`.
+/// **closed**. The supervisor corrected the false half of that claim in the
+/// `P7-T012` acceptance commit, and what it corrected was the *sentence*: the
+/// number is the same and the failure direction was opposite, because a bound that
+/// fails in `spend_allowance` makes SURE *do* less while a bound that failed here
+/// made SURE *claim* less is wrong — a false green rather than a refusal. The
+/// correction could not repair the behaviour, because [`previous_open_findings`]
+/// had no check for a correction to add to; **`P15-T029` added one**, and the
+/// direction now matches `spend_allowance`'s: a scan that stops at this bound
+/// returns [`HistoryReadError::ScanStoppedEarly`], which `pipeline::recheck`
+/// reports as stage 12 not running with that error as the detail, so reaching the
+/// bound makes SURE do less and the reassuring answer is the one it will not give.
+///
+/// The 4096 is still a judgement about scale: no fixture or test was found that
+/// reaches it in practice, and none is claimed here. What `P15-T029` added is a
+/// test that reaches it **on purpose** and a read that fails closed when it does.
+///
+/// # What this bound does not affect, so that it is not rediscovered
+///
+/// **Nothing consumes [`LifecycleUpdate::findings`]** — checked, not assumed:
+/// `git grep -n 'lifecycle' crates/` finds the field declared at `:135`, produced
+/// by `pipeline::recheck`, carried on `RunOutcome.lifecycle` (`pipeline.rs:461`),
+/// and read by callers that take `kept_open` and `resolved` only (the CLI's human
+/// line and machine frame for stage 12; `pipeline.rs`'s own detail in
+/// `recheck`). So the blast radius of a truncation used to be bounded to the
+/// `Against the earlier run: N finding(s) still open` line and stage 12's detail,
+/// and never reached `run.verdict.findings`, the open-finding counts or hand-off
+/// readiness. **That bound on the damage is what changed first**: a saturated scan
+/// now makes stage 12 not run, so the two lines a reader would have got are absent
+/// rather than short — and because `StageOutcome::NotRun` is a gap,
+/// [`crate::pipeline::PipelineOutcome::is_green`] is false for that run. Whoever
+/// gives `LifecycleUpdate::findings` a consumer inherits the reason this read
+/// refuses instead of answering.
 pub const HISTORY_SCAN_LIMIT: usize = 4096;
+
+/// Why the read of what an earlier run left open could not answer.
+///
+/// Two ways, and the second is the one this type exists for. A store that cannot
+/// answer its own query is [`StoreError`] carried through rather than restated, for
+/// the reason `crate::paths::PathError` gives for the same choice: one wording for
+/// one condition. A scan that reached its bound is not a store failure at all — the
+/// store answered, and what it answered with is exactly as much as the bound
+/// allowed, which may or may not be everything — so it needs a variant of its own,
+/// because reporting it as a store failure would send a reader looking for a
+/// damaged file that is not damaged.
+///
+/// **Why this is an error and not a flag on a short list.** A list that stopped at
+/// a bound is indistinguishable, to its caller, from a list that was read to the
+/// end and found nothing: `previous_open_findings` would answer `Ok(vec![])` for a
+/// project whose earlier run left something open, whenever that project's rows
+/// sort past the bound. That is the failure `CLAUDE.md` ranks above every other —
+/// *"a false green is more serious than a visible error"* — and the way out is the
+/// one `Store::spend_allowance` takes at `store/mod.rs:583`: refuse.
+///
+/// **The other precedent in this tree, and why it is not the one followed.**
+/// [`crate::capability_report`] reads a store with `EVENT_SCAN_LIMIT` and, when the
+/// scan reaches it, **succeeds with `CapabilityEvidence::truncated` set**
+/// (`capability_report.rs:234`); the flag is a field on the report and adds a
+/// sentence beside the number it qualifies — *"SURE stopped before it had read every
+/// event the store holds, so anything older than the events it read is not counted
+/// here"* (`sure_domain::capability:281`). **What a flag would cost here is two
+/// things that precedent does not have to pay.** The count this read produces is
+/// composed away from the read: the CLI's `Against the earlier run: N finding(s)
+/// still open` line is `LifecycleUpdate::kept_open.len()`, so the caveat would have
+/// to be carried through `reconcile` and out to every caller that prints the number
+/// or it would be a flag nobody reads. And a stage that ran with a caveat is a
+/// stage that **ran**, so `PipelineOutcome::is_green` would be true for a run whose
+/// comparison with the previous run was built from a list that stopped early — the
+/// false green again, one level up. Refusing uses the plumbing that already turns an
+/// `Err` here into [`crate::pipeline::StageOutcome::NotRun`], and a stage that did
+/// not run is a gap, which is what makes the run not green.
+#[derive(Debug)]
+pub enum HistoryReadError {
+    /// The store could not answer the query.
+    Store(StoreError),
+    /// The scan reached its bound, so the list it built may be short for a reason
+    /// it cannot show. Not "there was more than this": at exactly the bound SURE
+    /// cannot tell, which is why the message says so rather than claiming it.
+    ScanStoppedEarly {
+        /// The bound the scan stopped at.
+        limit: usize,
+        /// The project the read was about, so the message can name it.
+        project_root: String,
+    },
+}
+
+impl From<StoreError> for HistoryReadError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl fmt::Display for HistoryReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(error) => write!(f, "{error}"),
+            Self::ScanStoppedEarly {
+                limit,
+                project_root,
+            } => {
+                // Singular for the bound as well as the count, the way
+                // `sure_domain::capability` does it for the events it counts: the
+                // bound is 4096 in production and a test may set it to 1, and a
+                // message that reads "1 records" is one a reader has to interpret.
+                let records = if *limit == 1 { "record" } else { "records" };
+                write!(
+                    f,
+                    "SURE stopped reading its history at its bound of {limit} {records}, so it did \
+                     not read far enough to know what an earlier run left open for {project_root}.\n\n\
+                     A bound reached is not a history read to its end, and the two cannot be told \
+                     apart from the list: one cut short at the bound comes back looking exactly like \
+                     a list of a project with nothing open, and \"nothing was left open\" is the \
+                     answer SURE will not guess.\n\n\
+                     This read wrote nothing, and this run has no comparison against an earlier one \
+                     rather than a comparison that stopped early."
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for HistoryReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error),
+            Self::ScanStoppedEarly { .. } => None,
+        }
+    }
+}
 
 /// Read every open finding for `project_root` from earlier runs.
 ///
@@ -362,13 +509,40 @@ pub const HISTORY_SCAN_LIMIT: usize = 4096;
 ///
 /// # Errors
 ///
-/// Returns [`StoreError::MalformedRow`] when a stored finding does not decode,
-/// and whatever the store returns for a query it cannot answer.
+/// [`HistoryReadError::ScanStoppedEarly`] when the scan reached
+/// [`HISTORY_SCAN_LIMIT`] and there was more history behind it — see the constant's
+/// own comment for why that is a refusal rather than a short list.
+/// [`HistoryReadError::Store`] wraps any other failure: [`StoreError::MalformedRow`]
+/// when a stored finding does not decode, and whatever the store returns for a
+/// query it cannot answer.
 pub fn previous_open_findings(
     store: &Store,
     project_root: &str,
     case: CaseSensitivity,
-) -> Result<Vec<Finding>, StoreError> {
+) -> Result<Vec<Finding>, HistoryReadError> {
+    previous_open_findings_within(store, project_root, case, HISTORY_SCAN_LIMIT)
+}
+
+/// The same read, with the bound supplied instead of the constant.
+///
+/// Private, and the bound is the only reason it exists. The branch this read fails
+/// on is *reaching* the bound, and a test that cannot move the bound cannot reach
+/// it without writing [`HISTORY_SCAN_LIMIT`] rows into a store — which one test
+/// does, to drive the number production actually uses, and which the edge cases
+/// below cannot each do. So the bound is an argument here and the constant is the
+/// one production call site passes: the tests drive the same code path production
+/// does, at a size they can afford, rather than a copy of it that could disagree.
+///
+/// **`limit` is `HISTORY_SCAN_LIMIT` in every production call**, and the two are
+/// kept in step by [`previous_open_findings`] being the only caller: a second
+/// public entry point taking a limit would be a way to read this history with a
+/// bound nobody chose, which is the thing the constant exists to prevent.
+fn previous_open_findings_within(
+    store: &Store,
+    project_root: &str,
+    case: CaseSensitivity,
+    limit: usize,
+) -> Result<Vec<Finding>, HistoryReadError> {
     let filter = crate::store::HistoryFilter {
         project_fingerprint: None,
         kind: Some(RecordKind::Document(
@@ -376,7 +550,25 @@ pub fn previous_open_findings(
         )),
         include_recordings: false,
     };
-    let records = store.history(&filter, HISTORY_SCAN_LIMIT)?;
+    let records = store.history(&filter, limit)?;
+
+    // The bound was reached, and that is all this can know: the query is
+    // newest-first and the project filter runs *below*, so the rows in hand are
+    // not this project's rows. `>=` rather than `>` matches
+    // `Store::spend_allowance` (`store/mod.rs:583`) rather than being cleverer
+    // than it: a store holding exactly `limit` records may have been read to the
+    // end, and refusing then loses a comparison the reader could have had — but
+    // the other side of that off-by-one is an empty list that means "nothing was
+    // left open" about a project SURE never reached, and this repository ranks
+    // that false green above this refusal. The refusal is visible and says so;
+    // the false green is neither.
+    if records.len() >= limit {
+        return Err(HistoryReadError::ScanStoppedEarly {
+            limit,
+            project_root: project_root.to_owned(),
+        });
+    }
+
     let mut seen: HashSet<FindingKey> = HashSet::new();
     let mut findings = Vec::new();
     for record in records {
@@ -1189,5 +1381,221 @@ mod tests {
             "two files' findings were deduplicated into one"
         );
         assert_eq!(keeping[0].title, keeping[1].title);
+    }
+
+    /// The refusal's own text, which is what a reader is handed.
+    ///
+    /// This read does not fail into a log line nobody reads: `pipeline::recheck`
+    /// puts the error's `Display` into stage 12's detail, so this text is the
+    /// sentence a person ends up reading. The two things it must carry are
+    /// **which project and which bound** — a reader who cannot tell whether the
+    /// bound was about their project has no way to act — and the one thing it must
+    /// not carry is the reassuring reading of the same short list.
+    ///
+    /// The shape asserted is: the project is named, the bound is named, and the
+    /// sentence SURE writes when it genuinely found nothing
+    /// (`pipeline::recheck`'s `"no earlier run left anything open for this
+    /// project."`) is not what a stopped scan says instead.
+    #[test]
+    fn the_refusal_names_the_project_and_the_bound_and_not_the_reassuring_reading() {
+        let store = store_in("recheck-lifecycle-refusal-text");
+        let project = "C:/projects/sendmail";
+        store_run(
+            &store,
+            project,
+            &fingerprint(),
+            &[finding_with(
+                "Email not sent",
+                "src/email/send.rs",
+                FindingStatus::Open,
+            )],
+            &[],
+        )
+        .expect("the run is stored");
+
+        let error = previous_open_findings_within(&store, project, CaseSensitivity::Sensitive, 1)
+            .expect_err("a scan that read its whole bound did not stop at it");
+        assert!(
+            matches!(error, HistoryReadError::ScanStoppedEarly { .. }),
+            "a bound is not a store failure, and reporting it as one sends a reader \
+             looking for a damaged file: {error:?}"
+        );
+        let text = error.to_string();
+        assert!(
+            text.contains(project),
+            "the message does not name it: {text}"
+        );
+        assert!(
+            text.contains(&1.to_string()),
+            "the message does not name the bound it stopped at: {text}"
+        );
+        assert!(
+            !text.contains("no earlier run left anything open"),
+            "a scan that stopped early is saying what a scan that found nothing says: {text}"
+        );
+    }
+
+    /// The bound, driven as a number rather than argued about.
+    ///
+    /// Three rows, of which **this project's is the oldest** — which is the shape
+    /// the defect has: the scan is newest-first, so a bound spent on other
+    /// projects' rows is spent before this project's rows are ever looked at.
+    ///
+    /// The three readings below are what pin the edge. `4` is a bound past the end
+    /// of the store, and it answers with the project's finding — so the finding is
+    /// there, and a shorter answer is a lost one rather than an empty project.
+    /// `3` is exactly the number of rows the store holds: SURE read the whole
+    /// store and still refuses, which is the conservative half of `>=` and is
+    /// stated in the read's comment rather than left to be discovered. `2` is the
+    /// false green itself: the row the reader needs is *outside* what was read, and
+    /// before `P15-T029` this call answered `Ok(vec![])`, which reads as "nothing
+    /// was left open".
+    #[test]
+    fn the_bound_refuses_at_the_row_it_reaches_and_answers_one_short_of_it() {
+        let store = store_in("recheck-lifecycle-bound-edge");
+        let project = "C:/projects/sendmail";
+        let other = "C:/projects/other";
+
+        store_run(
+            &store,
+            project,
+            &fingerprint(),
+            &[finding_with(
+                "Email not sent",
+                "src/email/send.rs",
+                FindingStatus::Open,
+            )],
+            &[],
+        )
+        .expect("this project's run is stored first, so its row is the oldest");
+        store_run(
+            &store,
+            other,
+            &fingerprint(),
+            &[
+                finding_with(
+                    "Someone else's problem",
+                    "src/other/one.rs",
+                    FindingStatus::Open,
+                ),
+                finding_with(
+                    "Someone else's problem",
+                    "src/other/two.rs",
+                    FindingStatus::Open,
+                ),
+            ],
+            &[],
+        )
+        .expect("the other project's two runs are stored after it, so they are newer");
+
+        let read = |limit: usize| {
+            previous_open_findings_within(&store, project, CaseSensitivity::Sensitive, limit)
+        };
+
+        let read_to_the_end = read(4).expect("a bound past the end of the store is not a stop");
+        assert_eq!(
+            read_to_the_end.len(),
+            1,
+            "the project's open finding is in the store, beyond the two newer rows"
+        );
+        assert_eq!(read_to_the_end[0].title, "Email not sent");
+
+        for limit in [2, 3] {
+            match read(limit) {
+                Ok(findings) => panic!(
+                    "a scan that stopped at {limit} record(s) answered with {} finding(s); the \
+                     project's own open finding was outside what it read, so this list is short \
+                     for a reason the caller cannot see",
+                    findings.len()
+                ),
+                Err(HistoryReadError::ScanStoppedEarly { limit: got, .. }) => {
+                    assert_eq!(got, limit)
+                }
+                Err(other) => {
+                    panic!("the store was readable and only the bound was reached: {other}")
+                }
+            }
+        }
+    }
+
+    /// The number production uses, reached on purpose.
+    ///
+    /// The test above drives the branch at a size it can afford, which is a
+    /// different claim from "the number SURE ships is one that can be reached".
+    /// This one fills a store past [`HISTORY_SCAN_LIMIT`] and reads it through
+    /// [`previous_open_findings`] — the entry point production calls — so the
+    /// constant itself is exercised and an off-by-one in it would be visible here
+    /// rather than only in a comment.
+    ///
+    /// **What it would catch**: a bound that is not checked (`Ok` with 0 findings
+    /// in the saturated reading — the defect this task exists for), a check on the
+    /// wrong side of the read, and a bound that started refusing one row too early
+    /// (the `limit + 2` reading below would then miss the finding it must find).
+    #[test]
+    fn a_store_past_the_shipped_bound_makes_the_read_refuse_rather_than_answer_zero() {
+        let store = store_in("recheck-lifecycle-saturated");
+        let project = "C:/projects/sendmail";
+        let other = "C:/projects/other";
+
+        // This project's open finding first, so it is the oldest row in the store.
+        store_run(
+            &store,
+            project,
+            &fingerprint(),
+            &[finding_with(
+                "Email not sent",
+                "src/email/send.rs",
+                FindingStatus::Open,
+            )],
+            &[],
+        )
+        .expect("this project's run is stored");
+
+        // Then HISTORY_SCAN_LIMIT rows belonging to another project, all newer.
+        // Written through [`store_run`], which is the call the product writes a
+        // run's findings with — one row per finding it holds, so this is
+        // HISTORY_SCAN_LIMIT rows and the same number of write transactions. What
+        // the test needs is the row count, not any particular call count.
+        let filler: Vec<Finding> = (0..HISTORY_SCAN_LIMIT)
+            .map(|i| {
+                finding_with(
+                    &format!("Someone else's problem {i}"),
+                    &format!("src/other/{i}.rs"),
+                    FindingStatus::Open,
+                )
+            })
+            .collect();
+        store_run(&store, other, &fingerprint(), &filler, &[]).expect("the filler is stored");
+
+        match previous_open_findings(&store, project, CaseSensitivity::Sensitive) {
+            Ok(findings) => panic!(
+                "the scan stopped at {HISTORY_SCAN_LIMIT} records, and it answered with {} \
+                 finding(s) anyway — the project's own finding is one row past the bound, so a \
+                 short list here is the false green this read must not report",
+                findings.len()
+            ),
+            Err(HistoryReadError::ScanStoppedEarly {
+                limit,
+                project_root,
+            }) => {
+                assert_eq!(limit, HISTORY_SCAN_LIMIT);
+                assert_eq!(project_root, project);
+            }
+            Err(other) => panic!("the store was readable and only the bound was reached: {other}"),
+        }
+
+        // And the finding was genuinely one row beyond it, rather than absent: with
+        // room for every row in the store the same read answers with it. Without
+        // this, the refusal above would be consistent with a store that had
+        // nothing to find.
+        let read_to_the_end = previous_open_findings_within(
+            &store,
+            project,
+            CaseSensitivity::Sensitive,
+            HISTORY_SCAN_LIMIT + 2,
+        )
+        .expect("a bound past the end of the store is not a stop");
+        assert_eq!(read_to_the_end.len(), 1);
+        assert_eq!(read_to_the_end[0].title, "Email not sent");
     }
 }

@@ -1132,6 +1132,16 @@ impl Pipeline<'_> {
         let previous =
             match recheck_lifecycle::previous_open_findings(store, &run.project_root, case) {
                 Ok(previous) => previous,
+                // **A scan that stopped at its bound arrives here, on purpose.**
+                // `previous_open_findings` refuses rather than answering with a
+                // list that stopped early — the direction `Store::spend_allowance`
+                // fails in — and this arm is the plain-language path that refusal
+                // was written for: the stage did not run, the detail says so in the
+                // error's own words, and no comparison is built from a list that
+                // was cut short. The alternative, reading what there was and
+                // warning about it, would put a number in front of a reader that
+                // says "this many findings are still open" when the truth is that
+                // SURE did not read far enough to know.
                 Err(error) => {
                     return (
                         None,
@@ -1634,5 +1644,227 @@ mod tests {
         assert!(!is_confirmed(ClaimAssessment::CannotConfirm));
         assert!(!is_confirmed(ClaimAssessment::Contradicted));
         assert!(!is_confirmed(ClaimAssessment::NotCheckable));
+    }
+
+    // --- stage 12's failure to read --------------------------------------
+
+    /// A store that holds one finding for `project`, and nothing else.
+    ///
+    /// The finding is the same shape `recheck_lifecycle`'s own tests store: what
+    /// this test needs from it is that it is a valid stored `Finding` for this
+    /// project, because that is what makes stage 12's *successful* reading
+    /// non-empty and the saturated reading a lost answer rather than an empty
+    /// project.
+    fn a_stored_finding(title: &str, location: &str) -> sure_domain::finding::Finding {
+        use sure_domain::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
+        use sure_domain::finding::{
+            AssessmentSource, FindingBuilder, FindingStatus, SeverityRationale,
+        };
+        use sure_domain::ids::FindingId;
+
+        let fingerprint =
+            FingerprintId::parse("fp_01j2m8q5aaaabbbbccccddddee").expect("a fixture id");
+        FindingBuilder::new(
+            AssessmentSource::DeterministicCheck,
+            SeverityRationale::BlocksHandOff,
+        )
+        .id(FindingId::generate())
+        .title(title)
+        .severity(Severity::MustFix)
+        .status(FindingStatus::Open)
+        .explanation("the send path returns before the provider is called")
+        .user_impact("users believe a message was delivered")
+        .next_step("call the provider")
+        .fingerprint(fingerprint.clone())
+        .evidence(vec![Evidence::new(
+            EvidenceClass::DeterministicCheck,
+            "the send path returns before the provider is called",
+            EvidenceAnchor::new(AnchorSubject::File, location, "line 42"),
+            Some(fingerprint),
+            Severity::MustFix,
+        )])
+        .build()
+        .expect("the fixture finding is valid")
+    }
+
+    /// What a reader is told when the read of what an earlier run left open stops
+    /// at its bound.
+    ///
+    /// **This is the clause `P15-T029` is about, observed rather than argued.**
+    /// The read's failure has a plain-language path that already existed —
+    /// [`Pipeline::recheck`] turns an `Err` from it into stage 12
+    /// [`StageOutcome::NotRun`] with the error as the detail — and this is the only
+    /// place that translation can be watched: the saturation is real (the store
+    /// ends up holding more `Finding` records than
+    /// [`recheck_lifecycle::HISTORY_SCAN_LIMIT`]), the run reaches stage 12, and
+    /// what the run says about that stage is asserted rather than read off the
+    /// source.
+    ///
+    /// Three things a false green would need, and none of them may hold:
+    /// a comparison built from a scan that stopped early (`run.lifecycle` must be
+    /// `None` — which is also what stops a report printing `Against the earlier
+    /// run: 0 finding(s) still open`), a `Ran` stage whose detail is the reassuring
+    /// *"no earlier run left anything open"*, and a run that counts as green.
+    ///
+    /// **The middle reading is the control.** The same project and the same store
+    /// are read twice: once with one finding in it, where stage 12 runs and finds
+    /// it, and once after enough rows for other projects have been added to push
+    /// this project's own finding past the bound. Without that, a stage that never
+    /// ran for some other reason would satisfy every assertion about the last one.
+    #[test]
+    fn a_history_that_stops_the_scan_makes_stage_12_not_run_rather_than_compare() {
+        let root = crate::store::scratch_root().join(format!(
+            "pipeline-recheck-saturation-{}",
+            std::process::id()
+        ));
+        match std::fs::remove_dir_all(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot clear {}: {error}", root.display()),
+        }
+        let project = root.join("project");
+        let store_dir = root.join("store");
+        std::fs::create_dir_all(&project).expect("a scratch project");
+        std::fs::create_dir_all(&store_dir).expect("a scratch store directory");
+        std::fs::write(
+            project.join("README.md"),
+            "# A project SURE was pointed at\n\nIt is small on purpose: what this test is about is \
+             the history SURE reads, not the project it reads it for.\n",
+        )
+        .expect("a project file");
+
+        let store = Store::open_at(&store_dir.join("sure.db")).expect("the store opens");
+        let config = Config::default();
+        let run_recheck = |store: &Store| {
+            Pipeline {
+                project: &project,
+                purpose: Purpose::Recheck,
+                config: &config,
+                execution: ExecutionSettings::inspect_only(),
+                store: Some(store),
+                goal: None,
+            }
+            .run()
+        };
+
+        // The first run is the one that answers the question this test cannot
+        // answer for itself: what text the pipeline uses as the project's root.
+        // A stored finding has to carry that exact text for stage 12 to recognise
+        // it as this project's, and guessing it would make the control below
+        // prove nothing.
+        let first = run_recheck(&store);
+        let first_run = first
+            .run
+            .as_ref()
+            .expect("a run over a readable scratch project reaches its verdict");
+        let project_root = first_run.project_root.clone();
+        assert!(
+            matches!(
+                first.stage(Stage::Recheck).outcome,
+                StageOutcome::Ran { .. }
+            ),
+            "an empty history is not a failure to read one: {:?}",
+            first.stage(Stage::Recheck).outcome
+        );
+
+        crate::recheck_lifecycle::store_run(
+            &store,
+            &project_root,
+            &first_run.project_state.id,
+            &[a_stored_finding("Email not sent", "src/email/send.rs")],
+            &[],
+        )
+        .expect("the earlier run's finding is stored");
+
+        // The control: the same project, the same store, one finding in it.
+        let control = run_recheck(&store);
+        let control_run = control.run.as_ref().expect("the run finishes");
+        let control_lifecycle = control_run
+            .lifecycle
+            .as_ref()
+            .expect("a readable history is compared against");
+        assert_eq!(
+            control_lifecycle.kept_open.len(),
+            1,
+            "the stored finding was not carried open, so this store is not the \
+             control the saturated reading is measured against: {:?}",
+            control.stage(Stage::Recheck).outcome
+        );
+        match &control.stage(Stage::Recheck).outcome {
+            StageOutcome::Ran { detail } => assert!(
+                detail.starts_with("1 earlier finding(s) stayed open"),
+                "stage 12 ran but did not say what it compared: {detail}"
+            ),
+            other => panic!("stage 12 with a readable history is {other:?}"),
+        }
+
+        // Now the bound: this project's finding is the oldest row in the store, and
+        // `HISTORY_SCAN_LIMIT` rows for another project are newer than it — which
+        // is exactly what the newest-first scan spends its bound on.
+        let filler: Vec<sure_domain::finding::Finding> = (0..recheck_lifecycle::HISTORY_SCAN_LIMIT)
+            .map(|i| {
+                a_stored_finding(
+                    &format!("Someone else's problem {i}"),
+                    &format!("src/other/{i}.rs"),
+                )
+            })
+            .collect();
+        crate::recheck_lifecycle::store_run(
+            &store,
+            "C:/projects/other",
+            &control_run.project_state.id,
+            &filler,
+            &[],
+        )
+        .expect("the filler is stored");
+
+        let saturated = run_recheck(&store);
+        assert!(
+            saturated.run.is_some(),
+            "the run itself stopped instead of reporting the stage: {:?}",
+            saturated.stopped_at
+        );
+        let run = saturated.run.as_ref().expect("checked above");
+
+        assert!(
+            run.lifecycle.is_none(),
+            "a scan that stopped at its bound produced a comparison, and `Against the \
+             earlier run: {} finding(s) still open` is read off it",
+            run.lifecycle
+                .as_ref()
+                .map_or(0, |update| update.kept_open.len())
+        );
+
+        match &saturated.stage(Stage::Recheck).outcome {
+            StageOutcome::NotRun { reason, detail } => {
+                assert_eq!(
+                    *reason,
+                    Some(NotCheckedReason::UnknownReason),
+                    "the bound is not a scope limit: this project was in range and the \
+                     history could not be read far enough"
+                );
+                assert!(
+                    detail.contains(&recheck_lifecycle::HISTORY_SCAN_LIMIT.to_string()),
+                    "the detail does not say which bound was reached: {detail}"
+                );
+                assert!(
+                    !detail.contains("no earlier run left anything open"),
+                    "a scan that stopped early is saying what a scan that found nothing \
+                     says: {detail}"
+                );
+            }
+            other => panic!(
+                "a history read that stopped at its bound is reported as {other:?}, which is \
+                 a comparison the read did not make"
+            ),
+        }
+
+        // And the run does not pass as a clean one: a stage that did not do its
+        // work is a gap, so a saturated re-check is not green either.
+        assert!(
+            !saturated.is_green(),
+            "a run whose stage 12 could not read what the last run left open reported itself \
+             as clean"
+        );
     }
 }

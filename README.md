@@ -38,7 +38,10 @@ With a supported harness plugin/hook, SURE also records selected development fac
 
 This repository is being implemented autonomously from a v0.1 bootstrap. It is **not the completed SURE product**, but it is already a working Rust workspace with substantial checking infrastructure in place.
 
-- **Progress:** 92 of 166 v0.1 tasks accepted (phase P9 in progress).
+- **Progress:** `progress/state.json` is the authoritative record and `node
+  scripts/taskctl.mjs status` prints it. No count is restated here, because a
+  hand-copied one is wrong the day after it is written — the line that stood here
+  claimed 92 of 166 tasks at phase P9 while the file held 199 at phase P16.
 - **Branch for active work:** `claude/v0.1-autonomous`.
 - **Canonical remote:** `https://github.com/lichman0405/SURE.git`.
 

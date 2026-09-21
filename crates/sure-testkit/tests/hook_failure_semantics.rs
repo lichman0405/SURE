@@ -53,6 +53,80 @@
 //! asserted separately, by
 //! `the_unix_launchers_carry_the_executable_bit_in_the_index` in
 //! `integration_thinness.rs`.
+//!
+//! # The shell this target is started from, and what was measured
+//!
+//! Every launcher on Windows is started by handing a `.ps1` path to Windows
+//! PowerShell, which makes this target's *result* a function of the process that
+//! started `cargo test` and not only of the tree. Measured on 2026-09-21, two
+//! runs of one command over one worktree at `4c99873`:
+//!
+//! ```text
+//! $ cargo test -p sure-testkit --test hook_failure_semantics   # from the Bash tool
+//! test result: FAILED. 1 passed; 4 failed; ...
+//!
+//! $ cargo test -p sure-testkit --test hook_failure_semantics   # from the PowerShell tool
+//! test result: ok. 5 passed; 0 failed; ...
+//! ```
+//!
+//! The four failures are one thing and it is not the launcher's:
+//! `no_launcher_blocks_the_session_when_sure_cannot_be_found`,
+//! `a_launcher_relays_the_status_of_a_run_that_could_not_finish`,
+//! `a_launcher_relays_a_blocked_request_status_and_the_frame_that_says_so` and
+//! `a_launcher_relays_a_sure_run_that_succeeded` each read `Some(1)` where the
+//! launcher would have answered `Some(0)`, `Some(5)` and `Some(0)`. Windows
+//! PowerShell never loaded the file, and said so — once in each language this
+//! machine has, which is why the classifier below matches the identifiers and
+//! not the sentence:
+//!
+//! ```text
+//! File C:\...\sure-hook.ps1 cannot be loaded because running scripts is disabled
+//! on this system. For more information, see about_Execution_Policies at
+//! https:/go.microsoft.com/fwlink/?LinkID=135170.
+//!     + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException
+//!     + FullyQualifiedErrorId : UnauthorizedAccess
+//!
+//! 无法加载文件 C:\...\sure-hook.ps1，因为在此系统上禁止运行脚本。...
+//!     + CategoryInfo          : SecurityError: (:) []，ParentContainsErrorRecordException
+//!     + FullyQualifiedErrorId : UnauthorizedAccess
+//! ```
+//!
+//! **The variable is not "Bash against PowerShell", and this is the part that
+//! matters.** It is whether the process that started `cargo test` carries
+//! `PSExecutionPolicyPreference`, which is where PowerShell keeps the
+//! *process*-scoped execution policy, and which every descendant inherits.
+//! Measured here: a PowerShell 7 window with no such variable in its environment
+//! reports an effective policy of `RemoteSigned` and its `powershell.exe` child
+//! *still refuses a local `.ps1`*, because Windows PowerShell 5.1's own default
+//! is `Restricted` when no scope sets one and the two hosts default differently.
+//! The PowerShell tool this file was run from is started with
+//! `-ExecutionPolicy Bypass`, so its `cargo test` — and that run's
+//! `powershell.exe` grandchild — inherit `Process  Bypass` and the same four
+//! tests pass. **"Run it from PowerShell" is therefore not the requirement**; a
+//! fresh PowerShell window on this machine fails these four tests too.
+//!
+//! The standing requirement is that the session which starts this target carries
+//! a process-scoped policy that permits scripts. `docs/development/WINDOWS.md`,
+//! `## Which shell the tests are run from`, says that where a contributor meets
+//! it, and says which scope is allowed and which is out of bounds;
+//! `docs/testing/TEST_STRATEGY.md` says the same for the suite as a whole.
+//!
+//! # What this file does about it, and what it refuses to do
+//!
+//! It refuses to report a refusal as if the launcher had answered. When a run's
+//! status is not the one the test asked for *and* the host left its own marks on
+//! stderr, the failure is reported as what it is: the interpreter named, the
+//! script named, the scope that fixes it named, and the raw stream kept.
+//!
+//! The alternative — skipping these tests when the host refuses — is the one
+//! answer this file must not take. A skipped run still prints `5 passed`, and
+//! nothing in that line says that four of them measured nothing; that is a false
+//! green, and this repository treats a false green as more serious than a
+//! visible error. So the refusal stays **red**, and it stays red naming its
+//! cause. `a_host_that_cannot_run_scripts_is_named_rather_than_reported_as_a_launcher_failure`
+//! is the test that holds that rule, and it goes red under *both* shells on any
+//! machine, because it pins the policy on a child process this test owns rather
+//! than relying on the state the surrounding session happens to be in.
 
 // The workspace forbids `unwrap`, `expect` and `panic` in shipped code because a
 // panic is a message nobody chose. In a test the panic *is* the report.
@@ -267,6 +341,19 @@ fn run_launcher(
             }
         }
     }
+    run_configured(command, payload)
+}
+
+/// Start a launcher that has already been configured, hand it the event on
+/// standard input, and collect what it did.
+///
+/// Split out of [`run_launcher`] so that
+/// `a_host_that_cannot_run_scripts_is_named_rather_than_reported_as_a_launcher_failure`,
+/// which builds its own `Command` in order to pin an execution policy on the
+/// child, still starts a launcher through this one path. A second copy of these
+/// eight lines is a second place the pipes can be wired differently, and the
+/// whole point of that test is that it measures what this one measures.
+fn run_configured(mut command: Command, payload: &str) -> Output {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -372,6 +459,144 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+// --- A shell that will not run the launcher ------------------------------
+
+/// The marks a PowerShell host leaves on stderr when it refuses to run a script.
+///
+/// The two identifiers and not the sentence beside them, because the sentence is
+/// localised and the identifiers are not: measured on this machine on
+/// 2026-09-21, the *same* refusal read "running scripts is disabled on this
+/// system" from one shell and "因为在此系统上禁止运行脚本" from another. A
+/// classifier that matched the English sentence would report the localised
+/// machine as an ordinary launcher failure — which is the failure this whole
+/// file is about, one layer down.
+const REFUSAL_MARKS: [&str; 4] = [
+    "CategoryInfo",
+    "SecurityError",
+    "FullyQualifiedErrorId",
+    "UnauthorizedAccess",
+];
+
+/// Whether a stream carries a host's own refusal to run a script.
+///
+/// All four marks, so that a launcher which merely mentions one of these words
+/// is not read as a shell that cannot run anything. A false positive here does
+/// not hide anything — the raw stream goes into the message — but it would
+/// explain a real launcher defect away as an environment problem, and a real
+/// launcher defect is exactly what the four tests below exist to catch.
+fn a_host_refused(stderr: &str) -> bool {
+    REFUSAL_MARKS.iter().all(|mark| stderr.contains(mark))
+}
+
+/// What a reader is told when the shell that started this target would not run
+/// the launcher.
+///
+/// A function rather than a sentence written into each assertion, for two
+/// reasons: the same refusal reaches all four tests and one wording is easier to
+/// keep true than four, and
+/// `a_host_that_cannot_run_scripts_is_named_rather_than_reported_as_a_launcher_failure`
+/// has to be able to drive this without being on a machine that is refusing
+/// anything.
+///
+/// What it names, in the order a reader needs it: that nothing was measured, the
+/// interpreter, the file, the status the test read against the status the
+/// launcher would have answered, the host's own words, whether *this* process
+/// inherited a process-scoped policy, where the requirement is written down, and
+/// which scope is out of bounds.
+fn a_shell_that_cannot_run_scripts(
+    harness: &str,
+    script: &Path,
+    host: &Path,
+    expected: Option<i32>,
+    status: Option<i32>,
+    stderr: &str,
+) -> String {
+    let inherited = std::env::var("PSExecutionPolicyPreference")
+        .map(|value| format!("{value:?}"))
+        .unwrap_or_else(|_| {
+            "not set, so the host answered from its own scopes and its own default".to_owned()
+        });
+    format!(
+        "{harness}: this run measured nothing. The launcher at {} was never started, so the \
+         status below is not a launcher answering.\n\
+         \n\
+         The host is {}, and it refused to load the file:\n\
+         \n{stderr}\
+         \n\
+         this test read exit {status:?}, and the launcher would have answered {expected:?}.\n\
+         PSExecutionPolicyPreference in this test process: {inherited}.\n\
+         \n\
+         The requirement is written down in `docs/development/WINDOWS.md`, `## Which shell the \
+         tests are run from`, and in `docs/testing/TEST_STRATEGY.md`. The short form: the session \
+         that starts `cargo test` must carry a process-scoped policy that permits scripts, and \
+         every process it starts inherits it. Any other shell reaches Windows PowerShell's own \
+         default and every target that spawns a `.ps1` fails this way — a fresh PowerShell window \
+         on this machine included, which is why \"run it from PowerShell\" is not the rule.\n\
+         \n\
+         A process-scoped policy belongs to one session and to the processes under it: it writes \
+         nothing to any scope, nothing to the registry, and it ends with the session. A \
+         machine-scoped or user-scoped change is not the fix and must not be proposed as one — it \
+         would make this refusal invisible on every machine it was applied to, and a check that \
+         cannot report a refusal is the false green this repository treats as more serious than a \
+         visible error.",
+        script.display(),
+        host.display(),
+    )
+}
+
+/// The interpreter `launcher_command` starts a launcher with.
+///
+/// The same choice, for the same reason it is named by absolute path there, and
+/// per platform so that a message can name it on either one.
+#[cfg(windows)]
+fn the_shell_that_runs_launchers() -> PathBuf {
+    powershell()
+}
+
+#[cfg(unix)]
+fn the_shell_that_runs_launchers() -> PathBuf {
+    PathBuf::from("/bin/sh")
+}
+
+/// Fail with the naming message when the launcher was refused rather than run.
+///
+/// Called by the tests that assert what a launcher did, once they know whether
+/// it did it. Two conditions, and both are needed:
+///
+/// * `satisfied` — the run delivered everything the test asked for. A run that
+///   did has measured what it was there to measure, and there is nothing to
+///   explain however its stderr reads.
+/// * the refusal marks on stderr.
+///
+/// **The status alone would not do**, and this is the trap that made the message
+/// necessary: exit 1 is `UnauthorizedAccess`'s status *and* SURE's `block`
+/// status, so a refused run whose test expects a 1 passes its status assertion
+/// and then fails on stdout with nothing said about the shell. That is exactly
+/// the failure this file is here to stop reporting.
+fn assert_the_shell_did_not_refuse_the_launcher(
+    harness: &str,
+    script: &Path,
+    expected: Option<i32>,
+    satisfied: bool,
+    output: &Output,
+) {
+    let stderr = text(&output.stderr);
+    if satisfied || !a_host_refused(&stderr) {
+        return;
+    }
+    panic!(
+        "{}",
+        a_shell_that_cannot_run_scripts(
+            harness,
+            script,
+            &the_shell_that_runs_launchers(),
+            expected,
+            output.status.code(),
+            &stderr,
+        )
+    );
+}
+
 // --- SURE missing: the launcher must not block the session --------------
 
 /// What one launcher must write when SURE cannot be resolved at all.
@@ -473,6 +698,15 @@ fn no_launcher_blocks_the_session_when_sure_cannot_be_found() {
         let stdout = text(&output.stdout);
         let stderr = text(&output.stderr);
 
+        // What this test asks of one launcher: exit 0, and nothing on stdout,
+        // because stdout is what a harness reads as SURE's answer.
+        assert_the_shell_did_not_refuse_the_launcher(
+            harness,
+            script,
+            Some(0),
+            output.status.code() == Some(0) && stdout.is_empty(),
+            &output,
+        );
         assert_eq!(
             output.status.code(),
             Some(0),
@@ -523,6 +757,18 @@ fn assert_relayed(harness: &str, script: &Path, scratch: &Path, code: u8) {
     let stdout = text(&output.stdout);
     let stderr = text(&output.stderr);
 
+    // Everything this test asks of one launcher: the status the stand-in
+    // answered, and both of the stand-in's lines reaching the harness.
+    let relayed = output.status.code() == Some(i32::from(code))
+        && stdout.contains(&format!("stub-out {code}"))
+        && stderr.contains(&format!("stub-err {code}"));
+    assert_the_shell_did_not_refuse_the_launcher(
+        harness,
+        script,
+        Some(i32::from(code)),
+        relayed,
+        &output,
+    );
     assert_eq!(
         output.status.code(),
         Some(i32::from(code)),
@@ -572,6 +818,112 @@ fn a_launcher_relays_the_status_of_a_run_that_could_not_finish() {
     for (harness, script) in hook_launchers() {
         assert_relayed(&harness, &script, &scratch, 5);
     }
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// --- the shell the launchers are started from ----------------------------
+
+/// A host that will not run a script is named, not reported as the launcher
+/// failing.
+///
+/// This is the instrument for the rule at the top of this file, and it is
+/// written so that it runs under **either** shell on any machine: it does not
+/// wait for the surrounding session to be in the state it is about. It pins the
+/// policy on a child process this test owns, with the interpreter's own
+/// command-line option, so the refusal happens here whatever the session that
+/// started `cargo test` did — which is what makes this rule checkable from the
+/// shell that used to surface the raw `UnauthorizedAccess`, and not only from
+/// the one where the refusal does not happen.
+///
+/// **That pin can only tighten, and it is the only execution policy named
+/// anywhere in this repository.** An execution policy given on a command line is
+/// the process scope of the process being started and of nothing under it: not
+/// written to any scope, not written to the registry, and gone when that child
+/// exits, which is a few milliseconds later. Nothing here weakens anything, and
+/// no test, gate, script or workflow in this tree sets an execution policy. The
+/// point of the measurement is that the tree keeps *reporting* this refusal
+/// rather than arranging for it not to happen.
+///
+/// The control at the bottom is not decoration. A diagnosis that fired on every
+/// stream would explain every real launcher defect in this file away as an
+/// environment problem, and a real launcher defect is what the four tests above
+/// exist to catch.
+#[test]
+#[cfg(windows)]
+fn a_host_that_cannot_run_scripts_is_named_rather_than_reported_as_a_launcher_failure() {
+    let scratch = scratch("hook-refused");
+    let host = powershell();
+    let launchers = hook_launchers();
+    assert!(
+        !launchers.is_empty(),
+        "no hook launcher was found for this platform, so this test proves nothing"
+    );
+
+    for (harness, script) in &launchers {
+        let bin = stand_in(&scratch, 0);
+        // Built here rather than through `launcher_command`, because the policy
+        // has to go between the interpreter and `-File`. The tail — pipes, the
+        // event on standard input, the wait — is `run_configured`, the same one
+        // every other test in this file goes through.
+        let mut command = Command::new(&host);
+        command
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Restricted")
+            .arg("-File")
+            .arg(script);
+        if let Some(kind) = event_kind(harness) {
+            command.arg(kind);
+        }
+        command.env("SURE_BIN", &bin);
+        let output = run_configured(command, &an_event(harness));
+        let stderr = text(&output.stderr);
+
+        assert_ne!(
+            output.status.code(),
+            Some(0),
+            "{harness}: the host was asked to refuse scripts and did not, so this test measured \
+             nothing. stderr:\n{stderr}"
+        );
+        assert!(
+            a_host_refused(&stderr),
+            "{harness}: the host refused the launcher and the classifier did not see it, so the \
+             tests above would report this refusal as the launcher failing. The marks matched for \
+             are {REFUSAL_MARKS:?}. stderr:\n{stderr}"
+        );
+
+        let message = a_shell_that_cannot_run_scripts(
+            harness,
+            script,
+            &host,
+            Some(0),
+            output.status.code(),
+            &stderr,
+        );
+        for named in [
+            host.display().to_string(),
+            script.display().to_string(),
+            "WINDOWS.md".to_owned(),
+            "process-scoped".to_owned(),
+        ] {
+            assert!(
+                message.contains(&named),
+                "{harness}: the message a reader gets does not name {named:?}. A refusal that does \
+                 not name what refused it, and does not say which scope is allowed, is the failure \
+                 this test exists to prevent:\n{message}"
+            );
+        }
+    }
+
+    // The control: what a launcher leaves on its streams when it did what it was
+    // asked to. Bytes a test chose rather than bytes this machine happens to
+    // produce, so the rule holds on a machine where no host refuses anything.
+    let an_ordinary_run = "stub-out 0\nstub-err 0\n";
+    assert!(
+        !a_host_refused(an_ordinary_run),
+        "the refusal marks fire on an ordinary launcher run, so every failure in this file would \
+         be explained away as a shell problem instead of reported"
+    );
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

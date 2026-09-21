@@ -151,7 +151,15 @@ pub struct NotYet {
 /// its status is the run's own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalRecorded {
-    /// The goal, as the user gave it. Not a summary; see `cli.rs`.
+    /// The goal, as the record holds it. Not the words as the user typed them,
+    /// and not a summary of them either; see `cli.rs`.
+    ///
+    /// The two texts are one text unless the store's redaction removed a
+    /// credential-shaped value on the way in, and the report prints this one
+    /// because the sentence above it is about the record — `P15-T024`, and
+    /// `docs/architecture/PROJECT_INTENT.md` for the decision and the case
+    /// against it. `crate::check`'s `record_goal` reads the row back and puts
+    /// what it holds here, rather than redacting the words a second time.
     pub goal: String,
     /// The requirement's identifier, so that a later report can say whether the
     /// goal it compared against is the one this run recorded.

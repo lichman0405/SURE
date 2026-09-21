@@ -61,17 +61,57 @@ prevented by a shape rather than by a rule the code follows.
 
 ## The explicit channel
 
-`sure check --goal "…"` stores the text **verbatim** as a requirement whose
-source is `explicit_user_goal`, then reports that it checked nothing. The
+`sure check --goal "…"` stores the text as a requirement whose source is
+`explicit_user_goal`, verbatim except for the one removal the section below
+states, then reports that it checked nothing. The
 command-line half of the contract is in `docs/architecture/CLI.md`; this section
 is what the stored requirement means.
 
-**Nothing is normalized.** The text is kept as it arrived, minus nothing. SURE
-rewording what the user asked for is the overclaim `MASTER_PROMPT.md` §3 forbids,
-and a summary that dropped a clause would be a requirement the user never
-stated. `Requirement::raw_retained` is set, because the stored text *is* the raw
-text rather than a summary of it, and the flag says so rather than leaving a
-reader to guess.
+**Nothing is normalized, and one thing is removed.** The text is kept as it
+arrived, with a single exception: the store's redaction removes credential-shaped
+values before the row is written.
+
+`P15-T024` decided which of the two rules wins, and **the store's redaction won
+and the goal is not exempt from it**. What this means on the surfaces:
+
+- the row holds the user's words with credential-shaped values replaced by `***`;
+- the report prints **the row's own text** — `crate::check`'s `record_goal` reads
+  the row back and hands that text to every surface, so the sentence "Your goal
+  was written to the history as record N" and the text beside it are about the
+  same record, and are the same text;
+- the run checks against the text it recorded: stage 2 resolves the requirement
+  from the record's own text, so the not-checked line for an unmatched
+  requirement — which quotes the requirement — cannot become a second place the
+  removed value is printed;
+- `crates/sure-core/src/store/mod.rs` keeps **no** exception. `redact_document`
+  is applied to every accepted document including this one, and its
+  documentation says so at the place the exception would have been written.
+
+**The case against that decision, recorded rather than left out.** A stored
+requirement with a value removed is not, word for word, what the user typed, so a
+later reader comparing a project against the recorded goal compares against a
+sentence the user did not write in full; and the honest form of the alternative
+is not absurd — the words *were* handed to SURE in the same breath as the
+command, and the goal is the one thing on this surface that is a user's own
+statement rather than material SURE collected. It is still the wrong way round,
+for three reasons. The report has a machine form (`--format json`) that a harness
+captures, redirects or logs, and `docs/security/SECRET_REDACTION.md` requires
+redaction to happen *before user-visible reports* — an exemption would need that
+sentence to mean something narrower than it says. The store is local but not
+private to the run: `docs/security/PRIVACY.md` promises the user can inspect it,
+and a credential written into it is in every backup and every copy of that file.
+And an exemption is not a one-time choice: the channels that carry a goal are
+growing (a documented goal in `sure.yaml` has a producer today), so a door opened
+for the explicit goal is a door the next channel walks through unless someone
+argues this again each time.
+
+SURE rewording what the user asked for is the overclaim `MASTER_PROMPT.md` §3
+forbids, and a summary that dropped a clause would be a requirement the user never
+stated. `Requirement::raw_retained` is set, because the stored text is the user's
+own wording rather than a summary of it. Redaction is neither rewording nor
+summarising: it removes a value and leaves the sentence, and it is bounded by a
+detector that `docs/security/SECRET_REDACTION.md` says is imperfect — so the flag
+does not claim the row holds no secret, only that the row is not a paraphrase.
 
 **No opt-in is consulted, and no recording is written.** The privacy rule is
 about *captured material* — a transcript from a harness session, kept only under

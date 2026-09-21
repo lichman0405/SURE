@@ -301,25 +301,33 @@ The first place on this surface where a command changes something the output doe
 not contain: the goal goes into the user's record store. Everything below follows
 from having to be honest about that.
 
-**What a run with `--goal` does.** It writes the text, verbatim, as a project
-intent whose `source` is `explicit_user_goal` — the source the domain marks as a
-user requirement, and the one that asks for no transcript recording. There is no
-session to capture: the words arrived with the command that stored them.
-`docs/architecture/PROJECT_INTENT.md` is the contract; this section is the
-command-line half of it.
+**What a run with `--goal` does.** It writes the text as a project intent whose
+`source` is `explicit_user_goal` — the source the domain marks as a user
+requirement, and the one that asks for no transcript recording. The text is kept
+as it arrived with one exception: the store removes credential-shaped values from
+every document it accepts, and `P15-T024` decided that rule wins here rather than
+the goal being exempt from it. `docs/architecture/PROJECT_INTENT.md` is the
+contract, and it holds the decision and the case against it; this section is the
+command-line half of it. There is no session to capture: the words arrived with
+the command that stored them.
 
 **Then the check runs against it.** The recorded goal is stage 2's input: the run
-resolves its intent partly from what the user stated, and the verdict says what
-that intent was worth (`must_caveat_requirements`) as it does for a run with no
-goal at all. Reporting a receipt and no check would be the worse of the two
-answers — the user asked for a check.
+resolves its intent partly from what the user stated, and what it resolves is the
+text the record holds rather than the words as they were typed — so the
+requirement quoted in a not-checked line is the requirement that was written
+down. The verdict says what that intent was worth (`must_caveat_requirements`) as
+it does for a run with no goal at all. Reporting a receipt and no check would be
+the worse of the two answers — the user asked for a check.
 
-**The report says what was recorded.** `details.recorded_goal` carries the goal,
-its requirement identifier, the source as the domain's wire name, and the project
-state it was recorded against — the kind and the digest, which is what two runs
-can compare, plus the identifier of the reading itself. The prose prints the same
-facts in words. A run with no `--goal` answers with `null` there rather than a
-placeholder: an empty goal object would be a stored goal no user ever stated, and
+**The report says what was recorded.** `details.recorded_goal` carries the goal as
+the record holds it — read back out of the row rather than kept from the words
+that were typed, so that the sentence a person reads and the text beside it are
+about the same record. The same object carries its requirement identifier, the
+source as the domain's wire name, and the project state it was recorded against —
+the kind and the digest, which is what two runs can compare, plus the identifier
+of the reading itself. The prose prints the same facts in words. A run with no
+`--goal` answers with `null` there rather than a placeholder: an empty goal
+object would be a stored goal no user ever stated, and
 `null` is what this frame says wherever something did not happen — `reason` and
 `stopped_at` in the stage records are the same spelling.
 

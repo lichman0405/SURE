@@ -228,8 +228,8 @@
       "kind": "check",
       "layer": "binary",
       "release_blocking": true,
-      "title": "A credential in `--goal` is in no byte of the store, and the redacted form is",
-      "why": "The report-and-storage seam for a value that arrives on the command line rather than from the project. Both halves are required: the absence proves nothing on its own, because a run that wrote no goal at all would satisfy it -- the redacted text being present is what shows SURE really did store the words it was given. The stdouts assertion requires the run to have said it recorded the goal, so the store half is about a goal that was recorded rather than about a setting that was never written. What the report prints is not asserted here; see not_confirmed[the-report-shows-a-goal-the-history-does-not-hold].",
+      "title": "A credential in `--goal` is in no byte of the store, and the report prints the text the store holds",
+      "why": "The report-and-storage seam for a value that arrives on the command line rather than from the project. Both halves are required: the absence proves nothing on its own, because a run that wrote no goal at all would satisfy it -- the redacted text being present is what shows SURE really did store the words it was given. The stdouts assertion requires the run to have said it recorded the goal, so the store half is about a goal that was recorded rather than about a setting that was never written. The report half is asserted here too: P15-T024 decided that the store's redaction wins and the goal is not exempt from it, so the text beside the sentence is read back out of the record and `deploy using token *** please` is what the run prints -- while the credential reaches neither stream. This case used to record that half as unconfirmed; the entry in `not_confirmed` went with the gap it described.",
       "promised_by": [
         {
           "doc": "docs/security/SECRET_REDACTION.md",
@@ -251,7 +251,11 @@
       "expect": {
         "status_not": [2, 3, 5],
         "store_exists": true,
-        "stdout_contains": ["Your goal was written to the history as record"],
+        "stdout_contains": [
+          "Your goal was written to the history as record",
+          "deploy using token *** please"
+        ],
+        "output_absent": ["ghp_0123456789abcdefghij"],
         "store_absent": ["ghp_0123456789abcdefghij"],
         "store_present": ["deploy using token *** please"]
       }
@@ -710,14 +714,6 @@
     }
   ],
   "not_confirmed": [
-    {
-      "id": "the-report-shows-a-goal-the-history-does-not-hold",
-      "kind": "gap",
-      "owner": "unassigned",
-      "what": "`sure check --goal \"...\"` prints the goal verbatim under 'Your goal was written to the history as record N', and the history holds the redacted form. The sentence is about the record, so it describes a record that is not the one that was written.",
-      "evidence": "The case `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` asserts the store half and passes: every byte under the store directory holds `deploy using token *** please` and no byte holds the credential. The report half is asserted by nothing, because the honest expectation is not settled. The two surfaces are `crates/sure-cli/src/check.rs` (`what_was_recorded`, the sentence and the verbatim text) and `crates/sure-core/src/store/mod.rs` (`redact_document`, applied to every document a write accepts).",
-      "would_settle_it": "A decision about which of the two rules wins for the goal: PROJECT_INTENT.md says the text is stored verbatim -- 'minus nothing' -- and the store redacts every document it accepts. Either the report prints what the store holds, or the goal is exempted from the store's redaction and the document says so. The corpus entry above should then become an assertion about the report as well as the store."
-    },
     {
       "id": "the-dangerous-action-scenarios-are-p14-t008s",
       "kind": "seam",

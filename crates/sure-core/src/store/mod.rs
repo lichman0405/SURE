@@ -978,6 +978,22 @@ pub(crate) fn is_busy(error: &rusqlite::Error) -> bool {
 /// `a_secret_in_a_document_does_not_reach_the_file`, beside the other store
 /// tests rather than in a `tests/` file that does not exist — checks that
 /// against the bytes on disk.
+///
+/// # There is no exception, and the explicit goal is the case that asked for one
+///
+/// `sure check --goal "…"` is the surface where the user hands SURE a value that
+/// may be a credential in the same breath as the command that keeps it, and the
+/// rule here would keep it verbatim under
+/// `docs/architecture/PROJECT_INTENT.md`'s "minus nothing". `P15-T024` decided
+/// the other way: this rule wins, the goal is redacted like every other accepted
+/// document, and the report prints the text this leaves in the row rather than
+/// the words that were typed. The reasons are in that document, which also
+/// records the case against the choice.
+///
+/// It is written down here because the question comes back: a reader who finds
+/// one document type exempt has to know whether the next one may be, and the
+/// answer is that a door naming one channel is a door the next channel inherits.
+/// The exception count is zero.
 pub(crate) fn redact_document(value: &Value) -> Value {
     redact::redact_value(value)
 }

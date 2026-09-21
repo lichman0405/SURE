@@ -96,7 +96,8 @@ Two of these deserve a note.
   satisfy it. So `no-settings-file-at-all-records-no-full-recording` requires a
   stored `event` row before the missing recording means anything, and
   `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` requires the
-  redacted text to be in the store before the absent credential means anything.
+  redacted text to be in the store **and in the report** before the absent
+  credential means anything.
 - Every case reads **every byte** under its store directory, not the value a
   reader is handed back: a redaction is a claim about the file, and a row read
   back through a redacting path would pass while the page still held the secret.
@@ -126,15 +127,21 @@ exactly like a pass.
 
 ## What could not be confirmed
 
-Printed on every run. One gap and one seam:
+Printed on every run. One seam:
 
-- **`the-report-shows-a-goal-the-history-does-not-hold`** — `sure check --goal`
-  prints the goal verbatim under a sentence about the record, and the record holds
-  the redacted form. The corpus asserts the store half and records the report
-  half, because the honest expectation is not settled: `PROJECT_INTENT.md` says
-  the text is stored minus nothing, and the store redacts every document it
-  accepts. One of the two rules has to win, and that is a product decision.
 - **`the-dangerous-action-scenarios-are-p14-t008s`** — the seam with that task.
+
+There was a gap here until P15-T024, `the-report-shows-a-goal-the-history-does-not-hold`:
+`sure check --goal` printed the words that were typed under a sentence about the
+record, while the record held the redacted form. Two rules each said they won —
+`PROJECT_INTENT.md` said the text was stored minus nothing, and the store redacts
+every document it accepts — and what the entry was waiting for was the product
+decision between them. P15-T024 took it: the store's redaction wins and the goal is
+not exempt, `check.rs`'s `record_goal` reads the row back so the sentence and the
+text beneath it are about the same record by construction, and the case above now
+asserts the report half as well as the store half — which is why its
+`stdout_contains` names the redacted text and its `output_absent` names the
+credential.
 
 There was a second gap here until P15-T025, `no-recording-through-the-binary`: no
 case could open a full recording through a real process, because the consent comes

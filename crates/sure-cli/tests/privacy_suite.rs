@@ -32,13 +32,24 @@
 //!
 //! # What it cannot reach, and says so
 //!
-//! One thing a reader might expect is not here, and it is recorded in the
-//! manifest's `not_confirmed` and printed by
-//! [`the_corpus_prints_what_it_could_not_confirm`]:
+//! It is recorded in the manifest's `not_confirmed` and printed by
+//! [`the_corpus_prints_what_it_could_not_confirm`]. One entry stands there, the
+//! seam with P14-T008's three dangerous-action scenarios.
 //!
-//! - **the `--goal` the report shows and the one the store holds.** They differ
-//!   today. The corpus asserts the half that is settled (the store redacts) and
-//!   records the half that is not.
+//! # The `--goal` case asserts both halves now
+//!
+//! It used to be the example here of a thing this file could not reach, and it
+//! is worth keeping the shape of that in view. `sure check --goal` printed the
+//! words that were typed under a sentence about the record, while the record
+//! held the redacted form; the case
+//! `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` asserted the
+//! store half and the report half was recorded as unsettled. `P15-T024` decided
+//! which rule wins — the store's redaction, with the goal not exempt from it —
+//! and `check.rs`'s `record_goal` now reads the row back and hands that text to
+//! every surface. So the case asserts the report too: no byte under the store
+//! directory holds the credential, the redacted text does, the report shows that
+//! same text, and the credential is in neither stream. The manifest entry and
+//! this paragraph went with the gap.
 //!
 //! # The settings file a case supplies, and the one it must not
 //!

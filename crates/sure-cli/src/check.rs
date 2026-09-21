@@ -32,6 +32,18 @@
 //! what it happens to find in the history, so a run cannot record one thing and
 //! check against another.
 //!
+//! # What the report shows, and what the record holds
+//!
+//! One text. The store redacts every document it accepts, so the text beside
+//! "Your goal was written to the history as record N" is not the words as they
+//! arrived but the record's own text, read back out of that record — and it is
+//! the text stage 2 resolves, so the requirement the run checks against is the
+//! one it wrote down. The decision, the argument for it and the case against it
+//! are in `docs/architecture/PROJECT_INTENT.md`; what is here is the half a
+//! reader of this module needs: the goal is not exempt from the store's
+//! redaction, and no surface of this command prints a text the record does not
+//! hold.
+//!
 //! Every step before the write can refuse without having changed anything, which
 //! is why the order is: the words, then the project path, then the fingerprint,
 //! then the store, then the row. A goal with no words in it is refused before
@@ -104,6 +116,19 @@ const RECORDED_AND_UNCHECKED: &str = "The goal was recorded, and nothing was che
 /// written and SURE cannot say what.
 const RECORDED_WITHOUT_A_ROW: &str =
     "The goal was recorded, and SURE cannot say which record holds it.";
+
+/// What a run says when the row came back and the text it holds cannot be read.
+///
+/// The same family as [`RECORDED_WITHOUT_A_ROW`] — something was written and
+/// SURE cannot say what — and separate from it because what is missing is
+/// different: there the row is unknown, here the row is known and its text is
+/// not. The one thing this failure must not do is fall back to the words the
+/// user typed. Those are the words the store was asked to accept, not the text
+/// the record holds, and the case where the two differ is the case where what
+/// was removed is a credential: printing them here would put back exactly what
+/// the read-back exists to keep out of the report.
+const RECORDED_WITHOUT_TEXT: &str =
+    "The goal was recorded, and SURE cannot show the text the record holds.";
 
 /// What a run says when it checked the project and could not keep what it found.
 ///
@@ -249,13 +274,25 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         }
     }
 
+    // Stage 2 resolves the requirement from the text the record holds rather
+    // than from the words as they arrived. The two are the same text unless the
+    // store's redaction removed something, and in that case checking against the
+    // typed words would put the removed value back into the report: the
+    // not-checked line for an unmatched requirement quotes the requirement's own
+    // text. `Pipeline::goal`'s documentation is the same rule from the other
+    // side — a run that wrote a goal and then checked against a different intent
+    // would be recording something it did not use.
+    let goal_as_recorded = recorded
+        .as_ref()
+        .map_or(goal, |recorded| Some(recorded.goal.as_str()));
+
     let run = Pipeline {
         project,
         purpose,
         config: &loaded.config,
         execution: authority.execution(),
         store: store.as_ref(),
-        goal,
+        goal: goal_as_recorded,
     }
     .run();
 
@@ -307,6 +344,13 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
 /// The order is the promise: nothing is opened until the words and the project
 /// have both been accepted, so a refusal cannot have left a database behind and
 /// a user who typed nothing has no record to clean up.
+///
+/// **The text it hands back is the record's, not the user's.** A goal is stored
+/// through a write that redacts every document it accepts, and everything the
+/// report says about the goal is this text, so the row is read back and the
+/// report prints what it holds. Nothing here returns the words as they arrived:
+/// a caller that kept them would have two texts and no rule for which one to
+/// show, which is the defect `P15-T024` decided.
 fn record_goal(
     paths: &Paths,
     project: &Path,
@@ -360,9 +404,20 @@ fn record_goal(
         ));
     };
 
+    // The text the record holds, read back out of the row rather than kept from
+    // the words that went in. `store::redact_document` stands between the two —
+    // every document a write accepts is redacted — so the text a user reads
+    // beside "written to the history as record N" has to be the row's own text,
+    // or that sentence describes a record nobody wrote. The two differ exactly
+    // when a credential-shaped value was removed, which is the case this
+    // read-back is for. Read back rather than redacted a second time here, so
+    // that the report and the row agree by construction instead of by two
+    // implementations staying in step.
+    let text = held_text(&store, row)?;
+
     Ok((
         GoalRecorded {
-            goal: goal.to_owned(),
+            goal: text,
             requirement_id: EXPLICIT_GOAL_ID.to_owned(),
             source: IntentSource::ExplicitUserGoal,
             project_root: root.to_owned(),
@@ -371,6 +426,44 @@ fn record_goal(
         },
         store,
     ))
+}
+
+/// The text the row holds, or a failure rather than a fallback.
+///
+/// A read-back rather than a redaction applied here, because the question is
+/// not what the redactor would do to the words but what the record holds: the
+/// sentence the user reads names a record, and the text under it is read out of
+/// that record. `docs/architecture/PROJECT_INTENT.md` records the decision this
+/// implements — the store's redaction wins over the goal being stored verbatim,
+/// and the report follows the record.
+///
+/// # Errors
+///
+/// [`Failure`] carrying [`RECORDED_WITHOUT_TEXT`] if the row cannot be read, or
+/// if what comes back holds no text. Neither is a reason to print the words the
+/// user typed: those are not the record's text, and the difference between them
+/// is what this function exists not to lose.
+fn held_text(store: &Store, row: i64) -> Result<String, Failure> {
+    let held = store
+        .record(row)
+        .map_err(|error| Failure::new(RECORDED_WITHOUT_TEXT, error.to_string()))?;
+    held.and_then(|record| {
+        record
+            .document
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })
+    .ok_or_else(|| {
+        Failure::new(
+            RECORDED_WITHOUT_TEXT,
+            format!(
+                "Record {row} holds no text for the goal. The goal was written before the check \
+                 ran, and the row SURE read back is not the row it wrote. This is a fault in SURE \
+                 rather than in the goal."
+            ),
+        )
+    })
 }
 
 /// The history, when its file is already there.
@@ -782,6 +875,9 @@ fn stages(outcome: &PipelineOutcome, out: &mut impl Write) -> io::Result<()> {
 ///
 /// The one place a command changes something its output would not otherwise
 /// contain, so it is said in the words a person reads and not only in the frame.
+/// The text printed under the sentence is [`GoalRecorded::goal`], which is the
+/// row's own text rather than a copy of the words that were typed — see
+/// [`record_goal`] for why the two are read apart rather than assumed equal.
 fn what_was_recorded(recorded: &GoalRecorded, out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "What SURE recorded")?;
     writeln!(out)?;
@@ -2025,12 +2121,96 @@ privacy:
     }
 
     #[test]
+    fn the_goal_the_report_shows_is_the_text_the_record_holds() {
+        // P15-T024, measured rather than argued: a credential in the words, and
+        // then every surface this command has — the prose, the frame, the row and
+        // the requirement the run checked against. The report has to show the
+        // row's text rather than the words that were typed, and the credential
+        // has to reach none of the four.
+        //
+        // What this cannot see is the store's file: the corpus case
+        // `a-secret-typed-into-a-goal-reaches-the-store-only-redacted` drives the
+        // same goal through a real process and reads every byte under the store
+        // directory, which is where "no byte holds it" belongs.
+        let fixture = Fixture::new("goal-held-text");
+        a_project(&fixture);
+        let paths = fixture.paths();
+        let project = fixture.project();
+
+        let credential = "ghp_0123456789abcdefghij";
+        let goal = format!("deploy using token {credential} please");
+        let report = run_with(Purpose::Check, &paths, &project, Some(&goal));
+
+        let check = checked(&report);
+        let recorded = check
+            .recorded_goal
+            .as_ref()
+            .expect("the goal was written and the report does not say so");
+
+        let store = Store::open_at(&paths.store_file()).expect("the store this run wrote");
+        let row = the_intent_row(&store);
+        assert_eq!(row.id, recorded.record);
+        assert_eq!(
+            row.document["text"],
+            json!(recorded.goal),
+            "the report shows a text the record does not hold: {}",
+            row.document
+        );
+        // The row's text is the user's words with the credential removed, which
+        // is what the equality above is about: without this, two surfaces that
+        // both held the credential would satisfy it.
+        assert_eq!(recorded.goal, "deploy using token *** please");
+
+        // Neither form of the report prints the credential...
+        let prose = report.human_text();
+        assert!(
+            !prose.contains(credential),
+            "the human report prints the credential:\n{prose}"
+        );
+        let frame = machine_of(&report).to_string();
+        assert!(
+            !frame.contains(credential),
+            "the frame prints the credential:\n{frame}"
+        );
+        // ...nor does any column of the row.
+        assert!(
+            !row.document.to_string().contains(credential),
+            "the record holds the credential: {}",
+            row.document
+        );
+
+        // And the requirement the run checked against is the one it wrote down.
+        // The not-checked line for an unmatched requirement quotes the
+        // requirement's own text, so this is the second place the typed words
+        // would come back into the report.
+        let run = check
+            .run
+            .run
+            .as_ref()
+            .expect("the check produced a verdict");
+        let requirements: Vec<&str> = run
+            .intent
+            .user_requirements()
+            .map(|requirement| requirement.text.as_str())
+            .collect();
+        assert_eq!(
+            requirements,
+            vec![recorded.goal.as_str()],
+            "the run checked against an intent other than the one it recorded: {:?}",
+            run.intent
+        );
+    }
+
+    #[test]
     fn the_goal_is_written_verbatim_and_before_the_check() {
         // Two things a user cannot check for themselves. The first is the
         // acceptance's second half: nothing captured, nothing kept that was not
         // handed over in the same breath. The second is the same rule from the
         // other side — the words are the user's, so a run that trimmed or
-        // rewrapped them would be storing a requirement nobody stated.
+        // rewrapped them would be storing a requirement nobody stated. The one
+        // thing that is not kept as it arrived is a credential-shaped value,
+        // which `the_goal_the_report_shows_is_the_text_the_record_holds` above
+        // measures and `docs/architecture/PROJECT_INTENT.md` argues.
         let fixture = Fixture::new("goal-privacy");
         a_project(&fixture);
         let paths = fixture.paths();

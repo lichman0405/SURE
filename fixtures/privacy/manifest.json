@@ -656,12 +656,12 @@
       "kind": "covered_by",
       "layer": "binary",
       "release_blocking": true,
-      "title": "Every run that reads settings says which mode was in effect and what it did about models",
+      "title": "Every run that gets past reading its settings says which mode was in effect and what it did about models",
       "why": "The user-facing half of the privacy statement, asserted at the layer the user meets it. It is the promise in PRIVACY.md's last paragraph, and it is checked for a run that stopped as well as a run that finished.",
       "promised_by": [
         {
           "doc": "docs/security/PRIVACY.md",
-          "says": "**The report states which mode was in effect and whether a model was consulted**, on every run that reads settings, including a run that stopped."
+          "says": "**The report states which mode was in effect and whether a model was consulted**, on every run that gets past reading its settings, including a run that stopped before a verdict."
         }
       ],
       "file": "crates/sure-cli/tests/cli_contract.rs",

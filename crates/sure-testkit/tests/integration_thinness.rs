@@ -2629,7 +2629,7 @@ fn the_windows_hook_launchers_forward_the_event_and_fail_safe() {
 #[test]
 fn the_windows_hook_launchers_do_not_bind_the_event_to_a_parameter() {
     // The shape the Codex launcher records a measurement for
-    // (`integrations/codex/scripts/sure-hook.ps1:3-10`): a `param` block is
+    // (`integrations/codex/scripts/sure-hook.ps1:5-12`): a `param` block is
     // bound from a redirected event by PowerShell 5.1 — the host Windows 11 runs
     // by default, and the one every manifest here names — and the event never
     // arrives. The launcher then starts, exits 0 and collects nothing, which is

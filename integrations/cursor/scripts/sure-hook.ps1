@@ -1,15 +1,20 @@
 $ErrorActionPreference='SilentlyContinue'
 
+# A redirected stdin is otherwise decoded with the console's own code page (936
+# on a Simplified-Chinese Windows), which turns a non-ASCII `project_root` into a
+# path that is not there: the event records nothing and says nothing.
+[Console]::InputEncoding=New-Object System.Text.UTF8Encoding($false)
+
 # Read the JSON payload Cursor sends to this hook process. There is no `param`
 # block and `$input` is read before the console, which is the shape
-# `integrations/codex/scripts/sure-hook.ps1:3-10` records a measurement for:
+# `integrations/codex/scripts/sure-hook.ps1:5-12` records a measurement for:
 # PowerShell 5.1 binds a `param` block from the redirected event and the event
 # never arrives. The event name the manifest passes arrives in `$args` instead.
 $inputJson=($input -join "`n")
 if([string]::IsNullOrWhiteSpace($inputJson)){$inputJson=[Console]::In.ReadToEnd()}
 
 # 5.1's default encoding for the pipe below is ASCII, which turns non-ASCII in
-# the payload into `?`; that is the same file's line 18, measured there.
+# the payload into `?`; that is the same file's line 20, measured there.
 $OutputEncoding=New-Object System.Text.UTF8Encoding($false)
 
 # Resolve the local SURE binary. Order:

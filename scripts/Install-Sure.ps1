@@ -17,14 +17,14 @@
 #
 #   integrations/agent-plugin/scripts/install.ps1   (line 7)
 #   integrations/claude-code/scripts/install.ps1    (line 7)
-#   integrations/claude-code/scripts/sure-hook.ps1  (line 14)
+#   integrations/claude-code/scripts/sure-hook.ps1  (line 26)
 #   integrations/claude-code/scripts/sure-mcp.ps1   (line 16, and with a
 #       `[Environment]::GetFolderPath('LocalApplicationData')` fallback when
 #       `%LOCALAPPDATA%` is unset)
-#   integrations/codex/scripts/sure-hook.ps1        (line 24)
-#   integrations/copilot/scripts/sure-hook.ps1      (line 14)
+#   integrations/codex/scripts/sure-hook.ps1        (line 26)
+#   integrations/copilot/scripts/sure-hook.ps1      (line 26)
 #   integrations/cursor/scripts/install.ps1         (line 7)
-#   integrations/cursor/scripts/sure-hook.ps1       (line 14)
+#   integrations/cursor/scripts/sure-hook.ps1       (line 26)
 #
 # A different destination would be a binary those integrations cannot find, so
 # this is a place the tree already agreed on rather than one chosen here.
@@ -177,7 +177,7 @@ function Stop-Install {
 #
 # The variable first and the platform's own known-folder answer second, which is
 # `integrations/claude-code/scripts/sure-mcp.ps1:16`'s order. Read that line
-# before changing this one: the seven launchers listed at the top of this file
+# before changing this one: the eight launchers listed at the top of this file
 # resolve the install location this way, and one that resolved it differently
 # would look at a directory nothing is installed in.
 function Get-PerUserDataRoot {
@@ -637,7 +637,7 @@ if ($onPath -and $onPath.Source -eq $installedExe) {
 } elseif ($onPath) {
     Write-Host "   'sure' on PATH is $($onPath.Source), which is not this install."
     Write-Host "   This install is at $installedExe. It is reachable by its full path, and by the"
-    Write-Host "   seven launcher scripts in this repository, which resolve %LOCALAPPDATA%\SURE\bin\sure.exe"
+    Write-Host "   eight launcher scripts in this repository, which resolve %LOCALAPPDATA%\SURE\bin\sure.exe"
     Write-Host "   without PATH. To put it on PATH for your own shells, run:"
     Write-Host "     [Environment]::SetEnvironmentVariable('Path', ([Environment]::GetEnvironmentVariable('Path','User') + ';' + '$BinDirectory'), 'User')"
     Write-Host "   This installer does not run that line: it changes your user environment rather"

@@ -1,5 +1,7 @@
 $ErrorActionPreference='SilentlyContinue'
 
+# Redirected stdin uses the console code page unless this says so; inert under our own -File (P16-T011).
+[Console]::InputEncoding=New-Object System.Text.UTF8Encoding($false)
 # Read the JSON event Codex sends to this hook. It is forwarded unchanged: the
 # payload is Codex's own shape and carries `hook_event_name` itself, so no event
 # name is added here. There is no `param` block on purpose: with one, PowerShell

@@ -38,12 +38,12 @@ resolve `$SURE_BIN` and `PATH` instead, which is correct for Unix):
 | --- | --- | --- |
 | `integrations/agent-plugin/scripts/install.ps1` | 7 | `Join-Path $env:LOCALAPPDATA 'SURE\bin\sure.exe'`, third in the order `$env:SURE_BIN` → `Get-Command sure` → here |
 | `integrations/claude-code/scripts/install.ps1` | 7 | the same candidate |
-| `integrations/claude-code/scripts/sure-hook.ps1` | 21 | the same candidate, third in the same order |
+| `integrations/claude-code/scripts/sure-hook.ps1` | 26 | the same candidate, third in the same order |
 | `integrations/claude-code/scripts/sure-mcp.ps1` | 16 | the same path, with `[Environment]::GetFolderPath('LocalApplicationData')` as a fallback when `%LOCALAPPDATA%` is unset |
-| `integrations/codex/scripts/sure-hook.ps1` | 24 | the same candidate |
-| `integrations/copilot/scripts/sure-hook.ps1` | 21 | the same candidate |
+| `integrations/codex/scripts/sure-hook.ps1` | 26 | the same candidate |
+| `integrations/copilot/scripts/sure-hook.ps1` | 26 | the same candidate |
 | `integrations/cursor/scripts/install.ps1` | 7 | the same candidate |
-| `integrations/cursor/scripts/sure-hook.ps1` | 21 | the same candidate |
+| `integrations/cursor/scripts/sure-hook.ps1` | 26 | the same candidate |
 
 Eight rather than three is worth stating because the brief that dispatched this
 task named three, and five packages rather than six because the first correction

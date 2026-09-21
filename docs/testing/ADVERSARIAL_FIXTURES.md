@@ -34,7 +34,7 @@ observed, which is not a pass either.
 | --- | --- | --- |
 | the scenarios above | `fixtures/adversarial/<id>/scenario.json`, bound to `evaluation/acceptance-manifest.json` | `crates/sure-testkit/tests/fixture_apps.rs` |
 | the release contract those scenarios are graded against, observed | `evaluation/acceptance-manifest.json`, into `target/tmp/acceptance-report.json` | `crates/sure-core/tests/acceptance_report_runner.rs` |
-| the release decision taken from that report | the same report, into `target/tmp/release-gate.json` | `crates/sure-core/src/release_gate.rs`, driven by `crates/sure-core/tests/release_gate_runner.rs` |
+| the release decision taken from that report | the same report, into `target/tmp/release-gate.json` | `crates/sure-core/src/release_gate.rs`, driven by `crates/sure-core/tests/acceptance_report_runner.rs` — the same binary that produced the report, because the gate has to be taken from the reading the release is judged on, and that report carries one measurement no `src` module can make. `release_gate_runner.rs` measures the gate's *properties*, over a corpus the module can read on its own, and writes no document |
 | secret redaction and protection mode (`DEFINITION_OF_DONE.md`: "secret-redaction fixtures pass;", `PRODUCT_EVALS.md`: "secret redaction mandatory fixtures") | `fixtures/privacy/manifest.json` | `crates/sure-cli/tests/privacy_suite.rs` |
 
 The privacy corpus is not a list of scenarios under `fixtures/adversarial/`: its

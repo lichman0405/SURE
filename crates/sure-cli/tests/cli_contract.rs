@@ -4081,6 +4081,201 @@ fn the_four_ways_a_hook_event_can_fail_exit_5_and_record_nothing() {
     }
 }
 
+/// One Cursor `sessionStart`, with the project root the caller names.
+///
+/// The shape is `integrations/cursor/fixtures/session-start.json`'s. The root is
+/// a parameter rather than that fixture's value on purpose: the fixture carries
+/// `C:\Users\dev\sample-project`, which is absolute on Windows and relative
+/// everywhere else, and an input whose meaning depends on the machine is the
+/// defect `P15-T035` repaired.
+fn session_start_request(project_root: &str, harness_session: &str) -> String {
+    serde_json::json!({
+        "event": "sessionStart",
+        "harness_session_id": harness_session,
+        "project_root": project_root,
+        "timestamp_utc": "2026-09-19T09:30:00Z",
+        "source": "cursor",
+    })
+    .to_string()
+}
+
+/// The fifth way a hook event stops before it answers: a project root SURE
+/// cannot place.
+///
+/// The four above are events SURE could not *read*. This one it reads
+/// completely — the source is known, the event type is mapped, the payload
+/// validates — and what stops it is that `project_root` is not an absolute path.
+/// Such a value is resolved against whatever directory the hook process was
+/// started in, so the settings question ("is the file that decides what SURE may
+/// record and run inside this project?") would be answered by the harness's
+/// working directory rather than by the event, and so would the key the session
+/// is recorded under.
+///
+/// `P15-T035` decided SURE refuses rather than resolves, and the refusal is
+/// argued in `crates/sure-cli/src/hook.rs`'s module doc and recorded harness by
+/// harness in `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.3. This holds that
+/// decision at the level a harness meets it — a process and its status — and
+/// holds the *shape* rather than one sentence: exit 5, a frame with no
+/// `decision` field, and no store and no row afterwards.
+///
+/// Every root below is relative on all three of the platforms the suite runs on.
+/// None of them is a path that means one thing on Windows and another elsewhere,
+/// which is what would make this test the defect it is about — the class the
+/// fixtures do not fall into because this test never reads one.
+#[test]
+fn a_project_root_that_is_not_absolute_is_refused_and_records_nothing() {
+    let machine = the_store_on_this_machine();
+
+    // The control. Without it, "no store and no row" below would pass just as
+    // well against a hook that records nothing at all; what the refusals have to
+    // show is that the *only* thing wrong with those events is where the project
+    // is. This event is the same event, with a root SURE can place.
+    let store = a_store_of_our_own();
+    let project = a_project_of_our_own();
+    let allowed = ingest_argv(
+        &store,
+        &[
+            "--format",
+            "json",
+            "hook",
+            "ingest",
+            "--source",
+            "cursor",
+            "session-start",
+        ],
+        &session_start_request(&project.to_string_lossy(), "p15t035-placeable"),
+    );
+    assert_eq!(
+        allowed.status, 0,
+        "a sessionStart about a project SURE can place did not answer:\n{}",
+        allowed.stderr
+    );
+    let frame: serde_json::Value =
+        serde_json::from_str(allowed.stdout.trim()).unwrap_or_else(|error| {
+            panic!(
+                "the answer to a placeable project is not one frame: {error}\n{}",
+                allowed.stdout
+            )
+        });
+    assert_eq!(frame["decision"].as_str(), Some("allow"), "{frame}");
+    assert!(
+        store_file(&store).exists(),
+        "the control event recorded nothing, so the refusals below would prove nothing"
+    );
+    let recorded = history_frame(&store, &[]);
+    assert_eq!(
+        recorded["details"]["total"].as_i64(),
+        Some(1),
+        "the control event is not in the history it was recorded in: {recorded}"
+    );
+
+    // The empty string is here because it is the value that must *not* fall
+    // through to the current-directory default: an event with no `project_root`
+    // at all gets that default, deliberately, and an event that names an empty
+    // one has named something SURE cannot use. `.` is here because it is what a
+    // resolver would turn into the hook's own working directory and then record
+    // the session under.
+    for root in ["sample-project", "../sample-project", ".", ""] {
+        let store = a_store_of_our_own();
+        let run = ingest_argv(
+            &store,
+            &[
+                "--format",
+                "json",
+                "hook",
+                "ingest",
+                "--source",
+                "cursor",
+                "session-start",
+            ],
+            &session_start_request(root, "p15t035-unplaceable"),
+        );
+        assert_eq!(
+            run.status, 5,
+            "a sessionStart whose project root is {root:?} exited {} rather than 5. 0 is what a \
+             launcher passes back to a harness that then proceeds, and 1 is a block SURE never \
+             made.\nstdout:\n{}\nstderr:\n{}",
+            run.status, run.stdout, run.stderr
+        );
+        let frame: serde_json::Value =
+            serde_json::from_str(run.stdout.trim()).unwrap_or_else(|error| {
+                panic!(
+                    "the refusal of {root:?} is not one frame: {error}\n{}",
+                    run.stdout
+                )
+            });
+        assert_eq!(frame["outcome"].as_str(), Some("failed"), "{frame}");
+        assert_eq!(frame["exit_code"].as_i64(), Some(5), "{frame}");
+        assert!(
+            frame.get("decision").is_none(),
+            "{root:?}: the refusal carries a decision SURE never made, and a harness that read \
+             `decision` would read an answer: {frame}"
+        );
+        assert_eq!(
+            frame["details"]["what"].as_str(),
+            Some("SURE did not read the settings it was pointed at."),
+            "{frame}"
+        );
+        let detail = frame["details"]["detail"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the refusal of {root:?} carries no detail: {frame}"));
+        assert!(
+            detail.contains(&format!("{root:?}")) && detail.contains("is not an absolute path"),
+            "the refusal of {root:?} does not name the value it refused and what is wrong with \
+             it: {detail}"
+        );
+        assert!(
+            detail.contains("SURE stopped rather than"),
+            "the refusal of {root:?} does not say it stopped rather than answer: {detail}"
+        );
+
+        assert!(
+            !store_file(&store).exists(),
+            "{root:?}: the refused event wrote a store at {}",
+            store_file(&store).display()
+        );
+        let reported = history_frame(&store, &[]);
+        assert_eq!(
+            reported["details"]["total"].as_i64(),
+            Some(0),
+            "{root:?}: a refused event was recorded anyway: {reported}"
+        );
+        assert_eq!(
+            reported["details"]["store_present"].as_bool(),
+            Some(false),
+            "{root:?}: a refused event left a store behind: {reported}"
+        );
+    }
+
+    // The same refusal in the shape the claude-code launcher reads, which passes
+    // no `--format` flag: nothing at all on stdout, and the sentence on stderr. A
+    // harness reading stdout sees no answer, which is the point of exit 5 — and a
+    // person reading stderr sees what to change.
+    let store = a_store_of_our_own();
+    let human = ingest_argv(
+        &store,
+        &["hook", "ingest", "--source", "cursor", "session-start"],
+        &session_start_request("sample-project", "p15t035-human"),
+    );
+    assert_eq!(human.status, 5, "{}", human.stderr);
+    assert!(
+        human.stdout.is_empty(),
+        "the human form of the refusal wrote to stdout, where a harness reads an answer: {}",
+        human.stdout
+    );
+    assert!(
+        human.stderr.contains("could not finish")
+            && human.stderr.contains("is not an absolute path"),
+        "the refusal said nothing a person could act on:\n{}",
+        human.stderr
+    );
+
+    assert_untouched(
+        &machine,
+        "by a hook event whose project root is not absolute",
+    );
+}
+
 #[test]
 fn a_hook_answer_reaches_stdout_in_the_shape_the_launcher_asked_for() {
     // The launchers differ in one flag, and this is what it buys. Both of the

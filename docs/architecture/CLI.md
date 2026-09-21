@@ -465,6 +465,15 @@ The corpus drives the attempt —
 `fixtures/privacy/manifest.json` puts a *granting* file inside the project, names
 it, and requires the refusal rather than a recording.
 
+The question is asked of the root itself as well as of the file: a `project_root`
+that is not an absolute path is refused here, with the same status and nothing
+recorded, because such a root would have to be resolved against whatever
+directory the hook was started in — and the store keys a session by that same
+root, so the project an event belonged to would depend on the harness's working
+directory. `P15-T035` decided this rather than inherited it, and
+`docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.3 records what each shipped
+harness pack does with the refusal.
+
 **The value comes from the process's argument vector and from nowhere else.** No
 environment variable, for the reason `--store-dir`'s section gives one step out:
 a checked project's harness configuration can set the environment of the processes

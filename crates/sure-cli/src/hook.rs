@@ -25,6 +25,42 @@
 //! person runs to give the answer a hook cannot ask for, and it writes one row
 //! to SURE's store. A hook is a fresh process per event, so that row is the only
 //! place a one-time grant can live; see `sure_core::allowance`.
+//!
+//! # A project root SURE cannot use, and what SURE decided about it
+//!
+//! The event names the project it is about, and every question below the naming
+//! reads that name as one location: the settings question asks whether the file
+//! that decides what SURE may record and run is inside it
+//! ([`Paths::ensure_settings_outside`]), and the store keys the session, the
+//! event and the fingerprint by it ([`Paths::ensure_outside`]). A `project_root`
+//! that is not an absolute path answers neither: it means "wherever this process
+//! happens to be", and for a hook that is wherever the harness started SURE.
+//!
+//! **The decision (P15-T035): SURE refuses the event** — exit 5, no `decision`
+//! field, nothing recorded — on every platform, before the settings file is read
+//! and before anything is written. The refusal's own words are
+//! [`sure_core::paths::PathError`]'s.
+//!
+//! The two answers not taken are worse, and both were argued rather than
+//! dismissed. *Resolving* the path against the current directory would put a
+//! location in the evidence that SURE inferred rather than read, and would make
+//! which project an event is recorded under depend on where the harness started
+//! the process; `crate::check`'s `project_of` refuses to do exactly that to a
+//! path a **person** typed ("SURE does not silently repair an argument"), and an
+//! event gets no more repair than an argument does. *Skipping the settings
+//! question and answering the event anyway* would send a harness an `allow`
+//! about a project SURE cannot place — and it could not record the event either,
+//! because `Store::open` asks the same question of the same root and refuses it,
+//! so the answer would be the only thing left and it would be about nothing.
+//! That is the false green this repository exists to refuse.
+//!
+//! **Which way it errs: toward no evidence and a visible refusal.** On a
+//! `SessionStart` there is no action a decision could have blocked, so the cost
+//! of refusing is that session's history and one sentence on stderr; the cost of
+//! the alternatives is a stored project root naming a directory the user never
+//! meant. What a `SessionStart` gets from each harness package this repository
+//! ships, and the source for each, is
+//! `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.3.
 
 use std::io::{self, Read};
 use std::path::Path;
@@ -433,6 +469,21 @@ fn run_ingest_with_paths(
     // which project this is. That is the right root to hold the file to: a
     // settings file inside the project the event says it is about is a file that
     // project can write, whoever sent the event.
+    //
+    // This is also the point at which a root that is not absolute stops the
+    // event, and that is a decision rather than a side effect of asking the
+    // question here (P15-T035). The root above is read by two questions and both
+    // need one location: this one, and the store's key for the session and the
+    // event. Resolving a relative root against the current directory would
+    // record a project SURE inferred rather than read, and would make which
+    // project an event belongs to depend on where the harness started the hook;
+    // answering the event without placing it is not available either, because
+    // `Store::open` asks the same question of the same root and refuses it, so
+    // the decision would be the only thing left and it would be about nothing.
+    // So SURE refuses, and the refusal errs toward no evidence plus a visible
+    // sentence rather than toward a green answer over an unknown project. The
+    // harness-by-harness consequence, and the source for each, is
+    // `docs/integrations/HOOK_FAILURE_SEMANTICS.md` §2.3.
     if let Err(error) = paths.ensure_settings_outside(Path::new(&project_root)) {
         return failed(
             "SURE did not read the settings it was pointed at.",
@@ -845,6 +896,51 @@ mod tests {
             .expect("the scratch locations are absolute")
     }
 
+    /// A store of our own, and a project directory of our own beside it, for an
+    /// event whose project root has to be a path SURE can use.
+    ///
+    /// The project is a directory of its own beside the roots rather than the
+    /// scratch root itself, because a settings file the project could have
+    /// written is refused before the event is recorded
+    /// (`Paths::ensure_settings_outside`, P15-T025): with the config root inside
+    /// the project, a test would assert about that refusal instead of about the
+    /// decision. `codex_session_start_allows_without_a_decision` says the same
+    /// of its own scratch tree, for the same reason.
+    fn roots_and_project_of_our_own(name: &str) -> (Paths, String) {
+        let tmp = scratch_hook_dir(name);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let project = tmp.join("project");
+        std::fs::create_dir_all(&project).expect("create the project directory");
+        let paths = Paths::from_roots(tmp.join("data"), tmp.join("config")).expect("paths");
+        (paths, project.to_string_lossy().into_owned())
+    }
+
+    /// One of the shipped events, with the project it names rewritten to a
+    /// directory this test made.
+    ///
+    /// `integrations/cursor/fixtures/session-start.json` and
+    /// `integrations/claude-code/fixtures/session-start.json` keep
+    /// `"project_root": "C:\\Users\\dev\\sample-project"`, and they keep it:
+    /// they are shipped example inputs a reader opens, and the example worth
+    /// shipping in a Windows-primary repository is a Windows path.
+    ///
+    /// That value is not what these tests are about. An event's project root is
+    /// read as a path — the settings question asks whether the file that decides
+    /// what SURE may record and run is inside it, and the store keys the session
+    /// by it — and `C:\Users\dev\sample-project` is absolute on Windows and
+    /// relative everywhere else. A test that read the fixture verbatim therefore
+    /// passed on Windows and was refused with `PathError::NotAbsolute` on macOS
+    /// and Linux (`P15-T025` put the refusal on this path; `P15-T035` repaired
+    /// the two tests). Rewriting this one field, in the shape the adapted codex
+    /// test already used (`codex_event_at`), is what makes the fixture's own
+    /// value stop being load-bearing: every other field, including the harness's
+    /// spelling of the event, still comes from the file verbatim.
+    fn session_event_at(text: &str, project_root: &str) -> String {
+        let mut value: serde_json::Value = serde_json::from_str(text).expect("fixture is JSON");
+        value["project_root"] = serde_json::Value::String(project_root.to_owned());
+        value.to_string()
+    }
+
     #[test]
     fn cursor_pre_tool_use_returns_decision() {
         let text = fixture("pre-tool-use.json");
@@ -869,11 +965,12 @@ mod tests {
     #[test]
     fn cursor_session_start_allows_without_decision() {
         let text = fixture("session-start.json");
+        let (paths, project) = roots_and_project_of_our_own("cursor-session-start");
         let report = run_ingest_with_paths(
             Some("cursor"),
             Some("session-start"),
-            &text,
-            &store_of_our_own("cursor-session-start"),
+            &session_event_at(&text, &project),
+            &paths,
         );
         let decision = match &report {
             Report::HookDecision(d) => d,
@@ -938,11 +1035,12 @@ mod tests {
     #[test]
     fn claude_code_session_start_allows_without_decision() {
         let text = claude_fixture("session-start.json");
+        let (paths, project) = roots_and_project_of_our_own("claude-code-session-start");
         let report = run_ingest_with_paths(
             Some("claude-code"),
             Some("session-start"),
-            &text,
-            &store_of_our_own("claude-code-session-start"),
+            &session_event_at(&text, &project),
+            &paths,
         );
         let decision = match &report {
             Report::HookDecision(d) => d,

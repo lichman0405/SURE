@@ -132,6 +132,65 @@ an empty directory. It is a property of the environment and not of the failure,
 which is why the test that pins the silence gives the child `/usr/bin:/bin`: an
 empty `PATH` there would have measured the test's setup instead of the launcher.
 
+### 2.3 A project root SURE cannot use, and what happens to a `SessionStart`
+
+A fifth way a hook event stops before it answers, and the only one that is a
+decision rather than an accident. The event is well formed, SURE knows the source
+and the event type, and what stops it is that `project_root` is not an absolute
+path. Both shipped `SessionStart` fixtures carry
+`"project_root": "C:\\Users\\dev\\sample-project"`
+(`integrations/cursor/fixtures/session-start.json`,
+`integrations/claude-code/fixtures/session-start.json`), which is absolute on
+Windows and relative everywhere else — so on macOS and Linux the two examples
+this repository ships are refused by this rule as written. That is what `P15-T035`
+found in CI and repaired in the tests that read them; the fixtures keep their
+value, and the tests now point the event at a directory they made themselves.
+
+Measured at the process level, like §2.1 and asserted by
+`a_project_root_that_is_not_absolute_is_refused_and_records_nothing` in
+`crates/sure-cli/tests/cli_contract.rs`, which runs the binary against a relative
+root and against a control that differs in nothing but the root: exit 5, a
+failure frame on stdout in `--format json` with **no `decision` key**, nothing at
+all on stdout in the human shape with the sentence on stderr, and no store and no
+row afterwards.
+
+**What SURE does, and why.** The root is read by two questions that each need one
+location: the settings question, which asks whether the file that decides what
+SURE may record and run is inside the project
+(`Paths::ensure_settings_outside`), and the store's key for the session and the
+event. SURE **refuses rather than resolves**, because a path resolved against its
+own working directory is a project SURE *inferred* rather than read — it would
+make which project an event belongs to depend on where the harness started the
+hook — and because `sure check`'s `project_of` already refuses to do that much
+repair to a path a person typed. The third option, skipping the settings question
+and answering anyway, is not available either: the store asks the same question
+of the same root and refuses it, so the decision would be the only thing left and
+it would be an `allow` about nothing.
+
+It errs toward **no evidence and a visible sentence**: a `SessionStart` has no
+action for a decision to block, so the cost of the refusal is that session's
+history, where the cost of the alternative is a stored project root naming a
+directory the user never meant. A root that is *absent* is a different case and
+not this rule — an event that names no project gets the process's own directory
+(`crates/sure-cli/src/hook.rs:447`) — while an event that names an empty one has
+named something SURE cannot use, and is refused.
+
+**What a `SessionStart` gets, in each pack this repository ships.** The harness
+column is §3's and the sources are §3's, applied to this one event:
+
+| Pack | A `SessionStart` whose project root SURE refuses | Where that comes from |
+| --- | --- | --- |
+| `claude-code` | **fail-open.** Exit 5 is not exit 2, and the launcher passes no `--format json`, so Claude Code reads a non-blocking error and the session starts. SURE records nothing for it. | §3, `claude-code / SessionStart`, from the Claude Code hooks page |
+| `cursor` | **fail-open.** "Non-zero exit codes other than 2 fail open by default", and for `sessionStart` "the agent loop does not wait for or enforce a blocking response". The `.ps1` launcher hands Cursor a failure frame carrying no `decision`; the session starts. | §3, `cursor / sessionStart`, from the Cursor hooks page |
+| `codex` | **cannot confirm.** The page defines exit 0 and exit 2 and no other status, so what Codex does with 5 is not knowable from it. Both launchers relay the status, and the frame they pass on carries no `decision`. | §3, `codex / SessionStart`, from the Codex hooks page |
+| `copilot` | **fail-open**, per the Copilot reference. The project-root question never arises here: `--source copilot` is refused for *every* event (§5), so a Copilot `sessionStart` stops one branch earlier, for a different reason, with the same status. | §3, `copilot / sessionStart`, from the Copilot hooks reference |
+| `agent-plugin` | **Nothing to answer.** The pack ships no hook script and has no `SessionStart` row (§6); this rule cannot reach it, and the launcher it does ship fails closed with exit 3 when the binary is missing. | §6, first bullet |
+
+Four of the five are fail-open and one cannot be confirmed; none is fail-closed.
+That is the safe direction here, because a `SessionStart` has no action to block
+and the failure this rule exists to prevent is the other one — a root SURE never
+read, written into the evidence as though it had.
+
 ## 3. The table
 
 `[F]` is §2.1. The `Failure semantics` cell holds exactly one of `fail-open`,

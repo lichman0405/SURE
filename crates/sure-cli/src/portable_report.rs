@@ -38,12 +38,10 @@ fn escape_html(text: &str) -> String {
 pub fn render_markdown(verdict: &ProjectVerdict) -> String {
     let mut out = String::new();
 
-    // Headline
+    // The summary carries the headline as its first line — see `render_summary`.
+    // Printing the headline above it as well put the verdict sentence in the
+    // report twice, with a blank line between the two copies.
     out.push_str("# SURE Report\n\n");
-    out.push_str(&verdict.aggregate.headline);
-    out.push_str("\n\n");
-
-    // Overall summary
     out.push_str(&render_summary(verdict));
     out.push_str("\n\n");
 
@@ -167,12 +165,11 @@ pub fn render_html(verdict: &ProjectVerdict) -> String {
     out.push_str("</header>\n");
     out.push_str("<main>\n");
 
-    // Summary
+    // Summary. `render_summary` begins with the aggregate headline, so the
+    // summary *is* the headline and the sentences under it; the `<p>` that used
+    // to stand above this block repeated that first sentence in the same page.
     out.push_str("<section id=\"summary\">\n");
     out.push_str("<h2>Summary</h2>\n");
-    out.push_str("<p>");
-    out.push_str(&escape_html(&verdict.aggregate.headline));
-    out.push_str("</p>\n");
     out.push_str("<pre>");
     out.push_str(&escape_html(&render_summary(verdict)));
     out.push_str("</pre>\n");

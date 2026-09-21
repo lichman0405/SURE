@@ -458,6 +458,13 @@ pub struct RunOutcome {
     /// One repair contract per finding, when the purpose asks for them.
     pub repairs: Vec<sure_domain::vocabulary::RepairContract>,
     /// What the comparison with the previous run found, for a re-check.
+    ///
+    /// `Some` exactly when there was something to compare: an earlier run left
+    /// findings open for this project and stage 12 matched them against this one.
+    /// `None` when there was no store, when the store could not be read, and when
+    /// it held nothing open for the project — a first run has no earlier run to
+    /// be compared with, and a reader of the report is told that rather than told
+    /// that the comparison found nothing.
     pub lifecycle: Option<LifecycleUpdate>,
 }
 
@@ -1155,6 +1162,34 @@ impl Pipeline<'_> {
                 }
             };
 
+        // **Nothing to compare is not a comparison, and it is answered as such.**
+        // `reconcile` walks `previous_open`, and every entry it walks lands in
+        // `kept_open` or in `resolved` — there is no path through its loop that
+        // drops one — so an empty `previous` is the *only* way for both lists to
+        // come back empty. That is what lets `Some` and `None` carry exactly the
+        // fact the callers need: whether SURE compared this run with an earlier
+        // one. Returning `Some(empty)` said a comparison happened and found
+        // nothing open, which is how the human report came to print "Against the
+        // earlier run: 0 finding(s) still open, 0 closed." beside this stage's own
+        // "no earlier run left anything open for this project.", and how the
+        // machine frame came to carry `{"closed": [], "still_open": []}` — the
+        // shape of an answer — where the honest answer is that there was nothing
+        // to compare. One result, one explanation: the sentence is absent and
+        // `details.lifecycle` is `null`.
+        //
+        // The stage itself **ran**: the store was read, and what it held is what
+        // this says. A stage that did not run would be a gap, and a first
+        // re-check is not a gap in the repair loop — there is simply no earlier
+        // run yet.
+        if previous.is_empty() {
+            return (
+                None,
+                StageOutcome::Ran {
+                    detail: "no earlier run left anything open for this project.".to_owned(),
+                },
+            );
+        }
+
         // Which checks have to pass before an earlier finding may close. The list
         // is `repair_impact::select_impacted_checks`'s answer, asked of each
         // contract stage 11 wrote — the module that owns the rule, not a second
@@ -1184,16 +1219,12 @@ impl Pipeline<'_> {
             },
             run.project_state.id.clone(),
         );
-        let detail = if previous.is_empty() {
-            "no earlier run left anything open for this project.".to_owned()
-        } else {
-            format!(
-                "{} earlier finding(s) stayed open, {} resolved. A finding closes only when every \
-                 check its repair contract named has passed in this run.",
-                update.kept_open.len(),
-                update.resolved.len(),
-            )
-        };
+        let detail = format!(
+            "{} earlier finding(s) stayed open, {} resolved. A finding closes only when every \
+             check its repair contract named has passed in this run.",
+            update.kept_open.len(),
+            update.resolved.len(),
+        );
         (Some(update), StageOutcome::Ran { detail })
     }
 }

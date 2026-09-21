@@ -422,11 +422,32 @@ unusable store gets. A location that does not exist yet is not an error:
 `doctor` reports it as not created yet, the first write creates it, and `doctor`
 still does not create it.
 
-**A location inside the project being checked is refused**, by the same
-`Paths::ensure_outside` rule the `--goal` path already used, and in the same
-shape: status 5, a message that says what it did and did not do, and no store
-directory created. The check refuses before it opens the store, so the refusal
-leaves the machine as it found it.
+**A location inside the project being checked is refused when the run opens the
+store there**, by the same `Paths::ensure_outside` rule the `--goal` path already
+used, and in the same shape: status 5, a message that says what it did and did not
+do, and no store directory created. The reason is the one a few paragraphs above —
+a location the judged project can write to is a history the judged thing writes —
+and the rule is asked of a store the run is about to use, so which runs meet the
+refusal follows the paragraph above about which commands write: `sure repair` and
+`sure recheck` create the store and are refused in every state, while `sure check`
+opens one only when it is already there and is refused exactly when there is a
+`sure.db` to open.
+
+Measured, three states of one command line, on Windows:
+
+| what is at the named location | `sure check` | `sure repair`, `sure recheck` |
+| --- | --- | --- |
+| nothing — the directory does not exist | exit 1, a full report, no refusal, nothing created | exit 5, the refusal, nothing created |
+| the directory, empty | exit 1, a full report, no refusal, nothing created | exit 5, the refusal, nothing created |
+| a `sure.db` inside it | exit 5, the refusal | exit 5, the refusal |
+
+**The two silent cells are not a gap in the guarantee.** What the rule protects is
+*what was read and what was written*, and in both of them `sure check` reads no
+store — it opens the history only when one is already there — and writes none. The
+security property holds in those cells in exactly the words it is written in; what
+a user does not get there is the warning, and the report does not mention the
+location it ignored. **The refusal comes before the store is opened**, in every
+cell, so it leaves the machine as it found it.
 
 `sure doctor` says which of the two locations a run is using, so a caller who is
 not sure whether their redirect took effect can ask instead of guessing.
@@ -1042,7 +1063,7 @@ anything about output or status: both are SURE's, and both have one home.
 | No run in this build can say a model was consulted | same file, `no_run_in_this_build_can_say_a_model_was_consulted` |
 | The three modes say what `PRIVACY_AND_MODEL_STRATEGY.md` says they say | `crates/sure-core/src/privacy.rs`, `the_three_modes_say_what_the_document_says_they_say` |
 | The two settings files can only differ in one direction | same file, `the_two_settings_can_only_differ_in_one_direction` |
-| A store location inside the checked project is refused, and nothing is written | same file, `a_store_inside_the_project_is_refused_before_anything_is_recorded` |
+| A store location inside the checked project is refused when the run opens it, and nothing is written | same file, `a_store_inside_the_project_is_refused_before_anything_is_recorded` — the refusal is driven on the `--goal` road, which opens the store; a `sure check` with no goal opens none and never meets the rule, and the `--store-dir` section above states which states each command is refused in |
 | `sure doctor` says whether the location is the platform's or the caller's | same file, `a_doctor_report_says_which_store_location_the_run_is_using` |
 | Nothing a project can write decides where the store goes | same file, `nothing_a_project_can_write_decides_where_the_store_goes` |
 | Every command is reached by the location the caller named | same file, `every_command_is_reached_by_the_location_the_caller_named` |

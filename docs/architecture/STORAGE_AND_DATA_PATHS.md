@@ -81,8 +81,14 @@ platform's own location would. It is held to every other rule: relative and empt
 paths are refused at the command line (status 2, a wrong command line) rather
 than resolved against whatever directory SURE happened to start in, and a
 directory inside the project being checked is refused by `Paths::ensure_outside`
-(status 5, a run that tried and did not finish) — the same refusal the `--goal`
-path already used. Nothing falls back to the default silently: a location that
+when a command opens the store there (status 5, a run that tried and did not
+finish) — the same refusal the `--goal` path already used. **When** that refusal
+happens follows from which commands keep a store: `sure repair` and `sure
+recheck` create one and are refused in every state, while `sure check` opens a
+store only when one is already there, so the refusal reaches it exactly when
+there is a `sure.db` to open — and in the states where it does not, nothing was
+read and nothing was written either way. `docs/architecture/CLI.md` records the
+three measured states. Nothing falls back to the default silently: a location that
 cannot be used is an error, never a quiet write somewhere else.
 
 `sure doctor` reports which of the two the location is — the platform's own, or

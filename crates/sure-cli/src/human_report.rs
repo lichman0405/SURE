@@ -40,12 +40,13 @@ pub struct HumanReportSettings<'a> {
 pub fn render_verdict(verdict: &ProjectVerdict, settings: HumanReportSettings<'_>) -> String {
     let mut out = String::new();
 
-    // Headline
-    out.push_str(&verdict.aggregate.headline);
-    out.push('\n');
-
-    // Overall summary
-    out.push('\n');
+    // Overall summary — and the headline, which is its first line.
+    //
+    // `render_summary` is self-contained: `sure_core::project_verdict` pushes
+    // `verdict.aggregate.headline` before anything else. Pushing the headline
+    // here as well printed the verdict sentence twice at the top of every human
+    // report, with nothing between the copies but a blank line; the summary is
+    // the one that stays, because it is also the form that is read on its own.
     out.push_str(&render_summary(verdict));
     out.push('\n');
 

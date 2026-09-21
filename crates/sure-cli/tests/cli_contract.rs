@@ -3004,6 +3004,109 @@ fn a_repair_contract_is_carried_to_the_next_run_and_that_run_says_what_it_left_o
 }
 
 #[test]
+fn a_recheck_with_nothing_to_compare_does_not_report_a_comparison() {
+    // A first re-check has no earlier run behind it, and the report used to say
+    // otherwise. The `Some(empty)` stage-12 return made the human form print
+    // `Against the earlier run: 0 finding(s) still open, 0 closed.` while stage
+    // 12's own detail, fourteen lines below, said `no earlier run left anything
+    // open for this project.` — two explanations of one result in one report,
+    // which is the thing the comment above `check::lifecycle` forbids. The frame
+    // carried the same emptiness as `{"closed": [], "still_open": []}`, the shape
+    // of an answer, where the honest value is `null`.
+    //
+    // The empty case is the only case, and that is what makes one return value
+    // enough to say it: `reconcile` walks the earlier findings, and every one it
+    // walks lands in `kept_open` or in `resolved`, so `Some` holds a comparison
+    // that found something and `None` holds a run with nothing to compare.
+    //
+    // The last third of the test is the control: a re-check that *does* have an
+    // earlier run behind it still says what it found, with the numbers in it. A
+    // report that had simply stopped printing the sentence would pass the first
+    // half and fail here.
+    let project = a_project_with_a_declared_command_that_never_runs();
+    let path = project
+        .to_str()
+        .expect("this test's own directory is a UTF-8 path");
+    let frame = |run: &Run| -> serde_json::Value {
+        serde_json::from_str(run.stdout.trim())
+            .unwrap_or_else(|error| panic!("`sure` printed no frame: {error}\n{}", run.stdout))
+    };
+
+    // The first re-check on a store that has never seen this project. The store
+    // is this run's own, so "first" is true by construction.
+    let first = run_in_a_store(&a_store_of_our_own(), &["recheck", path]);
+    assert_eq!(
+        first.status, 1,
+        "`sure recheck` returned {}:\n{}",
+        first.status, first.stderr
+    );
+    assert!(
+        !first.stdout.contains("Against the earlier run"),
+        "a re-check with no earlier run to compare against reported a comparison:\n{}",
+        first.stdout
+    );
+    assert!(
+        first
+            .stdout
+            .contains("no earlier run left anything open for this project."),
+        "stage 12 does not say what the first re-check found, so the assertion above is about a \
+         report that says nothing at all:\n{}",
+        first.stdout
+    );
+
+    // The same run in the machine frame. A separate store, because this run is
+    // the first for whichever store it names.
+    let machine = frame(&run_in_a_store(
+        &a_store_of_our_own(),
+        &["--format", "json", "recheck", path],
+    ));
+    assert!(
+        machine["details"]["lifecycle"].is_null(),
+        "a run with nothing to compare answered with a comparison rather than with none: {machine}"
+    );
+    assert_eq!(
+        machine["details"]["stages"][11]["outcome"], "ran",
+        "stage 12 did not run on a store it could read, and this test is about a stage that ran \
+         with nothing to compare: {machine}"
+    );
+
+    // The control. The first run over a store of its own leaves findings open, so
+    // the second one has an earlier run to be compared with.
+    let store = a_store_of_our_own();
+    let opened = frame(&run_in_a_store(
+        &store,
+        &["--format", "json", "recheck", path],
+    ));
+    assert!(
+        !opened["details"]["report"]["findings"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no findings array in the frame: {opened}"))
+            .is_empty(),
+        "this run left nothing open, so the next one has nothing to compare and the control below \
+         would be about nothing: {opened}"
+    );
+    assert!(
+        opened["details"]["lifecycle"].is_null(),
+        "the first run over this store reported a comparison: {opened}"
+    );
+
+    let compared = run_in_a_store(&store, &["recheck", path]);
+    assert!(
+        compared.stdout.contains("Against the earlier run"),
+        "a re-check with an earlier run behind it stopped saying what it found:\n{}",
+        compared.stdout
+    );
+    assert!(
+        !compared
+            .stdout
+            .contains("Against the earlier run: 0 finding(s) still open, 0 closed."),
+        "a re-check reported a comparison that found nothing open, on a store where the run before \
+         it left findings open:\n{}",
+        compared.stdout
+    );
+}
+
+#[test]
 fn a_project_that_cannot_be_read_is_status_five_and_not_status_three() {
     // The other half of the status rule, and the one a user meets by mistyping a
     // path. 5 is "it tried and did not finish": a statement about this run. 3 is

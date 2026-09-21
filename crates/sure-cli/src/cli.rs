@@ -61,8 +61,10 @@ pub struct Cli {
     /// reports which location this run used.
     ///
     /// The location is checked like any other: a directory inside the project
-    /// being checked is refused, and a relative or empty path is refused before
-    /// SURE runs anything at all.
+    /// being checked is refused when the run opens a store there — `sure check`
+    /// opens one only when it is already there, so it meets the refusal exactly
+    /// then — and a relative or empty path is refused before SURE runs anything
+    /// at all. `docs/architecture/CLI.md` records the three measured states.
     #[arg(long, value_name = "DIR", global = true, value_parser = a_store_directory)]
     pub store_dir: Option<PathBuf>,
 

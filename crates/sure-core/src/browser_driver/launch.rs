@@ -84,6 +84,50 @@ pub struct Launched {
     reaped: bool,
 }
 
+/// What the wait ran out on, as far as the loop could see.
+///
+/// **Neither variant is a claim about how far the browser had got.** They are
+/// the two things this file actually looked at, recorded so that the sentence a
+/// person reads is made of observations instead of arithmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildState {
+    /// `try_wait` answered that the program had not stopped.
+    ///
+    /// **Observed rather than assumed**: the loop asks on every pass, and a
+    /// program that *had* stopped comes back as [`LaunchError::Exited`] with its
+    /// exit status instead of reaching here. The observation is at most one
+    /// [`POLL`] old — so "it was still running" means *as of up to twenty-five
+    /// milliseconds before the deadline* — and it says nothing whatever about
+    /// what the program was doing.
+    Running,
+    /// `try_wait` would not answer, so whether the program was still running is
+    /// **not known**, and no sentence built from this says that it was.
+    Unreported,
+}
+
+/// What the browser's private profile directory held when the wait ran out.
+///
+/// The directory itself is always there — [`start`] made it before it started
+/// anything — so the question is about the one file inside it that the browser
+/// writes when it has a debugging port: `DevToolsActivePort`.
+///
+/// **This is the only progress signal the loop has, and it is a coarse one.**
+/// Measured on the development machine over six cold starts, polled every
+/// millisecond, the file went from absent to complete in under a millisecond
+/// every time and the half-written state was never observed at all — so at the
+/// twenty-five millisecond [`POLL`] this loop uses, `HalfWritten` is a state it
+/// will almost never see. What the two variants do say is still worth reading,
+/// because they are different facts about the browser: it had, or had not, got
+/// as far as writing the file SURE is waiting for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortFile {
+    /// No `DevToolsActivePort` at all: the browser had not written one.
+    Absent,
+    /// There, but not holding both the port and the endpoint path — the state
+    /// [`read_active_port`] reads as *a file being written*.
+    HalfWritten,
+}
+
 /// Why a browser is not available to be driven.
 ///
 /// Every variant ends as
@@ -98,10 +142,33 @@ pub enum LaunchError {
         program: PathBuf,
         error: std::io::Error,
     },
-    /// The program started and never said which port it was listening on.
+    /// The program started, and the wait ran out before it said which port it
+    /// was listening on.
+    ///
+    /// # What `waited` is, and what it is not
+    ///
+    /// **It is how long SURE waited, and it is not a measurement of the
+    /// browser.** The deadline is set before the loop, so `waited` is the
+    /// caller's own `budget` plus at most one [`POLL`] of overshoot: it is
+    /// bounded above by the budget by construction and would read the same for a
+    /// browser one millisecond from writing its port and for one that was never
+    /// going to write it.
+    ///
+    /// **It is printed as SURE's wait for exactly that reason**, and the
+    /// sentence around it reports the two observations the loop did make
+    /// ([`ChildState`] and [`PortFile`]) and states plainly that how close the
+    /// browser was to reporting a port **is not known**. An earlier shape of
+    /// this message read *"ran for N seconds without reporting a debugging
+    /// port"*, which said the opposite by implication: that N measured the
+    /// browser. Measured through this crate's own interface, two calls on one
+    /// machine against one unchanging `chrome.exe` printed `0.050` and
+    /// `0.150` — the two budgets they were given — and a third call with two
+    /// seconds opened the same browser.
     NeverOpened {
         program: PathBuf,
         waited: Duration,
+        child: ChildState,
+        port_file: PortFile,
         complaint: String,
     },
     /// The program started and then stopped before it said.
@@ -123,14 +190,36 @@ impl std::fmt::Display for LaunchError {
             Self::NeverOpened {
                 program,
                 waited,
+                child,
+                port_file,
                 complaint,
-            } => write!(
-                formatter,
-                "{} ran for {} seconds without reporting a debugging port{}",
-                program.display(),
-                waited.as_secs_f32(),
-                said(complaint)
-            ),
+            } => {
+                write!(
+                    formatter,
+                    "{} had not reported a debugging port after {:.3} seconds of \
+                     waiting, and {}, so how close it was to reporting one is not \
+                     known",
+                    program.display(),
+                    waited.as_secs_f32(),
+                    match child {
+                        ChildState::Running => "the program was still running",
+                        ChildState::Unreported => {
+                            "whether the program was still running could not be \
+                             read from the operating system"
+                        }
+                    },
+                )?;
+                formatter.write_str(match port_file {
+                    PortFile::Absent => {
+                        ", and its profile directory held no DevToolsActivePort file"
+                    }
+                    PortFile::HalfWritten => {
+                        ", and its profile directory held a DevToolsActivePort file \
+                         it had not finished writing"
+                    }
+                })?;
+                formatter.write_str(&said(complaint))
+            }
             Self::Exited {
                 program,
                 status,
@@ -142,6 +231,20 @@ impl std::fmt::Display for LaunchError {
                 said(complaint)
             ),
         }
+    }
+}
+
+/// What the profile directory holds now, in the two states this file can tell
+/// apart.
+///
+/// The reading is [`read_active_port`]'s: a file that is there but does not hold
+/// both lines is *being written*, which is the reading that function documents
+/// and not a second one invented here.
+fn port_file_state(profile: &Path) -> PortFile {
+    if profile.join("DevToolsActivePort").exists() {
+        PortFile::HalfWritten
+    } else {
+        PortFile::Absent
     }
 }
 
@@ -165,6 +268,20 @@ impl std::error::Error for LaunchError {}
 /// answers: a caller that has already used part of its own time passes what is
 /// left rather than a fresh allowance, so that one look cannot take longer than
 /// the limit its caller set.
+///
+/// # What the wait can and cannot tell apart
+///
+/// The loop watches a file the browser writes once it has a debugging port, and
+/// asks the operating system whether the process has stopped. **Both answers are
+/// about where the browser had got to, and neither is about how much longer it
+/// needed.** A browser that had not written the file and was still running is
+/// reported as [`LaunchError::NeverOpened`] whether it was one millisecond from
+/// writing it or was never going to; a browser that stopped is reported as
+/// [`LaunchError::Exited`] with its status; and a wait that runs out is a fact
+/// about `budget` and not about the program, which is why the sentence built
+/// from it says how long *SURE* waited. **The one thing raising `budget` cannot
+/// do is make this distinction appear**, which is why the report carries the two
+/// observations instead of a figure that implies closeness.
 ///
 /// # Errors
 ///
@@ -218,7 +335,19 @@ pub fn start(
         drain_into(stream, Arc::clone(&complaint));
     }
 
-    let deadline = Instant::now() + budget;
+    // The instant the wait is measured from, taken here rather than at each
+    // reading so that what the error reports is how long SURE waited and not how
+    // long the process had been alive. See `LaunchError::NeverOpened`.
+    let waiting_since = Instant::now();
+    let deadline = waiting_since + budget;
+
+    // **Not assumed to be anything.** There is no initial value: the only path
+    // that reaches the deadline check passes through the `try_wait` below and
+    // writes what it answered here, and the compiler holds that in place. So a
+    // deadline cannot be reported as a browser seen to be running without
+    // something having actually looked.
+    let mut child_state;
+
     loop {
         if cancellation.is_cancelled() {
             let mut child = child;
@@ -243,26 +372,46 @@ pub fn start(
             None => {
                 // A browser that has already stopped will not write the file,
                 // and waiting out the whole budget to say so wastes the caller's
-                // time to learn something already known.
-                if let Ok(Some(status)) = child.try_wait() {
-                    let complaint = complaint_text(&complaint);
-                    let _ = std::fs::remove_dir_all(&profile);
-                    return Err(LaunchError::Exited {
-                        program: program.to_path_buf(),
-                        status: status.to_string(),
-                        complaint,
-                    });
+                // time to learn something already known. **This is also the
+                // observation the deadline arm reports**: the three states are
+                // kept apart rather than collapsed, because "it had stopped" and
+                // "it was still running" and "the operating system would not say"
+                // are three different sentences about three different machines.
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        let complaint = complaint_text(&complaint);
+                        let _ = std::fs::remove_dir_all(&profile);
+                        return Err(LaunchError::Exited {
+                            program: program.to_path_buf(),
+                            status: status.to_string(),
+                            complaint,
+                        });
+                    }
+                    Ok(None) => child_state = ChildState::Running,
+                    Err(_) => child_state = ChildState::Unreported,
                 }
             }
         }
         if Instant::now() >= deadline {
+            // **Everything reported below is read here, at the deadline, and
+            // before anything is tidied up.** That ordering is the whole point:
+            // stopping a browser takes most of a second on Windows, and a figure
+            // or a file state taken after that would be a measurement of this
+            // function taking down a process rather than of the browser it was
+            // waiting for. It was measured: an earlier shape of this arm read
+            // the elapsed time after the teardown and a fifty-millisecond wait
+            // was reported as `0.800`.
+            let waited = waiting_since.elapsed();
+            let port_file = port_file_state(&profile);
             let complaint = complaint_text(&complaint);
             let mut child = child;
             let _ = crate::process::terminate::stop(&mut child);
             let _ = std::fs::remove_dir_all(&profile);
             return Err(LaunchError::NeverOpened {
                 program: program.to_path_buf(),
-                waited: budget,
+                waited,
+                child: child_state,
+                port_file,
                 complaint,
             });
         }
@@ -576,6 +725,148 @@ mod tests {
         assert_eq!(read_active_port(&directory), None, "no file at all");
 
         std::fs::remove_dir_all(&directory).expect("removed");
+    }
+
+    /// **A program that starts and then stops is `Exited`, and never the
+    /// deadline** — which is the observation that makes `NeverOpened` mean
+    /// something.
+    ///
+    /// The program is this test binary, started with the browser's argument
+    /// vector. `--headless=new` is not an option the test harness has, so it
+    /// stops immediately and says why; the launch loop's `try_wait` sees that
+    /// within one poll and reports the exit status. **If the loop did not ask,
+    /// this would be a `NeverOpened` after ten seconds** — the same sentence a
+    /// browser that was still starting gets — and that is the whole difference
+    /// this test holds in place.
+    ///
+    /// The budget is ten seconds against a program that stops in tens of
+    /// milliseconds, so what is being measured is the question being asked and
+    /// not the speed of the machine. It is deliberately not tuned tighter: a
+    /// test that failed because a loaded runner took a second to load a process
+    /// would be a test about the runner.
+    #[test]
+    fn a_program_that_stops_is_reported_as_stopped_and_not_as_a_deadline() {
+        let itself = std::env::current_exe().expect("this test binary has a path");
+        let error = start(&itself, Duration::from_secs(10), &Cancellation::default())
+            .expect_err("a program that stops without writing a port is an error");
+
+        let LaunchError::Exited { status, .. } = &error else {
+            panic!(
+                "a program that had stopped was reported as something else: {error:?} \
+                 — which is the difference between a sentence about a program that \
+                 gave up and one about a wait that ran out"
+            );
+        };
+        assert!(
+            !status.trim().is_empty(),
+            "the report does not say how the program ended"
+        );
+        // Reaching here means the branch was taken, which is the assertion that
+        // matters; the sentence below is checked so that a reader of a failure
+        // sees which program it was.
+        assert!(
+            error.to_string().contains("stopped before reporting"),
+            "{error}"
+        );
+    }
+
+    /// **The sentence for a wait that ran out reports what was observed and
+    /// never implies the figure measured the browser.**
+    ///
+    /// This is the shape the message was changed to, pinned without a browser so
+    /// that it fails on the wording rather than on a machine: every combination
+    /// of what the loop can have seen is rendered, and two things are required
+    /// of all of them — that the duration is attributed to SURE's waiting rather
+    /// than to the program, and that the closeness that is not known is said not
+    /// to be known.
+    ///
+    /// The old sentence is asserted *against*, not merely left out: *"ran for N
+    /// seconds without reporting a debugging port"* is the phrasing that made
+    /// four recorded CI failures read as a measurement of Chrome when the figure
+    /// was the caller's budget minus a sub-millisecond search. A future edit that
+    /// went back to it would have to delete this test.
+    #[test]
+    fn the_sentence_for_a_wait_that_ran_out_does_not_claim_the_browser_took_that_long() {
+        for child in [ChildState::Running, ChildState::Unreported] {
+            for port_file in [PortFile::Absent, PortFile::HalfWritten] {
+                let error = LaunchError::NeverOpened {
+                    program: PathBuf::from("/usr/bin/chromium"),
+                    waited: Duration::from_secs(30),
+                    child,
+                    port_file,
+                    complaint: String::new(),
+                };
+                let text = error.to_string();
+
+                assert!(
+                    text.contains("30.000 seconds of waiting"),
+                    "the wait is not reported as SURE's, in seconds, rounded to the                      millisecond this machine can actually measure: {text}"
+                );
+                assert!(
+                    text.contains("/usr/bin/chromium"),
+                    "the program is not named: {text}"
+                );
+                assert!(
+                    !text.contains("ran for"),
+                    "the sentence claims the program ran for the figure, which is \
+                     what the figure does not measure: {text}"
+                );
+                assert!(
+                    text.contains("how close it was to reporting one is not known"),
+                    "the sentence does not say what it does not know: {text}"
+                );
+                match child {
+                    ChildState::Running => assert!(
+                        text.contains("and the program was still running,"),
+                        "an observed-live child is not reported as running: {text}"
+                    ),
+                    // The overclaim this arm exists to stop: `try_wait` refused,
+                    // so nothing may say the program was running. The assertion
+                    // is on the *asserting* phrase and not on the words, because
+                    // the honest sentence for this arm has to say what it could
+                    // not find out and those words are part of that too.
+                    ChildState::Unreported => {
+                        assert!(
+                            !text.contains("and the program was still running,"),
+                            "a child whose state the operating system would not \
+                             report is claimed to have been running: {text}"
+                        );
+                        assert!(
+                            text.contains(
+                                "whether the program was still running could not be read \
+                                 from the operating system"
+                            ),
+                            "an unreadable child state is not said to be unreadable: {text}"
+                        );
+                    }
+                }
+            }
+        }
+
+        for port_file in [PortFile::Absent, PortFile::HalfWritten] {
+            let error = LaunchError::NeverOpened {
+                program: PathBuf::from("/usr/bin/chromium"),
+                waited: Duration::from_secs(30),
+                child: ChildState::Running,
+                port_file,
+                complaint: "Failed to connect to the bus".to_owned(),
+            };
+            let text = error.to_string();
+            assert!(
+                text.contains("Failed to connect to the bus"),
+                "the browser's own words are dropped: {text}"
+            );
+            match port_file {
+                PortFile::Absent => assert!(
+                    text.contains("held no DevToolsActivePort file"),
+                    "the profile directory's state is not reported: {text}"
+                ),
+                PortFile::HalfWritten => assert!(
+                    text.contains("had not finished writing"),
+                    "a half-written port file is not reported: {text}"
+                ),
+            }
+        }
     }
 
     /// **A program that cannot be started is reported, not panicked on**, and

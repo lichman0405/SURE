@@ -96,44 +96,88 @@ use sure_domain::status::CheckStatus;
 /// this is generous on purpose: a budget tight enough to be interesting is a
 /// budget that fails for reasons that are not the code's.
 ///
-/// **Forty-five rather than thirty seconds, measured.** One budget pays for two
-/// things in sequence — the launch, and the look that follows it — so a launch
-/// that takes twenty-five seconds leaves five for a page that was going to
-/// settle in three. On the windows job of `35351409364` Chrome was driven on a
-/// loaded runner and reached `29.999205` and `29.999266` seconds of its launch
-/// without reporting a debugging port, and the two tests here that need to look
-/// at a page then failed with *the look stopped early, so nothing below is a
-/// statement about the page* — which is this file refusing to draw a conclusion
-/// from half a look, and is the right thing to do with the budget it was given.
-/// The same tests drove the same browser well inside this budget on the two runs
-/// either side of that one (`35351293152` and `35349989431` before it,
+/// **Forty-five rather than thirty, and the figure that bought it did not measure
+/// what it was read as measuring.** One budget pays for two things in sequence —
+/// the launch, and the look that follows it — so a launch that takes twenty-five
+/// seconds leaves twenty for a page that was going to settle in three. On the
+/// windows job of `35351409364` the two tests that need to look at a page were
+/// handed `29.999205` and `29.999266` seconds and this budget was raised from
+/// thirty to forty-five on that evidence.
+///
+/// **What those two figures are, read from the source rather than reasoned
+/// about:** `session.rs:838-843` hands the launch what is left of *the caller's*
+/// budget — thirty seconds less the sub-millisecond search for a browser — and
+/// `launch.rs` polls to a deadline set from that figure and reports it back, so
+/// it is bounded above by the budget by construction and would read the same for
+/// a browser a millisecond from writing its port and for one that was never
+/// going to. It is SURE's wait, not the browser's launch. See [`BRIEF`], where
+/// `P15-T027` took that apart and left both numbers alone.
+///
+/// The rest of what this comment used to say is still true and still worth
+/// keeping: the same tests drove the same browser well inside this budget on the
+/// two runs either side of that one (`35351293152` and `35349989431` before it,
 /// `35352560694` and `35357365360` after, all four with a green windows job), so
-/// what ran out was the runner's headroom, not the project's. Raising it does
-/// not make anything pass that should fail: a browser
-/// that genuinely cannot be driven still reports `DriverWouldNotStart` and a
-/// look that still runs out still stops early. It only stops the suite measuring
-/// the machine instead of the project.
+/// what ran out was the runner's headroom and not the project's; and raising the
+/// number does not make anything pass that should fail, because a browser that
+/// genuinely cannot be driven still reports `DriverWouldNotStart` and a look that
+/// still runs out still stops early.
 const PATIENT: Duration = Duration::from_secs(45);
 
 /// The look budget for the page that never arrives. Smaller than [`PATIENT`]
 /// because the look runs to its deadline by design there — there is nothing to
 /// watch — and still comfortably more than a cold browser start plus an attach,
-/// which is all that has to happen before the navigation is refused. **Twenty
-/// rather than ten seconds**, because a loaded CI runner can take more than ten
-/// seconds to launch Chrome and report its debugging port, and a test that fails
-/// because the runner is slow is a test that says nothing about the project.
+/// which is all that has to happen before the navigation is refused.
 ///
-/// **Thirty rather than twenty, on the same evidence one step further on.** In
-/// `35365324422` this test was the only one of the five in this file to fail on
-/// ubuntu, at `19.999964` seconds of its launch; the four others, on the same
-/// runner and against the same `/usr/bin/chromium`, launched inside thirty. On
-/// the windows job of `35196110213` the same test failed the same way at
-/// `19.999018`, while the two tests beside it got their browser up and failed
-/// later, for a different reason. Twenty seconds is therefore below what a cold
-/// Chrome needs on a loaded runner often enough to be worth paying thirty for,
-/// and the price of the raise is bounded: this budget is spent only when the
-/// browser is slow to report its port, and when it is slow enough to exceed even
-/// this the test still fails and still says which machine state it saw.
+/// # This budget was raised twice, and `P15-T027` did not raise it a third time
+///
+/// **Ten, then twenty, then thirty** (`90a7bc6`, then `853d7de`), each time
+/// because a launch was reported as having spent the whole budget on a loaded CI
+/// runner: `35196110213` at `19.999018`, `35365324422` at `19.999964`,
+/// `35351409364` at `19.999577`, and then `35407533960` at `29.999916` and
+/// `35430022867` at `29.999912`. The third raise was not taken, because the
+/// report those decisions rested on does not measure the browser. What was
+/// measured, in the order it decides the question:
+///
+/// * **The figure is the budget.** Three calls through this crate's own
+///   interface, on one machine, against one unchanging `chrome.exe`, with
+///   budgets of 1 ms, 150 ms and 2 s, reported `0.050`, `0.150` — and then
+///   *opened the page*. The same browser opened when it was given two seconds,
+///   so the figure tracked the budget and not the browser. This test file now
+///   pins that behaviour in
+///   `a_wait_that_runs_out_says_the_browser_was_still_running_and_not_how_long_it_took`.
+/// * **The browser was still running when the wait ran out**, and that is
+///   observed rather than assumed: the loop asks `try_wait` on every pass and a
+///   browser that had stopped is reported as `Exited` with its status. So none
+///   of the recorded failures was a crash or an exit, and **none of them says
+///   whether the browser was a millisecond from writing its port or was never
+///   going to**.
+/// * **The runner that failed was driving browsers at that moment.** In
+///   `35407533960` the failing test was one of the three here that launch a
+///   browser — they run concurrently, which `35351409364` shows directly: two
+///   tests with thirty-second budgets failed 68 ms apart — and the other two
+///   launched and passed on that same job. The browser's own stderr in the
+///   failing one carries Chromium timestamps, and the last of them is 0.32 s
+///   before the line that reports the test failing. "That runner needed more
+///   seconds" is therefore not what the logs establish, and on the windows
+///   occurrences the browser said nothing at all on its error stream for the
+///   whole wait, where a healthy launch on the development machine writes its
+///   `DevTools listening on ws://…` line in under 0.35 s.
+/// * **The two candidate replacements were measured too, and neither works.** A
+///   rule that waits "while the browser is still making progress" has no
+///   progress signal to key on here: the port file went from absent to complete
+///   in under a millisecond in six cold starts polled every millisecond, so a
+///   half-written file is not a state the loop's 25 ms poll can observe, and the
+///   only other signal is the liveness it already reports. A larger number is
+///   not a rule at all.
+///
+/// **A red here is true, which is why it is left standing.** A machine on which
+/// SURE cannot drive a browser inside the budget is a machine on which the
+/// acceptance sentence *the check can navigate a local app* genuinely was not
+/// exercised, and `opened()` reports that as a failure rather than passing it
+/// over. What changed is what the failure says: it now reports the browser's
+/// liveness and its profile directory's state, and states plainly that how close
+/// it was to reporting a port is not known, instead of a figure that read like a
+/// launch duration.
 const BRIEF: Duration = Duration::from_secs(30);
 
 /// More than the broken page produces, since the bound is not what the test is
@@ -708,6 +752,85 @@ fn a_page_that_never_arrives_is_a_failure_of_the_project_and_not_an_absence() {
          something to skip: {observation:?}"
     );
     assert!(!report.status().is_green());
+}
+
+/// **A wait that runs out says what was observed, and never how long the
+/// browser took** — the sentence a reader of a red CI run is handed, checked
+/// against a real browser on the machine running it.
+///
+/// # What this pins, and why it is here rather than beside the message
+///
+/// The sentence is built in `browser_driver::launch` and its wording is pinned
+/// there by a unit test that needs no browser. What that test cannot show is
+/// that the sentence is what a **caller** is handed: this one goes through
+/// [`BrowserDriver`], through the product's own search for a browser, through a
+/// real launch, and reads the absence the caller actually gets. Both halves are
+/// needed, because the message a person reads is the one thing about this
+/// failure that the repository decided to change.
+///
+/// # The budget is the smallest this code can be given
+///
+/// [`Limits::new`] refuses a zero budget, and `session` floors what it passes on
+/// at `NO_LESS_THAN` — fifty milliseconds — so a one-millisecond budget is the
+/// **shortest wait this code can be asked for**, and nothing shorter exists to
+/// try. Measured, a cold Chrome needs more than that by a wide margin: six cold
+/// starts on the development machine took 0.184 s to 0.349 s to write their port
+/// file, and the recorded CI failures are on machines that took twenty and
+/// thirty seconds. If a machine ever did start a browser inside fifty
+/// milliseconds this test fails and says so, which is the safe direction — the
+/// alternative, treating *a browser was driven* as a pass here, is the false
+/// green this file is written against.
+#[test]
+fn a_wait_that_runs_out_says_the_browser_was_still_running_and_not_how_long_it_took() {
+    let Some(program) = find_installed_browser() else {
+        println!(
+            "no browser on this machine, so there is no launch to run out of \
+             budget — the contract for that machine is checked by the other \
+             tests here"
+        );
+        return;
+    };
+
+    let target = Target::local(a_port_nothing_is_listening_on(), "/")
+        .expect("a loopback target on any port");
+    let limits = Limits::new(Duration::from_millis(1), PROBLEMS_KEPT)
+        .expect("a budget and room for problems");
+    let driver: Box<dyn BrowserDriver> = Box::new(Browser::with_program(program.clone()));
+    let report = driver.observe(
+        &target,
+        &limits,
+        &sure_core::process::Cancellation::default(),
+    );
+
+    let Report::Absent(absence) = &report else {
+        panic!(
+            "this machine started {} inside the fifty milliseconds this code \
+             floors its launch budget at, so this test cannot reach the failure \
+             it is about. That is worth knowing and is not a pass: {report:?}",
+            program.display()
+        );
+    };
+    assert_eq!(
+        absence.reason,
+        AbsenceReason::DriverWouldNotStart,
+        "a launch that ran out of budget is not a reason about the project: {absence:?}"
+    );
+
+    let detail = &absence.detail;
+    assert!(
+        detail.contains("the program was still running"),
+        "the report does not say what the loop observed about the process: {detail}"
+    );
+    assert!(
+        detail.contains("how close it was to reporting one is not known"),
+        "the report does not say what it does not know: {detail}"
+    );
+    assert!(
+        !detail.contains("ran for"),
+        "the report claims the program ran for the figure, which is the caller's \
+         budget and not a measurement of the browser: {detail}"
+    );
+    println!("a launch that ran out of budget reported: {detail}");
 }
 
 /// A loopback port with nothing behind it, checked rather than assumed.

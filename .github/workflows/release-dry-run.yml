@@ -202,7 +202,7 @@ jobs:
       # missing exactly when it matters.
       - name: Upload the run's logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-aarch64-apple-darwin-logs
           path: target/tmp/release/logs/**
@@ -213,7 +213,7 @@ jobs:
       # is a workflow artifact and not a release: nothing is tagged, nothing is
       # published and nothing is uploaded anywhere else.
       - name: Upload the artifact and its checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-aarch64-apple-darwin
           path: |
@@ -373,7 +373,7 @@ jobs:
       # readable too.
       - name: Upload the run's logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-x86_64-apple-darwin-logs
           path: target/tmp/release/logs/**
@@ -381,7 +381,7 @@ jobs:
           retention-days: 14
 
       - name: Upload the artifact and its checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-x86_64-apple-darwin
           path: |
@@ -665,7 +665,7 @@ jobs:
       # got to.
       - name: Upload the run's logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-x86_64-unknown-linux-gnu-logs
           path: target/tmp/release/logs/**
@@ -673,7 +673,7 @@ jobs:
           retention-days: 14
 
       - name: Upload the artifact and its checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sure-x86_64-unknown-linux-gnu
           path: |

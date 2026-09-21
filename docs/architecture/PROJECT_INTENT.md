@@ -63,9 +63,21 @@ prevented by a shape rather than by a rule the code follows.
 
 `sure check --goal "…"` stores the text as a requirement whose source is
 `explicit_user_goal`, verbatim except for the one removal the section below
-states, then reports that it checked nothing. The
-command-line half of the contract is in `docs/architecture/CLI.md`; this section
-is what the stored requirement means.
+states, and the run then checks the project against it.
+
+**That sentence used to end "then reports that it checked nothing."** It was true
+when it was written and `P7-T010` is what stopped it being true: before the check
+pipeline existed there was no checking for a goal to be reported against. Measured
+now, on a scratch project holding one `package.json` and one `--goal`, the run
+goes through all twelve stages and the goal comes back as a **not-checked line** —
+`SURE checked 0 of 1 checks. 1 check could not run.`, with a `Cannot confirm`
+finding whose own text is "SURE planned this check and did not run it". So the
+goal is not checked *and the run does not say it checked nothing*: it says which
+check did not run and why. The two are different claims and the old sentence made
+the stronger, wrong one.
+
+The command-line half of the contract is in `docs/architecture/CLI.md`; this
+section is what the stored requirement means.
 
 **Nothing is normalized, and one thing is removed.** The text is kept as it
 arrived, with a single exception: the store's redaction removes credential-shaped

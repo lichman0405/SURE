@@ -1,0 +1,79 @@
+{
+  "id": "external-unverified",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "description": "The billing path presents a Stripe charge: it builds the request Stripe's API documents and hands it to a transport that lives in this process. The transport records the request, returns a prepared 200, and opens no connection, so nothing in the project can tell a working integration from a broken one.",
+  "entry_points": {
+    "start": "python app/main.py",
+    "test": "python scripts/check.py"
+  },
+  "defect_files": [
+    "app/transport.py",
+    "app/payments.py"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "external_unverified",
+      "surface": "external_service",
+      "module": "crates/sure-core/src/external_service.rs",
+      "detector": "ExternalServiceChecks::of -> ServiceCategory::Payment",
+      "title": "project uses an external payment service",
+      "anchor": "app/payments.py",
+      "status": "not_checked",
+      "assessment": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "should_fix_first",
+      "required_severity": "note",
+      "why": "`os.getenv(\"STRIPE_API_BASE\")` and `os.getenv(\"STRIPE_SECRET_KEY\", \"\")` in app/payments.py carry the STRIPE_ prefix in an env read, which is the Payment row's own signal. The check is proposed and cannot be run here."
+    },
+    {
+      "kind": "status",
+      "family": "external_unverified",
+      "surface": "external_service",
+      "module": "crates/sure-core/src/external_service.rs",
+      "detector": "ExternalServiceChecks::not_checked",
+      "status": "not_checked",
+      "not_checked_reason": "external_service_unavailable",
+      "detector_severity_today": "should_fix_first",
+      "required_severity": "note",
+      "why": "This is the outcome evaluation/acceptance-manifest.json names for this case: `external real-world behavior is explicitly cannot_confirm/not_checked`. The check becomes a Skipped result carrying NotCheckedReason::ExternalServiceUnavailable, so the payment path is never reported as passed locally."
+    },
+    {
+      "kind": "finding",
+      "family": "external_unverified",
+      "surface": "env_completeness",
+      "module": "crates/sure-core/src/env_completeness.rs",
+      "detector": "KeyStatus::ReadButNotDeclared",
+      "status": "reported",
+      "assessment": "confirmed",
+      "evidence_class": "observed_fact",
+      "detector_severity_today": "should_fix_first",
+      "required_severity": "note",
+      "why": "The same fixture produces two keys the project asks the environment for and names nowhere, STRIPE_API_BASE and STRIPE_SECRET_KEY. Recorded because it is part of what SURE reports here, not because this case is about configuration."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The payment path is reported as working, verified or passing. The provider's answer in this fixture is a constant in app/transport.py, so a success here is a sentence about a stand-in."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while nothing has established that Stripe is reachable, that the account key is accepted, or that a card was charged."
+    },
+    {
+      "kind": "false_green",
+      "description": "The fixture's own `python scripts/check.py` exit code is treated as evidence that the integration works. That check passes on purpose and prints `requests that left this machine  : 0` above its verdict."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The payment path is reported as broken or failed. Nothing here has established that it is: the honest answer is cannot confirm, and a failure would be a claim SURE cannot support either."
+    },
+    {
+      "kind": "silent",
+      "description": "The external payment dependency is not reported at all, so a reader takes the app's own claim that it charges cards through Stripe at face value."
+    }
+  ],
+  "notes": "Severity, recorded rather than hidden, and it points the other way from the P14-T001 gap. evaluation/acceptance-manifest.json asks for `note` on this case, and what SURE produces today is heavier, not lighter: ExternalServiceChecks proposes the check at Severity::ShouldFixFirst with critical = true and EvidenceClass::Inference, and because the severity is not Note, false_completion_aggregator::is_style_noise does not file it as style noise - the proposal is material. The manifest's own expectation, that the outcome be cannot_confirm/not_checked, is met: the check becomes a Skipped result with NotCheckedReason::ExternalServiceUnavailable. crates/sure-core/tests/adversarial_fixture_detection.rs asserts the proposal, the severity it carries today and the Skipped result, so the day either changes the record changes with it. Two stated limits of the detector, both measured rather than guessed, and both recorded here because a Python fake integration can walk straight through them: the import and dependency tables are JavaScript-shaped, so `import stripe` in a `.py` file and `stripe==11.0.0` in requirements.txt each produce no proposal at all, and what fires this fixture is the STRIPE_ environment prefix. A Python app that hard-codes the provider address and calls the provider's own client would be reported as nothing by this check. Runnable with `python`, standard library only, no network: app/transport.py opens no connection and app/main.py and scripts/check.py print `requests that left this machine  : 0`."
+}

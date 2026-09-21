@@ -1,0 +1,10 @@
+{
+  "name": "sure-fixture-route-mismatch",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: the frontend asks for a backend path the backend does not define, so the order list is always empty.",
+  "scripts": {
+    "start": "node src/backend/server.js",
+    "test": "node scripts/check.js"
+  }
+}

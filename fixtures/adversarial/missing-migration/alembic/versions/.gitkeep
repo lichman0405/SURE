@@ -1,0 +1,8 @@
+This file is why this directory exists at all.
+
+A directory with nothing in it cannot be kept in version control, and this
+fixture is about a directory that is *there* and holds no migration. The
+placeholder keeps the directory present; it is not a revision, and Alembic does
+not read it.
+
+The revisions that belong beside it were never written. See ../README.md.

@@ -1,0 +1,7 @@
+{
+  "event": "afterFileEdit",
+  "harness_session_id": "cursor-session-001",
+  "path": "C:\\Users\\dev\\sample-project\\src\\email\\send.rs",
+  "timestamp_utc": "2026-09-18T12:03:00Z",
+  "source": "cursor"
+}

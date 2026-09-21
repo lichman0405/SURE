@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Checkout (adversarial fixture)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 3rem; max-width: 32rem; }
+      button { font-size: 1.1rem; padding: 0.6rem 1.2rem; }
+      #result { margin-top: 1rem; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Pay for your order</h1>
+    <p>Card number <code>TEST-CARD-0000</code> (a placeholder, not a real card).</p>
+    <button id="pay">Pay now</button>
+    <p id="result"></p>
+
+    <script>
+      document.getElementById('pay').addEventListener('click', function () {
+        fetch('/api/checkout', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            amountCents: 2500,
+            card: { number: 'TEST-CARD-0000', expiry: '00/00' },
+          }),
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (body) {
+            // The page says this on the strength of a hard-coded `ok: true`.
+            document.getElementById('result').textContent =
+              'Payment successful. Reference ' + body.reference;
+          });
+      });
+    </script>
+  </body>
+</html>

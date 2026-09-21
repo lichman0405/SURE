@@ -1,6 +1,62 @@
 {
   "id": "route-mismatch",
   "expected_severity": "must_fix",
-  "description": "Frontend calls an API route that backend does not expose.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The web page asks the backend for /api/orders. The backend defines /api/order, singular. The request matches no handler, so every customer is told they have no orders, forever.",
+  "entry_points": {
+    "start": "node src/backend/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "src/frontend/api.js",
+    "src/backend/server.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "route_mismatch",
+      "surface": "route_consistency",
+      "module": "crates/sure-core/src/route_consistency.rs",
+      "detector": "FrontendExpectation::path",
+      "title": "frontend expects backend path `/api/orders` which is not declared",
+      "anchor": "src/frontend/api.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "fetch('/api/orders') is a literal path, and the backend reading holds no route for it."
+    },
+    {
+      "kind": "status",
+      "family": "route_mismatch",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "an empty order list is what a customer sees; the mismatch must be surfaced rather than filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The order list is reported as working, or the page is reported as showing the customer's orders."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while a path the frontend calls has no backend route."
+    },
+    {
+      "kind": "false_positive",
+      "description": "/api/health is reported as a mismatch. It is declared by the backend and called by the frontend, so reporting it would be a false alarm about a working route. crates/sure-core/tests/adversarial_fixture_detection.rs asserts that /api/orders is the only route finding in this fixture."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The fixture is reported as having fake or incomplete code it does not have. It holds no TODO, no mock, no placeholder and no fake key; the route checker must find the mismatch without them."
+    },
+    {
+      "kind": "silent",
+      "description": "The mismatch is not reported at all, so a customer's empty page is attributed to there being no orders."
+    }
+  ],
+  "notes": "The fixture ships a local Express-shaped app object (src/backend/mini-express.js) so the whole project runs with zero npm installs. SURE's JavaScript route reader reads `const app = express();` in src/backend/server.js and the statement-initial app.get(...) lines under it, exactly as it reads real Express, which is why src/backend/server.js is listed in defect_files: the backend half is where the reading comes from. Severity, recorded rather than measured here: evaluation/acceptance-manifest.json requires must_fix for this case, and must_fix is what route_consistency reaches for the undeclared path — Severity::MustFix, critical = false, EvidenceClass::Inference. This fixture has no unmet requirement to record: its one finding row was already at the weight its manifest case requires, which is why it carries no required_severity_unmet block. crates/sure-core/tests/adversarial_fixture_detection.rs asserts that /api/orders is the only route finding here, and its every_recorded_detector_severity_is_what_the_detector_produces_today reads this file's own detector_severity_today value and runs the detector named beside it. Before P7-T011 route_consistency emitted Severity::Note, so this weight was not reachable; that the required and the delivered severity were once different is kept as SEVERITY_BEFORE_P7T011 in that file and in git, and the test that recorded the gap was inverted rather than deleted: it is what_is_detected_now_carries_the_weight_the_manifest_requires now, and it asserts the severity the manifest requires rather than the gap."
 }

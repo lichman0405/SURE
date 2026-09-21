@@ -1,6 +1,161 @@
 {
   "id": "unknown-evidence",
   "expected_severity": "note",
-  "description": "Insufficient observation must produce cannot_confirm, not pass.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": false,
+  "description": "Insufficient observation must produce cannot_confirm, not pass. The recording holds a test run that matches the claim exactly, and a timestamp SURE cannot read: the event's own time is a leap second written `23:59:60Z`, which the wire schema accepts and `Timestamp::parse_rfc3339` refuses. The event is there, the claim is the event's own subject, and SURE will not place it in time — so it will not use it. This is the third reason of the three, and the only route to it: where `tests-not-run` has nothing to point at and `stale-test-evidence` can date what it points at, this one has evidence it cannot date, which is why it carries one item and still cannot confirm.",
+  "claim_check": {
+    "read_by": {
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "function": "check_claim",
+      "plain_report_module": "crates/sure-core/src/claim_report.rs",
+      "route": "an event matches the claim's family, and its timestamp cannot be read, so nothing can be placed against the project's later state",
+      "returns": "the `Stale(Freshness::Stale(StalenessReason::UnknownProvenance))` arm of `check_claim`, the only one that can produce it"
+    },
+    "claim": {
+      "id": "claim-unknown-evidence",
+      "claim_text": "I ran the suite and it passed.",
+      "claim_type": "test_ran",
+      "timestamp": "2026-07-01T00:00:07Z"
+    },
+    "events": [
+      {
+        "role": "an unrelated write with a readable timestamp, so that the control below has something to be compared against",
+        "event_type": "file.write",
+        "timestamp": "2026-06-30T23:58:30Z",
+        "payload": {
+          "path": "src/orders.js",
+          "written": true,
+          "size": 812
+        }
+      },
+      {
+        "role": "the test run the claim is about: a well-formed `test.finished` event whose timestamp is the leap second, accepted on the wire and unreadable to SURE",
+        "event_type": "test.finished",
+        "timestamp": "2026-06-30T23:59:60Z",
+        "payload": {
+          "target": "unit tests",
+          "success": true,
+          "counts": {
+            "passed": 12,
+            "failed": 0
+          }
+        }
+      }
+    ],
+    "expect": {
+      "assessment": "cannot_confirm",
+      "reason": "I do not know which version of the code this applies to, so I cannot use it as proof.",
+      "staleness_reason": "unknown_provenance",
+      "evidence_count": 1,
+      "evidence_class": "observed_fact",
+      "evidence_freshness": "fresh",
+      "anchored_to": {
+        "event_index": 1,
+        "subject": "event",
+        "location": "test.finished",
+        "locator": "2026-06-30T23:59:60Z"
+      }
+    },
+    "control": {
+      "moved": {
+        "event_index": 1,
+        "field": "timestamp",
+        "from": "2026-06-30T23:59:60Z",
+        "to": "2026-06-30T23:59:59Z"
+      },
+      "why": "One field of one event moves: the leap second becomes the second before it, which is a timestamp SURE can read. The payload, the event type, the claim, the other event and the order the two were read in are the fixture's own. The answer must become `confirmed`, and the anchor must move with the timestamp, because the anchor is the event — a checker that answered cannot_confirm to everything, or one that answered cannot_confirm to every unplaceable-looking event, fails here.",
+      "events": [
+        {
+          "event_type": "file.write",
+          "timestamp": "2026-06-30T23:58:30Z",
+          "payload": {
+            "path": "src/orders.js",
+            "written": true,
+            "size": 812
+          }
+        },
+        {
+          "event_type": "test.finished",
+          "timestamp": "2026-06-30T23:59:59Z",
+          "payload": {
+            "target": "unit tests",
+            "success": true,
+            "counts": {
+              "passed": 12,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "expect": {
+        "assessment": "confirmed",
+        "reason": "A recorded harness event supports this test_ran claim.",
+        "staleness_reason": null,
+        "evidence_count": 1,
+        "evidence_class": "observed_fact",
+        "evidence_freshness": "fresh",
+        "anchored_to": {
+          "event_index": 1,
+          "subject": "event",
+          "location": "test.finished",
+          "locator": "2026-06-30T23:59:59Z"
+        }
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "claim_check",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "reading_module": "crates/sure-core/src/claim_report.rs",
+      "detector": "check_claim -> evidence_freshness; the arm reached when the matching event's own timestamp cannot be parsed",
+      "title": "a matching test run SURE cannot place in time is cannot_confirm, and is pointed at rather than ignored",
+      "anchor": "the recorded test.finished event at 2026-06-30T23:59:60Z, declared in claim_check.events",
+      "status": "reported",
+      "assessment": "cannot_confirm",
+      "evidence_class": "observed_fact",
+      "evidence_count": 1,
+      "why": "This is the outcome the manifest's own sentence asks for — `insufficient evidence becomes cannot_confirm` — and the fixture is careful about which kind of insufficiency it is. SURE found the event: one evidence item, class `ObservedFact`, anchored to `test.finished` and to the unreadable timestamp itself, so a reader can see exactly what was found and why it was not used. The reason is `StalenessReason::UnknownProvenance.plain_explanation()`, asserted as a string and asserted to be that function's own sentence rather than a copy: `I do not know which version of the code this applies to, so I cannot use it as proof.` The rendered claim section is asserted in full, so the entry a person sees is graded too. The claim is not called false, the code is not called broken, and the run is not called unverified-because-absent: SURE says it cannot place what it found, and nothing more."
+    },
+    {
+      "kind": "status",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "detector": "sure_domain::evidence::freshness over the attached evidence, which answers Fresh while the assessment is cannot_confirm",
+      "status": "reported",
+      "detector_severity_today": "note",
+      "required_severity": "note",
+      "why": "The manifest asks for `note` on this case and does not make it release-blocking, and this is the one fixture of the three where what SURE produces today and what the contract asks for are the same weight rather than a gap. The evidence class is `ObservedFact` and the severity is `Note`; the freshness call over that evidence answers `Fresh`, because `check_claim` stamps the current fingerprint on what it attaches, while the assessment is `cannot_confirm` because `evidence_freshness` refuses the timestamp. Both are asserted here beside the outcome, so the pair of facts a reader would otherwise have to trust is a pair of facts a test holds."
+    },
+    {
+      "kind": "control",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "status": "not_checked",
+      "why": "The same claim against the same recording with one field of one event moved: `23:59:60Z` becomes `23:59:59Z`, one second earlier and readable. The answer must become `confirmed`, with the evidence anchored to the event at its new timestamp, so the only thing that changed the verdict is whether SURE could read the time. A checker that answered cannot_confirm to every claim fails here."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The claim is reported as Confirmed because an event matching it exists. The event exists and SURE found it; what it cannot do is say when it happened, and without that it cannot say whether the code changed afterwards. An event that cannot be placed in time is not a lighter kind of evidence, it is evidence SURE will not use."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while the one recorded test run cannot be tied to any version of the code. Nothing here establishes that the suite passed against the code being handed over, and a green tick would be a statement about a state SURE cannot name."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The event is reported as malformed, as rejected, or as a fault in the recording. SURE accepted it on the wire, stored it whole, and read it back: the schema is satisfied and the timestamp is a shape RFC 3339 allows. The difference is between accepting a document and being able to place it in time, and this fixture exists because a person can tell those apart only if the report does."
+    },
+    {
+      "kind": "silent",
+      "description": "The claim is reported as cannot_confirm with no evidence attached and no pointer to the event that was found. The item and the anchor are the difference between `SURE found nothing` and `SURE found this and cannot date it`, and a reader given the first answer about this recording has been told something untrue."
+    }
+  ],
+  "notes": "The manifest has a case for this fixture and the two agree: `release_blocking: false` and `expected_severity: note` are the manifest's values, checked by `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking`. Of the three reasons `check_claim` can reach `cannot_confirm` by, this fixture owns the one that is reachable by exactly one route — an unreadable proof timestamp — and it is therefore the only fixture in the corpus that exercises `StalenessReason::UnknownProvenance` at all. The timestamp is a leap second, which is the narrow gap between two of SURE's own parsers and is worth stating plainly because a reader will otherwise take it for a typo: `schemas/event.schema.json` checks `format: date-time` by shape and accepts `23:59:60Z`, and `Timestamp::parse_rfc3339` range-checks seconds and refuses anything above 59 — so the document is legal on the wire, is stored whole, comes back whole, and cannot be read by the code that decides whether evidence is fresh. The fixture is built on the disagreement rather than describing it: the event is ingested through `sure_core::harness_event::ingest_event_str`, which is the path a harness's JSON takes, so the ingestion that accepts it is exercised and not assumed. The date is not a scheduled leap second — none is scheduled — and that is part of the point: the value is what a harness bug, or a leap-second table with a date SURE has not been told about, would produce. Two consequences, both measured and both recorded rather than fixed. The first is that any recording containing such an event can never have that event used as evidence, which is honest but is a permanent refusal rather than a transient one. The second is the other side of the same rule, asserted by `stale-test-evidence`'s tests: a code-change event whose timestamp cannot be parsed is skipped by `evidence_freshness` rather than treated as superseding, so an unreadable write cannot invalidate a readable run. Together the two fixtures are the whole of what the checker does with an unreadable timestamp, and neither behaviour was changed by this task. The store keeps the event's own timestamp verbatim in `session_events.timestamp` while `timestamp_ms` records when SURE wrote the row, which is why a value the parser refuses can be persisted without error — that is a property of the store, read rather than asserted here because it belongs to a store test rather than to this fixture."
 }

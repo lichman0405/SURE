@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "sure": {
-      "command": "sure",
-      "args": ["mcp", "serve"]
+      "command": "powershell",
+      "args": ["-NoProfile", "-File", "${CLAUDE_PLUGIN_ROOT}/scripts/sure-mcp.ps1"]
     }
   }
 }

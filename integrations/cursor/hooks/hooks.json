@@ -1,35 +1,78 @@
 {
-  "version": 1,
+  "description": "SURE evidence/protection hooks for Cursor — Windows bootstrap template; release packaging must render/test per-platform launchers.",
   "hooks": {
     "sessionStart": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 session-start"
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 session-start",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "preToolUse": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 pre-tool-use",
-        "matcher": "Shell|Read|Write|Delete"
+        "matcher": "Shell|Read|Write|Delete",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 pre-tool-use",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "postToolUse": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 post-tool-use"
+        "matcher": "Shell|Read|Write|Delete",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-use",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "postToolUseFailure": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 post-tool-failure"
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-failure",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "afterFileEdit": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 after-file-edit"
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 after-file-edit",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "stop": [
       {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\sure-hook.ps1 stop"
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 stop",
+            "timeout": 20
+          }
+        ]
       }
     ]
   }

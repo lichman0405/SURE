@@ -1,6 +1,169 @@
 {
   "id": "stale-test-evidence",
   "expected_severity": "must_fix",
-  "description": "Tests ran before final source modification and are stale.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "Tests ran before final source modification and are stale. The recording holds a real, well-formed `test.finished` event with a passing summary, and a file write to the code under test 8 minutes and 26 seconds later. The AI's own claim says the run came after the change; the recording says the change came after the run, and the claim checker believes the recording. This is the middle reason of the three: unlike `tests-not-run` there is an event to point at, and unlike `unknown-evidence` the event can be placed in time — which is exactly what makes it unusable.",
+  "claim_check": {
+    "read_by": {
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "function": "check_claim",
+      "plain_report_module": "crates/sure-core/src/claim_report.rs",
+      "route": "an event matches the claim's family, and a later file write to the project supersedes it",
+      "returns": "the `Stale(Freshness::Stale(StalenessReason::SupersededByLaterChange))` arm of `check_claim`"
+    },
+    "claim": {
+      "id": "claim-stale-test-evidence",
+      "claim_text": "I ran the full suite after the change and it passed.",
+      "claim_type": "test_ran",
+      "timestamp": "2026-09-14T10:31:12.000Z"
+    },
+    "events": [
+      {
+        "role": "the test run the claim is about, and the event SURE attaches as evidence",
+        "event_type": "test.finished",
+        "timestamp": "2026-09-14T10:22:41.000Z",
+        "payload": {
+          "target": "unit tests",
+          "success": true,
+          "counts": {
+            "passed": 12,
+            "failed": 0
+          }
+        }
+      },
+      {
+        "role": "the write that invalidates it: the same file the claim is about, 8 minutes and 26 seconds after the run it says covered the change",
+        "event_type": "file.write",
+        "timestamp": "2026-09-14T10:31:07.000Z",
+        "payload": {
+          "path": "src/orders.js",
+          "written": true,
+          "size": 934
+        }
+      }
+    ],
+    "expect": {
+      "assessment": "cannot_confirm",
+      "reason": "This was checked before later changes were made, so it no longer describes the current version.",
+      "staleness_reason": "superseded_by_later_change",
+      "evidence_count": 1,
+      "evidence_class": "observed_fact",
+      "evidence_freshness": "fresh",
+      "anchored_to": {
+        "event_index": 0,
+        "subject": "event",
+        "location": "test.finished",
+        "locator": "2026-09-14T10:22:41.000Z"
+      }
+    },
+    "control": {
+      "moved": {
+        "event_index": 1,
+        "field": "timestamp",
+        "from": "2026-09-14T10:31:07.000Z",
+        "to": "2026-09-14T10:21:00.000Z"
+      },
+      "why": "One field of one event moves: the write's timestamp, from 8 minutes after the run to 1 minute 41 seconds before it. The claim, the evidence event, its own timestamp and payload, the order the two were read in and the write's payload are all the fixture's own. The answer must become `confirmed`, and the evidence must be anchored to the same event as before — so what moved is the verdict and nothing else, and a checker that answered cannot_confirm to everything fails here.",
+      "events": [
+        {
+          "event_type": "test.finished",
+          "timestamp": "2026-09-14T10:22:41.000Z",
+          "payload": {
+            "target": "unit tests",
+            "success": true,
+            "counts": {
+              "passed": 12,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "event_type": "file.write",
+          "timestamp": "2026-09-14T10:21:00.000Z",
+          "payload": {
+            "path": "src/orders.js",
+            "written": true,
+            "size": 934
+          }
+        }
+      ],
+      "expect": {
+        "assessment": "confirmed",
+        "reason": "A recorded harness event supports this test_ran claim.",
+        "staleness_reason": null,
+        "evidence_count": 1,
+        "evidence_class": "observed_fact",
+        "evidence_freshness": "fresh",
+        "anchored_to": {
+          "event_index": 0,
+          "subject": "event",
+          "location": "test.finished",
+          "locator": "2026-09-14T10:22:41.000Z"
+        }
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "claim_check",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "reading_module": "crates/sure-core/src/claim_report.rs",
+      "detector": "check_claim -> evidence_freshness; the arm reached when a matching event exists and a later code change is at or after its timestamp",
+      "title": "the passing `test.finished` event is not made evidence of the final code by the write that followed it",
+      "anchor": "the recorded test.finished event at 2026-09-14T10:22:41.000Z, declared in claim_check.events",
+      "status": "reported",
+      "assessment": "cannot_confirm",
+      "evidence_class": "observed_fact",
+      "evidence_count": 1,
+      "why": "The event is real and SURE says so: one evidence item, class `ObservedFact`, anchored to the event's own type and timestamp. What it refuses is the conclusion. A `test_ran` claim is a result claim, so `is_result_claim_type` sends it through `evidence_freshness`, which compares the run's timestamp with every code-change event in the recording and finds one 8 minutes and 26 seconds later. The reason a reader is shown is that reason's own sentence, asserted as a string and asserted to be `StalenessReason::SupersededByLaterChange.plain_explanation()` rather than a second copy of it: `This was checked before later changes were made, so it no longer describes the current version.` The rendered claim section is asserted in full, so the entry a person sees is graded and not only the value behind it."
+    },
+    {
+      "kind": "status",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "detector": "sure_domain::evidence::freshness over the attached evidence, which answers Fresh because check_claim stamps the current fingerprint on what it attaches",
+      "status": "reported",
+      "detector_severity_today": "note",
+      "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "The weight `check_claim` puts on the evidence it attaches is `Severity::Note`, in every state of every claim check, so no reading of this recording reaches the `must_fix` the case's manifest row asks for. The staleness this fixture is about is decided in the assessment and in the reason, and the claim path has no route into `crates/sure-core/src/false_completion_aggregator.rs`, which is what decides hand-off.",
+        "would_require": "a verdict-layer rule that reads a claim assessment — `pipeline::is_confirmed` is the predicate that would decide it, and it has no caller outside its own unit test. This is the same verdict-layer gap `tests-not-run` records, and it is not closed by editing a fixture: the change would be to the product, so the requirement stands unmet and is recorded here rather than quietly restated as `note`."
+      },
+      "why": "The trap this fixture exists to hold open, recorded as a value rather than as a warning. `Evidence.fingerprint` is the current project fingerprint, so `sure_domain::evidence::freshness(&evidence, &fingerprint)` answers `Fresh` on the very evidence the checker has just refused to use; the staleness that decides the assessment lives in the assessment and in the reason, and nowhere in that call. A reader who reached for `freshness` as the way to find stale evidence would find none here, so the fixture asserts the class, the count and the anchor of the evidence, the sentence in the reason, and the freshness call — all four, together, so that a change to any one of them is a failing test rather than a quietly different product. The severity the attached evidence carries is `Note`, while the manifest asks `must_fix` for this case; the same verdict-layer gap `tests-not-run` records, and not closed here."
+    },
+    {
+      "kind": "control",
+      "family": "claim_evidence",
+      "surface": "claim_checker",
+      "module": "crates/sure-core/src/claim_checker.rs",
+      "status": "not_checked",
+      "why": "The same claim against the same recording with one field of one event moved: the write's timestamp set 1 minute 41 seconds before the test run instead of 8 minutes 26 seconds after it. The answer must become `confirmed`, with the evidence anchored to the same event as before, so the only thing that moved is the verdict. A checker that answered cannot_confirm to everything would satisfy the required outcome above and fails here."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The claim is reported as Confirmed because a `test.finished` event with `success: true` exists. The event does exist, and the reason it is not evidence is the write that came after it — the run measured a version of the code that is no longer the version on disk."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while the only test evidence predates the last change to the file under test. The suite that passed and the code being shipped are not the same code, and a green tick is a statement about the second one."
+    },
+    {
+      "kind": "false_green",
+      "description": "The claim is reported as passing or verified because the AI's sentence says the run came after the change. The sentence is the thing being checked; a checker that read it as evidence of itself would confirm every claim ever made."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The test run is reported as failed, or the tests are reported as not having run. Both are untrue of this recording, and `Contradicted` is an assessment `check_claim` documents it never returns: the honest answer is that SURE cannot use this evidence, not that it has refuted it."
+    },
+    {
+      "kind": "silent",
+      "description": "The claim is reported as Confirmed without the reason being shown, so a reader never learns that the evidence was superseded — the assessment and the sentence are one outcome and a report that ships the first without the second is the false green in a quieter form."
+    }
+  ],
+  "notes": "The manifest has a case for this fixture and the two agree: `release_blocking: true` and `expected_severity: must_fix` are the manifest's values, checked by `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking`, and the case's own expectation — `old test evidence does not prove final code` — is the sentence this fixture measures. The recording is declared in `claim_check` as event documents and ingested through `sure_core::harness_event::ingest_event_str`, then persisted through the session event store into a scratch store under `target/tmp`, so the two paths a real event takes are both exercised. The comparison that decides this fixture is millisecond-precision and inclusive: a code change at exactly the proof event's timestamp supersedes it, which `claim_checker`'s own comment explains as the harness not promising ordering inside a millisecond, and which is why the control moves the write well before the run rather than one millisecond after it. Two limits of the reading, both measured and both recorded rather than hidden. The first is that the store orders events by the time SURE wrote them, not by the time the events say they happened — `session_events` carries both, and claim checking reads the second from the document — so a recording whose events arrive out of order is checked by their own timestamps and the fixture declares the order SURE read them in. The second is that a code-change event whose own timestamp cannot be parsed is skipped by `evidence_freshness` rather than treated as superseding: an unreadable write cannot invalidate a run, and the run keeps the benefit of the doubt. That is the same unreadable-timestamp state `unknown-evidence` is built on, seen from the other side, and the two fixtures together are the whole of what the checker does with it. It is asserted rather than described, in `a_write_whose_own_timestamp_cannot_be_read_does_not_supersede_the_run`, because it is the one place where the refusal this fixture is about turns into a confirmation and the difference deserves a name. Related and not fixed: this fixture is about the claim a person made, and nothing in the build turns a `cannot_confirm` claim into a release-blocking finding — `pipeline::is_confirmed` reads claim assessments and has no caller outside its own test."
 }

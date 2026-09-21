@@ -1,0 +1,163 @@
+{
+  "id": "missing-user-intent",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "description": "A small Node project and no request to compare it against. Nothing in the project is wrong: it declares one route and implements it. The defect this fixture traps is not in the project at all — it is in what a report is allowed to say about it, and the answer SURE must give is that it cannot say anything about whether the project meets what the user asked for, because no request was ever provided.",
+  "intent_comparison": {
+    "read_by": {
+      "module": "crates/sure-core/src/intent_implementation.rs",
+      "function": "compare_intent_to_project",
+      "plain_report_module": "crates/sure-core/src/project_verdict.rs",
+      "route": "there is no intent to compare, so `may_claim_full_fulfilment` is false before any evidence count is considered, and the report's only honest answer is the frozen caveat",
+      "returns": "`ProjectIntent::empty()` reaches `is_after_the_fact()`, so `ProjectVerdict::must_caveat_requirements()` is true and `render_summary` carries the frozen sentence"
+    },
+    "goal_text": null,
+    "why_no_goal": "The fixture is the case where the user's request was never given to SURE. Supplying one here — even as a file in the project — would be the fixture answering a different question, which is what the control below is for.",
+    "project": {
+      "files": ["src/bookings.js", "src/server.js"],
+      "route": "/bookings, declared in src/server.js line 4"
+    },
+    "expect": {
+      "requirement_claim": "after_the_fact",
+      "intent_caveat": "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+      "may_claim_full_fulfilment": false,
+      "swept_requirement_counts": [0, 1, 2, 64],
+      "sweep_includes_the_top_of_the_range": true,
+      "user_requirements_checked": 0,
+      "matched": 0,
+      "unmatched": 0,
+      "findings": 0,
+      "limitation": "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings."
+      ]
+    },
+    "control": {
+      "moved": {
+        "what": "the intent",
+        "from": "no intent at all: `ProjectIntent::empty()`",
+        "to": "one ExplicitUserGoal reading `serve the bookings route`",
+        "how": "sure_core::project_intent::explicit_goal against the fixture's own directory, so the project is read where it ships and cannot have moved"
+      },
+      "why": "One thing moves and it is not in the project: the request that was never provided is provided. The project is the same directory, read by the same `discover` call, and the test asserts the two `Discovery` values are equal before it reads either answer, so a second difference cannot hide in the files. If SURE answered `cannot_confirm` to everything, this half would answer it too; it does not, so the fixture's silence about fulfilment is a fact about the missing request rather than about a pessimistic reporter.",
+      "goal_text": "serve the bookings route",
+      "expect": {
+        "requirement_claim": "comparable",
+        "intent_caveat": null,
+        "may_claim_full_fulfilment": true,
+        "user_requirements_checked": 1,
+        "matched": 1,
+        "unmatched": 0,
+        "findings": 0,
+        "limitation": null,
+        "matched_anchor": {
+          "kind": "route",
+          "path": "/bookings",
+          "declared_in": "src/server.js",
+          "line": 4
+        },
+        "summary_lines": [
+          "Not enough could be checked to say whether this is ready.",
+          "This project is not ready to hand off.",
+          "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+          "No open findings."
+        ]
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "intent_status",
+      "family": "intent_implementation",
+      "surface": "project_verdict",
+      "module": "crates/sure-core/src/project_verdict.rs",
+      "reading_module": "crates/sure-domain/src/status.rs",
+      "detector": "ProjectVerdict::must_caveat_requirements, and the caveat line render_summary adds when it is true",
+      "title": "the report says it cannot check the project against the request, because there was no request",
+      "status": "reported",
+      "requirement_claim": "after_the_fact",
+      "intent_caveat": "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+      "may_claim_full_fulfilment": false,
+      "swept_requirement_counts": [0, 1, 2, 64],
+      "sweep_includes_the_top_of_the_range": true,
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings."
+      ],
+      "why": "The gate is `may_claim_full_fulfilment`, and the claim this outcome records is that it is false for **every** number of requirements with fresh evidence, not just for zero. `ProjectIntent::empty()` has no user requirement, so `has_user_requirement()` is false and the count never matters: the sweep runs from 0 to `usize::MAX` and the answer is `false` at every point. The sentence a reader is shown is compared whole — the five lines of `render_summary`, not a substring of them — and the frozen caveat is one of the five. That is what makes `I cannot confirm that it matches your original request` a graded fact rather than a phrase someone hoped was still there. The manifest asks for `note` on this case and this fixture produces no finding at all, which is the stronger answer: the absence of a request is not a defect in the project."
+    },
+    {
+      "kind": "comparison_detail",
+      "family": "intent_implementation",
+      "surface": "intent_implementation",
+      "module": "crates/sure-core/src/intent_implementation.rs",
+      "reading_module": "crates/sure-domain/src/intent.rs",
+      "detector": "compare_intent_to_project over an empty intent: no requirement is checked and the limitation is the claim's own caveat",
+      "title": "no requirement is checked, and the limitation says why",
+      "status": "reported",
+      "user_requirements_checked": 0,
+      "matched": 0,
+      "unmatched": 0,
+      "findings": 0,
+      "limitation": "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
+      "why": "This is the comparison's own answer, reached by calling `compare_intent_to_project` directly, because the pipeline keeps only its `.findings` and drops the other four fields. It matters that all four are asserted here rather than assumed: `checked == 0` is what says SURE compared nothing, `unmatched == 0` is what says the empty report is not the report of a failed comparison, `findings == 0` is what says nothing was invented about a project that was never asked to do anything, and `limitation` is the sentence the reader-facing half carries by a different route. `RequirementClaim::AfterTheFact` is where that route starts, and it is asserted above as the claim rather than read off this field."
+    },
+    {
+      "kind": "control",
+      "family": "intent_implementation",
+      "surface": "project_verdict",
+      "module": "crates/sure-core/src/project_intent.rs",
+      "reading_module": "crates/sure-core/src/project_verdict.rs",
+      "status": "not_checked",
+      "title": "the same project with one explicit goal added",
+      "goal_text": "serve the bookings route",
+      "requirement_claim": "comparable",
+      "intent_caveat": null,
+      "may_claim_full_fulfilment": true,
+      "user_requirements_checked": 1,
+      "matched": 1,
+      "unmatched": 0,
+      "findings": 0,
+      "limitation": null,
+      "matched_anchor": {
+        "kind": "route",
+        "path": "/bookings",
+        "declared_in": "src/server.js",
+        "line": 4
+      },
+      "summary_lines": [
+        "Not enough could be checked to say whether this is ready.",
+        "This project is not ready to hand off.",
+        "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
+        "No open findings."
+      ],
+      "why": "The entire fixture rests on this half. A reporter that answered `I cannot confirm that it matches your original request` to every project would satisfy every positive assertion above and would measure nothing; with a goal supplied, the answer must flip — `Comparable`, no caveat, one requirement checked and matched against the fixture's own `/bookings` route, and the rendered summary losing exactly the caveat line and gaining nothing. The project is not rebuilt for the control: it is the fixture's own directory, and the test asserts the two `Discovery` values are equal, so the intent is the only thing that moved."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The report claims the project meets what the user asked for, when no request was ever provided. There is no request to meet, so any sentence saying the work is done, complete, or matching the goal is invented — and it reads to a person as a green light on work nobody described."
+    },
+    {
+      "kind": "false_green",
+      "description": "The summary is rendered without the sentence `I cannot confirm that it matches your original request because that request was not provided to SURE.`, so `No open findings.` is left standing on its own and a reader takes it as the project being verified against what they asked for. The absence of findings in a project nothing was asked of is silence, not a passing result."
+    },
+    {
+      "kind": "silent",
+      "description": "Nothing is said about the missing request at all: the report shows the capability tier, the headline and no findings, and never tells the reader that SURE has nothing to compare the project against."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The lack of a request is reported as a defect in the project — a finding, a `must_fix`, a critical check, or a failure. Nothing in this directory is wrong: the route it declares is implemented, and `src/bookings.js` is a real file. SURE is the one that was not told what the work was for."
+    }
+  ],
+  "notes": "`missing-user-intent` is a case in `evaluation/acceptance-manifest.json` with `release_blocking: false`, `expected_severity: \"note\"` and the expectation `no claim of full requirement fulfillment without trusted intent`; the two `required_severity` fields at the top of this file are copied from that row rather than chosen here, and `every_fixture_agrees_with_the_manifest_about_id_severity_and_blocking` in `crates/sure-testkit/tests/fixture_apps.rs` fails if either drifts. SURE produces no finding for this case at all — the manifest's `note` is a ceiling this fixture stays under rather than a level it reaches — and that is recorded here rather than dressed up: there is nothing in the project to report. The pipeline is driven with `store: None`, so a test run of this fixture writes nothing anywhere, and the project directory is read where it ships rather than copied, so a fixture edited without the test being edited is a red test. The project is deliberately tiny and ships no language manifest: `every_runnable_fixture_directory_is_named_in_this_file` fires the moment a `package.json` appears, and this fixture is graded from a `Discovery` rather than by running anything."
+}

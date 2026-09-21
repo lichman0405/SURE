@@ -1,0 +1,6 @@
+{
+  "event": "Stop",
+  "harness_session_id": "claude-session-001",
+  "timestamp_utc": "2026-09-18T12:04:00Z",
+  "source": "claude-code"
+}

@@ -1,0 +1,11 @@
+{
+  "session_id": "codex-session-001",
+  "transcript_path": "C:\\Users\\dev\\.codex\\sessions\\2026\\09\\18\\codex-session-001.jsonl",
+  "cwd": "C:\\Users\\dev\\sample-project",
+  "hook_event_name": "Stop",
+  "model": "codex-example-model",
+  "permission_mode": "example-mode",
+  "turn_id": "turn-001",
+  "stop_hook_active": false,
+  "last_assistant_message": "Done — every test passes and the feature is complete."
+}

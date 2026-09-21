@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Release Gate",
+  "description": "The seven release metrics docs/product/PRODUCT_EVALS.md states, measured, and the decision a packaging task is entitled to take from them. Produced by sure_core::release_gate::release_gate over the report sure_core::acceptance_report produces, and written to target/tmp/release-gate.json where the report exists in full. A metric's value is computed from the report's observations and never from the corpus's own declarations; a metric nothing on this corpus can measure reads `unmeasured` with its reason rather than as a zero. This schema is closed (`additionalProperties: false`) on purpose, unlike the document schemas that describe a lower-bound contract: this document is what a release decision is taken from, so a field it carries that no reader knows about is a mistake rather than an extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract",
+    "decision",
+    "corpus",
+    "blocked_by",
+    "metrics",
+    "unmeasured_metrics",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this document's shape. Bumped when the shape changes in a way an older reader would get wrong.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "contract": {
+      "description": "What a consumer of this document is entitled to do with it, in the document rather than only in a commit message: what `permitted` authorises, what `blocked` forbids, and what the decision is not about.",
+      "type": "string"
+    },
+    "decision": {
+      "description": "`permitted` only when every release-blocking case of the corpus is `met` by an observation. `blocked` otherwise, with every such case named in `blocked_by` — including a release-blocking case that nothing observed, which is not a pass.",
+      "enum": [
+        "permitted",
+        "blocked"
+      ]
+    },
+    "corpus": {
+      "description": "Which contract, and which corpus, the decision is against. The digest ties the decision to the exact manifest it was taken from, so an edited contract cannot leave an old decision standing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest",
+        "manifest_digest",
+        "cases",
+        "release_blocking",
+        "release_blocking_observed",
+        "release_blocking_cannot_confirm"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "string"
+        },
+        "manifest_digest": {
+          "type": "string"
+        },
+        "cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_blocking_cannot_confirm": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "blocked_by": {
+      "description": "Every release-blocking case that stops the release, in the report's order. Empty exactly when the decision is `permitted`.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "agreement",
+          "requirement",
+          "comparison",
+          "why"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agreement": {
+            "description": "`unmet`: the requirement did not hold, as measured. `cannot_confirm`: nothing in the run that produced the report observed the case, so its requirement has not been shown to hold either.",
+            "enum": [
+              "unmet",
+              "cannot_confirm"
+            ]
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "comparison": {
+            "description": "The report's own comparison sentence for the row, carried rather than paraphrased, so the gate points at the measurement instead of restating it.",
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "description": "The seven metrics docs/product/PRODUCT_EVALS.md states, in that document's order. Every one says what it is computed from, what it sees and what it does not, in the document rather than in a commit message.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim",
+          "value",
+          "computed_from",
+          "covers",
+          "does_not_cover"
+        ],
+        "properties": {
+          "claim": {
+            "description": "The metric's name as docs/product/PRODUCT_EVALS.md states it, checked against that file's bullets by crates/sure-core/tests/release_gate_runner.rs so a line rewritten there without this document moving is a red test rather than a drift nobody sees.",
+            "type": "string"
+          },
+          "value": {
+            "description": "`state` is the discriminator. `rate` carries a numerator and the denominator it was taken over — both numbers, because a rate of zero over zero rows is not a rate of zero. `unmeasured` carries why nothing here computes it, what would have to change, and, where another suite measures it, where that is: a metric that cannot be measured on this corpus reads as unmeasured rather than as zero.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "rate",
+                  "unmeasured"
+                ]
+              },
+              "numerator": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "denominator": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string"
+              },
+              "would_require": {
+                "type": "string"
+              },
+              "measured_elsewhere": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "computed_from": {
+            "description": "The rows and values the number was computed from, named so that a reader can recompute it by hand.",
+            "type": "string"
+          },
+          "covers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "does_not_cover": {
+            "description": "What this metric does not see, with the reason. An exclusion written here is a decision somebody made; an exclusion that is not here is a hole.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "unmeasured_metrics": {
+      "description": "The claims of the metrics this document could not measure, so that a reader of a `permitted` decision is not left to discover a gap by reading every entry.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "description": "What this document does not know, said in the document rather than only in a commit message.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

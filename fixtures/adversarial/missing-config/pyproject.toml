@@ -1,0 +1,12 @@
+# The project's own manifest. It declares no dependencies, because the app is
+# written against the standard library: `python scripts/check.py` works on a
+# machine with nothing installed but Python itself.
+#
+# It declares no configuration either. If the settings this project needs were
+# written down anywhere, this would be a reasonable place, and they are not.
+[project]
+name = "sure-fixture-missing-config"
+version = "0.0.0"
+description = "Adversarial fixture: the app reads configuration names that the project documents and provides nowhere."
+requires-python = ">=3.9"
+dependencies = []

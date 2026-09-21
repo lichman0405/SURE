@@ -8,6 +8,29 @@ license.workspace = true
 [dependencies]
 sure-domain = { path = "../sure-domain" }
 sure-protocol = { path = "../sure-protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+# `pyproject.toml` and, from `P2-T006`, `Cargo.toml`. See the workspace manifest
+# for why this is not deserialized directly into `serde_json::Value`.
+toml = { workspace = true }
+sha2 = { workspace = true }
+dirs = { workspace = true }
+rusqlite = { workspace = true }
+regex = { workspace = true }
+ureq = { workspace = true }
+
+# The testkit is a development-only dependency. Nothing the product ships may
+# reach it (see `sure-testkit`'s `workspace` module), and the loader tests use
+# it to find the checkout rather than re-deriving the repository root.
+#
+# `rusqlite` is repeated here, already a real dependency, for
+# `tests/store_concurrency.rs`: holding the write lock from outside the store is
+# the only way to test what SURE does when it cannot take it, and the lock is
+# SQLite's, so the test has to take it with SQLite.
+[dev-dependencies]
+sure-testkit = { path = "../sure-testkit" }
+rusqlite = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,0 +1,13 @@
+{
+  "name": "sure-fixture-repair-regression",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: two packages share one helper, and the repair that fixes the first package's defect is the repair that breaks the second package's previously passing behaviour.",
+  "packageManager": "npm@10.9.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "node scripts/demo.js"
+  }
+}

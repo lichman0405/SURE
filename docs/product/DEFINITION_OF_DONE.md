@@ -20,7 +20,10 @@ Release gates:
 - zero false green on the mandatory adversarial corpus;
 - no fabricated command/test execution evidence;
 - critical `error/skipped/unknown` never aggregates to clean green;
-- secret-redaction fixtures pass;
+- secret-redaction fixtures pass (`fixtures/privacy/manifest.json`, run by
+  `cargo test -p sure-cli --test privacy_suite`; it is also where full recording
+  being off by default is observed, and its `not_confirmed` list is part of the
+  claim rather than an excuse beside it);
 - native Windows local gates pass;
 - Windows/macOS/Linux Rust-core CI passes;
 - install/uninstall docs pass clean-machine simulation as far as credentials permit;

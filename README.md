@@ -4,42 +4,174 @@
 
 > **AI says it's done. Be SURE.**
 
-SURE is a local-first project checking layer for software built with AI coding tools.
+[English](README.md) · [中文](README.zh-CN.md)
 
-It helps an individual builder or a small team answer:
+SURE checks software that was built with AI coding tools, and tells you what is
+actually true about it — in plain language, with evidence behind every claim.
+
+It answers three questions:
 
 1. **Can this project actually work?**
 2. **Is anything clearly broken, unsafe, fake or incomplete?**
 3. **Can the AI's claims about what it completed be confirmed?**
 
-When SURE finds a real problem, it explains the consequence in plain language, creates a bounded repair contract, hands that contract back to the user's existing coding agent, and checks again after the repair.
+When SURE finds a real problem, it explains the consequence, writes a bounded
+repair contract you can hand back to your coding agent, and checks again after
+the repair. When it cannot confirm something, it says "cannot confirm" instead
+of guessing. **A false "all clear" is treated as more serious than a visible
+error.**
 
-## Product rule
+SURE works beside the tool you already use. Claude Code users keep using Claude
+Code. Cursor users keep using Cursor. Codex users keep using Codex.
 
-> **Never replace the harness. Sit beside it.**
+## Install on Windows
 
-Claude Code users keep using Claude Code. Cursor users keep using Cursor. Codex users keep using Codex.
+You need two things on the machine that builds SURE:
 
-## Two modes
+- **Rust** — install [rustup](https://rustup.rs); the repository's
+  `rust-toolchain.toml` pins the version, so rustup installs the right one for
+  you.
+- **Visual Studio Build Tools** with the "Desktop development with C++"
+  workload.
 
-### Check this project
+Then, from the root of this repository, in PowerShell:
 
-Works even if SURE did not observe the development session.
+```powershell
+# 1. The release gate — SURE's own acceptance tests. Takes a few minutes.
+cargo test -p sure-core --test acceptance_report_runner
 
-It can inspect the current project, run approved checks, identify obvious incomplete/fake implementation and produce a plain-language report.
+# 2. Build and package the archive. Also a few minutes.
+& .\scripts\Build-Release.ps1 -Phase All
 
-It **cannot** claim that the project matches the user's original request unless that request/goal was supplied or observed.
+# 3. Install for your user account. No administrator, no PATH change.
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
 
-### Full-session checking
+# 4. Check that it works.
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
+```
 
-With a supported harness plugin/hook, SURE also records selected development facts and can compare the AI's completion claims with what actually happened.
+The program lands at `%LOCALAPPDATA%\SURE\bin\sure.exe`. To remove it later:
+`& .\scripts\Uninstall-Sure.ps1` — it never deletes `sure.db`, the file where
+your check history lives.
 
-## Current repository status
+The full walk is `docs/development/QUICKSTART_WINDOWS.md`; the installer
+reference is `docs/development/INSTALL_WINDOWS.md`.
 
-This repository contains an autonomous-development bootstrap, not the completed SURE product.
+## Install on macOS and Linux
 
-Start with `START_HERE.md`.
+Build from source:
 
-## Development bootstrap
+```sh
+cargo install --path crates/sure-cli   # installs `sure` into ~/.cargo/bin
+```
 
-Primary v0.1 development host: **Windows 11 x64 / native MSVC**. See `START_HERE.md`.
+That is also where the Unix launcher scripts look for it. The Rust core is
+portable and CI-tested on both platforms; `docs/development/MACOS.md` and
+`docs/development/LINUX.md` state the support boundaries.
+
+## Use it
+
+Is SURE itself set up correctly on this machine?
+
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+```
+
+Check a project. The path must be absolute:
+
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\demo\hello"
+```
+
+### What a run looks like
+
+This is a real `sure check` run against a small project holding a
+`package.json` and one JavaScript file — the output of SURE 0.1.0, cut to its
+own headings. The project's path was replaced with `C:\demo\hello`, and a line
+holding `...` is where text was left out:
+
+```text
+SURE checked C:\demo\hello.
+
+Not enough could be checked to say whether this is ready.
+This project is not ready to hand off.
+...
+No open findings.
+
+What the run did, stage by stage
+  1/12. Find the project's parts: node (level B); all of it was read. Support reaches level C.
+  ...
+  8/12. Ask a model to assess the project: No analysis provider is configured, so SURE assessed nothing with a model. ... (NOT CHECKED)
+  9/12. Check what was claimed against the evidence: SURE has no recorded history for this machine, so there are no agent claims to check against evidence. (NOT CHECKED)
+  ...
+
+2 of the 12 stages did not run, and each is marked NOT CHECKED above. A run with
+a stage that did not run is never reported as clean.
+
+SURE exited with status 1. That is what it returns when it checked the project
+and did not find it clean — not 3, which would mean this build cannot check a
+project at all.
+```
+
+Read the exit status as the answer:
+
+| status | meaning |
+| --- | --- |
+| `0` | clean — every check that ran passed, and nothing was skipped |
+| `1` | checked, and not clean — findings, or not enough could be checked |
+| `5` | the run did not finish — bad path, unreadable project |
+| `2` | the command line itself was wrong |
+
+**Expect `1` on your first runs.** With no AI model configured — the default —
+SURE runs its deterministic checks but marks the model-assessment stage "not
+checked", and a run with any stage not checked is never reported as clean. That
+is the tool being honest, not your project failing. Stage 9 needs history from
+the plugin below, so a machine that has never used SURE has two stages marked.
+
+Other commands worth knowing:
+
+- `sure repair` — turn findings into a bounded repair contract you can hand to
+  your coding agent
+- `sure recheck` — check again after the repair, and compare with last time
+- `sure history` — see (and delete) what SURE has recorded on this machine
+- add `--format json` to any command for one JSON object on one line, for
+  scripts to read
+
+A first check writes nothing to your machine: SURE opens your history only if
+one already exists.
+
+## Connect it to your AI coding tool
+
+SURE can also record a coding session (only with your consent) and compare the
+AI's "done" claims against what actually happened. That needs the plugin for
+your harness:
+
+```powershell
+# Claude Code — copies the plugin to %LOCALAPPDATA%\claude-plugins\sure
+& .\integrations\claude-code\scripts\install.ps1 -ForceCopy
+```
+
+Loading the plugin into Claude Code is Claude Code's own step;
+`integrations/claude-code/README.md` explains it. Cursor and Codex packages
+follow the same layout — see `docs/integrations/INSTALLATION_MATRIX.md`. The
+Copilot package is a template today; nothing installs it.
+
+No plugin? The CLI still checks projects. Claim-checking then reports "cannot
+confirm", which is the honest answer rather than a missing feature.
+
+## Where SURE keeps things
+
+`%LOCALAPPDATA%\SURE\` on Windows — the program, and `sure.db`, your evidence
+history. SURE is local-first: everything stays on your machine and nothing is
+sent anywhere.
+
+## Read more
+
+- `ROADMAP.md` — where the project stands and what comes next
+- `FINAL_REPORT.md` — what this v0.1 is and is not, with measurements
+- `docs/` — architecture, security, integrations, development
+- `START_HERE.md` — if you want to work on SURE itself
+
+## License
+
+Apache-2.0. See `LICENSE`.

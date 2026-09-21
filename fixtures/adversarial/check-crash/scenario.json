@@ -1,6 +1,675 @@
 {
   "id": "check-crash",
   "expected_severity": "must_fix",
-  "description": "A crashed check must surface ERROR/UNKNOWN and never aggregate to green.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "A critical check that did not produce a result — because its checker failed, because the execution mode refused it, or because nothing came back for it at all — must be a row in the report and must never aggregate green. The trap is that all three of those answers satisfy a criterion written only as *not green*: `NotEnoughChecked` is not green, and neither is the answer to an empty plan, so a product that never produced a result at all and a product that answered `NotEnoughChecked` to everything would both pass it. What makes the sentence a measurement is the control: the same schedule, with the check reporting a pass, which must reach `Green`.",
+  "checker_failure": {
+    "read_by": {
+      "module": "crates/sure-core/src/aggregation.rs",
+      "function": "aggregate_run",
+      "plain_report_module": "crates/sure-core/src/aggregation.rs",
+      "route": "the schedule is walked rather than the results, so a scheduled check with no result is a row (`unknown`, carrying `NOTHING_CAME_BACK`) and not an absence; a check the plan refused is the plan's own `ScheduledCheck::not_run` entry; and a result that came back is aggregated as itself. All three routes are this one function.",
+      "returns": "`Result<RunReport, RunRefused>`. The two refusals are a caller's faults rather than the product's — two answers for one check, or an answer established against a different project state — and this fixture never provokes either: every run below hands back at most one result per scheduled check, all of them against one fingerprint."
+    },
+    "schedule": {
+      "built_by": {
+        "module": "crates/sure-core/src/schedule.rs",
+        "function": "PlanBuilder::new / propose / refused / build",
+        "why": "The schedule is built by the product's own plan builder from this declaration, and `refused()` is asserted empty before anything runs: a check the builder turned down would leave the runs below describing a plan that never existed. The fixture declares no project and no `entry_points`, because the case is a check that produced no result rather than a project with code in it — the same stance `unknown-evidence` takes."
+      },
+      "checks": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "title": "Run the project's test suite",
+          "severity": "must_fix",
+          "critical": true,
+          "evidence_class": "deterministic_check",
+          "reason": "project_wide",
+          "actions": ["run_tests"],
+          "why": "`run_tests` is what makes this check the interesting one: it executes the project's own code, so an inspect-only mode refuses it, and it is the kind of check whose failure a reader most needs to hear about."
+        },
+        {
+          "id": "chk_q7h2nvb3cy5t9wq2medx",
+          "title": "Check the database migration history",
+          "severity": "must_fix",
+          "critical": true,
+          "evidence_class": "deterministic_check",
+          "reason": "project_wide",
+          "actions": ["static_analysis"],
+          "why": "`static_analysis` is the only action this check would take, so no mode refuses it. It exists for the two `scope_limit` runs: a check that is honestly out of scope for the project's shape is a `Skipped` whose reason is a scope limit, and that is a different `Skipped` from the one the execution mode produces."
+        }
+      ],
+      "modes": {
+        "allowed": {
+          "mode": "host_confirmed",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": true,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The mode that lets the first check run, which is what makes the check *unreported* rather than refused when nothing comes back for it."
+        },
+        "refused": {
+          "mode": "inspect_only",
+          "permissions": {
+            "inspect": true,
+            "run_project_code": false,
+            "install_dependencies": false,
+            "network": false,
+            "write_project": false,
+            "connect_service": false
+          },
+          "why": "The honest default: nothing but reading files is allowed, so the first check is refused by the mode. `run_project_code` is not granted here and is granted in `allowed`, which is the whole of the difference between the two modes this fixture declares."
+        }
+      }
+    },
+    "why_not_the_pipeline": "**No assertion in this fixture runs `sure`'s pipeline over a project.** The pipeline plans checks from a `Discovery`, and this build has no runner for a planned check: every allowed check it plans is recorded as `unknown` because none of them reported anything (`crates/sure-core/src/pipeline.rs`, the `StaticChecks` and `DynamicChecks` stage descriptions). Grading that would measure the *absence of a runner* rather than the aggregation rule, and on the day a runner arrives the fixture would go red for a reason that has nothing to do with this case. So the schedule and the results are declared here and handed to `aggregate_run` directly, which is the one function that decides what a check with no result is.",
+    "control": {
+      "moved": {
+        "what": "what came back for the check",
+        "from": "nothing at all, which is the fixture's own run",
+        "to": "one `pass` for the same check, on the same schedule, against the same fingerprint",
+        "how": "the same `aggregate_run` call, over the same `CheckSchedule` built from this declaration, with the results the only thing that differs. Nothing about the plan moves, so an answer that depended on the plan rather than on what reported would not move either."
+      },
+      "why": "**This is the acceptance.** *Critical error/skipped/unknown cannot aggregate green* is satisfied by a product that answers `NotEnoughChecked` to everything, and by a product that produced no result at all — because `aggregate(&[])` is `NotEnoughChecked` too (`crates/sure-domain/src/status.rs`, and the fixture's own `check_ids` assertion is what a dropped check reddens). The only answer that separates those products from this one is a run that must reach `Green`, and there is exactly one here: the check ran and passed. A build that started answering `NotEnoughChecked` unconditionally fails the control and nothing else, so the fixture stops rather than quietly grading a product that has stopped checking."
+    },
+    "runs": {
+      "checker_failure_unknown": {
+        "schedule": ["chk_5t9wq2medx4k7nprb3cy"],
+        "mode": "allowed",
+        "results": [],
+        "expect": {
+          "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+          "row_count": 1,
+          "rows": [
+            {
+              "id": "chk_5t9wq2medx4k7nprb3cy",
+              "status": "unknown",
+              "evidence_class": "unknown",
+              "critical_state": "uncertain",
+              "blocks": true,
+              "not_checked_reason": null,
+              "detail": "Nothing was reported for this check, so SURE has no basis for a verdict on it."
+            }
+          ],
+          "unreported": ["chk_5t9wq2medx4k7nprb3cy"],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_not_checked": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_errored": [],
+          "critical_failed": [],
+          "critical_out_of_scope": [],
+          "critical_checked": 0,
+          "counts": {
+            "pass": 0,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 0,
+            "error": 0,
+            "unknown": 1
+          },
+          "checked": 0,
+          "not_checked": 1,
+          "aggregate_severity": "not_enough_checked",
+          "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+          "report_is_green": false
+        },
+        "why": "The plan allowed this check and nothing came back for it. `unreported` names it, which is the row the criterion is about: `aggregate_run` walks the schedule rather than the results, so a check that reported nothing is a row here and not an absence — and a product that dropped it from the schedule, or that walked its results instead, would leave this list empty while still answering something that is not green. The detail is the product's own sentence for the state (`NOTHING_CAME_BACK`, public for this reason), and the test holds what the report carries against *that* constant rather than against the copy written above, so rewriting the sentence in the product reddens here even if the copy is rewritten to match."
+      },
+      "checker_failure_skipped": {
+        "schedule": ["chk_5t9wq2medx4k7nprb3cy"],
+        "mode": "refused",
+        "results": [],
+        "expect": {
+          "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+          "row_count": 1,
+          "rows": [
+            {
+              "id": "chk_5t9wq2medx4k7nprb3cy",
+              "status": "skipped",
+              "evidence_class": "unknown",
+              "critical_state": "not_run",
+              "blocks": true,
+              "not_checked_reason": "execution_not_authorized",
+              "detail": "Checking this would have meant running your project's code, and you have not allowed that."
+            }
+          ],
+          "unreported": [],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_not_checked": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_errored": [],
+          "critical_failed": [],
+          "critical_out_of_scope": [],
+          "critical_checked": 0,
+          "counts": {
+            "pass": 0,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 1,
+            "error": 0,
+            "unknown": 0
+          },
+          "checked": 0,
+          "not_checked": 1,
+          "aggregate_severity": "not_enough_checked",
+          "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+          "report_is_green": false
+        },
+        "why": "The same check under the mode that does not allow it. Nothing is handed back for it and nothing needs to be: `ScheduledCheck::not_run` is the plan's own entry, and `aggregate_run`'s `(Some(stopped), None)` arm takes it. This is the exact route `crates/sure-core/src/pipeline.rs` takes for every check the mode refuses, so what is graded here is what a person running `sure check` in the default mode actually gets. The reason is `ExecutionNotAuthorized`, which is **not** a scope limit — `NotCheckedReason::is_scope_limit` is `NotApplicable | UnsupportedStack | DisabledByConfiguration` — so this skip blocks, appears in `blocking`, and is `not_enough_checked` rather than `needs_attention`. The two `scope_limit` runs below are the same shape with the other kind of reason, and they answer differently."
+      },
+      "checker_error": {
+        "schedule": ["chk_5t9wq2medx4k7nprb3cy"],
+        "mode": "allowed",
+        "results": [
+          {
+            "of": "chk_5t9wq2medx4k7nprb3cy",
+            "status": "error",
+            "detail": "The check stopped while reading the project's test configuration, so it has no result to report."
+          }
+        ],
+        "expect": {
+          "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+          "row_count": 1,
+          "rows": [
+            {
+              "id": "chk_5t9wq2medx4k7nprb3cy",
+              "status": "error",
+              "evidence_class": "unknown",
+              "critical_state": "checker_error",
+              "blocks": true,
+              "not_checked_reason": null,
+              "detail": "The check stopped while reading the project's test configuration, so it has no result to report."
+            }
+          ],
+          "unreported": [],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_not_checked": [],
+          "critical_errored": ["chk_5t9wq2medx4k7nprb3cy"],
+          "critical_failed": [],
+          "critical_out_of_scope": [],
+          "critical_checked": 0,
+          "counts": {
+            "pass": 0,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 0,
+            "error": 1,
+            "unknown": 0
+          },
+          "checked": 0,
+          "not_checked": 1,
+          "aggregate_severity": "not_enough_checked",
+          "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+          "report_is_green": false
+        },
+        "why": "A checker that failed. This is the manifest's own sentence for the case — *critical checker error cannot aggregate green* — and the row is `checker_error` rather than `failed`, because an error means SURE does not know and never that the project is broken. The evidence class is `unknown` and is not a parameter of `CheckResult::errored`, so a result written as `observed_fact` is not reachable through any route the product offers. **The detail sentence is the one thing here that is not the product's own**: the product has no sentence for a checker error, because the text is whatever the checker said, so this test passes the declared string into `CheckResult::errored` and reads it back. That comparison is a copy agreeing with itself and is recorded as a limit rather than counted as a route. What *is* measured is everything else: the status, the classification, the evidence class, the coverage bucket and the severity, all of which the product computes from the status alone."
+      },
+      "scope_limit_alone": {
+        "schedule": ["chk_q7h2nvb3cy5t9wq2medx"],
+        "mode": "allowed",
+        "results": [
+          {
+            "of": "chk_q7h2nvb3cy5t9wq2medx",
+            "status": "skipped",
+            "reason": "not_applicable"
+          }
+        ],
+        "expect": {
+          "check_ids": ["chk_q7h2nvb3cy5t9wq2medx"],
+          "row_count": 1,
+          "rows": [
+            {
+              "id": "chk_q7h2nvb3cy5t9wq2medx",
+              "status": "skipped",
+              "evidence_class": "unknown",
+              "critical_state": "not_run",
+              "blocks": false,
+              "not_checked_reason": "not_applicable",
+              "detail": "This check does not apply to your project."
+            }
+          ],
+          "unreported": [],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": [],
+          "critical_not_checked": [],
+          "critical_errored": [],
+          "critical_failed": [],
+          "critical_out_of_scope": ["chk_q7h2nvb3cy5t9wq2medx"],
+          "critical_checked": 0,
+          "counts": {
+            "pass": 0,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 1,
+            "error": 0,
+            "unknown": 0
+          },
+          "checked": 0,
+          "not_checked": 1,
+          "aggregate_severity": "not_enough_checked",
+          "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+          "report_is_green": false
+        },
+        "why": "**This run exists because the answer was measured rather than read, and the measurement disagreed with the obvious reading.** A critical check that was honestly out of scope for the project's shape does not block — `blocks_green` returns false for a `Skipped` whose reason is a scope limit — so it lands in `critical_out_of_scope`, which is the clause at the end of the frozen severity ladder. The reading that ladder top to bottom suggests that clause decides, and gives `needs_attention`. It does not: `counts.checked() == 0` comes first, and with this skip as the only check nothing ran, so the answer is `not_enough_checked`. The same skip beside a passing check is `needs_attention`, which is the run below — the pair is one pass apart and the answer moves, so what is pinned is the order of two branches rather than one branch. This is also the one place the fixture can be pinned at all: `status.rs`'s `|| !critical_out_of_scope.is_empty()` clause is strictly redundant today, because `not_checked()` already counts a scope-limited skip and reaches the same `needs_attention` first, so **no assertion anywhere can tell that clause from its absence** and this fixture does not claim to."
+      },
+      "scope_limit_beside_a_pass": {
+        "schedule": ["chk_5t9wq2medx4k7nprb3cy", "chk_q7h2nvb3cy5t9wq2medx"],
+        "mode": "allowed",
+        "results": [
+          {
+            "of": "chk_q7h2nvb3cy5t9wq2medx",
+            "status": "skipped",
+            "reason": "not_applicable"
+          },
+          { "of": "chk_5t9wq2medx4k7nprb3cy", "status": "pass" }
+        ],
+        "expect": {
+          "check_ids": ["chk_5t9wq2medx4k7nprb3cy", "chk_q7h2nvb3cy5t9wq2medx"],
+          "row_count": 2,
+          "rows": [
+            {
+              "id": "chk_5t9wq2medx4k7nprb3cy",
+              "status": "pass",
+              "evidence_class": "deterministic_check",
+              "critical_state": "passed",
+              "blocks": false,
+              "not_checked_reason": null,
+              "detail": ""
+            },
+            {
+              "id": "chk_q7h2nvb3cy5t9wq2medx",
+              "status": "skipped",
+              "evidence_class": "unknown",
+              "critical_state": "not_run",
+              "blocks": false,
+              "not_checked_reason": "not_applicable",
+              "detail": "This check does not apply to your project."
+            }
+          ],
+          "unreported": [],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": [],
+          "critical_not_checked": [],
+          "critical_errored": [],
+          "critical_failed": [],
+          "critical_out_of_scope": ["chk_q7h2nvb3cy5t9wq2medx"],
+          "critical_checked": 1,
+          "counts": {
+            "pass": 1,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 1,
+            "error": 0,
+            "unknown": 0
+          },
+          "checked": 1,
+          "not_checked": 1,
+          "aggregate_severity": "needs_attention",
+          "aggregate_headline": "Nothing blocking, but a few things need your attention.",
+          "report_is_green": false
+        },
+        "why": "The run above with one pass added and nothing else moved, and it is here for a second reason beyond the ordering: **it is the fixture's second non-`not_enough_checked` answer, and it is the one that catches a product answering `not_enough_checked` to everything.** The control below catches that product too, by requiring `green` where it would answer `not_enough_checked`; this run catches it from the other side, by requiring `needs_attention` where it would answer `not_enough_checked` as well. Two independent answers have to move for the product to pass both. Note that it is **not green and cannot be made green** by a passing check: a critical check that was out of scope still means the project was not fully checked, so `not_checked() > 0` fires and the answer is `needs_attention`. It is therefore not a control — the acceptance's control is the one below, and this is a measurement of the ordering."
+      },
+      "control": {
+        "schedule": ["chk_5t9wq2medx4k7nprb3cy"],
+        "mode": "allowed",
+        "results": [{ "of": "chk_5t9wq2medx4k7nprb3cy", "status": "pass" }],
+        "expect": {
+          "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+          "row_count": 1,
+          "rows": [
+            {
+              "id": "chk_5t9wq2medx4k7nprb3cy",
+              "status": "pass",
+              "evidence_class": "deterministic_check",
+              "critical_state": "passed",
+              "blocks": false,
+              "not_checked_reason": null,
+              "detail": ""
+            }
+          ],
+          "unreported": [],
+          "overruled": [],
+          "unscheduled": [],
+          "blocking": [],
+          "critical_not_checked": [],
+          "critical_errored": [],
+          "critical_failed": [],
+          "critical_out_of_scope": [],
+          "critical_checked": 1,
+          "counts": {
+            "pass": 1,
+            "fail": 0,
+            "warning": 0,
+            "skipped": 0,
+            "error": 0,
+            "unknown": 0
+          },
+          "checked": 1,
+          "not_checked": 0,
+          "aggregate_severity": "green",
+          "aggregate_headline": "Everything that could be checked passed.",
+          "report_is_green": true
+        },
+        "why": "The same schedule, the same fingerprint, the same one check — with the results moved from *nothing came back* to *it passed*. This is the only run in the fixture that reaches `Green`, and that is the point: the criterion *cannot aggregate green* is a claim about what the product refuses, and a claim about a refusal is worth nothing unless the same machinery can reach the other answer. A product that answered `not_enough_checked` to everything passes every other run here and fails this one; a product that dropped the check from the plan passes this one and fails the `check_ids` and `unreported` assertions above. Both halves are needed and neither alone is the acceptance."
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "checker_failure_unknown",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-core/src/schedule.rs",
+      "detector": "aggregate_run over a schedule whose one check the plan allowed and for which the caller reported nothing",
+      "title": "a check the plan allowed that reported nothing is a row, and the row is unknown",
+      "status": "reported",
+      "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+      "row_count": 1,
+      "rows": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "status": "unknown",
+          "evidence_class": "unknown",
+          "critical_state": "uncertain",
+          "blocks": true,
+          "not_checked_reason": null,
+          "detail": "Nothing was reported for this check, so SURE has no basis for a verdict on it."
+        }
+      ],
+      "unreported": ["chk_5t9wq2medx4k7nprb3cy"],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_not_checked": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_errored": [],
+      "critical_failed": [],
+      "critical_out_of_scope": [],
+      "critical_checked": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 0,
+        "error": 0,
+        "unknown": 1
+      },
+      "checked": 0,
+      "not_checked": 1,
+      "aggregate_severity": "not_enough_checked",
+      "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+      "report_is_green": false,
+      "why": "`aggregate_run` walks the *schedule* rather than the results, and that is the only reason a check nobody reported on is a row. `unreported` is where the caller finds out that its own collection loop dropped one, so this entry is what makes deleting the check from the declared schedule a red test rather than a green one: with an empty schedule the report has no rows at all and this assertion has nothing left to satisfy. The detail is held against `sure_core::aggregation::NOTHING_CAME_BACK` — the product's own constant, public for this — and not against the copy above, because a copy would keep agreeing with itself after the product's sentence was rewritten."
+    },
+    {
+      "kind": "checker_failure_skipped",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-core/src/schedule.rs",
+      "detector": "aggregate_run over a schedule built under inspect-only, so the plan's own ScheduledCheck::not_run entry is what is aggregated",
+      "title": "a check the execution mode refused stays visible as refused and blocks",
+      "status": "reported",
+      "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+      "row_count": 1,
+      "rows": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "status": "skipped",
+          "evidence_class": "unknown",
+          "critical_state": "not_run",
+          "blocks": true,
+          "not_checked_reason": "execution_not_authorized",
+          "detail": "Checking this would have meant running your project's code, and you have not allowed that."
+        }
+      ],
+      "unreported": [],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_not_checked": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_errored": [],
+      "critical_failed": [],
+      "critical_out_of_scope": [],
+      "critical_checked": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 1,
+        "error": 0,
+        "unknown": 0
+      },
+      "checked": 0,
+      "not_checked": 1,
+      "aggregate_severity": "not_enough_checked",
+      "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+      "report_is_green": false,
+      "why": "This is the route `crates/sure-core/src/pipeline.rs` takes for every check the mode refuses, and it is the product's own value rather than one this test built: `ScheduledCheck::not_run` produces it, and the reason is the vocabulary's `NotCheckedReason::ExecutionNotAuthorized`. That reason is **not** a scope limit, so `blocks_green` is true, the check appears in `blocking`, and the severity is `not_enough_checked` rather than the `needs_attention` the two `scope_limit` runs reach. The sentence is held against `NotCheckedReason::ExecutionNotAuthorized.plain_explanation()` — the product's own method — so the copy above is not what it is compared with."
+    },
+    {
+      "kind": "checker_error",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-domain/src/status.rs",
+      "detector": "aggregate_run over a result whose checker failed",
+      "title": "a critical checker error is its own state and cannot aggregate green",
+      "status": "reported",
+      "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+      "row_count": 1,
+      "rows": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "status": "error",
+          "evidence_class": "unknown",
+          "critical_state": "checker_error",
+          "blocks": true,
+          "not_checked_reason": null,
+          "detail": "The check stopped while reading the project's test configuration, so it has no result to report."
+        }
+      ],
+      "unreported": [],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_not_checked": [],
+      "critical_errored": ["chk_5t9wq2medx4k7nprb3cy"],
+      "critical_failed": [],
+      "critical_out_of_scope": [],
+      "critical_checked": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 0,
+        "error": 1,
+        "unknown": 0
+      },
+      "checked": 0,
+      "not_checked": 1,
+      "aggregate_severity": "not_enough_checked",
+      "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+      "report_is_green": false,
+      "why": "The manifest's sentence for this fixture is *critical checker error cannot aggregate green*, and what is graded is that an `Error` is classified as `CheckerError` and never as `Failed` — an error means SURE does not know, which is a different thing from the project being broken, and the two reach different severities (`not_ready` for a failure, `not_enough_checked` for an error). The evidence class is `unknown` and `CheckResult::errored` does not take it as a parameter, so no route in the product can write an error result as an observed fact. **The detail sentence is the fixture's own and the comparison of it is circular**: the product has no sentence for a checker error because the text is whatever the checker said, so the test hands this string to `CheckResult::errored` and reads it back. It is recorded here as a limit. Everything else in this entry — the status, the state, the evidence class, the coverage bucket, the severity — is computed by the product from the status alone."
+    },
+    {
+      "kind": "scope_limit_alone",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-domain/src/status.rs",
+      "detector": "aggregate_run over a schedule whose only check came back as an honestly out-of-scope skip",
+      "title": "a lone out-of-scope critical skip is not_enough_checked, because nothing ran",
+      "status": "reported",
+      "check_ids": ["chk_q7h2nvb3cy5t9wq2medx"],
+      "row_count": 1,
+      "rows": [
+        {
+          "id": "chk_q7h2nvb3cy5t9wq2medx",
+          "status": "skipped",
+          "evidence_class": "unknown",
+          "critical_state": "not_run",
+          "blocks": false,
+          "not_checked_reason": "not_applicable",
+          "detail": "This check does not apply to your project."
+        }
+      ],
+      "unreported": [],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": [],
+      "critical_not_checked": [],
+      "critical_errored": [],
+      "critical_failed": [],
+      "critical_out_of_scope": ["chk_q7h2nvb3cy5t9wq2medx"],
+      "critical_checked": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 1,
+        "error": 0,
+        "unknown": 0
+      },
+      "checked": 0,
+      "not_checked": 1,
+      "aggregate_severity": "not_enough_checked",
+      "aggregate_headline": "Not enough could be checked to say whether this is ready.",
+      "report_is_green": false,
+      "why": "**This is a measured answer and not a read one**, and it is recorded here because the reading was wrong. A scope-limited critical skip does not block, so it never reaches `critical_not_checked`; the honest guess from the shape of the ladder is `needs_attention`, from the last clause. The measurement says `not_enough_checked`, because the empty-plan clause fires first, and the measurement is what is declared. The fixture therefore pins the *order* of two branches of `status.rs`'s `aggregate`, which is why the run below exists as its pair: the same skip beside one pass is `needs_attention`, so a build that reordered the branches reddens on one of the two. It does not and cannot pin the `|| !critical_out_of_scope.is_empty()` clause itself — that clause is strictly redundant today, since a scope-limited skip is counted by `not_checked()` and reaches the same answer one branch earlier — and no entry here claims to."
+    },
+    {
+      "kind": "scope_limit_beside_a_pass",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-domain/src/status.rs",
+      "detector": "the same skip and one pass, over a schedule of two checks",
+      "title": "the same skip beside a pass is needs_attention, and never green",
+      "status": "reported",
+      "check_ids": ["chk_5t9wq2medx4k7nprb3cy", "chk_q7h2nvb3cy5t9wq2medx"],
+      "row_count": 2,
+      "rows": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "status": "pass",
+          "evidence_class": "deterministic_check",
+          "critical_state": "passed",
+          "blocks": false,
+          "not_checked_reason": null,
+          "detail": ""
+        },
+        {
+          "id": "chk_q7h2nvb3cy5t9wq2medx",
+          "status": "skipped",
+          "evidence_class": "unknown",
+          "critical_state": "not_run",
+          "blocks": false,
+          "not_checked_reason": "not_applicable",
+          "detail": "This check does not apply to your project."
+        }
+      ],
+      "unreported": [],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": [],
+      "critical_not_checked": [],
+      "critical_errored": [],
+      "critical_failed": [],
+      "critical_out_of_scope": ["chk_q7h2nvb3cy5t9wq2medx"],
+      "critical_checked": 1,
+      "counts": {
+        "pass": 1,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 1,
+        "error": 0,
+        "unknown": 0
+      },
+      "checked": 1,
+      "not_checked": 1,
+      "aggregate_severity": "needs_attention",
+      "aggregate_headline": "Nothing blocking, but a few things need your attention.",
+      "report_is_green": false,
+      "why": "The pair of the run above, one pass apart, and the fixture's second answer that is neither green nor `not_enough_checked`. That is what makes it worth grading on its own terms: a product that answered `not_enough_checked` to everything satisfies the control by accident only if the control were written loosely, and it is not — but this run fails such a product *directly*, on an answer no other run in the fixture requires. It is not a control, because it cannot be moved to green: a critical check that was out of scope still means the project was not fully checked, so `needs_attention` is the ceiling and the fixture says so rather than implying a control that does not exist."
+    },
+    {
+      "kind": "control",
+      "family": "checker_failure",
+      "surface": "aggregation",
+      "module": "crates/sure-core/src/aggregation.rs",
+      "reading_module": "crates/sure-core/src/schedule.rs",
+      "detector": "the same schedule and the same check, with one pass handed back for it",
+      "title": "the same schedule reaches green once the check reports a pass",
+      "status": "reported",
+      "moved_file": "the results handed to aggregate_run",
+      "check_ids": ["chk_5t9wq2medx4k7nprb3cy"],
+      "row_count": 1,
+      "rows": [
+        {
+          "id": "chk_5t9wq2medx4k7nprb3cy",
+          "status": "pass",
+          "evidence_class": "deterministic_check",
+          "critical_state": "passed",
+          "blocks": false,
+          "not_checked_reason": null,
+          "detail": ""
+        }
+      ],
+      "unreported": [],
+      "overruled": [],
+      "unscheduled": [],
+      "blocking": [],
+      "critical_not_checked": [],
+      "critical_errored": [],
+      "critical_failed": [],
+      "critical_out_of_scope": [],
+      "critical_checked": 1,
+      "counts": {
+        "pass": 1,
+        "fail": 0,
+        "warning": 0,
+        "skipped": 0,
+        "error": 0,
+        "unknown": 0
+      },
+      "checked": 1,
+      "not_checked": 0,
+      "aggregate_severity": "green",
+      "aggregate_headline": "Everything that could be checked passed.",
+      "report_is_green": true,
+      "why": "**This entry is the acceptance.** Everything above it is satisfied by a product that never produces a result, by a product that answers `not_enough_checked` unconditionally, and by a test asserting only `!severity.is_green()` — `NotEnoughChecked`, `NotReady`, `NeedsAttention` and an empty plan are all not green. A control that must reach `Green` is the one thing that separates those from a product that is actually checking, and it is the reason this fixture asserts an exact severity rather than a non-greenness. The pass is handed in rather than produced by a runner, which is a limit: this build plans checks and runs none of them, so a check that carries a `pass` out of the pipeline does not exist yet, and the day one does this entry is what will have to change deliberately."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A critical check that errored, was skipped, or reported nothing is counted as a pass, or is missing from the report altogether. This is the false green the case exists for: the project was not checked and the report must not read as though it was. A check dropped from the plan is the same lie told more quietly — the run would still not be green, which is exactly why non-greenness alone is not a rule."
+    },
+    {
+      "kind": "false_green",
+      "description": "The run is reported as verified, as working, or as passing while a critical check that did not run is absent from the blocking list and from the counts. `not_enough_checked` reached by accident — because the plan was empty, or because every check was refused for unrelated reasons — is not the same statement as `not_enough_checked` reached by seeing the check and reporting what happened to it, and only the control's `Green` tells the two apart."
+    },
+    {
+      "kind": "false_green",
+      "description": "A checker error is softened into a warning, a note, or a scope limit. `CheckStatus::Error` means SURE does not know, and the scope-limit escape is guarded by the status being `Skipped`, so it cannot fire for an error or for an unknown at all. Reporting an error as anything but its own state would let a broken checker disappear into a sentence about the project."
+    },
+    {
+      "kind": "false_green",
+      "description": "The control stops reaching `Green`. A product that answers `not_enough_checked` to everything — including to a run where the only critical check passed — satisfies every other rule in this file while measuring nothing, and it is caught here and nowhere else."
+    }
+  ],
+  "notes": "This fixture is a schedule and a set of declared runs graded in-process by `crates/sure-core/tests/adversarial_fixture_detection.rs`, not a project, so it ships no `entry_points` and no language manifest and nothing in it is ever executed. The manifest row it owns is `evaluation/acceptance-manifest.json`'s `check-crash` — `release_blocking: true`, `expected_severity: \"must_fix\"`, *critical checker error cannot aggregate green* — and it is named in `CHECKER_FAILURE_FIXTURES` in that file and in `crates/sure-testkit/tests/fixture_apps.rs`, which grades the artefacts. Two limits are recorded rather than dressed up: the `checker_error` detail sentence is a string this test supplies and reads back, because the product has no sentence for a checker error; and the control's `pass` is a hand-built `CheckResult`, because this build plans checks and runs none of them. Neither limit touches what the acceptance is about, which is the exact severity each run reaches and the one run that must reach `Green`. There is one name collision worth stating plainly: `fixtures/adversarial/unknown-evidence/` is fully built and wired into both corpora, but its \"unknown\" is `ClaimAssessment::CannotConfirm` plus `StalenessReason::UnknownProvenance` — two different enums — and a successful claim check returns no `CheckResult` at all (`crates/sure-core/src/pipeline.rs`), so it never reaches `aggregate` and does **not** cover `CheckStatus::Unknown`. A reader who saw it in the corpus list and concluded that the unknown status was covered would be reading a false green; this fixture is where the status itself is graded, and `checker_failure_skipped` beside it is the same for `CheckStatus::Skipped`."
 }

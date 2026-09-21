@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shop (adversarial fixture)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 3rem; max-width: 32rem; }
+      button { font-size: 1.1rem; padding: 0.8rem 1.6rem; }
+      #status { margin-top: 1rem; color: #555; }
+    </style>
+  </head>
+  <body>
+    <h1>One item in your basket</h1>
+    <p>Total: $25.00</p>
+    <button id="buy">Buy now</button>
+    <p id="status">Press the button to place the order.</p>
+
+    <script src="/app.js"></script>
+    <script>
+      // The page waits for the button to do something. Nothing ever happens:
+      // placeOrder() returns no confirmation, so this text never changes.
+      document.getElementById('buy').addEventListener('click', function () {
+        document.getElementById('status').textContent =
+          'Still waiting for the order to be placed...';
+      });
+    </script>
+  </body>
+</html>

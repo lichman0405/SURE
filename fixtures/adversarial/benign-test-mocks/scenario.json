@@ -1,0 +1,216 @@
+{
+  "id": "benign-test-mocks",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "fixture_status": "implemented",
+  "description": "A small checkout service that keeps its test double, its worked example, its documentation snippet and its stand-in for a service it does not own beside the code they describe. Every one of those five files trips a real detector, and every one of them has to come back a note: a corpus that answered `no must-fix findings` because nothing read it would be the false green it exists to catch.",
+  "project": {
+    "manifest": "package.json",
+    "kind": "a Node application with no dependencies, so a reviewer with nothing but Node can run it",
+    "benign_files": {
+      "tests/checkout.js": "the double the checkout checks run against; classified by its directory, and its file name carries no conventional token",
+      "docs/snippets/usage.js": "the snippet the documentation page embeds; a `.js` file inside a `docs/` directory on purpose, because markdown is never a scan candidate",
+      "examples/quickstart.js": "a worked example whose payment address is a placeholder",
+      "stubs/pricing-api.js": "a stand-in for a service this project does not own; classified by its directory",
+      "src/gateway.mock.js": "the double a developer runs the checkout screen against offline; classified by its file name, because `src/` is not a conventional directory"
+    },
+    "why_no_entry_point_block": "This fixture ships a real project and still declares no entry point block, and the reason is this corpus's own rather than a copy of `repair-regression`'s. `crates/sure-core/tests/finding_severity_rule.rs` reads that block's presence to decide which cases are measured by `every_release_blocking_case_with_a_fixture_app_meets_the_manifest`, and the question that test answers is about release-blocking cases. This case is not release-blocking, so declaring the block would change nothing about which cases that test measures, and nothing else in the tree reads the key: `crates/sure-testkit/tests/fixture_apps.rs` reads it only for its Python and Rust runnability sweeps, and the Node half is checked from `package.json` instead. What grades this fixture is named below, in `graded_by`: `crates/sure-core/tests/benign_fixture_e2e.rs`, which drives the real discovery and the five candidate detectors over a copy of this directory in process.",
+    "entry_point_block_declared": false
+  },
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "benign_test_mocks",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Mock",
+      "title": "project contains mock usage in tests",
+      "anchor": "tests/checkout.js",
+      "path_context": "test",
+      "required_severity": "note",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The acceptance's own subject: a test double, read by the scanner, filed as a note because a `tests/` path cannot reach a user. The file name carries no conventional token — `checkout.js` — so the directory is the whole of the answer here, which is the half of `classify_path` the in-process shape in `finding_severity_rule.rs` does not exercise."
+    },
+    {
+      "kind": "finding",
+      "family": "benign_test_mocks",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in documentation",
+      "anchor": "docs/snippets/usage.js",
+      "path_context": "doc",
+      "required_severity": "note",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The documentation half of the acceptance, and the half that would have proved nothing if it had been written the obvious way: a TODO in a `.md` file reaches no detector at all, because `is_source_candidate` accepts only source extensions and all three text detectors filter on it. This is a `.js` file inside a `docs/` directory, so `classify_path` reads it as documentation and the detector reads it at all. The control below is the measurement of that difference."
+    },
+    {
+      "kind": "finding",
+      "family": "benign_test_mocks",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Placeholder",
+      "title": "project contains placeholder usage in examples",
+      "anchor": "examples/quickstart.js",
+      "path_context": "example",
+      "required_severity": "note",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The examples half of the acceptance. A worked example that names a payment address nobody owns is exactly what an example is for, and the gap kind is `unfinished marker`, which is the kind that cannot reach `must_fix` even in production."
+    },
+    {
+      "kind": "finding",
+      "family": "benign_test_mocks",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Stub",
+      "title": "project contains stub usage in mock fixtures",
+      "anchor": "stubs/pricing-api.js",
+      "path_context": "mock_fixture",
+      "required_severity": "note",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The second of the two ways `classify_path` reaches `MockFixture`: here by the `stubs/` directory rather than by a file-name segment. It is in the corpus beside `src/gateway.mock.js` on purpose, because a corpus that read only one of the two mechanisms would leave the other unmeasured."
+    },
+    {
+      "kind": "finding",
+      "family": "benign_test_mocks",
+      "surface": "noop_heuristics",
+      "module": "crates/sure-core/src/noop_heuristics.rs",
+      "detector": "NoOpCategory::FakeEmail",
+      "title": "project contains fake email addresses or domains in mock fixtures",
+      "anchor": "src/gateway.mock.js",
+      "path_context": "mock_fixture",
+      "required_severity": "note",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The one proposal in this corpus whose gap kind is `substituted action`, which is the only gap kind `finding_gravity` ever lifts to `must_fix`. It is a note here because of where it stands and for no other reason: the file name marks the file as a hand-written double, and a placeholder address inside one stands in for a provider that is not wired up yet. The control below removes that file name and measures what happens."
+    },
+    {
+      "kind": "status",
+      "family": "benign_test_mocks",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_outcome": "the aggregate over the five proposals has nothing material in it, and the heaviest severity any of them carries is `note` — the level `evaluation/acceptance-manifest.json` asks of this case",
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The manifest's row for this case is `expected_severity: \"note\"`, and until this fixture existed that row was answered by an assertion about a file that was not there. The aggregate is the half that makes the per-file answers add up to the sentence the case is about."
+    },
+    {
+      "kind": "control",
+      "family": "benign_test_mocks",
+      "surface": "candidate_context",
+      "module": "crates/sure-core/src/candidate_context.rs",
+      "title": "the same test double with the conventional directory removed is still detected, and reaches `can_fix_later` rather than `note`",
+      "control": {
+        "name": "convention_removed_from_the_directory",
+        "replaces": "tests/checkout.js",
+        "changes": [
+          { "change": "move", "from": "tests/checkout.js", "to": "checkout.js" }
+        ],
+        "expected_outcomes": [
+          {
+            "surface": "candidate_scanner",
+            "title": "project contains mock usage in production code",
+            "anchor": "checkout.js",
+            "path_context": "product",
+            "required_severity": "can_fix_later"
+          }
+        ],
+        "unchanged": [
+          "docs/snippets/usage.js",
+          "examples/quickstart.js",
+          "src/gateway.mock.js",
+          "stubs/pricing-api.js"
+        ]
+      },
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The control that stops the corpus's `note` from being silence. The same bytes are still read — the proposal exists at all, and its context is now `production` — so the shipped note is the gravity rule's answer about where the file stands rather than a detector that never ran. It also measures the ceiling of the marker vocabulary: an unfinished marker in production code is `can_fix_later` and cannot be `must_fix`, which is why this control alone would not have been enough."
+    },
+    {
+      "kind": "control",
+      "family": "benign_test_mocks",
+      "surface": "references",
+      "module": "crates/sure-core/src/references.rs",
+      "title": "the project's whole vocabulary, written in markdown inside `docs/`, reaches no detector at all",
+      "control": {
+        "name": "vocabulary_in_markdown",
+        "changes": [
+          {
+            "change": "add",
+            "path": "docs/setup.md",
+            "contents": "# Setup\n\nTODO: this page is a mock of the setup page. Replace the placeholder before\nthe documentation build runs, and stub out the payment client with the worked\nexample until the provider is wired up.\n"
+          }
+        ],
+        "expected_outcomes": [],
+        "unchanged": [
+          "docs/snippets/usage.js",
+          "examples/quickstart.js",
+          "src/gateway.mock.js",
+          "stubs/pricing-api.js",
+          "tests/checkout.js"
+        ]
+      },
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The measurement behind `is_source_candidate`. Markdown is never a scan candidate, so a documentation half written as `.md` would have produced no proposal, no finding and no failure — a corpus that reported `note` because nothing looked. This control adds the fixture's own vocabulary in that shape and asserts that the proposal set does not move by one entry, which is what makes `docs/snippets/usage.js` the documentation half rather than a lucky accident."
+    },
+    {
+      "kind": "control",
+      "family": "benign_test_mocks",
+      "surface": "candidate_context",
+      "module": "crates/sure-core/src/candidate_context.rs",
+      "title": "the same offline double with the marker taken out of its file name reaches `must_fix`, because a placeholder address in production is a substituted action",
+      "control": {
+        "name": "convention_removed_from_the_file_name",
+        "replaces": "src/gateway.mock.js",
+        "changes": [
+          { "change": "copy", "from": "src/gateway.mock.js", "to": "src/gateway.js" },
+          { "change": "remove", "path": "src/gateway.mock.js" }
+        ],
+        "expected_outcomes": [
+          {
+            "surface": "noop_heuristics",
+            "title": "project contains fake email addresses or domains in production code",
+            "anchor": "src/gateway.js",
+            "path_context": "product",
+            "required_severity": "must_fix"
+          }
+        ],
+        "unchanged": [
+          "docs/snippets/usage.js",
+          "examples/quickstart.js",
+          "stubs/pricing-api.js",
+          "tests/checkout.js"
+        ]
+      },
+      "graded_by": "crates/sure-core/tests/benign_fixture_e2e.rs",
+      "why": "The control the other two cannot replace, and the reason this corpus contains a `substituted action` at all. `unfinished marker` is capped one level below `must_fix` by `finding_gravity`'s table whatever the path says, so a corpus of TODOs and mock words satisfies `do not become must-fix` without the context gate ever being asked. This control asks it: the double's own bytes are copied onto the real client's path — two files cannot both be called `src/gateway.js`, so the copy displaces the client rather than sitting beside it — and the double is removed. What makes that displacement not a second variable is measured rather than asserted: the client it displaces produced no proposal at all in the shipped fixture, and the grader asserts exactly that before comparing the two readings. Nothing else moves, and what comes back is `must_fix`. That is the boundary of the acceptance measured rather than assumed — the manifest's sentence is about test mocks, examples and docs TODOs, and this is what the same content answers outside them."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The project is reported as free of findings, or as verified, on the strength of detectors that never read it. Five files in this directory carry the vocabulary the candidate scanners look for, and a run that reports nothing about them has measured silence rather than safety."
+    },
+    {
+      "kind": "false_green",
+      "description": "The checkout screen's offline double is reported as shipped production code, or the snippet a documentation page embeds is reported as a defect in the service."
+    },
+    {
+      "kind": "false_positive",
+      "description": "A test double, a worked example, a documentation snippet or a stand-in for a service this project does not own is raised to `must_fix`, marked `critical`, or turned into a hand-off blocker. `evaluation/acceptance-manifest.json` asks for `note` on this case and the corpus reaches it. This entry is prose: nothing reads a `false_positive` declaration. What holds the level is the `control` entries above, which assert the severity the product actually produces, and the `status` entry, which asserts the aggregate."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The offline double is reported as a payment provider that takes money it does not take, or the worked example's `.invalid` address as a service that was contacted. Neither file opens a socket and neither is shipped."
+    }
+  ],
+  "notes": "Measured at `P14-T010`, over the directory as it ships, with `discover` and the five candidate detectors driven in process: five proposals, one per benign file, every one of them `note`, `critical = false` and `EvidenceClass::Inference`, and the aggregate's `material` list empty. The heaviest severity SURE reaches about the project is therefore `note`, which is the `expected_severity` `evaluation/acceptance-manifest.json` states for this case — a reading the corpus could not produce while it was a stub with no directory. Two limits are recorded rather than dressed up. First, the aggregate is not a verdict: a `must_fix` candidate is not a `must_fix` finding, and nothing here is `critical`, so no verdict is claimed about this project in either direction. Second, and worth knowing before this corpus is widened, the candidate scanner reports at most one proposal per category per project and anchors it at the first file in sort order, so exactly one file in this directory carries the word `mock` and exactly one carries `TODO`; a project with benign markers in several places reports one of them, and `src/gateway.mock.js` therefore carries the address vocabulary rather than a word the file name already spells. The three controls are driven over copies of this directory under `target/tmp` and never over the shipped bytes, and every run in this corpus passes `store: None`, so grading it writes nothing anywhere."
+}

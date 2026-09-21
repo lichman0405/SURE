@@ -18,7 +18,9 @@ This package contains the full autonomous-development bootstrap, not the finishe
 - adversarial fixture specifications;
 - persistent autonomous progress + handoff tooling;
 - GitHub CI/release scaffolding;
-- **17 phases / 166 tasks**;
+- the task list in `tasks/tasks.json` — no count is restated here, because the
+  graph grew as gaps were found and a number in this file was stale each time
+  (this bullet itself said "17 phases" after there were already 18);
 - final dogfood requirement: SURE must check its own repository before v0.1 completion.
 
 Start with `START_HERE.md` or `WINDOWS_QUICKSTART.md`.

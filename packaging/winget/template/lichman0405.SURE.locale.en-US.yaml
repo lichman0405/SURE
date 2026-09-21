@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.4.0.schema.json
+
+# >>> template notes: removed when this file is rendered
+# =============================================================================
+# SURE — WinGet default-locale manifest. THIS IS A TEMPLATE, NOT A MANIFEST.
+# =============================================================================
+#
+# `lichman0405.SURE.yaml` in this directory carries the contract: the two placeholders,
+# where their values come from, and why no digest is written down here.
+#
+# The identity below is the repository's own, not a choice made here:
+#
+#   PublisherUrl, PackageUrl   `repository = "https://github.com/lichman0405/SURE"`
+#                              (`Cargo.toml:16`), and the `origin` remote says the
+#                              same thing. `scripts/New-WingetManifest.ps1`
+#                              refuses to render if `Cargo.toml`'s repository
+#                              owner no longer matches the `PackageIdentifier`
+#                              prefix, so a fork cannot inherit this identity by
+#                              accident
+#   License: Apache-2.0        `license = "Apache-2.0"` (`Cargo.toml:15`), and
+#                              `LICENSE` at the repository root
+#   PackageIdentifier          a reverse-DNS-shaped claim on the name `SURE`,
+#                              owned by whoever controls `github.com/lichman0405`.
+#                              A fork has to change it, and the document says what
+#                              else changes with it
+#
+# `PublisherSupportUrl` is absent on purpose: this repository has no support
+# channel that anyone verified exists, and an issue tracker URL that 404s is a
+# worse answer than no URL.
+#
+# `Description` is where a `winget show` reader is told what this package does
+# not do. It is the only place in the manifest that can carry it: a `zip`
+# package that copies one executable cannot say anything else at uninstall time,
+# so the sentence has to be here, before the install, rather than after it.
+# <<< end of template notes
+
+PackageIdentifier: lichman0405.SURE
+PackageVersion: <version>
+PackageLocale: en-US
+Publisher: lichman0405
+PublisherUrl: https://github.com/lichman0405
+PackageName: SURE
+PackageUrl: https://github.com/lichman0405/SURE
+License: Apache-2.0
+LicenseUrl: https://github.com/lichman0405/SURE/blob/main/LICENSE
+ShortDescription: Checks a project's claims about itself against what is on disk, and says "cannot confirm" when the evidence is not there.
+Description: |
+  SURE (Software Understanding & Reality Evaluation) is a project truth-checking
+  layer for AI-built software. It reads a repository, checks the claims made
+  about it against evidence on disk, and reports a verdict — including, when the
+  evidence is not there, the verdict "cannot confirm". AI says it's done. Be SURE.
+
+  This package installs the command-line program and nothing else. It does not
+  install a service, does not run anything in the background, needs no
+  administrator, and does not install the Claude Code, Codex, Copilot or Cursor
+  integrations. It is an unsigned build, so Windows SmartScreen will warn the
+  first time it runs.
+
+  SURE's own data is not part of this package. Its evidence store lives under
+  %LOCALAPPDATA%\SURE, beside any per-user install made by
+  scripts\Install-Sure.ps1, and uninstalling this package does not remove it.
+  See docs/development/INSTALL_WINGET.md in the repository for what an uninstall
+  removes, what it leaves, and how to delete what is left.
+Moniker: sure
+Tags:
+  - cli
+  - developer-tools
+  - verification
+  - ai
+ManifestType: defaultLocale
+ManifestVersion: 1.4.0

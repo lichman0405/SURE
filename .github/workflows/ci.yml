@@ -1,3 +1,19 @@
+# The cross-platform matrix. `P15-T010`'s acceptance is *"Windows is mandatory
+# primary job; macOS/Linux core jobs mandatory; fmt/check/clippy/test/evals
+# included appropriately"*, and Windows is primary here in the sense
+# `docs/adr/0007-windows-primary-development.md` gives it: the Windows-only
+# bootstrap validation is a job of its own (`bootstrap-validate-windows`) rather
+# than a step of a matrix leg.
+#
+# A workflow file that says the right thing is not a run that did the right
+# thing, so what is checked here is what the file *says*.
+# `crates/sure-testkit/tests/ci_workflow.rs` reads this file and fails if a job
+# loses its runner, if a platform leaves the matrix, if a job becomes
+# conditional or tolerant, if a command family stops being run, or if the
+# `cargo test` step stops being a whole-workspace run that reaches the
+# acceptance corpus. It is not evidence that any run passed;
+# `docs/development/GITHUB_WORKFLOW.md` is where the runs themselves are the
+# subject, and nothing on a workstation can stand in for them.
 name: ci
 
 on:
@@ -31,13 +47,92 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
+      # Left on the default feature set on purpose, unlike the clippy and test
+      # steps below: features are additive, so `--all-features` compiles a
+      # superset and never compiles a `cfg(not(feature = "..."))` arm. This is
+      # the one command here that still says the default set builds.
       - run: cargo check --workspace --all-targets
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # `--all-features`, because the repository has one definition of "the
+      # checks" and this is the flag the other clippy invocations in it already
+      # use: the supervisor's gate set
+      # (`cargo clippy --workspace --all-targets --all-features -- -D warnings`)
+      # and `scripts/check-non-windows.mjs`, which asks the same command of the
+      # other platform. **It selects nothing today**, which is measured rather
+      # than assumed: `cargo metadata --offline --no-deps --format-version 1`
+      # reports an empty `features` map for all five workspace members, and no
+      # `Cargo.toml` here declares `[features]` or an optional dependency — so
+      # this command compiles the same set as it would without the flag. What it
+      # changes is the first day a feature exists, when `cargo test` below would
+      # otherwise stop running the tests behind it while the local gate, which
+      # has always passed the flag, went on running them.
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # **The browser tests need a machine that can host a sandboxed Chromium,
+      # and Ubuntu 24.04 is not one by default.** It restricts unprivileged user
+      # namespaces through AppArmor, and Chromium refuses to start without a
+      # usable sandbox — `/usr/bin/chromium` aborts at `ZygoteHostImpl::Init`
+      # with *No usable sandbox!*. The product never passes `--no-sandbox`: a
+      # browser without it would run the project's JavaScript without the
+      # boundary that exists to hold it, so what has to change is the *runner*
+      # and not the rule. The knob below is the documented one, and it is
+      # deliberately not made tolerant — if a future image drops it this step
+      # fails, which is the honest outcome: the browser tests on Linux are then
+      # visibly missing rather than quietly skipped.
+      - name: Let a sandboxed browser start on Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # `--no-fail-fast` because the first failing target otherwise aborts the
+      # rest, and the targets are where the platform-specific tests live: a
+      # failure in `sure-core --lib` would hide every integration target after
+      # it, on the run whose whole job is to say what this platform does.
+      # `--all-features` for the reason the clippy step above gives, and this
+      # whole-workspace run is also what the evals are: the acceptance corpus's
+      # cases are plain `#[test]`s in
+      # `crates/sure-core/tests/acceptance_report_runner.rs`, so they are run
+      # here on every platform rather than by a step of their own. That report is
+      # also what the release *gate* is computed from —
+      # `target/tmp/release-gate.json`, the document `release-dry-run.yml` and
+      # `scripts/Build-Release.*` read — and the step below is this workflow's own
+      # reading of it.
+      - run: cargo test --workspace --all-features --no-fail-fast
+      # **This step is in this job rather than beside the two node gates in
+      # `bootstrap-validate-windows`, and what decides that is what it reads.**
+      # `scripts/product-evals.mjs` compares `docs/product/PRODUCT_EVALS.md`
+      # against `target/tmp/release-gate.json`, which the step immediately above
+      # wrote; there is no such file in the bootstrap job, and the script refuses
+      # — by name and with the command that produces the reading — rather than
+      # printing a number it did not read. So it runs here, on all three matrix
+      # legs, after the run whose artifact it is.
+      - run: node scripts/product-evals.mjs
 
   shellcheck-secondary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: shellcheck scripts/*.sh integrations/claude-code/scripts/*.sh integrations/cursor/scripts/*.sh
+      # `scripts/Build-Release.sh` is invoked as `sh scripts/Build-Release.sh` by
+      # all three artifact jobs in `release-dry-run.yml`, so `sh` is the shell it
+      # has to be checked against. This job checked it as `bash` until P15-T007,
+      # because shellcheck follows the shebang and the shebang said
+      # `#!/usr/bin/env bash` — which is why `set -o pipefail`, legal in bash and
+      # absent from the dash the script actually ran under, reddened the Linux
+      # release job while this lint stayed green. The file's shebang now says
+      # `#!/bin/sh`, and the dialect is pinned here as well rather than left to a
+      # first line a later edit could change back: the invocation in the workflow
+      # is what the script has to survive, and that is not on the file's first
+      # line. The one construct the file uses that POSIX `sh` does not have is
+      # `local`, which is why the file carries a single `# shellcheck
+      # disable=SC3043` at its top; everything else in it is checked as `sh`.
+      #
+      # The glob below still covers the file, by its shebang, so it is checked
+      # twice and by the same dialect. The rest of the line is about the other
+      # scripts: they are bash by construction and say so on their own first
+      # lines, and nothing about how they are checked changes here.
+      #
+      # The integration half of the second glob was two package names spelled out
+      # until P15-T008, which left `integrations/codex/scripts/sure-hook.sh`
+      # unchecked — the one launcher a manifest execs by path rather than through
+      # PowerShell, and so the only one whose shell dialect a Unix harness
+      # actually depends on. The glob is now the same shape `scripts/preflight.sh`
+      # already used, and it covers all three launchers rather than two.
+      - run: shellcheck -s sh scripts/Build-Release.sh
+      - run: shellcheck scripts/*.sh integrations/*/scripts/*.sh

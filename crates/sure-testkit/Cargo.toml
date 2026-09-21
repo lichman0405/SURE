@@ -5,5 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+sure-domain = { path = "../sure-domain" }
+serde_json = { workspace = true }
+toml = { workspace = true }
+# `source_manifest` hashes the index blobs `SHA256SUMS.txt` records, and the one
+# hash this workspace computes is SHA-256. Written here rather than by hand for
+# the reason the root manifest gives for `sure-core`'s use of it: a home-rolled
+# SHA-256 fails by producing a plausible-looking wrong digest, which is silent,
+# and a digest rule that is silently wrong is the failure mode the manifest
+# exists to prevent.
+sha2 = { workspace = true }
+
 [lints]
 workspace = true

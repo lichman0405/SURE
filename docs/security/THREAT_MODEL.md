@@ -39,6 +39,13 @@ Prompt/source/log/secret leaves machine unexpectedly.
 ## T13 — dangerous agent action
 Force push, broad deletion, sensitive read, destructive DB/shell action.
 
+Where a harness offers a pre-action hook, SURE answers a tool request with the
+action it would take and a sentence saying why, and a `strict` protection mode
+holds the sensitive reads and broad changes that
+[PROTECTION_MODE.md](PROTECTION_MODE.md) lists. **The answer is advisory in this
+release**: both integrations are capability tier 1, so what a decision states is
+what SURE would do and not what the harness did — see T18.
+
 ## T14 — repair regression
 Fixing one issue breaks previous behavior.
 
@@ -53,6 +60,21 @@ SURE infers a likely feature/goal and incorrectly calls it a user requirement.
 
 ## T18 — hook fail-open/fail-closed confusion
 A protection hook crashes and the user incorrectly assumes the action was blocked.
+
+Addressed per harness and per event in `docs/integrations/HOOK_FAILURE_SEMANTICS.md`,
+which keeps "what SURE emits" (measured here) apart from "what the harness does
+with it" (quoted upstream, or `cannot confirm`). The case where the two used to
+disagree — `integrations/copilot/` promising to fail open while `--source
+copilot` exits 5 for every event — was **decided rather than left open**, and
+that section records the decision: the package's own words now say it is a
+template that does not answer, its fail-open sentence is marked as a requirement
+on a future adapter, and the exit 5 stays, because Copilot's documented rule for
+`preToolUse` is fail-closed and a package promising the opposite while denying
+every tool call would be this threat in its worst form. What is still open on
+that harness is the wiring and not the disagreement: nothing installs the
+package, `sure doctor` does not offer it as a source, and the manifest wires two
+event names the Copilot reference does not define — `afterFileEdit` and `stop` —
+which is why those rows say `cannot confirm` rather than quoting a rule.
 
 ## T19 — local event tampering
 Project code or an agent modifies SURE history/evidence to fabricate a pass.

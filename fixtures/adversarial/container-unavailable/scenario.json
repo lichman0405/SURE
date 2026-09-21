@@ -1,0 +1,120 @@
+{
+  "id": "container-unavailable",
+  "expected_severity": "note",
+  "release_blocking": false,
+  "description": "A machine with no container runtime and a project whose check would have run in one. The case is not a defect in the project and not a failure of SURE: a missing runtime is a fact about the computer, SURE's answer to it is a value rather than an error, and the honest answer says what the absence does and does not change — it changes *inside what* a command would run and not *whether* anything runs, so the sentence says that no check runs on this computer any more than it runs in a container. The trap is a check whose result depends on the machine it happens to run on — and the fallback a reader assumes is the same trap in a sentence rather than in a verdict, which is why the declared answer says nothing runs rather than nothing was found here. The second half of the case is a limit stated rather than dressed up: since `P15-T001` the diagnostic reports whether a runtime is on the search path it was given, and nothing in this build runs a check in a container — no shipped line names the type a container command is built from.",
+  "container_absence": {
+    "read_by": {
+      "module": "crates/sure-core/src/container.rs",
+      "function": "Availability::in_path",
+      "plain_report_module": "crates/sure-core/src/container.rs",
+      "route": "the search path is a parameter rather than ambient state, so the answer is a function of the path handed to it and of nothing else; `Availability::on_this_machine` is the one way to get an answer from inside this module that reads the process's own `PATH`, and nothing that ships calls it — `crate::doctor::examine` reads `PATH` itself and hands what it read to `in_path` as an argument, which is why the answer a report prints can be reproduced from the argument alone",
+      "returns": "`Availability`, which has two variants and no error: `Found { runtime, program }` or `Absent`. A caller who ignores the absence gets a compiler error rather than a runtime failure, because there is nothing to propagate and nothing to `?`"
+    },
+    "project": {
+      "files": ["src/run-check.js"],
+      "no_manifest": "This fixture deliberately ships no `package.json`, `pyproject.toml` or `Cargo.toml`. The absence it is about is a fact about the computer and not about a project, so there is no language half to run and nothing for a runnability sweep to execute — the same stance `missing-user-intent` takes."
+    },
+    "why_not_the_runner": "**No assertion in this fixture may depend on whether the machine running it has Docker.** `Availability::Absent` on a developer's laptop and `Availability::Found` on a CI machine are the same program answering a question about two different computers, and a fixture that recorded one of them would be a test of the runner. So both answers are produced on any machine from one function with one thing moved — the search path — and `on_this_machine()` is only ever asserted in its shape.",
+    "expect": {
+      "is_found": false,
+      "runtime": null,
+      "sentence": "No container runtime was found, and that changes nothing: this build runs no check, in a container or on this computer, and each check is recorded as unknown rather than passed. SURE looked for docker or podman on PATH.",
+      "runtimes_looked_for": ["docker", "podman"],
+      "isolation_claim": "A container gives the check its own filesystem and its own process namespace, and it does not give it a separate kernel or a promise about what it can reach. The project directory is visible inside it, and whether that is read-only is a setting you can see. This is limited isolation: it narrows what a check can touch, and it is not a sandbox.",
+      "overclaim_phrases": ["isolated container", "isolated environment"],
+      "phrases_found_in_the_claim": 0,
+      "module_call_sites": 18,
+      "unwired_call_sites": 0
+    },
+    "control": {
+      "moved": {
+        "what": "the search path",
+        "from": "no entries at all, which is what `OsStr::new(\"\")` is",
+        "to": "a directory this test owns, holding a file named after a runtime",
+        "how": "the same `Availability::in_path` call, on the same machine and in the same process, with the argument the only thing that differs. The directory is under `target/tmp` and is removed before the test ends."
+      },
+      "why": "A fixture that asserted `Absent` on the machine it was written on would be measuring the runner. Here the two answers are produced on every machine: with an empty search path there is nothing to find, and with a directory holding `docker` there is exactly one thing to find. The absence and the presence are therefore both facts about the argument, and the test asserts them by equality on the whole value, including the path of the program that was found — so an answer that guessed a runtime rather than reading the directory would fail. A third path holds only `podman`, which is what makes the reported *name* a measurement rather than an assumption.",
+      "search_paths": {
+        "empty": "`OsStr::new(\"\")`, which is not a directory and holds nothing",
+        "docker_only": "a scratch directory holding one file named `docker` (plus the platform's executable suffix)",
+        "podman_only": "a scratch directory holding one file named `podman`"
+      },
+      "expect": {
+        "is_found": true,
+        "runtime": "docker",
+        "sentence": "docker was found at sure-fixture/bin/docker, and that changes nothing: this build runs no check, in a container or on this computer, and each check is recorded as unknown rather than passed.",
+        "both_present": "docker",
+        "podman_only": "podman"
+      }
+    }
+  },
+  "required_outcomes": [
+    {
+      "kind": "container_absence",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-domain/src/execution.rs",
+      "detector": "Availability::in_path over a search path with nothing in it, and Availability::explain over the answer it returns",
+      "title": "no container runtime is a value with a sentence, not an error and not a silence",
+      "status": "reported",
+      "is_found": false,
+      "runtime": null,
+      "sentence": "No container runtime was found, and that changes nothing: this build runs no check, in a container or on this computer, and each check is recorded as unknown rather than passed. SURE looked for docker or podman on PATH.",
+      "runtimes_looked_for": ["docker", "podman"],
+      "isolation_claim": "A container gives the check its own filesystem and its own process namespace, and it does not give it a separate kernel or a promise about what it can reach. The project directory is visible inside it, and whether that is read-only is a setting you can see. This is limited isolation: it narrows what a check can touch, and it is not a sandbox.",
+      "overclaim_phrases": ["isolated container", "isolated environment"],
+      "phrases_found_in_the_claim": 0,
+      "why": "The answer is a value: `Availability::Absent` compares equal to itself, `is_found()` is false, and `runtime()` is `None`, so a caller cannot get a runtime out of it without handling the possibility that there is none. The sentence is compared whole rather than searched for a word, and it has to do three things at once — say what was not found, say that **nothing runs** with a runtime and without one, and name what was looked for, or a reader cannot act on it. **The middle requirement used to read *say what happens instead (checks run on this computer)*, and that requirement was itself the defect this case is about.** It demanded a sentence claiming a check runs on this computer in a build where none does: `sure_core::enforce` says no check drives on the road to `Enforcement::admitted()`, and `sure_core::support`'s `CEILING` is `InspectOnly` for the same reason, so no check runs anywhere, in a container or on this machine. The guard was green because it asked the sentence for a **phrase** rather than for a **true claim** — and the phrase it asked for was false, so the assertion required the defect it was written to prevent. That is why the requirement is written down here in the shape it is now, and why `sure_core::container::claims_local_execution` is the rule that reads the claim instead: an absent runtime changes *inside what* a command would run and not *whether* anything runs, so a sentence naming a fallback fails in any wording rather than only in the old one. **`P16-T012` found the same claim made by the arm with a runtime, which this entry does not carry and the control below does**, and `sure_core::container::claims_container_execution` is the rule for that side of it; the acceptance sentence is *container unavailable path is honest*, and the second half of honesty is the claim the mode is described with: `isolation_claim` is quoted whole too, and the test asserts that neither sentence contains an `OVERCLAIMS` phrase used as a claim, by the module's own `overclaims` rule rather than by a substring search. A sentence that promised a sandbox would be the expensive kind of wrong, because it is read by the person deciding whether to switch the mode on."
+    },
+    {
+      "kind": "container_limit",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-core/src/lib.rs",
+      "detector": "a scan of every shipped Rust file, counted twice: lines that name the container module at all, and among them the lines that name the type a container command is built from",
+      "title": "container execution is not reachable from the pipeline or the command line, and the fixture says so",
+      "status": "not_checked",
+      "module_call_sites": 18,
+      "unwired_call_sites": 0,
+      "why": "This is the limit, recorded rather than repaired, and `P15-T001` is why it is two numbers instead of one. The module is no longer unreached: `crate::doctor` looks for a runtime on the search path it was handed and reports what it found, which is SURE answering a question about *this computer* rather than about the project, and the doctor's report is where a person reads the answer. What is still unreached is *execution*: no line of shipped code names `ContainerPlan` or `PlanError`, so nothing in this build can turn a check into a container command, and that is what `unwired_call_sites` counts and why it is still zero. `module_call_sites` counts the wider question — every line of shipped code that names `container::` or `Availability::`, which today is the doctor's observation plus the guard that reads the sentences it prints, and nothing that runs anything — and it is not zero, so the fixture says so rather than leaving a reader to find out. **`P16-T010` moved that number from 11 to 16 and moved `unwired_call_sites` not at all, and the difference is the distinction this paragraph draws.** The five lines are assertions in the `#[cfg(test)]` module of `crates/sure-cli/src/doctor.rs`, which this measurement counts because its filter is the file's path rather than the item's attributes: they name `Availability::Absent` and `sure_core::container::claims_local_execution` to say that neither container answer may claim a check ran here. **`P16-T012` moved the number again, from 16 to 18, and moved `unwired_call_sites` not at all.** That guard was rewritten rather than extended — it now asks both rules of both arms of the answer — and the net of the lines it lost and gained is the two that name the twin rule: once in the list of rules it asks the report's container section, and once in the assertion over the frame a script reads. The rule reads the arm that has a runtime, which is the sentence the local rule was never able to see. Nothing was wired in, and the number would have moved the same way had the guard been written first — which is why the two numbers are declared separately and why only the second one is the limit. The test measures both instead of describing them: it walks the tree with the product's own scanner, asserts the walk was complete and non-trivial, strips line comments, and compares both lists' lengths against this declaration. Neither number may drift: a change that made the report stop naming the module would fail on `module_call_sites`, and the first line of code that could run a container would fail on `unwired_call_sites`. The two keys are carried by this entry and by no other `required_outcomes` entry, deliberately: a second entry carrying either key would let this one be deleted with every assertion still green, which is how a case stops being measured while the corpus still reads as if it were."
+    },
+    {
+      "kind": "control",
+      "family": "execution_trust",
+      "surface": "container",
+      "module": "crates/sure-core/src/container.rs",
+      "reading_module": "crates/sure-core/src/doctor.rs",
+      "status": "not_checked",
+      "title": "the same call, with the search path the one thing moved",
+      "moved_file": "the search path",
+      "is_found": true,
+      "runtime": "docker",
+      "sentence": "docker was found at sure-fixture/bin/docker, and that changes nothing: this build runs no check, in a container or on this computer, and each check is recorded as unknown rather than passed.",
+      "both_present": "docker",
+      "podman_only": "podman",
+      "why": "A fixture that answered *no runtime found* unconditionally would satisfy every positive assertion above and would measure nothing; here one directory holding one file flips the answer. The pair is asserted as equality in both directions — the empty path on the same machine, in the same process, answers `Absent`, and the populated path answers `Found { runtime: Podman or Docker, program: <the file that was written> }` — so the two halves differ in the argument and in nothing else. The directory holding both names is what says the order in `Runtime::ALL` decides, and the directory holding only `podman` is what says the reported name comes from the directory rather than from the program's preference. **The sentence this arm produces is the other half of what `P16-T012` was about.** It used to read *\"Checks can run in a container: docker was found at …\"*, which no rule in the module read — the local rule is about the fallback claim and needs a place on this computer, and *\"in a container\"* is not one — so a machine with a runtime was told its project could be checked. `sure_core::container::claims_container_execution` is the twin rule that reads it, and `crates/sure-core/tests/container_isolation_claim.rs` holds both arms of the answer to both rules, including the assertion that the two sentences are one sentence with one clause moved."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "A missing container runtime is reported as the project being verified, as passing, or as safe to run. Nothing about the project changed and nothing was run in a container or anywhere else: the check this project declares is still unchecked, and a report that reads as a green light because a runtime was absent has turned SURE's own limit into a verdict on somebody's code."
+    },
+    {
+      "kind": "false_green",
+      "description": "The absence is silent. If the report says nothing about the mode and the machine, a reader takes the run for the one they asked for — the whole point of the container mode is that the person switching it on is told what they are and are not getting."
+    },
+    {
+      "kind": "false_positive",
+      "description": "The absence is reported as a defect of the project, or as a failure of the check. A computer without Docker is not the repository's problem, and `Availability` has no error variant precisely so that no caller can turn it into one."
+    },
+    {
+      "kind": "false_green",
+      "description": "The claim about the mode says more than the mode does: the word `sandbox`, or `isolated container` used as a claim rather than denied. This is the one wrong sentence a person reads *before* agreeing to run a stranger's code, which is why the repository forbids it in prose as well as here."
+    }
+  ],
+  "notes": "There is no case for this fixture in `evaluation/acceptance-manifest.json`: the manifest is the release contract, and its twenty cases are about defects in a project — a payment path that contacts nobody, a route that was never built, a claim with no recording behind it. None of them is about a machine, and the nearest by name, `dynamic-not-authorized`, is a different defect: there a check was *refused* by a rule about consent and its refusal is the thing that has to stay visible, while here nothing is refused by the absence at all — this build plans the same checks with a runtime on `PATH` and without one, because the pipeline never asks: the one place that asks is `sure doctor`, and what it prints there is a fact about the computer in a section of its own, not a row about the project. `expected_severity` and `release_blocking` are therefore the level the product actually reaches rather than a row copied from the contract: SURE produces no finding for this case, no candidate, and no not-checked row in a run's verdict, and `note` is a ceiling it stays under. It is named once in `FIXTURES_WITHOUT_A_MANIFEST_CASE` in `crates/sure-testkit/tests/fixture_apps.rs` with the reason, and `every_fixture_without_a_manifest_case_is_one_named_here` checks the exemption against the manifest rather than trusting it. The project is read where it ships and the scratch search paths live under `target/tmp` and are removed before the test ends, so nothing outside the repository's own ignored directory is written."
+}

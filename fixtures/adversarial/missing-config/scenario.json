@@ -1,0 +1,83 @@
+{
+  "id": "missing-config",
+  "expected_severity": "should_fix_first",
+  "release_blocking": false,
+  "description": "The reporting app reads three settings out of its environment and requires all three. No sample configuration file ships with the project, no document names any of them, and the README does not list them, so a person who clones this project cannot start it. The project's own check passes because it supplies the three names itself, in code.",
+  "entry_points": {
+    "start": "python app/main.py",
+    "test": "python scripts/check.py"
+  },
+  "defect_files": [
+    "app/settings.py",
+    "scripts/check.py"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "missing_config",
+      "surface": "env_completeness",
+      "module": "crates/sure-core/src/env_completeness.rs",
+      "reading_module": "crates/sure-core/src/references.rs",
+      "detector": "KeyStatus::ReadButNotDeclared; PROVIDED_BY_RUNTIME is consulted and none of these three is on it",
+      "title": "3 keys asked for in this project's source files and named in none of its examples or documents",
+      "anchor": "app/settings.py",
+      "status": "reported",
+      "assessment": "confirmed",
+      "evidence_class": "observed_fact",
+      "keys": [
+        "ORDERS_DB_URL",
+        "ORDERS_QUEUE_URL",
+        "REPORTING_BUCKET"
+      ],
+      "detector_severity_today": "should_fix_first",
+      "required_severity": "should_fix_first",
+      "why": "The three names are read at app/settings.py lines 25, 30 and 36 with os.environ[\"...\"] and os.getenv(\"...\", \"\"), and no .env-style template and no Markdown file in the project assigns any of them. os.getenv is compared against env_completeness::PROVIDED_BY_RUNTIME and none of the three is on that list, so none is set aside as the machine's. Each claim carries two read sites rather than one: app/settings.py, and scripts/check.py, where the fixture's own check supplies the three names itself - which is the trap, since that check asks for the same names it hands over."
+    },
+    {
+      "kind": "status",
+      "family": "missing_config",
+      "surface": "env_completeness",
+      "module": "crates/sure-core/src/env_completeness.rs",
+      "detector": "AssessedKey::severity",
+      "status": "reported",
+      "assessment": "confirmed",
+      "detector_severity_today": "should_fix_first",
+      "required_severity": "should_fix_first",
+      "why": "KeyStatus::ReadButNotDeclared is ShouldFixFirst and never MustFix by design: env_completeness documents that no missing line of configuration documentation is worth stopping a hand-off on its own. That is the highest weight any detector produces for this fixture and it is what expected_severity records."
+    },
+    {
+      "kind": "control",
+      "surface": "env_completeness",
+      "module": "crates/sure-core/src/env_completeness.rs",
+      "status": "not_checked",
+      "why": "The same project with a `.env.example` that assigns the three names must make no claim at all. The control project is built in crates/sure-core/tests/adversarial_fixture_detection.rs, so a check that answered ShouldFixFirst to every key cannot pass this fixture's tests."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The project is reported as set up, configured, working or passing. The fixture's own check passes because it supplies the very three names the project documents nowhere; a green tick here means nothing about whether anyone else can run it."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while three required settings are named in no sample file and no document, so the next person to clone it has nothing to follow."
+    },
+    {
+      "kind": "false_green",
+      "description": "The fixture's own `python scripts/check.py` exit code is treated as evidence that the configuration is documented. It prints `configuration this check supplied itself : 3 of 3` above its verdict."
+    },
+    {
+      "kind": "false_positive",
+      "description": "A key the machine provides rather than the project is reported as one the project owes. PATH, HOME, TMPDIR and their like are on env_completeness::PROVIDED_BY_RUNTIME and this fixture reads none of them."
+    },
+    {
+      "kind": "false_positive",
+      "description": "A key the project really does document is reported as undocumented. The control project, whose `.env.example` assigns all three names, must produce no claim at all."
+    },
+    {
+      "kind": "silent",
+      "description": "The three names are not reported at all, so the fact that the project documents nothing is left for the next person to discover by starting it."
+    }
+  ],
+  "notes": "There is no case for this fixture in evaluation/acceptance-manifest.json, and no id was added there for it. The manifest's case list is the release contract and this fixture is not part of it, so nothing here blocks a release; the nearest case, `external-unverified`, is a different defect and is not claimed to cover this one. expected_severity is therefore not an agreement with the manifest but a record of what SURE produces today, and crates/sure-core/tests/adversarial_fixture_detection.rs asserts that value against the detector so the two cannot drift apart. The value is should_fix_first, which is the strongest weight env_completeness can produce: it documents that no missing line of configuration documentation is worth stopping a hand-off on its own, and no detector in this build produces a heavier one for this state. Two limits of the reading, both measured and both recorded rather than hidden: the declaring side is `.env`-style templates and Markdown in which a name is *assigned*, so a README that says `this service reads ORDERS_DB_URL` in a sentence names it nowhere as far as SURE is concerned and the claim stands, while the same sentence in the form `ORDERS_DB_URL = ...` makes the claim disappear; and SURE does not read `.env`, `.env.local` or `.env.production` at all, by design, so a project whose real values file is `.env` and whose template is missing is exactly this finding. SURE reads no value anywhere here: every anchor in the report has an empty excerpt. Runnable with `python`, standard library only, no network, no writes."
+}

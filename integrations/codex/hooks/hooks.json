@@ -1,0 +1,49 @@
+{
+  "description": "SURE evidence hooks for Codex - template. ${PLUGIN_ROOT} is not a Codex variable and Codex will not expand it: render it to the absolute install path before this file is copied to ~/.codex/hooks.json, or the hooks fail loudly rather than silently. See README.md, Install step 3. On Windows the command runs PowerShell without -ExecutionPolicy Bypass on purpose: SURE does not override the machine's script-execution policy for a command the harness runs unattended. See README.md, Install step 3.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/scripts/sure-hook.sh\"",
+            "commandWindows": "powershell -NoProfile -File \"${PLUGIN_ROOT}\\scripts\\sure-hook.ps1\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/scripts/sure-hook.sh\"",
+            "commandWindows": "powershell -NoProfile -File \"${PLUGIN_ROOT}\\scripts\\sure-hook.ps1\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/scripts/sure-hook.sh\"",
+            "commandWindows": "powershell -NoProfile -File \"${PLUGIN_ROOT}\\scripts\\sure-hook.ps1\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/scripts/sure-hook.sh\"",
+            "commandWindows": "powershell -NoProfile -File \"${PLUGIN_ROOT}\\scripts\\sure-hook.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}

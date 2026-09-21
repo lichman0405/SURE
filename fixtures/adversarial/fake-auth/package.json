@@ -1,0 +1,10 @@
+{
+  "name": "sure-fixture-fake-auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial fixture: any password is accepted for an account that exists, because the password is never compared.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  }
+}

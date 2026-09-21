@@ -1,6 +1,69 @@
 {
   "id": "missing-migration",
   "expected_severity": "must_fix",
-  "description": "Schema/model changed but database migration is missing.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The order model gained a `discount_cents` column and the migration for it was never written. `alembic.ini` says this project manages its database with Alembic, `alembic/versions/` is in the project and holds no revision, so a database created before the change is never brought up to the shape `app/models.py` describes.",
+  "entry_points": {
+    "start": "python app/main.py",
+    "test": "python scripts/check.py"
+  },
+  "defect_files": [
+    "alembic/versions",
+    "app/models.py"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "missing_migration",
+      "surface": "db_migrations",
+      "module": "crates/sure-core/src/db_migrations.rs",
+      "detector": "DETECTORS Alembic row; Looked::gap + SchemaGap::severity",
+      "title": "`alembic.ini` says Alembic is in use in this project, and `alembic/versions`, where Alembic keeps the record of how the database reached its shape, is here and holds no migration.",
+      "anchor": "alembic.ini",
+      "status": "reported",
+      "assessment": "confirmed",
+      "evidence_class": "observed_fact",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "`alembic/versions/` exists and holds no `.py` revision, which is the exact state the check calls Confirmed at MustFix. The two evidence anchors are `alembic.ini` and `alembic/versions`, both AnchorSubject::Database, and neither carries an excerpt of a project line."
+    },
+    {
+      "kind": "status",
+      "family": "missing_migration",
+      "surface": "db_migrations",
+      "module": "crates/sure-core/src/db_migrations.rs",
+      "detector": "AssessedGap::severity",
+      "status": "reported",
+      "assessment": "confirmed",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "This is the one fixture in P14 whose detector already reaches the severity the release manifest names: MustFix blocks hand-off on its own, and crates/sure-core/tests/adversarial_fixture_detection.rs asserts both the severity and the evidence bar behind it."
+    },
+    {
+      "kind": "control",
+      "surface": "db_migrations",
+      "module": "crates/sure-core/src/db_migrations.rs",
+      "status": "not_checked",
+      "why": "The same project with one `.py` revision under `alembic/versions/` must make no claim at all. The control project is built in crates/sure-core/tests/adversarial_fixture_detection.rs, so a check that answered MustFix to every Alembic project cannot pass this fixture's tests."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The project is reported as working, verified or passing while `alembic/versions/` holds no migration and the model has moved on from any database that exists."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green on the strength of the fixture's own check. That check builds a fresh database from the model on every run, so it is green whatever the migration directory holds."
+    },
+    {
+      "kind": "silent",
+      "description": "The empty record is not reported at all, and the missing migration is left to be discovered by whoever runs the deployment."
+    },
+    {
+      "kind": "false_positive",
+      "description": "A project that has an Alembic revision is reported as missing one. The control project in crates/sure-core/tests/adversarial_fixture_detection.rs fails if that happens."
+    }
+  ],
+  "notes": "Severity: unlike every P14-T001 fixture, this one has no gap to record. evaluation/acceptance-manifest.json asks for must_fix and the check produces MustFix, critical, EvidenceClass::ObservedFact, so nothing here is filed as style noise by false_completion_aggregator::is_style_noise. What is narrower than the manifest's wording is the claim itself, and it is recorded rather than hidden: the manifest case reads `schema change without required migration identified`, and nothing in a path listing records a *change*. What SURE detects is the checkable coarser fact - a project that writes down the shape of its database and keeps no record of how it got there. A project whose migrations exist but do not cover a model added last week is not detectable here; see the module documentation of crates/sure-core/src/db_migrations.rs. This fixture holds the `must_fix` shape and not the other one: `alembic/versions/` is present and empty, which is Confirmed at MustFix, whereas a project with no versions directory at all is Confirmed at ShouldFixFirst. That choice is frozen in crates/sure-core/tests/db_migrations.rs and recorded in progress/DECISIONS.md. Runnable with `python`, standard library only, no network, no writes: the app builds an in-memory SQLite database and never opens a file on disk."
 }

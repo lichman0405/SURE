@@ -6,7 +6,7 @@
 - Edition 2024.
 - No nightly requirement.
 - Primary local host: native Windows 11 x64, `x86_64-pc-windows-msvc`.
-- Required CI/release core targets include Windows x64 MSVC, macOS and Linux x64.
+- Required CI/release core targets include Windows x64 MSVC, macOS (Apple Silicon) and Linux x64. The macOS release targets are `aarch64-apple-darwin` and `x86_64-apple-darwin`; both are produced and run by `.github/workflows/release-dry-run.yml` as workflow artifacts, and neither is published — see `docs/development/RELEASE_PROCESS.md`, "What the macOS Intel archive is, concretely".
 
 ## Dependency strategy
 

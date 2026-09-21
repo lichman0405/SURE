@@ -1,0 +1,10 @@
+{
+  "name": "benign-test-mocks",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A small checkout service that ships its test doubles, its worked example and its documentation snippets beside the code they describe.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  }
+}

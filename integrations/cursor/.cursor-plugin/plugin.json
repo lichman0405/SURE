@@ -1,6 +1,6 @@
 {
   "name": "sure",
-  "version": "0.0.0-bootstrap",
+  "version": "0.1.0",
   "description": "Check AI-built projects, record agent evidence and return repair contracts without replacing Cursor.",
   "author": {
     "name": "SURE contributors"

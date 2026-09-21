@@ -1,0 +1,16 @@
+{
+  "event": "postToolUse",
+  "harness_session_id": "cursor-session-001",
+  "tool": "Shell",
+  "args": {
+    "command": "npm test",
+    "workdir": "C:\\Users\\dev\\sample-project"
+  },
+  "result": {
+    "exit_code": 0,
+    "stdout": "Tests: 5 passed, 5 total",
+    "stderr": ""
+  },
+  "timestamp_utc": "2026-09-18T12:01:05Z",
+  "source": "cursor"
+}

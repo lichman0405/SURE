@@ -1,6 +1,93 @@
 {
   "id": "dead-button",
   "expected_severity": "must_fix",
-  "description": "Visible primary button has no connected behavior.",
-  "fixture_status": "to_be_implemented_by_task_graph"
+  "release_blocking": true,
+  "description": "The primary visible action does nothing. The Buy now button is wired to a real click handler, and that handler calls placeOrder(), which returns nothing, creates nothing and raises no error.",
+  "entry_points": {
+    "start": "node src/server.js",
+    "test": "node scripts/check.js"
+  },
+  "defect_files": [
+    "public/app.js"
+  ],
+  "required_outcomes": [
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "ui_action_bridge",
+      "module": "crates/sure-core/src/ui_action_bridge.rs",
+      "detector": "UiActionKind::Click",
+      "title": "UI action: click handler on element in `public/app.js`",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "must_fix",
+      "required_severity": "must_fix",
+      "why": "the Buy now button's click binding is found. With no browser evidence it stays an inference, and an inference about a primary action must stay visible rather than be assumed fine."
+    },
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Placeholder",
+      "title": "project contains placeholder usage in production code",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "can_fix_later",
+      "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `placeholder` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what it stands in for — so `sure_core::finding_gravity` grades it `can_fix_later` while this outcome requires `must_fix`.",
+        "would_require": "a scanner that read what the marker is on, so that one category could be graded two ways. `fixtures/adversarial/fake-auth/scenario.json` requires `must_fix` for `CandidateCategory::Placeholder` at `src/auth.js` and `fixtures/adversarial/demo-analytics/scenario.json` requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `must_fix` this fixture requires is reached by `ui_action_bridge`, the detector that saw the dead click handler itself."
+      },
+      "why": "the handler body says in words that it is a placeholder and returns nothing."
+    },
+    {
+      "kind": "finding",
+      "family": "dead_button",
+      "surface": "candidate_scanner",
+      "module": "crates/sure-core/src/candidate_scanner.rs",
+      "detector": "CandidateCategory::Todo",
+      "title": "project contains TODO or FIXME comments in production code",
+      "anchor": "public/app.js",
+      "status": "not_checked",
+      "evidence_class": "inference",
+      "detector_severity_today": "can_fix_later",
+      "required_severity": "must_fix",
+      "required_severity_unmet": {
+        "why": "`candidate_scanner` reads a `TODO` as `GapKind::UnfinishedMarker` — the word and the place it stands in, and not what the marker is on — so `sure_core::finding_gravity` grades it `can_fix_later` while this outcome requires `must_fix`.",
+        "would_require": "a scanner that read what the TODO is on, so that one category could be graded two ways. `fixtures/adversarial/fake-auth/scenario.json` requires `must_fix` for `CandidateCategory::Todo` at `src/auth.js` and `fixtures/adversarial/demo-analytics/scenario.json` requires `should_fix_first` for the same category, in the same context and with the same evidence class, so no function of a proposal's own fields satisfies both. The `must_fix` this fixture requires is reached by `ui_action_bridge`, the detector that saw the dead click handler itself."
+      },
+      "why": "the unfinished work is marked with a TODO on the same function."
+    },
+    {
+      "kind": "status",
+      "family": "dead_button",
+      "surface": "false_completion_aggregator",
+      "module": "crates/sure-core/src/false_completion_aggregator.rs",
+      "status": "reported",
+      "required_severity": "must_fix",
+      "why": "a first-time visitor presses this button; it must not be filed as style noise."
+    }
+  ],
+  "forbidden_outcomes": [
+    {
+      "kind": "false_green",
+      "description": "The Buy now button is reported as working, wired, implemented or passing. Pressing it creates no order."
+    },
+    {
+      "kind": "false_green",
+      "description": "The project aggregates to green while the primary action has no observable effect."
+    },
+    {
+      "kind": "false_green",
+      "description": "The existence of a click handler is treated as completion. A handler that does nothing is the defect, not the fix."
+    },
+    {
+      "kind": "silent",
+      "description": "The placeholder body, the TODO and the unwired outcome are not reported at all."
+    }
+  ],
+  "notes": "Severity, recorded rather than measured here: evaluation/acceptance-manifest.json requires must_fix for this case, and must_fix is what ui_action_bridge reaches for the dead click handler — `Severity::MustFix`, critical = false, EvidenceClass::Inference. The two candidate_scanner outcomes land at can_fix_later and say so in their own `required_severity_unmet` blocks, which carry the reason the requirement stands unmet and what would have to change for it to be met. Runtime browser evidence is what upgrades a UI action to ObservedFact, and this fixture does not require a browser. crates/sure-core/tests/adversarial_fixture_detection.rs asserts exactly these three proposals, and its every_recorded_detector_severity_is_what_the_detector_produces_today reads this file's own detector_severity_today values and runs the detector named beside each one. Before P7-T011 every scanner here emitted Severity::Note, so none of these weights was reachable; that the required and the delivered severity were once different is kept as SEVERITY_BEFORE_P7T011 in that file and in git, and the test that recorded the gap was inverted rather than deleted: it is what_is_detected_now_carries_the_weight_the_manifest_requires now, and it asserts the severity the manifest requires rather than the gap."
 }

@@ -1,0 +1,8 @@
+{
+  "session_id": "codex-session-001",
+  "transcript_path": "C:\\Users\\dev\\.codex\\sessions\\2026\\09\\18\\codex-session-001.jsonl",
+  "cwd": "C:\\Users\\dev\\sample-project",
+  "hook_event_name": "SessionEnd",
+  "model": "codex-example-model",
+  "reason": "other"
+}

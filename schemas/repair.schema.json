@@ -3,6 +3,7 @@
   "title": "SURE Repair Contract",
   "type": "object",
   "required": [
+    "id",
     "issue_id",
     "problem",
     "why_it_matters",
@@ -10,6 +11,9 @@
     "acceptance"
   ],
   "properties": {
+    "id": {
+      "type": "string"
+    },
     "issue_id": {
       "type": "string"
     },
@@ -32,6 +36,12 @@
       }
     },
     "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recheck": {
       "type": "array",
       "items": {
         "type": "string"

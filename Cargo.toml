@@ -9,16 +9,107 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.0-bootstrap"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
 license = "Apache-2.0"
 repository = "https://github.com/lichman0405/SURE"
 
+[workspace.dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+# The command line grammar. `docs/architecture/RUST_DESIGN.md` names clap for
+# this, and it earns its place on a surface this user-visible: usage errors,
+# `--help` that cannot drift from the accepted grammar, and the `--` handling
+# that decides whether a path beginning with a dash is a flag. Hand-rolling that
+# is where "an unknown flag was accepted and ignored" comes from, which is the
+# CLI's version of a false green.
+#
+# `docs/architecture/CLI.md` records what the flag decides and what it does not:
+# clap parses the command line, and every decision about *output* is SURE's.
+clap = { version = "4.6.6", features = ["derive"] }
+# Two readers, one parser. The crate-boundary policy test must use a real TOML
+# parser — a hand-rolled one could silently mis-parse and report "no violations",
+# which is a false green in the check that exists to prevent them — and
+# `sure-core` reads `pyproject.toml` with it for the same reason. It was
+# test-support-only until `P2-T005`; `Cargo.toml` is `P2-T006`'s reader and not
+# implemented yet.
+#
+# **Not deserialized straight into `serde_json::Value`.** `toml` represents a
+# TOML datetime in JSON as `{"$__toml_private_datetime": "2024-01-01"}` — a
+# table that the project did not write, under a key that looks like project
+# data — and it represents `inf` and `nan` as `null`. Both are a declared value
+# silently becoming a different value, so `discover::read::read_toml` converts
+# `toml::Value` explicitly and carries anything JSON cannot represent as the
+# text TOML wrote it with.
+toml = "1.1.6"
+# `sure.yaml` is a documented product surface (`PROJECT_NAME.md`,
+# `docs/architecture/ARCHITECTURE.md`), so it is parsed with a real YAML parser
+# rather than a hand-rolled one. `serde_yaml` itself is archived upstream, and
+# this is the maintained fork of it, which keeps the error type, the location
+# reporting and the serde integration that the diagnostics depend on.
+serde_yaml_ng = "0.10.0"
+# Per-user application-data and configuration locations.
+#
+# `docs/architecture/STORAGE_AND_DATA_PATHS.md` asks for "a well-tested path
+# abstraction rather than hard-coded `~/.sure`", and names the Windows known
+# folders it expects. Reading `%LOCALAPPDATA%` by hand would be wrong whenever
+# the variable is unset, and the correct API is `SHGetKnownFolderPath`, which
+# this workspace cannot call: `unsafe_code = "forbid"` is workspace-wide. Asking
+# a library that already does it is the only way to be right on all three
+# platforms rather than only on the one that was tested.
+dirs = "6.0.0"
+# The one hash SURE computes, for project fingerprints.
+#
+# A fingerprint's whole job is to be the *same value* for the same project state
+# and a *different* value for a different one, on every run, on every machine, on
+# every platform and under every version of SURE. `std::hash::DefaultHasher` is
+# explicitly documented as not stable across Rust releases, so it cannot be it: a
+# fingerprint that changes when the toolchain is upgraded marks good evidence
+# stale, and one that collides marks stale evidence fresh.
+#
+# The algorithm is SHA-256 rather than a faster non-cryptographic hash because
+# two different project states sharing a digest is exactly the false green this
+# product exists to prevent, and an adversary choosing the collision is in scope
+# — the project being checked is written by a coding agent.
+#
+# Written here rather than by hand in the crate: the failure mode of a
+# home-rolled SHA-256 is a plausible-looking wrong digest, which is silent.
+# `docs/architecture/FINGERPRINTING.md` is the rule; `sure_core::fingerprint` is
+# where it becomes code.
+sha2 = "0.11.0"
+# Local record storage. `bundled` compiles SQLite from its own C source into the
+# binary, which is what makes "storage packages without requiring system SQLite"
+# true: an installation carries its own database engine rather than linking
+# whatever `sqlite3.dll` happens to be on the machine. Linking the system one
+# would make SURE's locking behaviour depend on a library the user did not
+# install for SURE and cannot tell us about.
+#
+# `bundled` needs a C compiler at build time and nothing at run time. That is
+# the intended trade: this repository already requires the MSVC toolchain on
+# Windows and a system compiler on the macOS and Linux CI runners.
+#
+# `docs/architecture/STORAGE_AND_DATA_PATHS.md` is the rule; `sure_core::store`
+# is where it becomes code, including the concurrency contract that depends on
+# this choice.
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+# Regular expressions for the secret redaction engine. A real parser is needed
+# for user-configured redaction patterns and for detecting multi-line secret
+# shapes such as PEM private keys; hand-rolling the matching would be a false-
+# green risk when a pattern is slightly different from the one expected.
+regex = "1.11.1"
+# Synchronous HTTP client for the user-owned OpenAI-compatible analysis provider.
+# A blocking client keeps the `Analyzer` trait synchronous, and the provider is
+# the only place in this crate that reaches the network directly.
+ureq = { version = "2.12.1", features = ["json"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
+# Production code must handle these rather than abort the process. Test modules
+# opt out with `#![allow(...)]` at the top of `mod tests`, because a panic there
+# is a reported test failure rather than a crash a user ever sees.
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"

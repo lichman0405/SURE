@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SURE Project Report",
+  "description": "A stable, machine-readable report of a project verdict. Produced by the SURE CLI for downstream tools.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_fingerprint",
+    "aggregate",
+    "ready_for_hand_off",
+    "must_caveat_requirements",
+    "capability",
+    "findings",
+    "not_checked",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of the report schema. Bumped when the shape changes in a way an older reader would get wrong.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_fingerprint": {
+      "description": "The project state this verdict is about.",
+      "type": "string"
+    },
+    "aggregate": {
+      "type": "object",
+      "required": [
+        "severity",
+        "headline",
+        "is_green"
+      ],
+      "properties": {
+        "severity": {
+          "enum": [
+            "green",
+            "needs_attention",
+            "not_ready",
+            "not_enough_checked"
+          ]
+        },
+        "headline": {
+          "type": "string"
+        },
+        "is_green": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ready_for_hand_off": {
+      "type": "boolean"
+    },
+    "must_caveat_requirements": {
+      "type": "boolean"
+    },
+    "caveat": {
+      "type": "string"
+    },
+    "coverage_caveat": {
+      "description": "Reduced-coverage note when model-backed analysis is disabled.",
+      "type": "string"
+    },
+    "capability": {
+      "description": "What the harness integration could and could not see, and what the tier was counted from when it came from recorded events.",
+      "type": "object",
+      "required": [
+        "tier",
+        "summary",
+        "blind_spots"
+      ],
+      "properties": {
+        "tier": {
+          "description": "0 snapshot, 1 observed, 2 protected.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": "string"
+        },
+        "blind_spots": {
+          "description": "What SURE could not see, as the wire names of the blind-spot enum. A list rather than prose, so a script can ask whether a named gap is present without parsing the summary sentence.",
+          "type": "array",
+          "items": {
+            "enum": [
+              "user_goal_not_exposed",
+              "completion_claim_not_exposed",
+              "tool_calls_not_exposed",
+              "failures_not_exposed",
+              "file_edits_not_exposed",
+              "git_activity_not_exposed",
+              "no_pre_action_control",
+              "no_session_visibility"
+            ]
+          }
+        },
+        "evidence": {
+          "description": "What the tier was counted from, when it came from recorded events. Absent when SURE counted nothing at all: a project with no recorded events and a project whose events belong to a different directory both report tier 0, and only this says which is which.",
+          "type": "object",
+          "required": [
+            "events",
+            "elsewhere",
+            "truncated",
+            "unreadable"
+          ],
+          "properties": {
+            "harnesses": {
+              "description": "The harnesses the counted events came from, sorted and deduplicated. Empty when nothing was counted.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events": {
+              "description": "How many session events were counted for this project.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "window": {
+              "description": "The earliest and latest counted event, as the envelopes carried them. Absent when some counted event's time is not a timestamp SURE can read.",
+              "type": "object",
+              "required": [
+                "oldest",
+                "newest"
+              ],
+              "properties": {
+                "oldest": {
+                  "type": "string"
+                },
+                "newest": {
+                  "type": "string"
+                }
+              }
+            },
+            "elsewhere": {
+              "description": "How many session events the read found that are about other projects.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "description": "Whether the read stopped at its own limit before reading everything, so older events may exist that are not counted.",
+              "type": "boolean"
+            },
+            "unreadable": {
+              "description": "Whether SURE could not read the events its store holds at all. The report then states the snapshot tier it can prove without them.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "what",
+          "impact",
+          "severity",
+          "status",
+          "next_action",
+          "is_model_only",
+          "evidence_anchors"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "what": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "is_model_only": {
+            "type": "boolean"
+          },
+          "evidence_anchors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "location",
+                "locator",
+                "subject"
+              ],
+              "properties": {
+                "location": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "not_checked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "reason",
+          "is_critical"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "is_critical": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "claim_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim_text",
+          "claim_type",
+          "assessment",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "claim_text": {
+            "type": "string"
+          },
+          "claim_type": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "checked",
+        "skipped",
+        "could_not_run",
+        "open_findings"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "could_not_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_findings": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

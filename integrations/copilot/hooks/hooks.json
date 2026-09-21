@@ -1,0 +1,79 @@
+{
+  "description": "SURE evidence/protection hooks for GitHub Copilot — TEMPLATE. Do not load this file and do not install this package: SURE has no Copilot normaliser, so `sure hook ingest --source copilot` exits 5 for every event wired below and records nothing, and Copilot's own reference denies the tool call on a non-zero preToolUse exit (reported as `Denied by preToolUse hook (hook errored)`). Nothing in this repository installs it by default. Replace the placeholder event names and response handling, and get `--source copilot` answering, before wiring it up.",
+  "hooks": {
+    "sessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "terminal|shell|Read|readFile|Write|writeFile|Edit|applyEdit|Delete|deleteFile",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "postToolUse": [
+      {
+        "matcher": "terminal|shell|Read|readFile|Write|writeFile|Edit|applyEdit|Delete|deleteFile",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 post-tool-failure",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 after-file-edit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": ".\\scripts\\sure-hook.ps1 stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

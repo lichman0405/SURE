@@ -24,19 +24,6 @@ error.**
 SURE works beside the tool you already use. Claude Code users keep using Claude
 Code. Cursor users keep using Cursor. Codex users keep using Codex.
 
-## Status: working v0.1, no download yet
-
-Read this before anything else.
-
-- **The v0.1 development plan is complete** — 204 of 204 planned tasks, each
-  verified. The checker runs, the CLI works, and the checks are real.
-- **There is nothing to download.** No GitHub release, no `winget` package, no
-  installer you can fetch. The only way to get SURE today is to build it from
-  source, below.
-- **It is a bootstrap build.** `sure version` prints `0.0.0-bootstrap`. It is an
-  honest v0.1, not a finished product. `FINAL_REPORT.md` lists exactly what it
-  can and cannot do, with measurements.
-
 ## Install on Windows
 
 You need two things on the machine that builds SURE:
@@ -57,7 +44,7 @@ cargo test -p sure-core --test acceptance_report_runner
 & .\scripts\Build-Release.ps1 -Phase All
 
 # 3. Install for your user account. No administrator, no PATH change.
-& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.0.0-bootstrap-x86_64-pc-windows-msvc.zip
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
 
 # 4. Check that it works.
 & "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
@@ -70,9 +57,9 @@ your check history lives.
 The full walk is `docs/development/QUICKSTART_WINDOWS.md`; the installer
 reference is `docs/development/INSTALL_WINDOWS.md`.
 
-## macOS and Linux
+## Install on macOS and Linux
 
-No published archives here either — build from source:
+Build from source:
 
 ```sh
 cargo install --path crates/sure-cli   # installs `sure` into ~/.cargo/bin
@@ -84,12 +71,46 @@ portable and CI-tested on both platforms; `docs/development/MACOS.md` and
 
 ## Use it
 
-```powershell
-# Is SURE itself set up correctly on this machine?
-& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+Is SURE itself set up correctly on this machine?
 
-# Check a project. The path must be absolute.
-& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\path\to\your\project"
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+```
+
+Check a project. The path must be absolute:
+
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\demo\hello"
+```
+
+### What a run looks like
+
+This is a real `sure check` run against a small project holding a
+`package.json` and one JavaScript file — the output of SURE 0.1.0, cut to its
+own headings. The project's path was replaced with `C:\demo\hello`, and a line
+holding `...` is where text was left out:
+
+```text
+SURE checked C:\demo\hello.
+
+Not enough could be checked to say whether this is ready.
+This project is not ready to hand off.
+...
+No open findings.
+
+What the run did, stage by stage
+  1/12. Find the project's parts: node (level B); all of it was read. Support reaches level C.
+  ...
+  8/12. Ask a model to assess the project: No analysis provider is configured, so SURE assessed nothing with a model. ... (NOT CHECKED)
+  9/12. Check what was claimed against the evidence: SURE has no recorded history for this machine, so there are no agent claims to check against evidence. (NOT CHECKED)
+  ...
+
+2 of the 12 stages did not run, and each is marked NOT CHECKED above. A run with
+a stage that did not run is never reported as clean.
+
+SURE exited with status 1. That is what it returns when it checked the project
+and did not find it clean — not 3, which would mean this build cannot check a
+project at all.
 ```
 
 Read the exit status as the answer:
@@ -104,14 +125,17 @@ Read the exit status as the answer:
 **Expect `1` on your first runs.** With no AI model configured — the default —
 SURE runs its deterministic checks but marks the model-assessment stage "not
 checked", and a run with any stage not checked is never reported as clean. That
-is the tool being honest, not your project failing.
+is the tool being honest, not your project failing. Stage 9 needs history from
+the plugin below, so a machine that has never used SURE has two stages marked.
 
 Other commands worth knowing:
 
-- `sure repair` — turn findings into a repair contract for your coding agent
-- `sure recheck` — check again after a repair, and compare with last time
+- `sure repair` — turn findings into a bounded repair contract you can hand to
+  your coding agent
+- `sure recheck` — check again after the repair, and compare with last time
 - `sure history` — see (and delete) what SURE has recorded on this machine
-- add `--format json` to any command for machine-readable output
+- add `--format json` to any command for one JSON object on one line, for
+  scripts to read
 
 A first check writes nothing to your machine: SURE opens your history only if
 one already exists.
@@ -143,6 +167,7 @@ sent anywhere.
 
 ## Read more
 
+- `ROADMAP.md` — where the project stands and what comes next
 - `FINAL_REPORT.md` — what this v0.1 is and is not, with measurements
 - `docs/` — architecture, security, integrations, development
 - `START_HERE.md` — if you want to work on SURE itself

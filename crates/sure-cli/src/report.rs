@@ -1786,8 +1786,8 @@ mod tests {
 
     #[test]
     fn the_version_in_the_frame_is_the_one_the_version_command_prints() {
-        // Two spellings of one fact. The prose says "SURE 0.0.0-bootstrap" and
-        // the frame says "0.0.0-bootstrap", and if they were allowed to drift
+        // Two spellings of one fact. The prose says "SURE 0.1.0" and
+        // the frame says "0.1.0", and if they were allowed to drift
         // the machine form would be the one that is wrong without anyone
         // noticing, because it is the one nobody reads.
         let printed = text(&Report::Version, false);

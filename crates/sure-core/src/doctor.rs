@@ -474,7 +474,7 @@ pub struct Build {
     /// The version number of this build, without the product name.
     ///
     /// The number alone because every renderer of this report already says the
-    /// product's name, and a field holding "SURE 0.0.0-bootstrap" makes each of
+    /// product's name, and a field holding "SURE 0.1.0" makes each of
     /// them have to take it apart again. See [`crate::VERSION`].
     pub version: String,
     /// The harness protocol version it speaks.

@@ -1,7 +1,7 @@
 {
   "name": "sure-bootstrap-tools",
   "private": true,
-  "version": "0.0.0-bootstrap",
+  "version": "0.1.0",
   "engines": { "node": ">=24 <27" },
   "scripts": {
     "validate": "node scripts/validate-bootstrap.mjs",

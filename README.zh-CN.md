@@ -18,14 +18,6 @@ SURE 是一个本地优先的检查工具，专门检查用 AI 编程工具写�
 
 SURE 不取代你正在用的工具。用 Claude Code 的继续用 Claude Code，用 Cursor 的继续用 Cursor，用 Codex 的继续用 Codex。
 
-## 现状：能用，但还没有安装包
-
-先看这一段。
-
-- **v0.1 开发计划已全部完成**——204 项计划任务逐项做完并验证。检查器能跑，命令行能用，检查是真的。
-- **但现在没有任何可下载的东西**：没有 GitHub Release，没有 winget 包，没有任何可以直接拿到的安装器。今天想用 SURE，唯一的路是从源码构建，见下。
-- **这是一个引导版本**：`sure version` 打印 `0.0.0-bootstrap`。它是一个诚实的 v0.1，不是成品。它能做什么、不能做什么，`FINAL_REPORT.md` 里有逐条带测量的说明。
-
 ## 在 Windows 上安装
 
 构建的机器上需要两样东西：
@@ -43,7 +35,7 @@ cargo test -p sure-core --test acceptance_report_runner
 & .\scripts\Build-Release.ps1 -Phase All
 
 # 3. 安装到当前用户。不需要管理员，不改 PATH
-& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.0.0-bootstrap-x86_64-pc-windows-msvc.zip
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
 
 # 4. 验证装好了
 & "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
@@ -53,9 +45,9 @@ cargo test -p sure-core --test acceptance_report_runner
 
 完整步骤在 `docs/development/QUICKSTART_WINDOWS.md`；安装器的全部参数在 `docs/development/INSTALL_WINDOWS.md`。
 
-## macOS 和 Linux
+## 在 macOS 和 Linux 上安装
 
-同样没有已发布的安装包，从源码构建：
+从源码构建：
 
 ```sh
 cargo install --path crates/sure-cli   # 把 sure 装进 ~/.cargo/bin
@@ -65,12 +57,43 @@ Unix 的启动脚本默认就在这个位置找它。Rust 核心是可移植的�
 
 ## 使用
 
-```powershell
-# 先检查 SURE 自己在这台机器上装得对不对
-& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+先检查 SURE 自己在这台机器上装得对不对：
 
-# 检查一个项目。路径必须是绝对路径
-& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\path\to\your\project"
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" doctor
+```
+
+检查一个项目。路径必须是绝对路径：
+
+```powershell
+& "$env:LOCALAPPDATA\SURE\bin\sure.exe" check "C:\demo\hello"
+```
+
+### 一次运行长什么样
+
+下面是一次真实的 `sure check` 运行，被检查的项目只有一个 `package.json` 和一个 JavaScript 文件——这是 SURE 0.1.0 的输出，按小节裁剪过。项目路径替换成了 `C:\demo\hello`，标 `...` 的行是省略的地方：
+
+```text
+SURE checked C:\demo\hello.
+
+Not enough could be checked to say whether this is ready.
+This project is not ready to hand off.
+...
+No open findings.
+
+What the run did, stage by stage
+  1/12. Find the project's parts: node (level B); all of it was read. Support reaches level C.
+  ...
+  8/12. Ask a model to assess the project: No analysis provider is configured, so SURE assessed nothing with a model. ... (NOT CHECKED)
+  9/12. Check what was claimed against the evidence: SURE has no recorded history for this machine, so there are no agent claims to check against evidence. (NOT CHECKED)
+  ...
+
+2 of the 12 stages did not run, and each is marked NOT CHECKED above. A run with
+a stage that did not run is never reported as clean.
+
+SURE exited with status 1. That is what it returns when it checked the project
+and did not find it clean — not 3, which would mean this build cannot check a
+project at all.
 ```
 
 退出码就是答案：
@@ -82,14 +105,14 @@ Unix 的启动脚本默认就在这个位置找它。Rust 核心是可移植的�
 | `5` | 这次运行没完成（路径不对、项目读不了） |
 | `2` | 命令行本身写错了 |
 
-**前几次跑大概率得到 `1`，这是正常的。** 默认没有配置 AI 模型时，SURE 只跑确定性检查，"模型评估"这一步会标记为"未检查"；而有任何一步没跑的报告，永远不会被判为干净。这是工具在诚实，不是你的项目坏了。
+**前几次跑大概率得到 `1`，这是正常的。** 默认没有配置 AI 模型时，SURE 只跑确定性检查，"模型评估"这一步会标记为"未检查"；而有任何一步没跑的报告，永远不会被判为干净。这是工具在诚实，不是你的项目坏了。第 9 步要靠下面的插件提供的会话记录，所以没用过 SURE 的机器会有两步被标记。
 
 其他常用命令：
 
-- `sure repair`——把发现的问题变成一份修复契约，交给 AI 工具去修
+- `sure repair`——把发现的问题变成一份有边界的修复契约，交给 AI 工具去修
 - `sure recheck`——修完后复查，并和上次对比
 - `sure history`——查看（或删除）SURE 在这台机器上的记录
-- 任何命令加 `--format json`，输出机器可读格式
+- 任何命令加 `--format json`，输出一行一个 JSON 对象，给脚本读
 
 第一次检查不会在你机器上留下任何文件：只有已经存在历史记录时 SURE 才会打开它。
 
@@ -112,6 +135,7 @@ Windows 上是 `%LOCALAPPDATA%\SURE\`——程序和 `sure.db`（证据历史）
 
 ## 更多
 
+- `ROADMAP.md`——项目到哪了、接下来做什么
 - `FINAL_REPORT.md`——这个 v0.1 是什么、不是什么，带测量
 - `docs/`——架构、安全、集成、开发文档
 - `START_HERE.md`——想参与开发 SURE 本身，从这里开始

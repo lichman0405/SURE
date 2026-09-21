@@ -2,8 +2,8 @@
 # SURE - verify the four release archives against their checksums, and write the
 # one file a person who downloaded them needs.
 #
-#   sh scripts/Assemble-Release.sh --version 0.0.0-bootstrap
-#   sh scripts/Assemble-Release.sh --version 0.0.0-bootstrap --output-dir DIR
+#   sh scripts/Assemble-Release.sh --version 0.1.0
+#   sh scripts/Assemble-Release.sh --version 0.1.0 --output-dir DIR
 #
 # Run from anywhere; every path is derived from this file's own location.
 #

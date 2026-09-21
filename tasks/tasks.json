@@ -2915,13 +2915,17 @@
     "required": true,
     "depends_on": [
       "P15-T010",
-      "P16-T010"
+      "P16-T004",
+      "P16-T007",
+      "P16-T010",
+      "P16-T011",
+      "P16-T012"
     ],
     "acceptance": [
       "Required Windows/macOS/Linux jobs green for final commit."
     ],
     "outputs": [],
-    "notes": ""
+    "notes": " ORDERING CORRECTED by the supervisor: this clause is \"green for **final** commit\", and four tasks that move the tree were ordered *after* it — `P16-T004`, `P16-T007`, `P16-T011` and `P16-T012`. A reading of the final commit taken before the commits that follow it is not a reading of the final commit, and the failure is silent: the run is genuinely green, it is just green for a tree that no longer exists, which is the same shape as a false green and is the thing this project refuses. `P16-T004`'s own dependency on `P16-T003` was the reverse of the truth and is removed — an eval that can find a mandatory false green must run *before* the tree is frozen, not after it is certified."
   },
   {
     "id": "P16-T004",
@@ -2929,8 +2933,7 @@
     "title": "Run final product acceptance eval",
     "required": true,
     "depends_on": [
-      "P14-T012",
-      "P16-T003"
+      "P14-T012"
     ],
     "acceptance": [
       "Acceptance manifest results attached/recorded with zero mandatory false green."

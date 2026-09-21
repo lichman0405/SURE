@@ -145,7 +145,7 @@ install.
 
 ## Which of the launchers' three steps finds this install
 
-Seven launcher scripts across five integration packages resolve `sure.exe` in
+Eight launcher scripts across five integration packages resolve `sure.exe` in
 this order (`docs/development/INSTALL_WINDOWS.md` lists them by file and line):
 
 1. `$env:SURE_BIN`, if it is set to a path that exists;
@@ -166,7 +166,7 @@ and would say so rather than fall back to something else.
 
 `crates/sure-cli/tests/winget_manifest.rs::the_second_resolution_step_is_the_one_a_winget_install_fills`
 is that experiment, with the falsifier in the same test. It drives one of the
-seven — `integrations/claude-code/scripts/sure-mcp.ps1`, the same one
+eight — `integrations/claude-code/scripts/sure-mcp.ps1`, the same one
 `install_flow.rs` drives for step 3. That the other six resolve the same
 candidates in the same order is read from their text, which
 `docs/development/INSTALL_WINDOWS.md` lists by file and line, rather than

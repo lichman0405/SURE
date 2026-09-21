@@ -696,7 +696,7 @@ const QUICKSTART_REQUIRED: &[(&str, &str)] = &[
     ),
     (
         "%LOCALAPPDATA%\\SURE\\bin\\sure.exe",
-        "the destination is gone, and with it the one path seven launcher scripts resolve",
+        "the destination is gone, and with it the one path eight launcher scripts resolve",
     ),
     (
         "integrations\\claude-code\\scripts\\install.ps1 -ForceCopy",

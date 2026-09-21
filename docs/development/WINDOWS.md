@@ -141,6 +141,45 @@ owns — a *tightening* for one process that exits with the test, which writes
 nothing to any scope and cannot outlive it. Nothing in this repository sets an
 execution policy for the machine, for the user, or for the gate.
 
+## The gate set, and the runner that takes a reading
+
+Every acceptance in `progress/` quotes a line shaped like
+`exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0`. The six
+commands behind it are these, run in this order:
+
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features --no-fail-fast
+node scripts/validate-bootstrap.mjs
+node scripts/taskctl.mjs validate
+node scripts/check-non-windows.mjs
+```
+
+The harness that runs them is **`scripts/gates.ps1`**, tracked, and it runs from
+anywhere because it finds the repository root from its own path:
+
+```powershell
+pwsh -NoProfile -File scripts/gates.ps1 -Label p16t001-worker
+```
+
+It was `target\tmp\gates.ps1` until `P15-T037` — untracked, inside the
+git-ignored `/target/` — which meant no clone of this repository could reproduce
+any reading the record contains. `scripts/GATES.md` is the full text: the exit
+codes, the two test counts and which one to quote, what the runner refuses and
+what each refusal was exercised against, and what tracking it costs in
+`SHA256SUMS.txt`.
+
+**The requirement above is the one it enforces.** Before running anything, it
+starts a child `powershell.exe` on a probe `.ps1` and reads the exit code —
+because that is exactly what the six `.ps1`-spawning test targets do. When the
+child cannot load the script it says so, quotes the host's own refusal, names
+the process-scoped command that fixes it for one session, and **refuses to run
+the gates**, exiting 3: a red `test` gate caused by the shell is not a reading
+of the tree, and this repository has already paid once for that red being read
+as one. It never sets an execution policy at any scope and never writes a
+registry key.
+
 ## Native MSVC, not WSL
 
 The canonical Windows build is native:

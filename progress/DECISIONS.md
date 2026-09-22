@@ -5310,3 +5310,55 @@ rather than a silent change. `CheckOperation::Browser` still returns
 `no_runner_result`'s explicit `Error`, which is `P18-T010`'s. `ONE_EXCHANGE`
 (500 ms, 64 KiB) is the one budget the plan does not hold and is a stated judgment
 rather than a measurement, written where a reader can disagree with it.
+
+## P18-T010 — a page is read after the service answers, and a driver is held rather than made
+
+**This supersedes the last sentence of the section above.** `P18-T009`'s entry ends
+by saying `CheckOperation::Browser` *still* returns `no_runner_result`'s explicit
+`Error`; `P18-T010` is the task that replaced it, and `no_runner_result` no longer
+exists.
+
+- **A step was inserted into the one lifecycle, not written beside it.**
+  `StartSmoke::run` was `start → wait_out → ask → stop` in one indivisible body with
+  `supervisor()` and `observe()` private, so "look at a page while the service is up"
+  had two shapes. The rejected one — writing those five steps again in
+  `planned_check_runner.rs` — is a second answer to *did this service work* in a file
+  the verdict table's real-process tests do not cover, and `P18-T009` refused exactly
+  that shape. `run` is now `run_then(cancellation, |_| ()).0` and the caller's step is
+  taken inside `observe`, between the readiness answer and the stop.
+
+- **The gate is `ProbeOutcome::Answered`, not `status() == Pass`.** A readiness route
+  that answers 404 is still answered, so the page is looked at; `Refused`,
+  `Unreachable`, `NoAnswer`, `NotHttp` and the never-asked case are not. Gating on a
+  *passing* readiness check would have made the page's fate depend on the readiness
+  question's grade, which is a different question.
+
+- **The driver is held and cannot be made, and the census is what enforces it.** The
+  runner holds `Option<browser::Driver>` — an alias `browser.rs` declares — and the
+  setter is `with_page_driver`, because the file "must be able to *hold* a driver and
+  must not be able to *make* one". The one construction in the product is at
+  `sure-cli/src/check.rs`, the composition root: the layer that already assembles
+  `Paths`, the store and the pipeline, and so the layer allowed to know which
+  implementations exist. Naming it there rather than in `browser.rs` is forced, not
+  preferred — the census exempts the adapter and `lib.rs` and nothing else.
+
+- **Two censuses gave opposite instructions and the ceiling won.** `browser_probe.rs`
+  says a shipped file that names the adapter must "move that ceiling in the same
+  commit, or take the name back out"; `support.rs` and ADR 0014 say the ceiling moves
+  only on `P18-T012`'s measurements and that its default outcome is that it does not.
+  The second option was taken. `support.rs` and `browser_probe.rs` have zero diff.
+
+- **What that costs is recorded as a defect, not as a footnote.** Rule five's walk
+  starts at `crates/sure-core`, so it cannot see the composition root, and its name is
+  now false while it passes — a check that passes by not looking. Likewise
+  `nothing_in_the_product_can_drive_a_browser_today` is false as a name though every
+  assertion in it holds. Both are `P18-T012`'s, and neither was papered over by
+  renaming a file or widening a list.
+
+- **What this does not decide.** The ceiling, and anything about macOS or Linux. The
+  body of `run_browser` past the driver lookup is untested and the reason is
+  structural: holding a live driver in a test means naming it, which the census
+  forbids inside the scanned tree — including in the test module. There is still no
+  shipped planner that emits `CheckOperation::Browser`, so the door has no producer
+  and there is no end-to-end browser check; the wiring is measured with a fake and the
+  driver's verdict table separately, and the two are never presented as one run.

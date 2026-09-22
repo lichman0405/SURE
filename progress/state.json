@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P18",
-  "last_updated": "2026-09-22T03:48:38.132Z",
+  "last_updated": "2026-09-22T03:55:50.280Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3391,22 +3391,27 @@
       "finished_at": "2026-09-21T06:09:04.244Z"
     },
     "P18-T001": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-22T03:48:38.131Z",
-      "finished_at": null,
-      "base_sha": null,
-      "head_sha": null,
-      "evidence": [],
-      "notes": "new phase P18; contract record first"
+      "finished_at": "2026-09-22T03:55:50.205Z",
+      "base_sha": "47e13c0610d959ea46e0a619838a4e128f36d623",
+      "head_sha": "5098d5c",
+      "evidence": [
+        "clause 1 — a decision record states the execution contract, the invariants it holds and what it deliberately excludes — is MET. `docs/adr/0014-planned-check-execution-contract.md`, eleven numbered decisions, each naming the file and line its claim rests on at `47e13c0` (`pipeline.rs:689`, `pipeline.rs:739`, `node.rs:285`, `process/mod.rs:44`, `service.rs:78`) rather than asserting a shape from memory. The exclusions are the launch specification's own list, restated as what the record refuses: container execution, automatic dependency installation, arbitrary custom shell commands, commands read out of a README or model output, live external payment/email/OAuth/database/cloud validation, parallel runtime checks, shared multi-service topologies, containment claims for `host_confirmed`, an interactive consent UI, and promoting model evidence to deterministic evidence.",
+        "clause 2 — the record says what `host_confirmed` is and is not, and does not claim containment — is MET. Decision 9 is the whole of it: \"`host_confirmed` is consent, not containment. It means the user allowed these commands to run on this machine. It does not confine them, it does not make the project's test script safe, and no report, document or message may describe it as a sandbox.\" It names `container.rs` as the thing this record does not touch and records that it stays plan-only, so the sentence cannot be read as covering a capability the build does not have.",
+        "clause 3 — no behaviour changes: the tree is the same tree with a document beside it — is MET, and the reading is `target/tmp/gates-baseline2-utf8-console.txt`, taken over the tree carrying this task's files at `47e13c0`: `exits: fmt=0 clippy=0 test=0 bootstrap=0 taskctl=0 nonwindows=0 productevals=0`, `result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`, `counts: parent=2808`, `red: none`, `store identical: True`, `halt: exit 0 (clean)`. No file under `crates/` is in the commit at all — `git diff --stat --cached` over it listed `SHA256SUMS.txt`, `docs/adr/0014-…md`, `progress/state.json`, `tasks/README.md`, `tasks/phases.json`, `tasks/tasks.json` and nothing else. The commit is `5098d5c`; the gate was taken at its parent because the only byte it adds afterwards is `SHA256SUMS.txt`, which the manifest does not list and no test reads as a source.",
+        "One thing this task does NOT claim, recorded here because it is the kind of sentence that gets read as more than it is. **A reading of the same command in a different session is red, and the cause is not the tree.** `target/tmp/gates-baseline-before-planned-check-runner.txt` is the same gates at the same commit and reports `test=101`, `failed=17`, `red: tests\\install_flow.rs`, `red: tests\\quickstart_flow.rs`, `red: tests\\winget_manifest.rs`. The differences between the two runs are the console code page — `Process=Bypass` on both, and `[Console]::OutputEncoding=gb2312` against `utf-8` — and the file that decides it is `Run::of`, which decodes a child's stdout as UTF-8 while Windows PowerShell 5.1 writes it in the console's code page. The staging fixture puts the archive at a path holding `é` and `中文`, so the path does not survive the round trip: the archive and its checksum are on disk at exactly the path the failing test calls empty (`target/tmp/sure install flow é中文 and spaces/run-28692/launcher-3/`), which is the measurement that rules the tree out. This is a pre-existing defect in three test targets and not in the pipeline this phase builds; it is written down rather than repaired here, and the phase's own readings are taken from a UTF-8 console so that they are comparable with the readings this repository took before it."
+      ],
+      "notes": "contract fixed in ADR 0014; no behaviour change, seven gates green at 47e13c0"
     },
     "P18-T002": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-22T03:55:50.280Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "typed planned work and the operation vocabulary"
     },
     "P18-T003": {
       "status": "queued",

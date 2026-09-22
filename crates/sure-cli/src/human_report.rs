@@ -9,11 +9,6 @@
 //! - Line widths are kept reasonable for an 80-column terminal.
 //! - Attacker-controlled text is escaped before printing.
 
-#![allow(
-    dead_code,
-    reason = "this module is ready but awaits the check engine to produce a verdict"
-)]
-
 use std::io::{self, Write};
 
 use sure_core::claim_report::render_claim_section;

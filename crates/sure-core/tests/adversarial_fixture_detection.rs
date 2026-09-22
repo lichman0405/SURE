@@ -5068,9 +5068,12 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
     for (kind, run) in &runs {
         let schedule = declared_schedule(id, &block, run, kind);
         let results = declared_results(id, run, &schedule, &fingerprint, kind);
-        let report = aggregate_run(&schedule, &results, &fingerprint).unwrap_or_else(|refused| {
-            panic!("{id}: aggregating the `{kind}` run was refused rather than answered: {refused}")
-        });
+        let report =
+            aggregate_run(&schedule, &results, &[], &fingerprint).unwrap_or_else(|refused| {
+                panic!(
+                    "{id}: aggregating the `{kind}` run was refused rather than answered: {refused}"
+                )
+            });
         let planned = sorted_ids(
             schedule
                 .checks()
@@ -5305,7 +5308,7 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         ExecutionPermissions::inspect_only(),
     )
     .build();
-    let nothing = aggregate_run(&empty, &[], &fingerprint).expect("an empty plan aggregates");
+    let nothing = aggregate_run(&empty, &[], &[], &fingerprint).expect("an empty plan aggregates");
     assert!(
         nothing.results().is_empty() && nothing.unreported().is_empty(),
         "{id}: an empty plan produced rows, so the fixture's row assertions would not distinguish \

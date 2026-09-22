@@ -870,14 +870,14 @@ impl Pipeline<'_> {
                 }
             };
 
-        // The runner's results, and then the one kind of check it has never heard
-        // of: a declared command the project does not have was never scheduled, so
-        // it is not in the schedule the runner was handed and its own declaration
-        // is what stands in for an observation.
+        // The runner's results — and only those. The one kind of check it has
+        // never heard of is not pushed in here: a declared command the project
+        // does not have was never scheduled, so the runner was never handed it
+        // and nothing came back for it. Its own declaration stands in for an
+        // observation, and it is handed to `aggregate_run` beside these results
+        // at stage 10 rather than mixed into them, so that what this list holds
+        // stays *what the run reported*.
         let mut results: Vec<CheckResult> = run_results.results().to_vec();
-        for declaration in &planned.missing {
-            results.push(declaration.not_checked(&fingerprint));
-        }
 
         // ---- 5. Static deterministic checks ----------------------------------
         let static_checks = schedule
@@ -980,7 +980,7 @@ impl Pipeline<'_> {
         let stale = moved.as_deref().map_or_else(Vec::new, |reason| {
             invalidate_runtime_passes(reason, &schedule, &mut results)
         });
-        let report = match aggregate_run(&schedule, &results, &fingerprint) {
+        let report = match aggregate_run(&schedule, &results, &planned.missing, &fingerprint) {
             Ok(report) => report,
             Err(refusal) => {
                 return self.stopped_at(

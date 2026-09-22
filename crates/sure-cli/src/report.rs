@@ -1412,7 +1412,8 @@ mod tests {
         } else {
             Vec::new()
         };
-        let report = sure_core::aggregation::aggregate_run(&schedule, &results, &state.id).unwrap();
+        let report =
+            sure_core::aggregation::aggregate_run(&schedule, &results, &[], &state.id).unwrap();
         let capability = sure_core::capability::CapabilityReport::cli();
         let coverage = sure_core::coverage_summary::summarize(&schedule, &report, &capability);
         let intent = sure_core::intent::ProjectIntent::empty();

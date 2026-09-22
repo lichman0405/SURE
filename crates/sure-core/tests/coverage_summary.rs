@@ -137,7 +137,7 @@ fn all_checks_checked_produces_a_complete_summary() {
         .iter()
         .map(|scheduled| a_result_for(scheduled, CheckStatus::Pass, &fingerprint))
         .collect();
-    let report = aggregate_run(&schedule, &results, &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 
@@ -183,7 +183,7 @@ fn one_skipped_and_one_could_not_run_are_counted_and_listed() {
             results.push(a_result_for(scheduled, CheckStatus::Error, &fingerprint));
         }
     }
-    let report = aggregate_run(&schedule, &results, &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 
@@ -225,7 +225,7 @@ fn a_critical_skipped_check_sets_has_critical_gaps() {
         .unwrap();
     let schedule = builder.build();
     let fingerprint = fingerprint();
-    let report = aggregate_run(&schedule, &[], &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &[], &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 
@@ -241,7 +241,7 @@ fn a_critical_skipped_check_sets_has_critical_gaps() {
 fn support_level_is_reflected() {
     let schedule = an_inspecting_builder().build();
     let fingerprint = fingerprint();
-    let report = aggregate_run(&schedule, &[], &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &[], &[], &fingerprint).unwrap();
     let mut capability = capability();
     capability.tier = CapabilityTier::Protected;
     capability.pre_action_control = true;
@@ -289,7 +289,7 @@ fn ordering_is_deterministic() {
         .unwrap();
     let schedule = builder.build();
     let fingerprint = fingerprint();
-    let report = aggregate_run(&schedule, &[], &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &[], &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 
@@ -317,7 +317,7 @@ fn control_characters_in_check_titles_are_escaped() {
         .unwrap();
     let schedule = builder.build();
     let fingerprint = fingerprint();
-    let report = aggregate_run(&schedule, &[], &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &[], &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 
@@ -353,7 +353,7 @@ fn control_characters_in_error_reasons_are_escaped() {
         "parser\npanicked",
         fingerprint.clone(),
     );
-    let report = aggregate_run(&schedule, &[result], &fingerprint).unwrap();
+    let report = aggregate_run(&schedule, &[result], &[], &fingerprint).unwrap();
 
     let summary = summarize(&schedule, &report, &capability());
 

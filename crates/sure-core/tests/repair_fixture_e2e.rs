@@ -641,7 +641,7 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         });
     }
 
-    let report = aggregate_run(&schedule, &results, &state)
+    let report = aggregate_run(&schedule, &results, &[], &state)
         .unwrap_or_else(|refusal| panic!("the run was refused: {refusal:?}"));
     let verdict = build_verdict(
         state.clone(),

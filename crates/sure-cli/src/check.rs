@@ -1493,12 +1493,86 @@ mod tests {
         let not_checked = machine["report"]["not_checked"]
             .as_array()
             .expect("the verdict lists what was not checked");
-        assert_eq!(
-            not_checked.len(),
-            refused.len(),
-            "the verdict does not list every check the mode refused: {machine}"
+        let listed: Vec<&str> = not_checked
+            .iter()
+            .map(|entry| entry["id"].as_str().expect("every entry names its check"))
+            .collect();
+        for result in &refused {
+            assert!(
+                listed.contains(&result.id.as_str()),
+                "the verdict does not list the check the mode refused: {machine}"
+            );
+        }
+
+        // The run also holds a row for every role SURE proposes that this
+        // project never declared, and `P18-T011` is why they are in the account
+        // rather than only in the report's own list: those rows were built by
+        // `MissingCommand::not_checked` and then dropped into
+        // `RunReport::unscheduled`, a field no renderer reads, so a run over
+        // this fixture was made of four rows and told a reader about two. The
+        // report is where that silence would have been read as an absence of a
+        // problem, so the row's existence is asserted here and not only in
+        // `crates/sure-core/tests/declared_commands.rs`, which is where the
+        // critical kind and the aggregate are.
+        let undeclared: Vec<&sure_core::status::CheckResult> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| {
+                result.not_checked_reason
+                    == Some(sure_core::status::NotCheckedReason::NotApplicable)
+            })
+            .collect();
+        assert!(
+            !undeclared.is_empty(),
+            "the run holds no row for a role this project never declared, so its account of what \
+             it did not run is the mode's refusals alone: {:?}",
+            run.report.results()
         );
+
+        // And the rendered list is exactly the run's own rows that did not run —
+        // no more and no fewer, each carrying its own row's sentence. This pins
+        // the renderer rather than the run: a build that filtered a row out of
+        // the machine report, or printed a sentence the row does not carry,
+        // fails here.
+        let mut expected: Vec<&str> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| result.is_not_checked())
+            .map(|result| result.id.as_str())
+            .collect();
+        expected.sort_unstable();
+        let mut found = listed.clone();
+        found.sort_unstable();
+        assert_eq!(
+            found, expected,
+            "the verdict's list of checks that did not run is not the run's own rows for them: \
+             {machine}"
+        );
+
+        // Each entry says why, and says what the run's own row says about it —
+        // the refusal sentence for the checks the mode stopped, and the
+        // vocabulary's own sentence for a role the project never declared.
         for entry in not_checked {
+            let id = entry["id"].as_str().expect("every entry names its check");
+            let row = run
+                .report
+                .results()
+                .iter()
+                .find(|result| result.id.as_str() == id)
+                .expect("the list is a subset of the run's own rows");
+            assert_eq!(
+                entry["reason"],
+                json!(row.reason),
+                "a check that did not run does not carry its own sentence: {entry}"
+            );
+        }
+        for result in &refused {
+            let entry = not_checked
+                .iter()
+                .find(|entry| entry["id"].as_str() == Some(result.id.as_str()))
+                .expect("the refused check is in the list");
             assert!(
                 entry["reason"]
                     .as_str()

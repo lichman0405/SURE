@@ -65,6 +65,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sure_core::aggregation::{CriticalCheck, RunRefused, aggregate_run};
+use sure_core::checks::{MissingCommand, MissingKind};
 use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::scan::{ScanOptions, scan};
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder, ScheduledCheck};
@@ -306,6 +307,22 @@ fn a_result_for(
     )
 }
 
+/// A declaration for `id`, of `kind`, as the discovery would hand one over.
+///
+/// Built with the id a test names rather than one derived from a role, because
+/// the subject of these tests is what `aggregate_run` does with a declaration
+/// and not what the discovery decides one is.
+fn a_declaration_for(id: CheckId, kind: MissingKind) -> MissingCommand {
+    MissingCommand::new(
+        id,
+        "run the tests",
+        "package.json",
+        Severity::MustFix,
+        true,
+        kind,
+    )
+}
+
 /// The same, for a check no plan proposed.
 fn a_result_named(
     id: CheckId,
@@ -416,7 +433,7 @@ fn a_run_whose_critical_checks_all_pass_is_green() {
         .map(|scheduled| a_result_for(scheduled, CheckStatus::Pass, &fingerprint))
         .collect();
 
-    let report = aggregate_run(&schedule, &results, &fingerprint)
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint)
         .expect("one result per scheduled check is aggregable");
 
     assert_eq!(
@@ -470,7 +487,7 @@ fn the_three_states_the_acceptance_names_are_answered_separately() {
         // `c` is stopped by the plan, so it has a result without anyone
         // reporting one.
     ];
-    let report = aggregate_run(&schedule, &results, &fingerprint)
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint)
         .expect("nothing here is contradictory, so this aggregates");
 
     assert!(!report.is_green());
@@ -588,7 +605,7 @@ fn the_rows_come_back_in_the_plans_own_order() {
         .filter(|scheduled| scheduled.may_run())
         .map(|scheduled| a_result_for(scheduled, CheckStatus::Pass, &fingerprint))
         .collect();
-    let report = aggregate_run(&schedule, &results, &fingerprint).expect("aggregable");
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint).expect("aggregable");
 
     let planned: Vec<CheckId> = schedule
         .checks()
@@ -627,7 +644,7 @@ fn every_way_a_critical_check_can_fail_to_pass_stops_the_run_being_green() {
 
     for &status in CheckStatus::ALL {
         let result = a_result_for(scheduled, status, &fingerprint);
-        let report = aggregate_run(&schedule, std::slice::from_ref(&result), &fingerprint)
+        let report = aggregate_run(&schedule, std::slice::from_ref(&result), &[], &fingerprint)
             .expect("one result for the one scheduled check is aggregable");
 
         assert_eq!(
@@ -706,7 +723,7 @@ fn the_plan_stops_a_result_that_claims_a_check_ran() {
         ));
     }
 
-    let report = aggregate_run(&schedule, &results, &fingerprint)
+    let report = aggregate_run(&schedule, &results, &[], &fingerprint)
         .expect("one result per scheduled check is aggregable");
 
     assert_eq!(
@@ -742,7 +759,7 @@ fn a_result_for_a_check_the_plan_never_proposed_is_reported_and_changes_nothing(
         .may_run()
         .map(|scheduled| a_result_for(scheduled, CheckStatus::Pass, &fingerprint))
         .collect();
-    let quiet = aggregate_run(&schedule, &results, &fingerprint).expect("aggregable");
+    let quiet = aggregate_run(&schedule, &results, &[], &fingerprint).expect("aggregable");
 
     let stray = id("zzzzzzzzzzzzzzzzzzzz");
     for status in [CheckStatus::Pass, CheckStatus::Fail] {
@@ -756,7 +773,7 @@ fn a_result_for_a_check_the_plan_never_proposed_is_reported_and_changes_nothing(
             &fingerprint,
         ));
 
-        let report = aggregate_run(&schedule, &with_stray, &fingerprint).expect("aggregable");
+        let report = aggregate_run(&schedule, &with_stray, &[], &fingerprint).expect("aggregable");
         assert_eq!(
             report.unscheduled(),
             std::slice::from_ref(&stray),
@@ -795,6 +812,7 @@ fn a_stray_result_cannot_make_an_empty_plan_green() {
     let report = aggregate_run(
         &schedule,
         &[a_stray_result('z', &fingerprint)],
+        &[],
         &fingerprint,
     )
     .expect("a stray result is reported, not refused");
@@ -834,7 +852,7 @@ fn a_critical_check_with_no_result_cannot_be_dropped_out_of_the_verdict() {
         })
         .collect();
 
-    let full = aggregate_run(&schedule, &complete, &fingerprint).expect("aggregable");
+    let full = aggregate_run(&schedule, &complete, &[], &fingerprint).expect("aggregable");
     assert!(
         !full.is_green(),
         "one critical check failed, so the run is not green"
@@ -851,7 +869,7 @@ fn a_critical_check_with_no_result_cannot_be_dropped_out_of_the_verdict() {
         .filter(|result| result.id != failing)
         .cloned()
         .collect();
-    let dropped = aggregate_run(&schedule, &shorter, &fingerprint).expect("aggregable");
+    let dropped = aggregate_run(&schedule, &shorter, &[], &fingerprint).expect("aggregable");
 
     assert_eq!(
         dropped.unreported(),
@@ -906,9 +924,9 @@ fn every_order_of_the_same_results_gives_the_same_report() {
 
     let orderings = permutations(&results);
     assert_eq!(orderings.len(), 720, "six results have 720 orderings");
-    let first = aggregate_run(&schedule, &orderings[0], &fingerprint).expect("aggregable");
+    let first = aggregate_run(&schedule, &orderings[0], &[], &fingerprint).expect("aggregable");
     for (index, ordering) in orderings.iter().enumerate() {
-        let report = aggregate_run(&schedule, ordering, &fingerprint).expect("aggregable");
+        let report = aggregate_run(&schedule, ordering, &[], &fingerprint).expect("aggregable");
         assert_eq!(
             report, first,
             "ordering {index} produced a different report from the first one"
@@ -953,9 +971,9 @@ fn handing_back_the_plans_own_stopped_entry_is_the_ordinary_case() {
          back different from claiming the check ran"
     );
 
-    let without = aggregate_run(&schedule, &results, &fingerprint).expect("aggregable");
+    let without = aggregate_run(&schedule, &results, &[], &fingerprint).expect("aggregable");
     results.push(stopped_entry);
-    let with = aggregate_run(&schedule, &results, &fingerprint).expect("aggregable");
+    let with = aggregate_run(&schedule, &results, &[], &fingerprint).expect("aggregable");
 
     assert!(
         with.overruled().is_empty(),
@@ -980,7 +998,7 @@ fn two_answers_for_one_check_are_refused_rather_than_chosen() {
         a_result_for(scheduled, CheckStatus::Fail, &fingerprint),
     ];
 
-    let refused = aggregate_run(&schedule, &results, &fingerprint)
+    let refused = aggregate_run(&schedule, &results, &[], &fingerprint)
         .expect_err("two answers to one check cannot be aggregated");
     assert_eq!(
         refused,
@@ -990,6 +1008,99 @@ fn two_answers_for_one_check_are_refused_rather_than_chosen() {
         refused.to_string().contains(&the_id('c').to_string()),
         "the refusal names the check: {refused}"
     );
+}
+
+#[test]
+fn a_declaration_for_a_scheduled_check_is_refused_rather_than_taken_as_an_answer() {
+    // Rule five, over the other list `P18-T011` added. `missing` is a caller's
+    // answer to the same question `results` answers, so a check that was both
+    // proposed and declared missing has two answers and no rule for choosing
+    // between them. The run would otherwise hold two rows for one id — one the
+    // plan's, one a declaration's — which is the invariant this refusal keeps.
+    let schedule = a_one_check_plan();
+    let fingerprint = FingerprintId::generate();
+
+    let refused = aggregate_run(
+        &schedule,
+        &[],
+        &[a_declaration_for(the_id('c'), MissingKind::NotACommand)],
+        &fingerprint,
+    )
+    .expect_err("a check the plan proposed cannot also be declared missing");
+    assert_eq!(
+        refused,
+        RunRefused::TwoAnswersForOneCheck { id: the_id('c') }
+    );
+}
+
+#[test]
+fn two_declarations_for_one_check_are_refused_rather_than_chosen() {
+    // The same rule one list further in: two declarations are two answers, and
+    // deduplicating them would be this layer choosing which of the project's own
+    // declarations to believe.
+    let schedule = a_one_check_plan();
+    let fingerprint = FingerprintId::generate();
+
+    let refused = aggregate_run(
+        &schedule,
+        &[],
+        &[
+            a_declaration_for(the_id('d'), MissingKind::NotACommand),
+            a_declaration_for(the_id('d'), MissingKind::NotDeclared),
+        ],
+        &fingerprint,
+    )
+    .expect_err("two declarations for one check cannot be aggregated");
+    assert_eq!(
+        refused,
+        RunRefused::TwoAnswersForOneCheck { id: the_id('d') }
+    );
+}
+
+#[test]
+fn a_declaration_is_a_row_and_the_scope_limit_split_is_the_kinds() {
+    // `P18-T011`'s own property, at the level below the pipeline test: a declared
+    // check is a row of the report even though no plan entry was built for it,
+    // and whether it holds the run out of green is the *kind*'s answer rather
+    // than a blanket rule about declarations. A build that dropped the row again
+    // reports itself greener than the declarations it was handed.
+    let schedule = a_one_check_plan();
+    let fingerprint = FingerprintId::generate();
+
+    for (kind, blocks) in [
+        (MissingKind::NotACommand, true),
+        (MissingKind::NotDeclared, false),
+    ] {
+        let report = aggregate_run(
+            &schedule,
+            &[],
+            &[a_declaration_for(the_id('d'), kind.clone())],
+            &fingerprint,
+        )
+        .expect("a declaration beside an empty run aggregates");
+
+        let row = report
+            .results()
+            .iter()
+            .find(|result| result.id == the_id('d'))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the declaration is not a row of the report: {:?}",
+                    report.results()
+                )
+            });
+        assert_eq!(row.reason, kind.plain_explanation(), "{kind:?}");
+        assert_eq!(row.blocks_green(), blocks, "{kind:?}");
+        assert_eq!(
+            report
+                .aggregate()
+                .coverage
+                .critical_not_checked
+                .contains(&the_id('d')),
+            blocks,
+            "the aggregate's coverage disagrees with the row about {kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -1006,7 +1117,7 @@ fn a_result_from_another_project_state_is_refused() {
     let scheduled = entry(&schedule, &the_id('c'));
     let results = vec![a_result_for(scheduled, CheckStatus::Pass, &elsewhere)];
 
-    let refused = aggregate_run(&schedule, &results, &fingerprint)
+    let refused = aggregate_run(&schedule, &results, &[], &fingerprint)
         .expect_err("a result about another state cannot be aggregated into this one");
     assert_eq!(
         refused,

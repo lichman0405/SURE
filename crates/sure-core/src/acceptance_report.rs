@@ -1833,7 +1833,7 @@ fn checker_failure(fixtures_root: &Path, id: &str) -> Result<Measurement, Corpus
         };
         let schedule = declared_schedule(id, block, declared_checks, run, kind)?;
         let results = declared_results(id, run, &schedule, &fingerprint, kind)?;
-        let report = aggregate_run(&schedule, &results, &fingerprint).map_err(|refused| {
+        let report = aggregate_run(&schedule, &results, &[], &fingerprint).map_err(|refused| {
             CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
                 message: format!("the `{kind}` run cannot be aggregated honestly: {refused}"),

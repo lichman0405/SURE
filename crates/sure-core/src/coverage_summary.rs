@@ -4,8 +4,23 @@
 //! could not run, so that a gap is never mistaken for a clean result. This
 //! module builds that sentence from a [`CheckSchedule`] and the [`RunReport`] it
 //! produced.
+//!
+//! # The plan's checks, and the checks no plan entry could hold
+//!
+//! The schedule decides the order the summary walks and it is not the whole of
+//! what a run is made of. A project can declare a check SURE cannot run —
+//! `"test": ["jest"]` is a name with a value no runner accepts — and no plan
+//! entry is built for it, so its id is in the report and in no schedule. Those
+//! rows are counted here too.
+//!
+//! **Counting only the schedule would print the false green this module's own
+//! sentence exists against.** The verdict would hold the check as not checked
+//! while this summary — the sentence a person reads first, and the only one that
+//! says how much of the project was looked at — answered
+//! *"SURE checked all 5 checks."* A total is a claim about the run, and a run
+//! whose report holds a row no count accounts for has not been totalled.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sure_domain::capability::CapabilityReport;
 use sure_domain::ids::CheckId;
@@ -63,10 +78,7 @@ pub fn summarize(
         .map(|result| (&result.id, result))
         .collect();
 
-    let mut checked_count = 0_usize;
-    let mut skipped_count = 0_usize;
-    let mut could_not_run_count = 0_usize;
-    let mut with_severity: Vec<(NotCheckedEntry, Severity)> = Vec::new();
+    let mut tally = Tally::default();
 
     for scheduled in schedule.checks() {
         let id = scheduled.proposal().id();
@@ -75,27 +87,32 @@ pub fn summarize(
             None => continue,
         };
 
-        if result.status.produced_a_result() {
-            checked_count += 1;
+        tally.count(id.to_string(), &result);
+    }
+
+    // And the rows the schedule does not hold, which the join above cannot see
+    // because their ids were never proposed. The same rule is applied to them:
+    // a row that produced a result is a check, and a row that did not is a gap
+    // with a reason and a severity. The order they are counted in is the
+    // report's, which is a function of the ids and not of any caller's loop.
+    let proposed: BTreeSet<&CheckId> = schedule
+        .checks()
+        .iter()
+        .map(|scheduled| scheduled.proposal().id())
+        .collect();
+    for result in report.results() {
+        if proposed.contains(&result.id) {
             continue;
         }
-
-        let (category, reason) = categorize(&result);
-        match category {
-            Category::Skipped => skipped_count += 1,
-            Category::CouldNotRun => could_not_run_count += 1,
-        }
-
-        with_severity.push((
-            NotCheckedEntry {
-                check_id: id.to_string(),
-                check_title: escape_control_characters(&result.title),
-                reason,
-                is_critical: result.critical,
-            },
-            result.severity,
-        ));
+        tally.count(result.id.to_string(), result);
     }
+
+    let Tally {
+        checked_count,
+        skipped_count,
+        could_not_run_count,
+        mut with_severity,
+    } = tally;
 
     with_severity.sort_by(
         |(left_entry, left_severity), (right_entry, right_severity)| {
@@ -122,6 +139,47 @@ pub fn summarize(
     }
 }
 
+/// The counts and entries a summary is built from, as they are accumulated.
+///
+/// One type rather than four local counters threaded through two walks, because
+/// the two walks are the same rule applied to two halves of one set: a row that
+/// produced a result is a check, and every other row is a gap. Two copies of
+/// that rule would be two places for a row to be counted differently depending
+/// on which half it arrived in.
+#[derive(Default)]
+struct Tally {
+    checked_count: usize,
+    skipped_count: usize,
+    could_not_run_count: usize,
+    with_severity: Vec<(NotCheckedEntry, Severity)>,
+}
+
+impl Tally {
+    /// Count one row of the report.
+    fn count(&mut self, check_id: String, result: &CheckResult) {
+        if result.status.produced_a_result() {
+            self.checked_count += 1;
+            return;
+        }
+
+        let (category, reason) = categorize(result);
+        match category {
+            Category::Skipped => self.skipped_count += 1,
+            Category::CouldNotRun => self.could_not_run_count += 1,
+        }
+
+        self.with_severity.push((
+            NotCheckedEntry {
+                check_id,
+                check_title: escape_control_characters(&result.title),
+                reason,
+                is_critical: result.critical,
+            },
+            result.severity,
+        ));
+    }
+}
+
 /// Which bucket a not-checked check belongs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Category {
@@ -131,13 +189,29 @@ enum Category {
 
 /// Decide whether a not-checked result is a skip or a could-not-run, and phrase
 /// the reason in plain language.
+///
+/// **The result's own sentence comes first and the vocabulary's is the
+/// fallback**, which is the order the other two arms below already use.
+/// `CheckResult::not_run` writes the vocabulary's sentence for the reason it was
+/// given, so for a check the plan stopped the two agree and nothing moved here.
+/// They do not agree where the module that built the row knew something the word
+/// does not: `MissingCommand::not_checked` replaces the line with SURE's own
+/// sentence — *"what your project declares for this is not a command SURE can
+/// run"* — **precisely so that a report does not answer a broken manifest with
+/// "SURE does not know why this was not checked"**, which is the false sentence
+/// the generic word would produce. Reading the reason first is what carries that
+/// decision to the line a person reads.
 fn categorize(result: &CheckResult) -> (Category, String) {
     match result.status {
         CheckStatus::Skipped => {
-            let reason = result.not_checked_reason.map_or_else(
-                || "SURE does not know why this check was skipped.".to_owned(),
-                |reason| reason.plain_explanation().to_owned(),
-            );
+            let reason = if result.reason.trim().is_empty() {
+                result.not_checked_reason.map_or_else(
+                    || "SURE does not know why this check was skipped.".to_owned(),
+                    |reason| reason.plain_explanation().to_owned(),
+                )
+            } else {
+                escape_control_characters(&result.reason)
+            };
             (Category::Skipped, reason)
         }
         CheckStatus::Error => {

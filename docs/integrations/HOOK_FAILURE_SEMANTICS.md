@@ -102,7 +102,7 @@ Those inputs in `--format json` put a machine-readable failure frame on
 **stdout** instead and leave stderr empty:
 
 ```json
-{"command":"hook","details":{"detail":"The harness did not provide an event.","what":"No event was read from standard input."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"hook","details":{"detail":"The harness did not provide an event.","what":"No event was read from standard input."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 There is no `decision` key in that frame, in either shape — and the last row of

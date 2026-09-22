@@ -246,7 +246,7 @@ The machine form carries the numbers and which side moves, and not the sentence:
 a script that read prose would break the first time the prose was improved.
 
 ```json
-{"command":"protocol","details":{"agreed":false,"caller_speaks":2,"sure_speaks":1,"update":"sure"},"exit_code":3,"outcome":"unavailable","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"protocol","details":{"agreed":false,"caller_speaks":2,"sure_speaks":1,"update":"sure"},"exit_code":3,"outcome":"unavailable","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 ## `sure mcp serve`
@@ -769,19 +769,19 @@ is the only place that decides.
 A complaint:
 
 ```json
-{"command":"history","does":"…","exit_code":3,"instead":"…","outcome":"unavailable","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"history","does":"…","exit_code":3,"instead":"…","outcome":"unavailable","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 A report:
 
 ```json
-{"command":"doctor","details":{"build":{…},"not_checked":[…],"places":{…},"problems":[…],"store":{…},"tools":[…]}},"exit_code":0,"outcome":"ok","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"doctor","details":{"build":{…},"not_checked":[…],"places":{…},"problems":[…],"store":{…},"tools":[…]}},"exit_code":0,"outcome":"ok","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 A run that did not finish is a complaint too, and keeps the envelope:
 
 ```json
-{"command":"check","details":{"detail":"…","what":"Nothing was recorded, and nothing was checked."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"check","details":{"detail":"…","what":"Nothing was recorded, and nothing was checked."},"exit_code":5,"outcome":"failed","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 A check that finished puts the whole run under `details`, including one entry per
@@ -790,7 +790,7 @@ stage in the order `CHECK_PIPELINE.md` lists them, each with its outcome
 the vocabulary's own reason plus the sentence a person reads:
 
 ```json
-{"command":"check","details":{"checked_count":0,"green":false,"has_critical_gaps":true,"mode":"inspect_only","not_checked_count":18,"project":"…","purpose":"check","recorded_goal":null,"report":{…},"stages":[{"detail":"…","number":1,"outcome":"ran","reason":null,"stage":"discover","title":"Find the project's parts"},…,{"detail":"…","number":6,"outcome":"not_run","reason":"execution_not_authorized","reason_explained":"Checking this would have meant running your project's code, and you have not allowed that.","stage":"dynamic-checks","title":"Run the project's own checks"},…],"state":"finished","stopped_at":null,"support":{"letter":"C","level":"inspect_only","reason":"…"}},"exit_code":1,"outcome":"not_green","protocol_version":1,"sure_version":"0.1.0"}
+{"command":"check","details":{"checked_count":0,"green":false,"has_critical_gaps":true,"mode":"inspect_only","not_checked_count":18,"project":"…","purpose":"check","recorded_goal":null,"report":{…},"stages":[{"detail":"…","number":1,"outcome":"ran","reason":null,"stage":"discover","title":"Find the project's parts"},…,{"detail":"…","number":6,"outcome":"not_run","reason":"execution_not_authorized","reason_explained":"Checking this would have meant running your project's code, and you have not allowed that.","stage":"dynamic-checks","title":"Run the project's own checks"},…],"state":"finished","stopped_at":null,"support":{"letter":"C","level":"inspect_only","reason":"…"}},"exit_code":1,"outcome":"not_green","protocol_version":1,"sure_version":"0.1.2"}
 ```
 
 Five fields are always present: `sure_version` and `protocol_version`, so that a

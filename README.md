@@ -44,7 +44,7 @@ cargo test -p sure-core --test acceptance_report_runner
 & .\scripts\Build-Release.ps1 -Phase All
 
 # 3. Install for your user account. No administrator, no PATH change.
-& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.2-x86_64-pc-windows-msvc.zip
 
 # 4. Check that it works.
 & "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
@@ -86,7 +86,7 @@ Check a project. The path must be absolute:
 ### What a run looks like
 
 This is a real `sure check` run against a small project holding a
-`package.json` and one JavaScript file — the output of SURE 0.1.0, cut to its
+`package.json` and one JavaScript file — the output of SURE 0.1.2, cut to its
 own headings. The project's path was replaced with `C:\demo\hello`, and a line
 holding `...` is where text was left out:
 

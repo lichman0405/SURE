@@ -87,12 +87,12 @@ That leaves two files in `target\tmp\release\` — the archive and the checksum
 the installer will require beside it:
 
 ```text
-sure-0.1.0-x86_64-pc-windows-msvc.zip
-sure-0.1.0-x86_64-pc-windows-msvc.zip.sha256
+sure-0.1.2-x86_64-pc-windows-msvc.zip
+sure-0.1.2-x86_64-pc-windows-msvc.zip.sha256
 ```
 
 The name is `sure-<version>-x86_64-pc-windows-msvc.zip`, where `<version>` is
-what `sure version` prints — `0.1.0` in this build.
+what `sure version` prints — `0.1.2` in this build.
 `docs/development/RELEASE_PROCESS.md` is the specification for the layout: one
 top-level directory named after the archive, holding `sure.exe`, `LICENSE` and
 `RELEASE.txt`.
@@ -110,7 +110,7 @@ does that itself.
 Still in the root of the checkout, with the archive where section 2 left it:
 
 ```powershell
-& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.2-x86_64-pc-windows-msvc.zip
 ```
 
 That is the whole install. It verifies the archive against the `.sha256` before
@@ -142,7 +142,7 @@ install in section 4 — by its full path:
 ```
 
 ```text
-SURE 0.1.0
+SURE 0.1.2
 ```
 
 Exit status `0` means installed. Status `2` means it stopped, with the reason

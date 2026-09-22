@@ -35,7 +35,7 @@ cargo test -p sure-core --test acceptance_report_runner
 & .\scripts\Build-Release.ps1 -Phase All
 
 # 3. 安装到当前用户。不需要管理员，不改 PATH
-& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.0-x86_64-pc-windows-msvc.zip
+& .\scripts\Install-Sure.ps1 -Archive .\target\tmp\release\sure-0.1.2-x86_64-pc-windows-msvc.zip
 
 # 4. 验证装好了
 & "$env:LOCALAPPDATA\SURE\bin\sure.exe" version
@@ -71,7 +71,7 @@ Unix 的启动脚本默认就在这个位置找它。Rust 核心是可移植的�
 
 ### 一次运行长什么样
 
-下面是一次真实的 `sure check` 运行，被检查的项目只有一个 `package.json` 和一个 JavaScript 文件——这是 SURE 0.1.0 的输出，按小节裁剪过。项目路径替换成了 `C:\demo\hello`，标 `...` 的行是省略的地方：
+下面是一次真实的 `sure check` 运行，被检查的项目只有一个 `package.json` 和一个 JavaScript 文件——这是 SURE 0.1.2 的输出，按小节裁剪过。项目路径替换成了 `C:\demo\hello`，标 `...` 的行是省略的地方：
 
 ```text
 SURE checked C:\demo\hello.

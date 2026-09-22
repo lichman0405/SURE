@@ -636,9 +636,25 @@ impl ProgramPath {
         std::env::split_paths(&self.search).filter(|directory| !directory.as_os_str().is_empty())
     }
 
-    /// What `name` is, on this path.
+    /// What `name` is, on this path, completed the way this platform completes
+    /// a bare name.
     #[must_use]
     pub fn resolve(&self, name: &OsStr) -> Resolution {
+        self.resolve_with(name, completions())
+    }
+
+    /// [`Self::resolve`] against a table of completions handed in.
+    ///
+    /// **The table is a parameter so that the platform this build is not running
+    /// on can be tested on it.** The defect this split was made for is the one
+    /// `completions` records: a table that was wrong on macOS and Linux and
+    /// right on Windows, where every test that would have read the wrong half
+    /// was `#[cfg(windows)]` — so the bug sat in precisely the place no test on
+    /// this machine could reach, and the fix for it would have been just as
+    /// unreachable as the bug. An argument turns "wrong on the other platform"
+    /// from a fact about the build machine into a case, and a case can fail
+    /// here.
+    fn resolve_with(&self, name: &OsStr, completions: &[(&str, Completion)]) -> Resolution {
         let named = Path::new(name);
         let spelled_out = named.extension().is_some();
         for directory in self.directories() {
@@ -652,11 +668,21 @@ impl ProgramPath {
                 }
                 continue;
             }
-            for (extension, kind) in completions() {
-                let candidate = directory.join(format!(
-                    "{}.{extension}",
-                    named.as_os_str().to_string_lossy()
-                ));
+            for (extension, kind) in completions {
+                let candidate = if extension.is_empty() {
+                    // The platform completes a bare name with nothing, so the
+                    // candidate is the name itself. This is a branch rather
+                    // than a `format!` so that the joined spelling is never
+                    // produced at all: `{name}.` is a different file name from
+                    // `{name}`, and looking for it would report a program that
+                    // is installed as one that is not.
+                    directory.join(named)
+                } else {
+                    directory.join(format!(
+                        "{}.{extension}",
+                        named.as_os_str().to_string_lossy()
+                    ))
+                };
                 if candidate.is_file() {
                     return match kind {
                         Completion::Executable => Resolution::Executable(candidate),
@@ -696,10 +722,26 @@ const fn completions() -> &'static [(&'static str, Completion)] {
     ]
 }
 
-/// On a platform without `PATHEXT` there is one completion and it is none.
+/// On a platform without `PATHEXT` there is one completion and it is the name.
+///
+/// The empty suffix is the completion, not a wildcard: `execvp` starts the file
+/// whose name is the one it was handed, so `cargo` on `PATH` is a file called
+/// `cargo`. **An empty list here was wrong, and wrong in the direction this
+/// repository treats as serious.** It meant a bare name could only ever answer
+/// [`Resolution::Absent`] on macOS and Linux — every installed program reported
+/// as one that is not there, on the two platforms this build is required to stay
+/// portable to, and only on those, because the Windows list below is not empty.
+/// Nothing caught it while P18-T002 stood: the table of completions had no test
+/// of its own off Windows, and the tests that would have read it were
+/// `#[cfg(windows)]` because the *interesting* cases are Windows cases. The
+/// predicate was right on the machine it was written on and false on the two it
+/// was written for, which is the shape this repository keeps finding.
+#[cfg(any(not(windows), test))]
+const WITHOUT_PATHEXT: &[(&str, Completion)] = &[("", Completion::Executable)];
+
 #[cfg(not(windows))]
 const fn completions() -> &'static [(&'static str, Completion)] {
-    &[]
+    WITHOUT_PATHEXT
 }
 
 /// What a file that was found is.
@@ -880,6 +922,42 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn a_platform_that_completes_a_bare_name_with_nothing_finds_the_name_itself() {
+        // The macOS and Linux table, handed to `resolve_with` on Windows. That
+        // is the whole reason `resolve_with` takes a table: the defect this
+        // guards was a table that was wrong on the two platforms whose tests
+        // could not run there, so a test that only ran on those two would have
+        // been the same defect one layer up.
+        let directory = a_directory_holding("no completion", &["npm"]);
+        let search = ProgramPath::from_search_path(directory.clone().into_os_string());
+        assert_eq!(
+            search.resolve_with(OsStr::new("npm"), WITHOUT_PATHEXT),
+            Resolution::Executable(directory.join("npm")),
+            "a program that is on PATH must not be reported as absent just \
+             because this platform completes a bare name with nothing"
+        );
+    }
+
+    // There is deliberately no test here for the other half of the empty
+    // completion — that a joined suffix would build the candidate `npm.` rather
+    // than `npm` — and the reason it is absent is worth more than the test was.
+    // **The fixture cannot be built on Windows.** A file created as `npm.` is
+    // stored as `npm`: the Win32 layer strips trailing dots and spaces, so on
+    // this machine `directory.join("npm.")` and `directory.join("npm")` name one
+    // file, and a directory holding the first is a directory holding the second.
+    // Measured rather than assumed: the test that asserted otherwise found
+    // `…\trailing dot-6\npm` `Executable` on the first run.
+    //
+    // So the two implementations are indistinguishable here for *any* fixture,
+    // and the distinction exists only on the platform where `npm.` is its own
+    // file. What catches a joined suffix there is the test above this comment:
+    // on a platform that completes a bare name with nothing, the join produces
+    // `npm.`, the branch produces `npm`, and only one of those is the file the
+    // fixture put on the path. **The collision the empty suffix guards against
+    // is therefore reachable, and reachable nowhere the tests run** — which is
+    // the same sentence as the defect it repairs, one layer along.
 
     #[cfg(windows)]
     #[test]

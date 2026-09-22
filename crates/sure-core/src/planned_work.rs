@@ -79,12 +79,14 @@
 //! first one is a permission question asked about something the project chose.
 
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sure_domain::ids::FingerprintId;
 use sure_domain::status::CheckResult;
 
+use crate::probe::{Endpoint, EndpointError};
 use crate::process::{Environment, Limits};
 use crate::schedule::CheckProposal;
 
@@ -425,6 +427,20 @@ impl ServiceCheckSpec {
 /// carried one would be a variant that could carry `example.com`, and the
 /// repository's "no silent external network validation" rule would then rest on
 /// every caller rather than on this type.
+///
+/// **The path is not a `String` either, and that is the same invariant one layer
+/// along.** A URL is authority-then-path, and the authority ends at the first
+/// `/`. So a path that does *not* begin with one does not extend the path — it
+/// extends the **host**: `Answers { port: 8080, path: "@evil.example/" }` reads,
+/// to every URL parser there is, as the host `evil.example`, and a check whose
+/// whole reason for existing is that it never leaves this machine would have
+/// left it. Holding a [`probe::Endpoint`] instead makes that unrepresentable
+/// rather than unreviewed: the field is private, both of its constructors
+/// validate, and neither will produce one whose path omits the `/`. **This is
+/// deliberately the same type the local probe uses and not a second copy of its
+/// rule**, because two copies of a refusal rule are two rules the day one of
+/// them is changed — the reason [`crate::browser::Target`] gives for wrapping
+/// it, which is now this module's reason too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Readiness {
     /// Nothing is asked of it beyond staying up for the window.
@@ -433,25 +449,35 @@ pub enum Readiness {
     /// readiness: a service that stayed up and answered nothing is not a service
     /// SURE has confirmed anything about, and the result says exactly that.
     StaysUp,
-    /// It answers on this loopback port.
+    /// It answers at this endpoint, which is on loopback by construction.
     Answers {
-        /// The port.
-        port: u16,
-        /// The path asked for, beginning with `/`.
-        path: String,
+        /// Where the question is sent.
+        endpoint: Endpoint,
     },
 }
 
 impl Readiness {
     /// The address a probe of this readiness would be sent to, if any.
     ///
-    /// `127.0.0.1` by name rather than `localhost`, because `localhost` is a
-    /// name this machine resolves and a name can be pointed elsewhere.
+    /// The string is [`Endpoint`]'s own `Display` and not an assembly here, so
+    /// the URL a report prints and the URL a request is written for are the same
+    /// value rendered once. `127.0.0.1` by number rather than `localhost`,
+    /// because `localhost` is a name this machine resolves and a name can be
+    /// pointed elsewhere.
     #[must_use]
     pub fn loopback_url(&self) -> Option<String> {
         match self {
             Self::StaysUp => None,
-            Self::Answers { port, path } => Some(format!("http://127.0.0.1:{port}{path}")),
+            Self::Answers { endpoint } => Some(endpoint.to_string()),
+        }
+    }
+
+    /// The endpoint a question would be sent to, or `None` for [`Self::StaysUp`].
+    #[must_use]
+    pub const fn endpoint(&self) -> Option<&Endpoint> {
+        match self {
+            Self::StaysUp => None,
+            Self::Answers { endpoint } => Some(endpoint),
         }
     }
 }
@@ -460,7 +486,7 @@ impl Readiness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserCheckSpec {
     service: ServiceCheckSpec,
-    path: String,
+    endpoint: Endpoint,
     expectation: String,
 }
 
@@ -470,18 +496,32 @@ impl BrowserCheckSpec {
     /// The host is not a parameter for the same reason it is not one in
     /// [`Readiness`]: the page is the supervised service's own, on loopback. It
     /// is passed to the browser as a URL because a browser takes one, and the
-    /// URL is built by [`Self::loopback_url`] rather than assembled by a caller.
-    #[must_use]
+    /// URL is [`Self::loopback_url`] — built by the same [`Endpoint`] that
+    /// refused the path, rather than assembled here.
+    ///
+    /// # Errors
+    ///
+    /// [`WorkRefusal::ServiceNamesNoPort`] when the service's readiness is
+    /// [`Readiness::StaysUp`], because a service that names no port has no page
+    /// for a browser to open and the honest answer is to refuse the check rather
+    /// than to hand back a `None` a caller would have to remember to handle.
+    /// [`WorkRefusal::Endpoint`] when `path` is not a path
+    /// [`Endpoint::loopback`] will write into a request line.
     pub fn new(
         service: ServiceCheckSpec,
         path: impl Into<String>,
         expectation: impl Into<String>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WorkRefusal> {
+        let port = match service.readiness().endpoint() {
+            Some(endpoint) => endpoint.address().port(),
+            None => return Err(WorkRefusal::ServiceNamesNoPort),
+        };
+        let endpoint = Endpoint::loopback(port, path).map_err(WorkRefusal::Endpoint)?;
+        Ok(Self {
             service,
-            path: path.into(),
+            endpoint,
             expectation: expectation.into(),
-        }
+        })
     }
 
     /// The service this check starts and stops.
@@ -493,7 +533,7 @@ impl BrowserCheckSpec {
     /// The path on it the browser opens.
     #[must_use]
     pub fn path(&self) -> &str {
-        &self.path
+        self.endpoint.path()
     }
 
     /// What the observation is for.
@@ -502,15 +542,48 @@ impl BrowserCheckSpec {
         &self.expectation
     }
 
-    /// The loopback URL the browser is sent to, or `None` if the service's own
-    /// readiness does not name a port to ask.
+    /// The loopback URL the browser is sent to.
+    ///
+    /// **Not an `Option`.** A browser check that has no URL was refused when it
+    /// was built, so a value of this type always has one, and no caller needs a
+    /// branch for a case that cannot arise.
     #[must_use]
-    pub fn loopback_url(&self) -> Option<String> {
-        match self.service.readiness() {
-            Readiness::StaysUp => None,
-            Readiness::Answers { port, .. } => {
-                Some(format!("http://127.0.0.1:{port}{}", self.path))
-            }
+    pub fn loopback_url(&self) -> String {
+        self.endpoint.to_string()
+    }
+}
+
+/// Why a planned check could not be built.
+///
+/// A refusal is not a check that failed: it is a check that was never made,
+/// and it says which. It is a value so that the reason survives to whatever
+/// reports it, instead of becoming a sentence written where it happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkRefusal {
+    /// A browser check was built on a service that never says which port to ask
+    /// on, so there is no page to open and nothing to observe.
+    ServiceNamesNoPort,
+    /// The endpoint a check would have used was refused.
+    Endpoint(EndpointError),
+}
+
+impl fmt::Display for WorkRefusal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ServiceNamesNoPort => write!(
+                formatter,
+                "the service says it stays up and never says which port to ask on, so there is no page to open"
+            ),
+            Self::Endpoint(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for WorkRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ServiceNamesNoPort => None,
+            Self::Endpoint(error) => Some(error),
         }
     }
 }
@@ -881,35 +954,195 @@ mod tests {
         assert_eq!(result.project_fingerprint, fingerprint);
     }
 
+    /// A service that answers on `port`, for the fixtures below.
+    fn a_service_answering_on(port: u16) -> ServiceCheckSpec {
+        let endpoint = Endpoint::loopback(port, "/").expect("`/` is a safe path");
+        ServiceCheckSpec::new(
+            a_spec(),
+            Readiness::Answers { endpoint },
+            Duration::from_secs(20),
+        )
+    }
+
+    /// The authority of an `http://` URL as text: everything before the first
+    /// `/` after the scheme. Written out here rather than pulled from a URL
+    /// parser so that the test states the rule it is checking — **the authority
+    /// ends at the first `/`, so a path that does not start with one is part of
+    /// the host** — instead of borrowing a library's agreement with it.
+    fn authority_of(url: &str) -> &str {
+        let after_scheme = url.strip_prefix("http://").expect("the scheme is http");
+        match after_scheme.find('/') {
+            Some(slash) => &after_scheme[..slash],
+            None => after_scheme,
+        }
+    }
+
+    /// The host an `http://` URL would actually reach: the authority with any
+    /// userinfo and the port taken off.
+    ///
+    /// This is a second step and not a pedantic one. `http://127.0.0.1:8080@evil.example/`
+    /// has the authority `127.0.0.1:8080@evil.example` — which *looks* loopback,
+    /// because the loopback address is right there at the front — and the host
+    /// `evil.example`, because everything before the `@` is userinfo. **A test
+    /// that stopped at the authority would pass on that string**, and the first
+    /// version of this helper did exactly that: the assertion failed with
+    /// `left: "127.0.0.1:8080@evil.example"`, which is the measured proof that
+    /// the authority is not the part that decides where the request goes.
+    ///
+    /// Splitting the port off the first `:` is enough here because every
+    /// [`Endpoint`] in this module is IPv4 loopback; a bracketed IPv6 host would
+    /// need more, and this module has no way to build one.
+    fn host_of(url: &str) -> &str {
+        let authority = authority_of(url);
+        let without_userinfo = match authority.rsplit_once('@') {
+            Some((_userinfo, host)) => host,
+            None => authority,
+        };
+        match without_userinfo.split_once(':') {
+            Some((host, _port)) => host,
+            None => without_userinfo,
+        }
+    }
+
     #[test]
     fn a_readiness_names_loopback_and_nothing_else() {
         let answers = Readiness::Answers {
-            port: 4321,
-            path: "/health".to_owned(),
+            endpoint: Endpoint::loopback(4321, "/health").expect("`/health` is a safe path"),
         };
         assert_eq!(
             answers.loopback_url().as_deref(),
             Some("http://127.0.0.1:4321/health")
         );
         assert_eq!(Readiness::StaysUp.loopback_url(), None);
+        assert!(Readiness::StaysUp.endpoint().is_none());
     }
 
     #[test]
     fn a_browser_check_reads_the_service_it_starts() {
-        let service = ServiceCheckSpec::new(
-            a_spec(),
-            Readiness::Answers {
-                port: 5173,
-                path: "/".to_owned(),
-            },
-            Duration::from_secs(20),
-        );
-        let check = BrowserCheckSpec::new(service, "/post/1", "the post has a title");
-        assert_eq!(
-            check.loopback_url().as_deref(),
-            Some("http://127.0.0.1:5173/post/1")
-        );
+        let check = BrowserCheckSpec::new(
+            a_service_answering_on(5173),
+            "/post/1",
+            "the post has a title",
+        )
+        .expect("a service on a port and a safe path build a check");
+        assert_eq!(check.loopback_url(), "http://127.0.0.1:5173/post/1");
+        assert_eq!(authority_of(&check.loopback_url()), "127.0.0.1:5173");
+        assert_eq!(check.path(), "/post/1");
         assert_eq!(check.expectation(), "the post has a title");
+    }
+
+    #[test]
+    fn a_path_that_would_move_the_host_is_refused_rather_than_formatted() {
+        // The defect this test exists for, as the string that produced it: what
+        // `format!("http://127.0.0.1:{port}{path}")` had for its answer once the
+        // path was a free `String`. It *looks* loopback — the address is right
+        // there at the front — and it is not: the host is `evil.example`, and
+        // the loopback address is userinfo. A check whose entire justification is
+        // that it never leaves this machine would have left it.
+        let smuggled = format!("http://127.0.0.1:{}{}", 8080, "@evil.example/");
+        assert_eq!(host_of(&smuggled), "evil.example");
+        assert_ne!(host_of(&smuggled), "127.0.0.1");
+        // And the weaker reading really would have missed it, which is why the
+        // assertion above is on the host.
+        assert_eq!(authority_of(&smuggled), "127.0.0.1:8080@evil.example");
+
+        // And the value that would have produced it cannot be built: the path
+        // is refused where it enters, by the same constructor the local probe
+        // uses, so no code downstream has a `@evil.example/` to format.
+        assert_eq!(
+            BrowserCheckSpec::new(
+                a_service_answering_on(8080),
+                "@evil.example/",
+                "the page says something"
+            ),
+            Err(WorkRefusal::Endpoint(EndpointError::UnsafePath {
+                path: "@evil.example/".to_owned()
+            }))
+        );
+    }
+
+    #[test]
+    fn every_path_a_check_can_hold_keeps_the_authority_on_loopback() {
+        // The control for the test above: a check that *is* built has a host,
+        // and it is loopback. Without this, refusing every path would pass the
+        // test above and no browser check would ever run — the shape of a fix
+        // that hides a defect by removing the feature.
+        for path in [
+            "/",
+            "/post/1",
+            "/a/b?c=d",
+            "/%2Fencoded",
+            "/~user",
+            "/@evil.example",
+        ] {
+            let check = BrowserCheckSpec::new(a_service_answering_on(3000), path, "something")
+                .unwrap_or_else(|error| panic!("{path} must build a check: {error}"));
+            assert_eq!(
+                host_of(&check.loopback_url()),
+                "127.0.0.1",
+                "{path} moved the host off loopback"
+            );
+            assert_eq!(
+                authority_of(&check.loopback_url()),
+                "127.0.0.1:3000",
+                "{path} moved the authority off loopback"
+            );
+            assert_eq!(check.path(), path);
+        }
+        // `"/@evil.example"` above is the near miss worth naming: with the
+        // leading `/` it is a path on loopback that happens to contain an `@`,
+        // and without it, it is the host. The character is the same; the `/` is
+        // the whole difference.
+    }
+
+    #[test]
+    fn the_paths_a_request_line_cannot_carry_are_the_paths_a_check_cannot_hold() {
+        // Each of these is one of `probe::path_is_safe`'s three refusals or its
+        // no-leading-slash rule, reached through this module's own door: a space
+        // splits the request line, a CRLF adds a header, a backslash is a
+        // separator on this machine and not in the request-target grammar, and
+        // no leading `/` is the host confusion above.
+        let a_crlf = "/a\r\nHost: evil.example";
+        // The request-line hazard, as the string a free-form path would have
+        // put on the wire. A request line ends at the first CRLF, so this path
+        // does not lengthen the path — **it adds a header**, chosen by whatever
+        // produced the string.
+        let would_be_request_line = format!("GET {a_crlf} HTTP/1.1");
+        assert_eq!(would_be_request_line.lines().count(), 2);
+        assert!(
+            would_be_request_line
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.starts_with("Host: evil.example")),
+            "the fixture no longer demonstrates a header being added"
+        );
+        // And that string is not on the wire, because the path never became an
+        // endpoint: it is refused at the same door as every other path here.
+        for path in ["health", "/a b", "/a\\b", a_crlf, "/\u{e9}", "", "//\r\n"] {
+            assert!(
+                matches!(
+                    BrowserCheckSpec::new(a_service_answering_on(80), path, "something"),
+                    Err(WorkRefusal::Endpoint(EndpointError::UnsafePath { .. }))
+                ),
+                "{path:?} built a browser check, and it must not"
+            );
+        }
+    }
+
+    #[test]
+    fn a_browser_check_on_a_service_that_names_no_port_is_refused_by_name() {
+        let silent = ServiceCheckSpec::new(a_spec(), Readiness::StaysUp, Duration::from_secs(5));
+        assert_eq!(
+            BrowserCheckSpec::new(silent, "/", "the page says something"),
+            Err(WorkRefusal::ServiceNamesNoPort)
+        );
+        // A refusal is a value that can be printed, not a dropped `None`.
+        assert!(
+            WorkRefusal::ServiceNamesNoPort
+                .to_string()
+                .contains("never says which port"),
+            "the refusal must say what was missing"
+        );
     }
 
     #[test]

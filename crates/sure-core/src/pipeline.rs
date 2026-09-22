@@ -56,6 +56,33 @@
 //! [`CheckOperation::Precomputed`](crate::planned_work::CheckOperation::Precomputed),
 //! and the runner reads their result out of the evidence.
 //!
+//! # The project is read twice, and the second read is the one that matters
+//!
+//! Stage 3 takes **one** fingerprint, and every result in the run names it. That
+//! is a binding on the *value* — [`CheckResult::project_fingerprint`]'s own
+//! documentation says a result that names its state exists so that it cannot be
+//! read against a later one — and it is not a statement about the world. Every
+//! result in a run carries the same fingerprint, so nothing inside the run can
+//! ever notice that the project moved; `aggregate_run`'s refusal is a
+//! within-run consistency check and would refuse a *correct* answer as readily as
+//! a wrong one. **The world is what the second read compares against**, and stage
+//! 10 takes it, immediately before the results are added up. A result from a
+//! check that ran the project's own code, taken before the project moved, is
+//! replaced by one that is not a pass and that says why.
+//!
+//! **A build's own caches are not a change, and this is measured rather than
+//! argued.** The fingerprint covers exactly what a check can read
+//! ([`crate::fingerprint`]), so `target/` ([`crate::scan`] ignores it as build
+//! output), `node_modules/` (vendored) and SURE's own `.sure/` are outside it: a
+//! run whose only writes land in those does not move the fingerprint, so it does
+//! not invalidate anything and cannot invalidate itself. The honest limit of that
+//! statement is the other half of it, and it is not papered over: a build that
+//! writes a file the walk **does** cover — a generated source file, a
+//! regenerated lockfile — has genuinely changed the project, and the run that
+//! caused it has genuinely invalidated its own evidence. That is not a false
+//! stale; it is the first failure in [`crate::fingerprint`]'s two-way list being
+//! paid for the sake of the second, which is the worse one.
+//!
 //! # What a run a user did not grant does
 //!
 //! **Nothing, and that is a reading rather than a promise.**
@@ -79,12 +106,12 @@
 
 use std::path::Path;
 
-use sure_domain::evidence::ClaimAssessment;
+use sure_domain::evidence::{ClaimAssessment, EvidenceClass, StalenessReason};
 use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
 use sure_domain::ids::{CheckId, ClaimId, FingerprintId};
 use sure_domain::intent::{IntentSource, ProjectIntent};
 use sure_domain::severity::Severity;
-use sure_domain::status::{CheckResult, NotCheckedReason};
+use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
 use sure_domain::vocabulary::{Claim, ProjectFingerprint, ProjectSupport, ProjectVerdict};
 
 use crate::aggregation::{RunReport, aggregate_run};
@@ -891,6 +918,43 @@ impl Pipeline<'_> {
         stages.push(Stage::ClaimChecking, claim_outcome);
 
         // ---- 10. Aggregate ---------------------------------------------------
+        //
+        // **The project is read a second time, here, before anything is added
+        // up.** Stage 3's fingerprint is the state every result in this run
+        // names, and a run cannot notice from the inside that it has stopped
+        // being true: every result names the same state, so `aggregate_run`'s
+        // own refusal is a check on the set's consistency and never on the
+        // world. What the run has done since stage 3 is work that takes real
+        // time — a build, a test suite — and a project edited while it ran
+        // leaves exactly the stale pass `CheckResult::project_fingerprint`
+        // exists to prevent.
+        //
+        // **This is the last read that can still change anything**, which is why
+        // the pipeline takes it here: a fingerprint computed one line above
+        // `aggregate_run` covers the whole of the run's window, and one taken
+        // beside the runtime work covers a prefix of it. It is also why there is
+        // no thirteenth stage. The second read is not a phase of checking anybody
+        // asked for — nothing is discovered, planned, run or reported by it — it
+        // is a fact about whether this run's evidence is still current, so it
+        // belongs inside the stage that has to act on the answer.
+        // `Stage::Aggregate` is that stage: the results it is about to add up are
+        // the ones this changes, and a reader who wants to know what the verdict
+        // is about reads this stage's line.
+        //
+        // The page taken from the environment is the domain's own:
+        // [`StalenessReason::SupersededByLaterChange`] is the vocabulary's word
+        // for "this was checked before later changes were made", and it is quoted
+        // rather than paraphrased. The status is `Unknown`, which is the one
+        // `CheckResult::unknown` gives *SURE has evidence that supports no
+        // verdict* — never `Warning`, which `CriticalState::from_status` maps to
+        // `Passed` and which therefore blocks nothing on the checks where it
+        // matters most.
+        let current_state =
+            project_fingerprint(self.project, &fingerprint::FingerprintOptions::default());
+        let moved = stale_evidence_reason(&state, &current_state);
+        let stale = moved.as_deref().map_or_else(Vec::new, |reason| {
+            invalidate_runtime_passes(reason, &schedule, &mut results)
+        });
         let report = match aggregate_run(&schedule, &results, &fingerprint) {
             Ok(report) => report,
             Err(refusal) => {
@@ -958,11 +1022,50 @@ impl Pipeline<'_> {
             ),
             None => String::new(),
         };
+        // What the second read did, said on the stage a reader looks at for what
+        // the verdict is about. One sentence and not a paragraph: each replaced
+        // result carries the movement in its own reason, and the coverage summary
+        // lists every one of them under "could not run" — so this line says the
+        // thing only it can say, which is that there are such results at all.
+        //
+        // **The movement is said even when nothing was replaced**, which is the
+        // second arm and not an omission. `moved` and `stale` are two different
+        // facts — the project is not where stage 3 found it, and this run withdrew
+        // these passes — and a line that reported only the second would answer the
+        // first by saying nothing at all. That case is reachable on the ordinary
+        // path rather than a corner: it is every run with nothing to withdraw,
+        // which is every run whose checks read the project without running it.
+        // [`stale_evidence_reason`] answers `Some` when it could not read the
+        // project a second time *precisely so that the movement is not silently
+        // dropped*, and dropping it here would undo that decision one line later.
+        let stale_clause = match moved.as_deref() {
+            None => String::new(),
+            Some(reason) if stale.is_empty() => format!(
+                " {reason} Nothing above is replaced, because no check that ran your project's \
+                 own code was left standing as a pass — and these results describe the state \
+                 SURE read rather than the state the project is in now."
+            ),
+            Some(_) => {
+                let titles: Vec<&str> = results
+                    .iter()
+                    .filter(|result| stale.contains(&result.id))
+                    .map(|result| result.title.as_str())
+                    .collect();
+                format!(
+                    " {} of those checks ran your project's own code and the project changed \
+                     while the run was working, so their earlier results are not current: they \
+                     are not counted above as checks that produced a result, and each one says \
+                     what moved: {}.",
+                    stale.len(),
+                    titles.join(", "),
+                )
+            }
+        };
         stages.push(
             Stage::Aggregate,
             StageOutcome::Ran {
                 detail: format!(
-                    "{} {} check(s) produced a result, {} did not run.{capability_failure}",
+                    "{} {} check(s) produced a result, {} did not run.{stale_clause}{capability_failure}",
                     verdict.aggregate.headline,
                     coverage.checked_count,
                     coverage.not_checked.len(),
@@ -1760,6 +1863,116 @@ fn describe_dynamic(
     }
 }
 
+/// Why a run's results may no longer describe the project, if they may not.
+///
+/// **The whole of clause one, read against the world rather than against the
+/// value.** [`CheckResult::project_fingerprint`] binds every result to the state
+/// that produced it and `aggregate_run` refuses a set whose members name
+/// different states — and neither of those can see the project. Every result in
+/// one run names the one state stage 3 took, so the refusal is a check on the
+/// set and never on the world, and a run whose project moved has no member of
+/// the set that disagrees. `before` is that state, `after` is the project read
+/// again, and the comparison is [`ProjectFingerprint::matches`] — `kind` and
+/// `digest`, never the `id`, which is freshly generated per computation and would
+/// differ for two reads of one unchanged project.
+///
+/// `None` is the ordinary answer: the project is where stage 3 found it, nothing
+/// is replaced, and a run that only built its own caches lands here. `Some` is
+/// the reason, written once and quoted by every result the answer replaces.
+///
+/// **A project SURE could not read again is not a project that stayed still.**
+/// The error arm answers `Some`, because the honest statement is that SURE could
+/// not tell — and of the two ways to be wrong about that, invalidating evidence
+/// SURE could not confirm is the one that costs a repeated check rather than a
+/// green about a project nobody looked at twice.
+fn stale_evidence_reason(
+    before: &ProjectFingerprint,
+    after: &Result<ProjectFingerprint, fingerprint::FingerprintError>,
+) -> Option<String> {
+    match after {
+        Ok(after) if before.matches(after) => None,
+        Ok(after) => Some(format!(
+            "{} SURE took this project's fingerprint as {} before the run's checks were carried \
+             out, and the project is now at {}.",
+            StalenessReason::SupersededByLaterChange.plain_explanation(),
+            before.digest,
+            after.digest,
+        )),
+        Err(error) => Some(format!(
+            "SURE could not take the project's fingerprint again after the run's checks were \
+             carried out, so it cannot confirm that this still describes the project: {error}"
+        )),
+    }
+}
+
+/// Replace every pass whose evidence came from running the project's own code
+/// now that the project is not the one that evidence is about.
+///
+/// Returns the checks it replaced, in plan order, so that the stage which has to
+/// say what happened and the results themselves are answering from one rule
+/// rather than from two that agree today.
+///
+/// # What is replaced, and what is deliberately not
+///
+/// **Only a `Pass`.** [`CheckResult::blocks_green`] is what the verdict turns on,
+/// and a result that already failed, warned, could not run or established nothing
+/// is not a pass that could stand as current — replacing one would cost a finding
+/// the run actually made (a failing test is the most useful thing a runtime
+/// check produces) and would buy no safety at all, because none of those statuses
+/// is green. `Pass` is the only status this rule can be about, which is why the
+/// clause it implements is phrased about an *earlier pass* and not about an
+/// earlier result.
+///
+/// **Only a check that runs the project's own code**, which is the predicate
+/// stages 5 and 6 already split the plan by and not a second one written beside
+/// them: a check that only reads files has evidence SURE can re-read, and a check
+/// that *ran* the project has evidence about an execution that no longer exists.
+/// The status is [`CheckStatus::Unknown`] with a reason — not `Warning`, which
+/// maps to `CriticalState::Passed` and so blocks nothing on a critical check, and
+/// not `Skipped`, which would read as a decision somebody made when nobody did.
+///
+/// The result keeps **its own** `project_fingerprint`. That is not an oversight
+/// and the alternative is worse in both directions: binding it to the newer state
+/// would make `aggregate_run` refuse the whole set and leave the run with no
+/// verdict at all, and binding it to the older state is simply true — the run is
+/// about the state stage 3 read, every other result in it is about that state,
+/// and this result is SURE saying it may not be carried forward to the one that
+/// is there now. Which state that is, is in the reason.
+fn invalidate_runtime_passes(
+    reason: &str,
+    schedule: &CheckSchedule,
+    results: &mut [CheckResult],
+) -> Vec<CheckId> {
+    let mut replaced: Vec<CheckId> = Vec::new();
+    for scheduled in schedule.checks() {
+        if !scheduled.proposal().requirements().runs_project_code() {
+            continue;
+        }
+        let id = scheduled.proposal().id();
+        let Some(result) = results.iter_mut().find(|result| &result.id == id) else {
+            continue;
+        };
+        if result.status != CheckStatus::Pass {
+            continue;
+        }
+        *result = CheckResult::unknown(
+            id.clone(),
+            result.title.clone(),
+            result.severity,
+            result.critical,
+            // The class a result SURE cannot stand behind carries: `unknown`'s own
+            // documentation keeps this a parameter rather than a default *because*
+            // this is the case that needs one — the check did observe something,
+            // and what it observed is not about the project in front of a reader.
+            EvidenceClass::Unknown,
+            result.project_fingerprint.clone(),
+        )
+        .with_reason(reason.to_owned());
+        replaced.push(id.clone());
+    }
+    replaced
+}
+
 fn describe_candidates(candidates: &Candidates) -> String {
     if candidates.is_empty() {
         return "no completeness candidate was found.".to_owned();
@@ -1780,7 +1993,8 @@ mod tests {
     use std::cell::RefCell;
 
     use crate::planned_check_runner::ProcessRunner;
-    use crate::process::Cancellation;
+    use crate::planned_work::CommandRun;
+    use crate::process::{Cancellation, CapturedOutput, Outcome, Termination};
 
     #[test]
     fn every_purpose_performs_a_contiguous_run_of_the_documented_stages() {
@@ -2335,5 +2549,532 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- the project, read a second time ----------------------------------
+
+    /// The identities of the checks in a run's plan that would run the project's
+    /// own code, in plan order.
+    ///
+    /// The same predicate stages 5 and 6 count with — [`CheckRequirements::runs_project_code`]
+    /// — rather than a list of titles, so this test and the pipeline agree on
+    /// what "runtime evidence" is by construction.
+    ///
+    /// [`CheckRequirements::runs_project_code`]: crate::consent::CheckRequirements::runs_project_code
+    fn runtime_check_ids(run: &RunOutcome) -> Vec<CheckId> {
+        run.schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| scheduled.proposal().requirements().runs_project_code())
+            .map(|scheduled| scheduled.proposal().id().clone())
+            .collect()
+    }
+
+    /// A run's results as `(title, status)` pairs, for a failing assertion's
+    /// message.
+    fn statuses(results: &[&CheckResult]) -> Vec<(String, CheckStatus)> {
+        results
+            .iter()
+            .map(|result| (result.title.clone(), result.status))
+            .collect()
+    }
+
+    /// The stage line a reader of this run sees for one stage.
+    fn stage_detail(outcome: &PipelineOutcome, stage: Stage) -> String {
+        outcome
+            .stages
+            .iter()
+            .find(|record| record.stage == stage)
+            .unwrap_or_else(|| panic!("a finished run has a record for every stage"))
+            .outcome
+            .detail()
+            .to_owned()
+    }
+
+    /// The third acceptance clause, **measured rather than argued**.
+    ///
+    /// The second reading in the run below would fire on every honest run if a
+    /// build moved the fingerprint, so the rule is stated for the trees a build
+    /// legitimately writes rather than pretending those trees do not exist. The
+    /// tree already carries the answer — the scan's ignore tables *are* the
+    /// fingerprint's coverage, so `target/`, `node_modules/` and SURE's own
+    /// `.sure/` are outside the walk — and this is that answer as a reading
+    /// rather than a second statement of it.
+    ///
+    /// **The last third is the control, and without it this test could not
+    /// fail.** A fingerprint that answered `matches` for every pair would
+    /// satisfy both readings above while measuring nothing, so the same fixture
+    /// then gets a file the walk *does* cover — a generated module under `src/`.
+    /// That is the honest limit of the rule and it is not papered over: a build
+    /// that writes a generated source file, or regenerates a lockfile, has
+    /// genuinely changed the project, and a run that caused that has genuinely
+    /// invalidated its own evidence.
+    #[test]
+    fn a_builds_own_caches_do_not_move_the_fingerprint() {
+        let project = a_rust_project("pipeline-caches");
+        let now = || {
+            project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+                .expect("this fixture is readable")
+        };
+
+        let before = now();
+        for (tree, file) in [
+            ("target", "debug/thing.exe"),
+            ("node_modules", "left-pad/index.js"),
+            (crate::paths::PROJECT_CACHE_DIR, "evidence/current.json"),
+        ] {
+            let path = project.join(tree).join(file);
+            std::fs::create_dir_all(path.parent().expect("a parent directory"))
+                .expect("a cache directory a build would write");
+            std::fs::write(&path, b"a build wrote this").expect("a cache file a build would write");
+        }
+        let after = now();
+        assert!(
+            before.matches(&after),
+            "a build writing its own caches moved the fingerprint, so every honest run would \
+             invalidate its own evidence: {} became {}",
+            before.digest,
+            after.digest
+        );
+
+        std::fs::write(
+            project.join("src").join("generated.rs"),
+            "pub fn generated() -> u32 {\n    7\n}\n",
+        )
+        .expect("a generated source file");
+        let moved = now();
+        assert!(
+            !after.matches(&moved),
+            "a file the walk covers did not move the fingerprint, so the reading above measures \
+             nothing: both are {}",
+            after.digest
+        );
+    }
+
+    /// A runner that answers *the command passed*, and writes a file first.
+    ///
+    /// **It starts nothing.** The seam `P18-T007` added exists so that the wired
+    /// path is measurable with a runner that records being called and starts no
+    /// process, and this test would be worth nothing without it: a real `cargo
+    /// test` would measure the machine rather than the pipeline, and the one
+    /// thing this test needs — a project that moves *while the run is working* —
+    /// can only be arranged from inside the window the project's own checks
+    /// occupy.
+    ///
+    /// The answer it returns is a real shape rather than a convenience: an
+    /// [`Outcome`] whose process exited with code 0 and whose streams SURE holds
+    /// whole is exactly what [`CommandRun::to_result`] reports as a `Pass`, and a
+    /// pass is the only thing this test is about — it is the status a stale
+    /// result must not be left standing as.
+    #[derive(Debug)]
+    struct Moves {
+        /// Written, in order, every time the runner is asked to run anything.
+        writes: Vec<std::path::PathBuf>,
+        /// Every command it was handed, so a test can show it was reached.
+        asked: RefCell<Vec<String>>,
+        /// The exit code it answers with. `Some(0)` is the pass a stale result
+        /// must not be left standing as; anything else is a finding the run made,
+        /// which the stale rule is deliberately not about.
+        exit: Option<i32>,
+    }
+
+    impl CommandRunner for Moves {
+        fn run(
+            &self,
+            work: &crate::planned_check_runner::AdmittedRun<'_>,
+        ) -> crate::planned_work::CommandRun {
+            let spec = work.command();
+            self.asked.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            for path in &self.writes {
+                std::fs::create_dir_all(path.parent().expect("a parent directory"))
+                    .expect("a directory for the write");
+                std::fs::write(path, b"written while the run was working")
+                    .expect("a write inside the run's window");
+            }
+            CommandRun::Ran(Outcome::new(
+                spec.program().to_owned(),
+                Termination::Exited { code: self.exit },
+                CapturedOutput::empty(),
+                CapturedOutput::empty(),
+                std::time::SystemTime::now(),
+                std::time::Duration::ZERO,
+            ))
+        }
+    }
+
+    /// The second acceptance clause, in both directions, over the real pipeline.
+    ///
+    /// **Two runs of the same project with the same runner, differing in one
+    /// thing: which file the runner writes while the run's checks are being
+    /// carried out.** The runner is [`Moves`], and it answers every admitted
+    /// command with a clean exit — so every runtime check comes back `Pass`,
+    /// which is what makes the second run a measurement rather than a run that
+    /// never had a pass to lose.
+    ///
+    /// - **The control** writes only where a build legitimately writes, into
+    ///   `target/` and `node_modules/`. Those same checks are still `Pass`, which
+    ///   is the other half of the clause: a rule that invalidated on any write to
+    ///   the tree would fail here, and a fingerprint that moves when the project
+    ///   did not teaches a reader to stop reading the word "stale".
+    /// - **The run whose project moved** writes a file the walk covers, and the
+    ///   checks that had passed come back `Unknown`, carrying the domain
+    ///   vocabulary's own sentence and the digest of the state the project is
+    ///   *actually* in.
+    ///
+    /// Two guard assertions keep this from being a test that cannot fail: the
+    /// runner must have been reached, and at least one runtime check must have
+    /// come back `Pass` in the control. The project's movement is measured too —
+    /// the fingerprint is taken again after the run and the run's own state is
+    /// asserted not to match it.
+    #[test]
+    fn a_project_that_moved_under_a_run_leaves_no_pass_from_running_it_standing() {
+        let project = a_rust_project("pipeline-moved");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+
+        let run_writing = |writes: Vec<std::path::PathBuf>| {
+            let runner = Moves {
+                writes,
+                asked: RefCell::new(Vec::new()),
+                exit: Some(0),
+            };
+            let outcome = Pipeline {
+                project: &project,
+                purpose: Purpose::Check,
+                config: &config,
+                execution: authority.execution(),
+                store: None,
+                goal: None,
+                runner: &runner,
+            }
+            .run();
+            let asked = runner.asked.borrow().clone();
+            (outcome, asked)
+        };
+
+        // The control: the same runner, writing only where a build writes.
+        let (control_outcome, control_asked) = run_writing(vec![
+            project.join("target").join("debug").join("thing.exe"),
+            project
+                .join("node_modules")
+                .join("left-pad")
+                .join("index.js"),
+        ]);
+        let control = control_outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the control run stopped: {:?}", control_outcome.stopped_at));
+        assert_eq!(control.mode, ExecutionMode::HostConfirmed);
+        assert!(
+            control.permissions.run_project_code,
+            "the user's own file did not move the mode, so the runs below are not the granted runs \
+             they claim to be"
+        );
+        assert!(
+            !control_asked.is_empty(),
+            "the user granted execution and the runner was never reached, so there is no pass to \
+             lose and the second run measures nothing: {:?}",
+            control.schedule.plain_description()
+        );
+        let runtime_ids = runtime_check_ids(control);
+        assert!(
+            !runtime_ids.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            control.schedule.plain_description()
+        );
+        let runtime_in_control: Vec<&CheckResult> = control
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        let passed_in_control: Vec<CheckId> = runtime_in_control
+            .iter()
+            .filter(|result| result.status == CheckStatus::Pass)
+            .map(|result| result.id.clone())
+            .collect();
+        assert!(
+            !passed_in_control.is_empty(),
+            "the runner answered every admitted command with a clean exit and no check that ran \
+             this project's code came back as a pass, so the run below has nothing to invalidate: \
+             {:?}",
+            statuses(&runtime_in_control)
+        );
+
+        // The same run, with the runner writing a file the walk covers.
+        let (moved_outcome, moved_asked) =
+            run_writing(vec![project.join("src").join("generated.rs")]);
+        let moved = moved_outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", moved_outcome.stopped_at));
+        assert!(
+            !moved_asked.is_empty(),
+            "the runner was never reached in the run whose project moved, so nothing was \
+             invalidated because nothing was ever observed"
+        );
+        let now = project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+            .expect("this fixture is readable");
+        assert!(
+            !moved.project_state.matches(&now),
+            "the fixture did not move, so this run is not the run it claims to be: {} and {}",
+            moved.project_state.digest,
+            now.digest
+        );
+
+        let runtime_in_moved: Vec<&CheckResult> = moved
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        assert_eq!(
+            runtime_in_moved.len(),
+            runtime_ids.len(),
+            "the run reports {} of the {} checks in its plan that would run the project's code",
+            runtime_in_moved.len(),
+            runtime_ids.len()
+        );
+        assert!(
+            runtime_in_moved
+                .iter()
+                .all(|result| result.status != CheckStatus::Pass),
+            "the project moved while these ran and the run still stands one of them up as current: \
+             {:?}",
+            statuses(&runtime_in_moved)
+        );
+        for result in runtime_in_moved
+            .iter()
+            .filter(|result| passed_in_control.contains(&result.id))
+        {
+            assert_eq!(
+                result.status,
+                CheckStatus::Unknown,
+                "{} passed, the project moved while it was working, and the run reports it as \
+                 `{:?}` rather than as evidence that supports no verdict: {}",
+                result.title,
+                result.status,
+                result.reason
+            );
+            assert!(
+                result
+                    .reason
+                    .contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+                "{} does not say why in the vocabulary's own words: {}",
+                result.title,
+                result.reason
+            );
+            assert!(
+                result.reason.contains(&now.digest),
+                "{} does not name the state the project is actually in, so a reader cannot tell \
+                 what its result is stale against: {}",
+                result.title,
+                result.reason
+            );
+            assert!(
+                result.blocks_green() || !result.critical,
+                "{} is critical and its pass is no longer current, but the run still counts it as \
+                 passing: {:?}",
+                result.title,
+                result.status
+            );
+        }
+
+        // The line a reader of the report looks at for what the verdict is
+        // about, and the coverage entry that carries the same fact.
+        let aggregate_line = stage_detail(&moved_outcome, Stage::Aggregate);
+        assert!(
+            aggregate_line.contains("the project changed while the run was working"),
+            "the aggregate stage does not say the project moved: {aggregate_line}"
+        );
+        for id in &passed_in_control {
+            let title = moved
+                .report
+                .results()
+                .iter()
+                .find(|result| &result.id == id)
+                .map(|result| result.title.as_str())
+                .expect("a result that was in the control run is in this one");
+            assert!(
+                aggregate_line.contains(title),
+                "the aggregate stage does not name {title} among the results it is not counting: \
+                 {aggregate_line}"
+            );
+            let entry = moved
+                .coverage
+                .not_checked
+                .iter()
+                .find(|entry| entry.check_id == id.to_string())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{title} is not in the coverage summary's not-checked list: {:?}",
+                        moved.coverage.not_checked
+                    )
+                });
+            assert!(
+                entry
+                    .reason
+                    .contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+                "{title} is listed as not checked with a reason that does not say why: {}",
+                entry.reason
+            );
+        }
+
+        // The control's own report says nothing of the sort, which is the
+        // direction that would otherwise be this rule's false positive.
+        assert!(
+            !stage_detail(&control_outcome, Stage::Aggregate)
+                .contains("the project changed while the run was working"),
+            "a run that only wrote its own build caches was reported as one whose project moved: \
+             {}",
+            stage_detail(&control_outcome, Stage::Aggregate)
+        );
+        let control_passed: Vec<&CheckResult> = control
+            .report
+            .results()
+            .iter()
+            .filter(|result| passed_in_control.contains(&result.id))
+            .collect();
+        assert_eq!(
+            control_passed.len(),
+            passed_in_control.len(),
+            "a check that passed in the control run is missing from its report: {:?}",
+            statuses(&control_passed)
+        );
+        assert!(
+            control_passed
+                .iter()
+                .all(|result| result.status == CheckStatus::Pass),
+            "a run that wrote only its own build caches invalidated a check that ran the project's \
+             code: {:?}",
+            statuses(&control_passed)
+        );
+    }
+
+    /// The movement named even when there was nothing to withdraw, over the real
+    /// pipeline.
+    ///
+    /// [`invalidate_runtime_passes`] replaces a `Pass` and nothing else — rightly,
+    /// because a failing check is a finding the run actually made rather than a
+    /// stale one — so a run whose project moved and whose runtime checks all
+    /// *failed* has an empty withdrawal list while the second read has still
+    /// answered. **A stage line that spoke only for the non-empty list is silent
+    /// in exactly that run**, and silent too in every run that plans no check
+    /// which runs the project's code at all, which is every run a user has not
+    /// granted execution. This is the reading that keeps the second read from
+    /// being taken and then dropped — the shape
+    /// [`stale_evidence_reason`]'s error arm exists to avoid one line earlier.
+    ///
+    /// The runner answers with a failing exit code and writes a file the walk
+    /// covers, so both halves of the fixture are arranged by the one call the run
+    /// makes. Three guard assertions keep this from being a test that cannot
+    /// fail: the runner must have been reached, no runtime check may have passed,
+    /// and the project must actually have moved.
+    #[test]
+    fn a_project_that_moved_is_named_even_when_no_pass_was_withdrawn() {
+        let project = a_rust_project("pipeline-moved-unreplaced");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+
+        let runner = Moves {
+            writes: vec![project.join("src").join("generated.rs")],
+            asked: RefCell::new(Vec::new()),
+            // A command that ran, ended on its own, and reported failure: the
+            // `fail` row of `CommandRun::to_result`'s table rather than the pass
+            // the other test needs.
+            exit: Some(1),
+        };
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert!(
+            !runner.asked.borrow().is_empty(),
+            "the user granted execution and the runner was never reached, so this run has no \
+             runtime result at all and measures nothing: {:?}",
+            run.schedule.plain_description()
+        );
+        let now = project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+            .expect("this fixture is readable");
+        assert!(
+            !run.project_state.matches(&now),
+            "the fixture did not move, so this run is not the run it claims to be: {} and {}",
+            run.project_state.digest,
+            now.digest
+        );
+
+        let runtime_ids = runtime_check_ids(run);
+        assert!(
+            !runtime_ids.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            run.schedule.plain_description()
+        );
+        let runtime: Vec<&CheckResult> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        assert!(
+            runtime
+                .iter()
+                .all(|result| result.status == CheckStatus::Fail),
+            "the runner answered every admitted command with a failing exit code, so no runtime \
+             check has a pass to withdraw and the run below is about the empty list; one came \
+             back as something else: {:?}",
+            statuses(&runtime)
+        );
+
+        // The line a reader of the verdict looks at. **Both assertions are about
+        // the second read's answer reaching the page**, not about how it is
+        // phrased: a run whose project did not move carries neither of these, and
+        // that is the difference this test exists to measure.
+        let line = stage_detail(&outcome, Stage::Aggregate);
+        assert!(
+            line.contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+            "the project moved while the run was working and the run's own line does not say so, \
+             because it had no pass to withdraw: {line}"
+        );
+        assert!(
+            line.contains(&now.digest),
+            "the line does not name the state the project is actually in, so a reader cannot tell \
+             what this run's results are stale against: {line}"
+        );
     }
 }

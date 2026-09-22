@@ -128,6 +128,14 @@ impl Fixture {
     /// cheap half of this file: what it costs is a `NodeProject` per call, and what
     /// it buys is that a caller cannot hold a finding that outlives the reading it
     /// was made from.
+    ///
+    /// **Windows-only, because its readers are.** Both calls are inside
+    /// `the_program_a_node_check_plans`, which asserts what Windows' own name
+    /// completion does with the manager name a Node check plans; a platform
+    /// without `PATHEXT` has no such rule to assert, so those tests do not exist
+    /// there and this helper would be dead code — which `-D warnings` reports, and
+    /// reports correctly.
+    #[cfg(windows)]
     fn node(&self) -> sure_core::discover::NodeProject {
         let found = self.discover();
         match finding(&found, Ecosystem::Node, self.path()) {

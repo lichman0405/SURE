@@ -73,13 +73,20 @@
 //! evidence about the project.** A plan is only offered for a role the project
 //! declared the tool for, and the tools behind it are named in
 //! [`ConventionalCommand::because`] so a reader can see what the plan rests on.
+//!
+//! **The plan and the line are one value seen twice.** Since `P18-T003`
+//! [`invocation_for`] answers the plan as an [`Invocation`] — a program and its
+//! argument vector — and [`command_for`] renders that plan for a person to read.
+//! Nothing is spelled twice and nothing is parsed: a caller that means to *start*
+//! a check takes the vector, and a report takes the rendering, so the two cannot
+//! describe different things.
 
 use std::path::{Path, PathBuf};
 
 use sure_domain::vocabulary::SupportLevel;
 
 use super::read::{self, Budget, Probe, ReadFile, UnreadReason};
-use super::{DiscoverOptions, Ecosystem, EcosystemReport, Findings, Source, Unread};
+use super::{DiscoverOptions, Ecosystem, EcosystemReport, Findings, Invocation, Source, Unread};
 use crate::scan::Scan;
 
 /// The manifest modern Python projects declare themselves in.
@@ -1524,6 +1531,10 @@ impl CommandRole {
 /// is a later step with its own authorisation — the same rule
 /// [`super::node::Package::command_for`] holds to.
 ///
+/// **The plan behind the line is [`invocation_for`]**, which since `P18-T003` is
+/// also what a caller that means to start something asks for: this function is
+/// that plan rendered, plus the tools it rests on. See [`Invocation`].
+///
 /// The plan differs by role in where it comes from, and the difference is worth
 /// stating: `Test`, `Lint`, `TypeCheck`, `Format` and `Build` are only offered
 /// when the project declared a tool for the job, and `Install` is offered when
@@ -1545,29 +1556,13 @@ pub fn command_for(
         })
         .collect();
 
-    let command = match role {
-        // The installer answers this one, and there is nothing in `TOOLS` to
-        // look for: a project that named no installer has no install plan.
-        CommandRole::Install => manager.map(install_command),
-        // A build backend is not a command: `setuptools` and `poetry-core` are
-        // libraries a frontend calls, so the command is the *frontend's* —
-        // `python -m build`, or the installer's own `build` subcommand. Naming
-        // the backend as if it were the command would be a plan that does not
-        // run. Offered only when the project declared a backend, because a
-        // project that declared nothing that builds it has no build plan.
-        CommandRole::Build if !because.is_empty() => Some(match manager {
-            Some(manager) if manager != Installer::Pip => format!("{} build", manager.as_str()),
-            // `python -m build` is the frontend the packaging specification
-            // defines, and it is what is left when the project declared a
-            // backend and no installer to drive it.
-            _ => "python -m build".to_owned(),
-        }),
-        // Everything else is the tool's own command, run through the installer,
-        // and only for a tool the project declared. Every one of these is built
-        // from a constant and a name from [`TOOLS`], so no project text reaches
-        // a command.
-        _ => because.first().map(|tool| run(manager, tool)),
-    };
+    // **The line is a rendering of [`invocation_for`], and this is the only way
+    // it is produced.** Since `P18-T003` the same plan also has to reach a
+    // runner as a program and an argument vector, and two spellings of one plan
+    // would be two things free to disagree — a report showing a person
+    // `uv run pytest` while a check ran something else is exactly the failure
+    // the pairing with a typed operation exists to end.
+    let command = invocation_for(manager, role, tools).map(|invocation| invocation.rendered());
 
     // Computed before the literal, because a row with no command has no reasons
     // either: naming the tools a plan rests on when there is no plan would be a
@@ -1585,36 +1580,109 @@ pub fn command_for(
     }
 }
 
-/// A tool a project runs, through the installer if there is one.
-fn run(manager: Option<Installer>, tool: &str) -> String {
-    match manager {
-        // `uv run`, `poetry run` and `pdm run` all execute a command inside the
-        // project's environment. `pipenv run` does the same for pipenv.
-        Some(manager) if manager != Installer::Pip => format!("{} run {tool}", manager.as_str()),
-        // pip has no `run`: it installs, and `python -m` is how the standard
-        // library names a module. `pytest` alone would be a command that
-        // depends on which interpreter is first on the path.
-        _ => format!("python -m {tool}"),
+/// The program and its argument vector for one role, and the plan
+/// [`command_for`] prints.
+///
+/// **The plan itself, where [`command_for`] is one way of showing it.** See
+/// [`Invocation`] for what the value is and why the program is a name.
+///
+/// `None` means the project declared nothing for this role, which is the finding
+/// [`conventional_commands`] exists to report, and it is the same condition as
+/// `command_for` returning `None` — including for
+/// [`Install`](CommandRole::Install), which is answered by the installer rather
+/// than by a tool.
+#[must_use]
+pub fn invocation_for(
+    manager: Option<Installer>,
+    role: CommandRole,
+    tools: &[Tooling],
+) -> Option<Invocation> {
+    match role {
+        // The installer answers this one, and there is nothing in `TOOLS` to
+        // look for: a project that named no installer has no install plan.
+        CommandRole::Install => manager.map(install_invocation),
+        // A build backend is not a command: `setuptools` and `poetry-core` are
+        // libraries a frontend calls, so the command is the *frontend's* —
+        // `python -m build`, or the installer's own `build` subcommand. Naming
+        // the backend as if it were the command would be a plan that does not
+        // run. Offered only when the project declared a backend, because a
+        // project that declared nothing that builds it has no build plan.
+        CommandRole::Build => {
+            declared_tool(role, tools)?;
+            Some(match manager {
+                Some(manager) if manager != Installer::Pip => {
+                    Invocation::of(manager.as_str(), &["build"])
+                }
+                // `python -m build` is the frontend the packaging specification
+                // defines, and it is what is left when the project declared a
+                // backend and no installer to drive it.
+                _ => Invocation::of("python", &["-m", "build"]),
+            })
+        }
+        // Everything else is the tool's own command, run through the installer,
+        // and only for a tool the project declared. Every one of these is built
+        // from a constant and a name from [`TOOLS`], so no project text reaches
+        // a command.
+        _ => {
+            let tool = declared_tool(role, tools)?;
+            Some(run_invocation(manager, tool))
+        }
     }
 }
 
-/// The command that installs a project's dependencies.
+/// The tool the project declared for this role, if it declared one.
+///
+/// **The first in the discovery's order**, which is what [`command_for`] has
+/// always used: a tool list is sorted as the manifests were read, so the first
+/// match is the stable and reproposable choice, and picking any other would make
+/// the plan depend on nothing.
+fn declared_tool(role: CommandRole, tools: &[Tooling]) -> Option<&str> {
+    role.tool_roles()
+        .iter()
+        .flat_map(|&wanted| {
+            tools
+                .iter()
+                .filter(move |tool| tool.role == wanted)
+                .map(|tool| tool.package)
+        })
+        .next()
+}
+
+/// A tool a project runs, through the installer if there is one.
+fn run_invocation(manager: Option<Installer>, tool: &str) -> Invocation {
+    match manager {
+        // `uv run`, `poetry run` and `pdm run` all execute a command inside the
+        // project's environment. `pipenv run` does the same for pipenv.
+        Some(manager) if manager != Installer::Pip => {
+            Invocation::of(manager.as_str(), &["run", tool])
+        }
+        // pip has no `run`: it installs, and `python -m` is how the standard
+        // library names a module. `pytest` alone would be a command that
+        // depends on which interpreter is first on the path.
+        _ => Invocation::of("python", &["-m", tool]),
+    }
+}
+
+/// The plan that installs a project's dependencies.
 ///
 /// One arm per installer, and they are **not all the same verb**: uv's is
 /// `uv sync`, and poetry's and pdm's are `install`. Composing one of them from
 /// `as_str()` and a shared `" sync"` would produce `poetry sync`, which is not
 /// the command that installs a project's dependencies. Writing all five out is
 /// the only form in which a reader can check them, and the tests hold each one.
-fn install_command(manager: Installer) -> String {
+fn install_invocation(manager: Installer) -> Invocation {
     match manager {
         // Not `pip install .`: a project with a `requirements.txt` has not
         // necessarily made itself installable, and the requirements file is what
         // the weakest piece of evidence in this module is about.
-        Installer::Pip => "python -m pip install -r requirements.txt".to_owned(),
-        Installer::Uv => "uv sync".to_owned(),
-        Installer::Poetry => "poetry install".to_owned(),
-        Installer::Pipenv => "pipenv install".to_owned(),
-        Installer::Pdm => "pdm install".to_owned(),
+        Installer::Pip => Invocation::of(
+            "python",
+            &["-m", "pip", "install", "-r", "requirements.txt"],
+        ),
+        Installer::Uv => Invocation::of("uv", &["sync"]),
+        Installer::Poetry => Invocation::of("poetry", &["install"]),
+        Installer::Pipenv => Invocation::of("pipenv", &["install"]),
+        Installer::Pdm => Invocation::of("pdm", &["install"]),
     }
 }
 

@@ -30,9 +30,10 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::{CandidateContext, classify_path};
-use crate::checks::check_id;
+use crate::checks::{check_id, nothing_observed_yet};
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
+use crate::planned_work::PlannedWork;
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -333,9 +334,18 @@ impl DemoDataHeuristics {
     }
 
     /// Hands every proposal to a plan builder.
+    ///
+    /// **Each proposal is paired with the operation that would carry it out, and
+    /// the operation here is the placeholder `P18-T003` puts beside every check
+    /// that is not a declared command.** What this module proves is a *candidate*
+    /// from a reading of the source — it starts nothing, and at the moment the
+    /// plan is made nothing has settled any of these checks — so the honest
+    /// observation is the one that claims neither a pass nor a defect. `P18-T004`
+    /// replaces it with the observation this scanner actually made.
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            let work = PlannedWork::new(proposal.clone(), nothing_observed_yet());
+            if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"

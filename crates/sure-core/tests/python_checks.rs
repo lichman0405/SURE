@@ -47,6 +47,7 @@ use sure_core::checks::MissingKind;
 use sure_core::checks::python::PythonChecks;
 use sure_core::discover::python::{CommandRole, MANIFEST};
 use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, discover};
+use sure_core::planned_work::PlannedWork;
 use sure_core::schedule::{CheckReason, CheckSchedule, ExecutionRequirements, PlanBuilder};
 use sure_domain::execution::{
     ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions, Permission,
@@ -129,7 +130,7 @@ impl Fixture {
     }
 
     fn checks(&self) -> PythonChecks {
-        PythonChecks::of(&self.python())
+        PythonChecks::of(&self.python(), &self.project)
     }
 }
 
@@ -186,9 +187,9 @@ fn host_confirmed() -> ExecutionPermissions {
 /// nothing about, and nothing else in these tests would notice.
 fn covered(checks: &PythonChecks, fingerprint: &FingerprintId) -> Vec<String> {
     let mut titles: Vec<String> = checks
-        .proposed()
+        .planned()
         .iter()
-        .map(|proposal| proposal.title().to_owned())
+        .map(|work| work.proposal().title().to_owned())
         .chain(
             checks
                 .not_checked(fingerprint)
@@ -304,7 +305,8 @@ fn nothing_the_plan_holds_needs_the_permission_to_install_anything() {
     let mut seen = 0;
     for (what, fixture) in &shapes {
         let checks = fixture.checks();
-        for proposal in checks.proposed() {
+        for work in checks.planned() {
+            let proposal = work.proposal();
             seen += 1;
             let blocked = proposal
                 .requirements()
@@ -356,7 +358,7 @@ fn the_install_is_a_step_beside_the_plan_and_never_a_row_inside_it() {
     let step = checks.install().expect("uv.lock names an installer");
 
     let schedule = plan(&checks, ExecutionMode::HostConfirmed, host_confirmed());
-    assert_eq!(schedule.len(), checks.proposed().len());
+    assert_eq!(schedule.len(), checks.planned().len());
     assert_eq!(schedule.may_run().count(), schedule.len());
     assert!(
         schedule.duplicates().is_empty(),
@@ -452,7 +454,7 @@ fn a_project_that_declares_nothing_still_gets_four_rows_and_no_checks() {
     fixture.write("pyproject.toml", BARE);
     let checks = fixture.checks();
 
-    assert!(checks.proposed().is_empty());
+    assert!(checks.planned().is_empty());
     assert_eq!(checks.missing().len(), 4);
     assert!(!checks.is_empty());
     assert!(checks.install().is_none(), "nothing names an installer");
@@ -610,11 +612,11 @@ fn a_project_that_names_two_environments_is_refused_rather_than_run_through_a_th
         "and it is a disagreement rather than an empty result"
     );
 
-    let checks = PythonChecks::of(&python);
+    let checks = PythonChecks::of(&python, fixture.path());
     assert!(
-        checks.proposed().is_empty(),
+        checks.planned().is_empty(),
         "a command for an interpreter nobody named is not a check: {:?}",
-        checks.proposed()
+        checks.planned()
     );
     assert!(checks.install().is_none());
 
@@ -709,9 +711,9 @@ fn two_independent_readings_of_one_project_give_the_same_identifiers() {
 
     let ids = |checks: &PythonChecks| -> Vec<String> {
         checks
-            .proposed()
+            .planned()
             .iter()
-            .map(|proposal| proposal.id().as_str().to_owned())
+            .map(|work| work.proposal().id().as_str().to_owned())
             .collect()
     };
     assert_eq!(ids(&first), ids(&second));
@@ -815,8 +817,9 @@ fn the_command_a_check_names_is_the_line_sure_would_run() {
     let checks = fixture.checks();
 
     let test = checks
-        .proposed()
+        .planned()
         .iter()
+        .map(PlannedWork::proposal)
         .find(|proposal| proposal.title() == CommandRole::Test.plain_description())
         .expect("pytest is declared");
     match test.reason() {
@@ -849,9 +852,10 @@ fn gap_kind(checks: &PythonChecks, role: CommandRole) -> MissingKind {
 /// The role and command of every proposed check, in the module's own order.
 fn commands(checks: &PythonChecks) -> Vec<(CommandRole, String)> {
     checks
-        .proposed()
+        .planned()
         .iter()
-        .map(|proposal| {
+        .map(|work| {
+            let proposal = work.proposal();
             let role = CommandRole::ALL
                 .iter()
                 .copied()

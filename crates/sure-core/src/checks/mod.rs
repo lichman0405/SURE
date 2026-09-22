@@ -86,15 +86,46 @@
 //! its caller. [`python`]'s documentation said `P4-T004` would add a third
 //! proposer and that the module would be a diff to this paragraph; it was.
 //!
+//! # What the three proposers share now that they propose work
+//!
+//! Since `P18-T003` a proposer hands over typed work rather than a rendered
+//! command, and the parts all three of them need are here: [`command_operation`]
+//! turns a program, an argument vector and a directory into the operation a check
+//! carries, [`component_directory`] derives a member's directory from the manifest
+//! path the scan spells it by, and [`CHECK_LIMITS`] is the one deadline and output
+//! bound every declared check runs under. **They are here rather than repeated in
+//! each proposer because they are policy**, and three copies of a deadline are
+//! three deadlines.
+//!
+//! What is deliberately *not* here is any way to get a program name or an argument
+//! vector out of text. Each proposer builds those from its own typed discovery
+//! values — [`node`] from a script's own name and the package manager, [`python`]
+//! from an installer and a tool, [`rust`] from `cargo` and a subcommand — and a
+//! shared function taking a rendered line would be the parse
+//! `docs/adr/0014-planned-check-execution-contract.md` rejected, moved one module
+//! up rather than avoided.
+//!
 //! **It witnesses nothing about whether these checks are the right ones.** A
 //! `package.json` that declares `"test": "true"` gets a test check that passes,
 //! and nothing here can tell. Choosing good checks is not a thing a table of
 //! conventions can do, and the module says so rather than implying otherwise —
 //! the same limit [`crate::browser`] states about its drivers.
+//!
+//! **A detector's proposal needs an operation too, and it has no program to
+//! name.** Since `P18-T003` every proposed check carries one, so the handful of
+//! places that propose from a *reading* rather than from a declared command —
+//! the candidate scanners, the runtime probes, the flow steps and the corpus
+//! fixtures — take [`nothing_observed_yet`], which is a candidate observation and
+//! therefore never a pass. It is a placeholder with an owner: `P18-T004` replaces
+//! each one with the observation the detector actually made, and until then the
+//! honest answer is the one that claims nothing.
 
 pub mod node;
 pub mod python;
 pub mod rust;
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sure_domain::evidence::{Evidence, EvidenceAnchor, EvidenceClass};
 use sure_domain::ids::{CheckId, FingerprintId};
@@ -102,6 +133,8 @@ use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
 
 use crate::fingerprint::digest::Digest;
+use crate::planned_work::{CheckOperation, CommandSpec, PrecomputedEvidence};
+use crate::process::{Environment, Limits};
 
 /// The domain tag for a check identifier.
 ///
@@ -171,6 +204,117 @@ pub fn check_id(component: &str, tag: &str) -> CheckId {
 
     CheckId::parse(format!("{}_{body}", CheckId::KIND.prefix()))
         .expect("the body is built from [a-z0-9] and lowercase hexadecimal")
+}
+
+/// How long a declared check has, and how much of what it says SURE keeps.
+///
+/// **One policy for every declared check, written down where it can be argued
+/// with.** A check with no deadline is a check that hangs, and a check that hangs
+/// is indistinguishable from one that is still working — so there is no
+/// `Limits::default` for this to fall back on and no proposer decides for itself.
+/// Fifteen minutes is long enough for a cold build or a full test suite on the
+/// projects this build is aimed at, and short enough that a stuck check is a
+/// reported failure rather than a run nobody can end; the output bounds are wide
+/// enough that an ordinary log fits and small enough that a program printing in a
+/// loop cannot exhaust memory.
+///
+/// **Truncation is not silent.** `docs/adr/0014-planned-check-execution-contract.md`
+/// decision 7 makes materially truncated output an error rather than a pass, so
+/// these two numbers are the point at which a check's result stops being `Pass`
+/// — which is why they are here, in one place, rather than four.
+const CHECK_LIMITS: Limits = Limits::new(Duration::from_secs(15 * 60), 256 * 1024, 256 * 1024);
+
+/// A check's command, as typed work.
+///
+/// `program` is a program's *name* — `npm`, `python`, `cargo` — and never a
+/// command line: an argument with a space in it is one argument and stays one,
+/// because the operating system is handed the vector rather than a string somebody
+/// split. The three ecosystem proposers call this with values they already hold
+/// typed, which is the whole of `P18-T003`: the `npm run build` a report prints is
+/// a rendering of the same decision and not its source.
+///
+/// **`directory` must be absolute**, which is [`CommandSpec::new`]'s own rule and
+/// [`process`](crate::process)'s: every caller passes the scan's root joined with a
+/// component path, and `scan::open_root` refuses a root that is not absolute, so
+/// there is no path from here to a command whose directory is relative to whatever
+/// SURE happened to be started in.
+///
+/// **The environment is SURE's own**, because of what a check is: `npm` finds
+/// `node`, and `cargo` finds the linker, by name and through `PATH`. ADR 0014's
+/// decision 11 — a *service* is not given SURE's environment — is about programs
+/// SURE starts for a project, where the environment is part of what is being
+/// observed; a declared check is the project's own command run in the user's own
+/// shell's environment, and a check that could not find `node` would report a
+/// missing toolchain that is installed.
+#[must_use]
+pub(crate) fn command_operation(
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> CheckOperation {
+    CheckOperation::Command(
+        CommandSpec::new(program, directory, Environment::inherited(), CHECK_LIMITS)
+            .with_arguments(arguments.iter().copied()),
+    )
+}
+
+/// The operation for a check nothing has observed yet.
+///
+/// **`P18-T003`'s placeholder, and `P18-T004` is the task that replaces it.** Every
+/// check in this product is now proposed with the work that would carry it out or
+/// with the evidence behind it, and the three ecosystem proposers can answer
+/// properly because they hold a program and an argument vector. The detectors, the
+/// runtime probes and the flow steps do not: what they hold is a *candidate* — a
+/// pattern in a source file, an external service that is not reachable, a route
+/// nothing answers — and no command has been started for any of them at the moment
+/// the plan is made.
+///
+/// So the answer is [`StaticObservation::Candidate`], which
+/// [`PrecomputedEvidence::to_result`] maps to
+/// [`Warning`](sure_domain::status::CheckStatus::Warning). That is the only value
+/// among the four that claims nothing: a detector that said [`Holds`] would be
+/// reporting a pass it never established, one that said [`Contradicted`] would be
+/// reporting a defect it never confirmed, and [`CouldNotRun`] would be reporting a
+/// failure that has not happened yet — the false green and the false red in one
+/// line each.
+///
+/// **The detail is a constant SURE writes and never project text**, like every
+/// other sentence in this module. It says exactly what is true: a reading happened,
+/// and nothing has settled it.
+///
+/// [`Holds`]: crate::planned_work::StaticObservation::Holds
+/// [`Contradicted`]: crate::planned_work::StaticObservation::Contradicted
+/// [`CouldNotRun`]: crate::planned_work::StaticObservation::CouldNotRun
+#[must_use]
+pub(crate) fn nothing_observed_yet() -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+        "nothing has settled this check yet: it was proposed from a reading of the \
+         project, and no command has been run for it",
+    ))
+}
+
+/// The absolute directory a component's manifest sits in.
+///
+/// `manifest` is a path the scan spells a component by — `package.json` for the
+/// project's own manifest, `packages/web/package.json` for a workspace member —
+/// and the answer is the project root for the first and the root joined with the
+/// member's own directory for the second. **This is the case ADR 0014 says a parsed
+/// display string could not represent**: the directory a member's check runs in is
+/// not in the rendered command at all, and it is here because the discovery has the
+/// member's path as a value.
+///
+/// The empty parent — what `Path::parent` answers for a bare file name — is folded
+/// into the root rather than joined onto it: `root.join("")` is the root *with a
+/// trailing separator*, which is a different string and, on Windows, can be a
+/// different path to a program that cares. `runtime_probes.rs` has the same
+/// derivation one layer up and keeps the empty path, because there it is a
+/// component identity rather than a directory to run something in.
+#[must_use]
+pub(crate) fn component_directory(root: &Path, manifest: &str) -> PathBuf {
+    match Path::new(manifest).parent() {
+        Some(directory) if !directory.as_os_str().is_empty() => root.join(directory),
+        _ => root.to_path_buf(),
+    }
 }
 
 /// Why SURE has no command for a check it would otherwise propose.

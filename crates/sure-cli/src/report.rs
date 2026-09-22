@@ -1368,6 +1368,7 @@ mod tests {
     fn a_check_run(clean: bool) -> sure_core::pipeline::RunOutcome {
         use sure_core::evidence::EvidenceClass;
         use sure_core::execution::{ActionKind, ExecutionMode};
+        use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
         use sure_core::schedule::{CheckProposal, CheckReason, PlanBuilder};
         use sure_core::severity::Severity;
         use sure_core::status::CheckResult;
@@ -1375,16 +1376,24 @@ mod tests {
         let mode = ExecutionMode::InspectOnly;
         let mut builder = PlanBuilder::new(mode, mode.baseline_permissions());
         builder
-            .propose(CheckProposal::new(
-                sure_core::checks::check_id("sure.test", "read-the-manifest"),
-                "Read the project's manifest",
-                Severity::Note,
-                false,
-                EvidenceClass::ObservedFact,
-                CheckReason::FilePresent {
-                    path: "package.json".to_owned(),
-                },
-                &[ActionKind::ReadFile],
+            .propose(PlannedWork::new(
+                CheckProposal::new(
+                    sure_core::checks::check_id("sure.test", "read-the-manifest"),
+                    "Read the project's manifest",
+                    Severity::Note,
+                    false,
+                    EvidenceClass::ObservedFact,
+                    CheckReason::FilePresent {
+                        path: "package.json".to_owned(),
+                    },
+                    &[ActionKind::ReadFile],
+                ),
+                // Nothing here runs a check: this stands in for a scheduled result
+                // so that the report's frame and stream can be graded. The most
+                // conservative thing an unrun check can say about itself.
+                CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+                    "this fixture builds a plan and observes nothing",
+                )),
             ))
             .unwrap();
         let schedule = builder.build();

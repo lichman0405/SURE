@@ -185,10 +185,11 @@ use sure_domain::severity::Severity;
 use sure_domain::variants::variants;
 
 use crate::checks::node::{Runner, command_for, components};
-use crate::checks::{MissingKind, check_id};
+use crate::checks::{MissingKind, check_id, nothing_observed_yet};
 use crate::components::ComponentGraph;
 use crate::config::{CheckPreference, ChecksConfig, ScopeReduction};
 use crate::discover::node::{NodeProject, Package, ScriptRole};
+use crate::planned_work::PlannedWork;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
@@ -774,12 +775,21 @@ impl ProbePlan {
     /// is what holds that rather than this sentence.
     ///
     /// [`NodeChecks::add_to`]: crate::checks::node::NodeChecks::add_to
+    ///
+    /// **The operation beside each probe is the placeholder `P18-T003` puts
+    /// beside every check that is not a declared command.** A probe is a check
+    /// that starts the project and looks at it, and *nothing has been started* at
+    /// the moment the plan is made — the probe's own command is what a later stage
+    /// would run, and until it does there is nothing to report about it. So the
+    /// honest observation is the one that claims neither a pass nor a defect, and
+    /// `P18-T004` is where this becomes the command the probe would run.
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for probe in &self.probes {
             // The `Err` is the refusal, and it is not dropped: `propose` has
             // already pushed it onto the builder's own list by the time this
             // returns it, which is the contract that function documents.
-            if let Err(refusal) = builder.propose(probe.proposal.clone()) {
+            let work = PlannedWork::new(probe.proposal.clone(), nothing_observed_yet());
+            if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"

@@ -27,9 +27,10 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
-use crate::checks::check_id;
+use crate::checks::{check_id, nothing_observed_yet};
 use crate::discover::node::{MANIFEST, NodeProject, Package};
 use crate::discover::{Discovery, Ecosystem};
+use crate::planned_work::PlannedWork;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
@@ -250,9 +251,19 @@ impl ExternalServiceChecks {
     }
 
     /// Hands every proposal to a plan builder.
+    ///
+    /// **Each proposal is paired with the operation that would carry it out, and
+    /// the operation here is the placeholder `P18-T003` puts beside every check
+    /// that is not a declared command.** These checks can only be confirmed
+    /// against the real outside service, which has not been contacted at the
+    /// moment the plan is made — so the honest observation is the one that claims
+    /// neither a pass nor a defect. `P18-T004` replaces it with the observation
+    /// this detector actually made, and ADR 0014's decision 11 is where the
+    /// separate question of what a *service* check may be given is answered.
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            let work = PlannedWork::new(proposal.clone(), nothing_observed_yet());
+            if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"

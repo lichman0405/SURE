@@ -79,6 +79,7 @@ use sure_core::checks::rust::RustChecks;
 use sure_core::discover::rust::MANIFEST;
 use sure_core::discover::{DiscoverOptions, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, content_fingerprint, project_fingerprint};
+use sure_core::planned_work::PlannedWork;
 use sure_core::process::{
     Cancellation, Environment, Limits, Outcome, ProcessRequest, Termination, run,
 };
@@ -427,7 +428,7 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
     let Findings::Rust(rust) = &report.findings else {
         panic!("the Rust report carried {:?} findings", report.findings);
     };
-    let checks = RustChecks::of(rust);
+    let checks = RustChecks::of(rust, copy.path());
 
     assert_eq!(
         checks.component(),
@@ -440,12 +441,13 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         checks.missing()
     );
     assert_eq!(
-        checks.proposed().len(),
+        checks.planned().len(),
         4,
         "a project that asks for both tools gets the four checks: {:?}",
         checks
-            .proposed()
+            .planned()
             .iter()
+            .map(PlannedWork::proposal)
             .map(|proposal| proposal.title())
             .collect::<Vec<_>>()
     );

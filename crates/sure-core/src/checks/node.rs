@@ -81,6 +81,34 @@
 //!    `None`, and it answers `None` for two different reasons which
 //!    [`Runner`] keeps apart in the sentence.
 //!
+//! # A check is planned as work, and not only as a line
+//!
+//! Since `P18-T003` every check here is a proposal **and the operation that would
+//! carry it out** ([`PlannedWork`](crate::planned_work::PlannedWork)): the program
+//! is the package manager's own name, the arguments are the script's own name
+//! after `run` where the manager needs one, and the directory is the component's —
+//! the project root for the project's own manifest and the member's own directory
+//! for a workspace member's.
+//!
+//! **The rendered command stays a rendering.**
+//! [`CheckReason::DeclaredCommand`] still carries `npm run build`, because that is
+//! what a report prints and what a person is being asked to allow, and nothing
+//! reads it back into a program: ADR 0014 rejected exactly that, and the pairing is
+//! what makes it unnecessary. The two are one decision shown twice —
+//! `discover::node`'s `invocation_for` holds the program and the vector and
+//! `command_for` renders it — so the line and the program cannot come apart, and
+//! `the_work_behind_a_check_is_the_typed_form_of_the_line_a_report_prints` holds
+//! that over every manager and all four roles.
+//!
+//! **The manager's name is not rewritten for the platform.** On Windows a bare
+//! `npm` is a name Windows completes with `.exe` and nothing else, so a project
+//! whose only manager is `npm.cmd` plans a command this build will not start.
+//! Whether a name is startable is
+//! [`ProgramPath`](crate::planned_work::ProgramPath)'s answer and the runner's to
+//! act on; a builder that appended `.cmd` — or wrapped the name in `cmd.exe /c`,
+//! which is what the operating system would do — would be constructing the
+//! interpreter ADR 0014 says SURE must not build.
+//!
 //! # What it does not do
 //!
 //! **It does not look at `node_modules`.** Nothing here can tell whether a
@@ -103,6 +131,8 @@
 //! again. That is honest — all four are declared, and none of them is SURE's to
 //! drop — and it is wasteful, which is stated here rather than discovered later.
 
+use std::path::Path;
+
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
 use sure_domain::ids::FingerprintId;
@@ -110,10 +140,14 @@ use sure_domain::severity::Severity;
 use sure_domain::status::CheckResult;
 
 use crate::discover::node::{MANIFEST, Managers, NodeProject, Package, PackageManager, ScriptRole};
+use crate::planned_work::PlannedWork;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
-use super::{MissingCommand, MissingKind, NOTHING_NAMES_A_RUNNER, check_id};
+use super::{
+    MissingCommand, MissingKind, NOTHING_NAMES_A_RUNNER, check_id, command_operation,
+    component_directory,
+};
 
 /// What SURE proposes for one role.
 ///
@@ -250,7 +284,7 @@ impl Runner {
 /// documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeChecks {
-    proposed: Vec<CheckProposal>,
+    proposed: Vec<PlannedWork>,
     missing: Vec<MissingCommand>,
 }
 
@@ -264,8 +298,18 @@ impl NodeChecks {
     /// absent*. Four "nothing is declared" gaps for a `package.json` that failed
     /// to parse would be four false statements about the project, and the unread
     /// manifest is already a value in the discovery result where it belongs.
+    ///
+    /// **`root` is the project root, and it is a parameter rather than a field of
+    /// the discovery result** because a check's command is planned as typed work
+    /// and [`CommandSpec`](crate::planned_work::CommandSpec) requires an absolute
+    /// working directory. The discovery carries the root and the members carry
+    /// their own paths; what a member's check needs is the two joined, which is
+    /// the fact a member's *rendered* command does not hold — ADR 0014 rejected
+    /// parsing that string partly because it cannot say where the command runs.
+    /// The scan refuses a root that is not absolute (`scan::open_root`), so the
+    /// directory built here is absolute whenever the discovery is a value at all.
     #[must_use]
-    pub fn of(project: &NodeProject) -> Self {
+    pub fn of(project: &NodeProject, root: &Path) -> Self {
         let mut checks = Self {
             proposed: Vec::new(),
             missing: Vec::new(),
@@ -278,27 +322,50 @@ impl NodeChecks {
         let runner = Runner::of(&project.managers);
 
         for (manifest, package) in components(project) {
+            // The directory this component's check runs in, which is the root for
+            // the project's own manifest and the member's own directory for a
+            // member's. Derived from the component path rather than from anything
+            // the manifest says, which is what makes it true for a workspace.
+            let directory = component_directory(root, &manifest);
+
             for &(role, check) in CHECKS {
                 let id = check_id(&manifest, &format!("node{}", role.conventional_name()));
                 let title = titled(role, &manifest);
 
-                match command_for(package, role, runner) {
-                    Ok(command) => checks.proposed.push(CheckProposal::new(
-                        id,
-                        title,
-                        check.severity,
-                        check.critical,
-                        // A check that runs a command the project declared and
-                        // watches what it does is a deterministic check rather
-                        // than an observation: the same project state gives the
-                        // same answer, which is the whole of what makes it worth
-                        // running.
-                        EvidenceClass::DeterministicCheck,
-                        CheckReason::DeclaredCommand {
-                            declared_in: manifest.clone(),
-                            command,
-                        },
-                        &[check.action],
+                match invocation_for(package, role, runner) {
+                    Ok(invocation) => checks.proposed.push(PlannedWork::new(
+                        CheckProposal::new(
+                            id,
+                            title,
+                            check.severity,
+                            check.critical,
+                            // A check that runs a command the project declared and
+                            // watches what it does is a deterministic check rather
+                            // than an observation: the same project state gives the
+                            // same answer, which is the whole of what makes it worth
+                            // running.
+                            EvidenceClass::DeterministicCheck,
+                            CheckReason::DeclaredCommand {
+                                declared_in: manifest.clone(),
+                                // The rendered line, and only the rendered line: it
+                                // is what a report prints, and the program that would
+                                // run is the `CommandSpec` beside it. Nothing reads
+                                // this string back into a program -- ADR 0014
+                                // rejected exactly that, and the pairing is what
+                                // makes it unnecessary.
+                                command: invocation.rendered,
+                            },
+                            &[check.action],
+                        ),
+                        command_operation(
+                            invocation.manager.as_str(),
+                            &directory,
+                            &invocation
+                                .arguments
+                                .iter()
+                                .map(String::as_str)
+                                .collect::<Vec<_>>(),
+                        ),
                     )),
                     Err(kind) => checks.missing.push(MissingCommand::new(
                         id,
@@ -321,8 +388,14 @@ impl NodeChecks {
     /// them, and a caller that read an order out of this list would be depending
     /// on the order the components were walked, which is not a fact about the
     /// project.
+    ///
+    /// Each value is a proposal **with the work that would carry it out** — the
+    /// program, its arguments and the directory, as typed fields. A caller that
+    /// wants only what a report shows asks each one for its proposal; a caller
+    /// that means to run the check reads the operation, and neither can reach one
+    /// half without the other existing.
     #[must_use]
-    pub fn proposed(&self) -> &[CheckProposal] {
+    pub fn planned(&self) -> &[PlannedWork] {
         &self.proposed
     }
 
@@ -344,23 +417,24 @@ impl NodeChecks {
         self.proposed.is_empty() && self.missing.is_empty()
     }
 
-    /// Hands every proposal to a plan builder.
+    /// Hands every check to a plan builder, each with its own work.
     ///
     /// **The builder's refusals are the record, which is why nothing is
     /// returned here.** [`PlanBuilder::propose`] remembers a refusal even when
     /// its `Err` is dropped, and [`PlanBuilder::refused`] is where a caller
-    /// finds them — so a proposal this module got wrong cannot disappear by
+    /// finds them — so a check this module got wrong cannot disappear by
     /// being ignored. Nothing this module builds can be refused in the first
-    /// place: every proposal has a title, a reason naming a file, and exactly
-    /// one action, and `nothing_this_module_builds_is_refused` is what holds
-    /// that rather than this sentence.
+    /// place: every check has a title, a reason naming a file, exactly one
+    /// action, and the operation it was planned with, and
+    /// `nothing_this_module_builds_is_refused` is what holds that rather than
+    /// this sentence.
     pub fn add_to(&self, builder: &mut PlanBuilder) {
-        for proposal in &self.proposed {
+        for work in &self.proposed {
             // The `Err` is the refusal, and it is not dropped: `propose` has
             // already pushed it onto the builder's own list by the time this
             // returns it, which is the contract that function documents. Binding
             // it here rather than with `let _` is what makes that deliberate.
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            if let Err(refusal) = builder.propose(work.clone()) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"
@@ -413,6 +487,25 @@ pub(crate) fn components(project: &NodeProject) -> Vec<(String, &Package)> {
     found
 }
 
+/// One declared command, in the three forms its two callers need.
+///
+/// **The three fields are one decision rather than three computations.** `manager`
+/// and `arguments` are what a check would start; `rendered` is the same pair as the
+/// line a report prints. It comes from the discovery's own
+/// [`Package::command_for`](crate::discover::node::Package::command_for), which is
+/// that pair rendered, so a change to how a command is spelled reaches the report
+/// and the program together — and there is no second `format!` here that could
+/// disagree with the first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Invocation {
+    /// The program's name, as a command line spells it.
+    manager: PackageManager,
+    /// The arguments, one per argument.
+    arguments: Vec<String>,
+    /// The line a report prints for this command.
+    rendered: String,
+}
+
 /// The command SURE would run for a role, or why it has none.
 ///
 /// The three failures are ordered deliberately. *Is the script declared* is
@@ -431,6 +524,25 @@ pub(crate) fn command_for(
     role: ScriptRole,
     runner: Runner,
 ) -> Result<String, MissingKind> {
+    invocation_for(package, role, runner).map(|invocation| invocation.rendered)
+}
+
+/// The same command as typed work: the program, its arguments and the rendering.
+///
+/// **This is where a declared check stops being text.** The program is
+/// [`PackageManager::as_str`](crate::discover::node::PackageManager::as_str) — a
+/// name, and on Windows a name with no extension, which is the platform's business
+/// and not this module's: whether `npm` is startable is [`Resolution`]'s answer, and
+/// a builder that appended `.cmd` to make it "work" would be inventing a program.
+/// The arguments are the discovery's own vector, so a script named `my tests` is one
+/// argument and not two.
+///
+/// [`Resolution`]: crate::planned_work::Resolution
+fn invocation_for(
+    package: &Package,
+    role: ScriptRole,
+    runner: Runner,
+) -> Result<Invocation, MissingKind> {
     if package.script(role).is_none() {
         return Err(if is_not_a_command(package, role) {
             MissingKind::NotACommand
@@ -449,13 +561,20 @@ pub(crate) fn command_for(
         });
     };
 
-    match package.command_for(manager, role) {
-        Some(command) => Ok(command),
-        // Unreachable: `command_for` answers `None` exactly when `script(role)`
-        // does, and that was excluded above. Folded into the shape it would mean
-        // — a script SURE could not turn into a command is one it has no command
-        // for — rather than panicking on a shipped path.
-        None => Err(MissingKind::NotDeclared),
+    match (
+        package.invocation_for(manager, role),
+        package.command_for(manager, role),
+    ) {
+        (Some((manager, arguments)), Some(rendered)) => Ok(Invocation {
+            manager,
+            arguments,
+            rendered,
+        }),
+        // Unreachable: both answer `None` exactly when `script(role)` does, and
+        // that was excluded above. Folded into the shape it would mean — a script
+        // SURE could not turn into a command is one it has no command for —
+        // rather than panicking on a shipped path.
+        _ => Err(MissingKind::NotDeclared),
     }
 }
 
@@ -499,8 +618,12 @@ fn titled(role: ScriptRole, manifest: &str) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::ffi::{OsStr, OsString};
+    use std::path::PathBuf;
+
     use crate::discover::Source;
     use crate::discover::node::{ManagerEvidence, ManagerFinding, ManifestState};
+    use crate::planned_work::CheckOperation;
     use serde_json::json;
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
@@ -547,6 +670,41 @@ mod tests {
             }),
             &[("package-lock.json", PackageManager::Npm)],
         )
+    }
+
+    /// The root every fixture in this module is a project in.
+    ///
+    /// One spelling, so that a test asserting a working directory compares against
+    /// a value rather than against a second `PathBuf::from` that could differ by a
+    /// separator and pass for the wrong reason. It is a Windows-looking path on
+    /// purpose: a working directory is a path, and the module is portable because
+    /// it never parses one.
+    fn root() -> PathBuf {
+        PathBuf::from(r"C:\projects\fixture")
+    }
+
+    /// The checks for a project, in the root above.
+    fn checks_of(project: &NodeProject) -> NodeChecks {
+        NodeChecks::of(project, &root())
+    }
+
+    /// The proposals of a check list.
+    ///
+    /// For the assertions that are about what a report shows rather than about what
+    /// would run. **The two are reached through different accessors on purpose**:
+    /// `planned` is what a runner reads and this is what a person reads, and a test
+    /// that is really about one of them says so.
+    fn proposals(checks: &NodeChecks) -> Vec<&CheckProposal> {
+        checks.planned().iter().map(PlannedWork::proposal).collect()
+    }
+
+    /// The work behind the check with this title.
+    fn work_for<'a>(checks: &'a NodeChecks, title: &str) -> &'a PlannedWork {
+        checks
+            .planned()
+            .iter()
+            .find(|work| work.proposal().title() == title)
+            .unwrap_or_else(|| panic!("there is no check titled {title:?}"))
     }
 
     /// The gap for one role, by the title a person reads.
@@ -659,13 +817,12 @@ mod tests {
 
     #[test]
     fn a_declared_script_becomes_a_check_running_the_command_sure_would_run() {
-        let checks = NodeChecks::of(&a_complete_project());
+        let checks = checks_of(&a_complete_project());
         assert!(checks.missing().is_empty(), "{:?}", checks.missing());
-        assert_eq!(checks.proposed().len(), 4);
+        assert_eq!(proposals(&checks).len(), 4);
 
-        let build = checks
-            .proposed()
-            .iter()
+        let build = proposals(&checks)
+            .into_iter()
             .find(|proposal| {
                 proposal.reason().names_something() && proposal.title() == "build the project"
             })
@@ -693,9 +850,8 @@ mod tests {
         // And the two roles npm spells differently, because a table that got
         // this wrong would propose `npm test` as `npm run test`, which happens
         // to work and is not what the manager documents.
-        let test = checks
-            .proposed()
-            .iter()
+        let test = proposals(&checks)
+            .into_iter()
             .find(|proposal| proposal.title() == "run the tests")
             .expect("the test check");
         match test.reason() {
@@ -715,10 +871,9 @@ mod tests {
             (("pnpm-lock.yaml", PackageManager::Pnpm), "pnpm run build"),
             (("bun.lockb", PackageManager::Bun), "bun run build"),
         ] {
-            let checks = NodeChecks::of(&project(json!({ "build": "tsc -b" }), &[locked]));
-            let build = checks
-                .proposed()
-                .iter()
+            let checks = checks_of(&project(json!({ "build": "tsc -b" }), &[locked]));
+            let build = proposals(&checks)
+                .into_iter()
                 .find(|proposal| proposal.title() == "build the project")
                 .unwrap_or_else(|| panic!("no build check for {}", locked.0));
             match build.reason() {
@@ -731,12 +886,151 @@ mod tests {
     }
 
     #[test]
+    fn the_work_behind_a_check_is_the_typed_form_of_the_line_a_report_prints() {
+        // **The pairing `P18-T003` exists for, held over the whole matrix rather
+        // than over one example.** Every manager and all four roles, so both
+        // spellings npm has and the `run` the other three need are covered. The
+        // claim is that the program and the argument vector are the *same decision*
+        // as the rendered line: the discovery renders the line from that vector
+        // (`Package::command_for` is `invocation_for` joined with spaces), so a
+        // change to one that did not reach the other fails here rather than in a
+        // report nobody can execute.
+        for &manager in PackageManager::ALL {
+            let checks = checks_of(&project(
+                json!({
+                    "build": "tsc -b",
+                    "test": "vitest run",
+                    "lint": "eslint .",
+                    "typecheck": "tsc --noEmit",
+                }),
+                &[match manager {
+                    PackageManager::Npm => ("package-lock.json", PackageManager::Npm),
+                    PackageManager::Yarn => ("yarn.lock", PackageManager::Yarn),
+                    PackageManager::Pnpm => ("pnpm-lock.yaml", PackageManager::Pnpm),
+                    PackageManager::Bun => ("bun.lockb", PackageManager::Bun),
+                }],
+            ));
+
+            for role in [
+                ScriptRole::Build,
+                ScriptRole::Test,
+                ScriptRole::Lint,
+                ScriptRole::TypeCheck,
+            ] {
+                let work = work_for(&checks, &titled(role, MANIFEST));
+                let CheckOperation::Command(spec) = work.operation() else {
+                    panic!("{role:?} for {manager:?} is not work that runs a command");
+                };
+                let CheckReason::DeclaredCommand { command, .. } = work.proposal().reason() else {
+                    panic!("a declared script has a reason that is not a command");
+                };
+
+                // The program is the manager's own name -- `npm`, and on Windows a
+                // name with no extension. **Nothing appends `.cmd` here**: whether
+                // a name is startable is `ProgramPath`'s answer, and a builder that
+                // rewrote the name to make it so would be inventing the program it
+                // then starts.
+                assert_eq!(spec.program(), OsStr::new(manager.as_str()));
+                assert!(
+                    !spec.program().to_string_lossy().contains('.'),
+                    "{} was given an extension a check must not add",
+                    spec.program().to_string_lossy()
+                );
+
+                // The line a report prints is the vector, and this is the direction
+                // that matters: rendering the operation and comparing it with the
+                // reason is what would fail if either moved alone.
+                let rendered = std::iter::once(spec.program().to_string_lossy().into_owned())
+                    .chain(
+                        spec.arguments()
+                            .iter()
+                            .map(|argument| argument.to_string_lossy().into_owned()),
+                    )
+                    .collect::<Vec<String>>()
+                    .join(" ");
+                assert_eq!(&rendered, command, "for {manager:?} and {role:?}");
+
+                // And the vector says what the manager expects, which for npm is
+                // two different things: `npm test` is not `npm run test`.
+                let expected: Vec<&str> = match (manager, role) {
+                    (PackageManager::Npm, ScriptRole::Test) => {
+                        vec![ScriptRole::Test.conventional_name()]
+                    }
+                    _ => vec!["run", role.conventional_name()],
+                };
+                assert_eq!(
+                    spec.arguments().to_vec(),
+                    expected
+                        .iter()
+                        .copied()
+                        .map(OsString::from)
+                        .collect::<Vec<_>>(),
+                    "the arguments for {manager:?} and {role:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_members_check_runs_in_the_members_directory_and_the_roots_in_the_root() {
+        // **The fact ADR 0014 says a parsed display string cannot carry.** A
+        // member's check runs in the member's own directory, which appears nowhere
+        // in the command a report prints: `npm run build` and
+        // `npm run build in packages/web` are the same program in different places.
+        // The directory is derived from the component path the discovery holds as a
+        // value, and this is the test that says so.
+        let mut found = a_complete_project();
+        found.workspaces.patterns.push("packages/*".to_owned());
+        found
+            .workspaces
+            .members
+            .push(crate::discover::node::Member {
+                path: "packages/web".into(),
+                manifest: crate::discover::MemberManifest::Present,
+                package: Some(Box::new(package(
+                    json!({ "scripts": { "build": "vite build" } }),
+                ))),
+            });
+
+        let checks = checks_of(&found);
+        let mut seen: Vec<PathBuf> = Vec::new();
+        for (work, expected) in [
+            (work_for(&checks, "build the project"), root()),
+            (
+                work_for(&checks, "build the project in packages/web"),
+                root().join("packages").join("web"),
+            ),
+        ] {
+            let CheckOperation::Command(spec) = work.operation() else {
+                panic!("{} does not run a command", work.proposal().title());
+            };
+            assert!(
+                spec.working_directory().is_absolute(),
+                "{} would run somewhere relative to wherever SURE was started",
+                work.proposal().title()
+            );
+            assert_eq!(
+                spec.working_directory(),
+                expected,
+                "{}",
+                work.proposal().title()
+            );
+            seen.push(spec.working_directory().to_path_buf());
+        }
+        assert_ne!(
+            seen[0], seen[1],
+            "the root's check and the member's run in the same directory, so a \
+             member's command would be run against the root's manifest"
+        );
+    }
+
+    #[test]
     fn a_role_with_no_script_is_not_checked_rather_than_passed() {
-        let checks = NodeChecks::of(&project(
+        let checks = checks_of(&project(
             json!({ "build": "tsc -b" }),
             &[("yarn.lock", PackageManager::Yarn)],
         ));
-        assert_eq!(checks.proposed().len(), 1);
+        assert_eq!(proposals(&checks).len(), 1);
 
         let kinds: Vec<&MissingKind> = checks.missing().iter().map(MissingCommand::kind).collect();
         assert_eq!(
@@ -778,12 +1072,12 @@ mod tests {
         // against it. A test for a conjunction is worth exactly as much as the
         // case where the two conjuncts differ, and a project that declares
         // nothing is that case: no proposals, four gaps.
-        let checks = NodeChecks::of(&project(
+        let checks = checks_of(&project(
             json!({}),
             &[("package-lock.json", PackageManager::Npm)],
         ));
         assert!(
-            checks.proposed().is_empty(),
+            proposals(&checks).is_empty(),
             "the fixture declares a script"
         );
         assert_eq!(checks.missing().len(), 4);
@@ -800,7 +1094,7 @@ mod tests {
         // that is present with a value that is not a command, and a report that
         // showed it as a project with no test script would be describing a
         // broken manifest as a project that never wrote one.
-        let checks = NodeChecks::of(&project(
+        let checks = checks_of(&project(
             json!({ "build": "tsc -b", "test": ["jest"], "lint": null }),
             &[("package-lock.json", PackageManager::Npm)],
         ));
@@ -835,8 +1129,8 @@ mod tests {
         // away `disagreement`. This is the caller that must not.
         let scripts = json!({ "test": "jest" });
 
-        let nothing = NodeChecks::of(&project(scripts.clone(), &[]));
-        let two = NodeChecks::of(&project(
+        let nothing = checks_of(&project(scripts.clone(), &[]));
+        let two = checks_of(&project(
             scripts,
             &[
                 ("package-lock.json", PackageManager::Npm),
@@ -863,7 +1157,7 @@ mod tests {
         // And a script that is not declared is reported as that, whatever the
         // runner evidence says: the sentence a person reads should be about the
         // problem they act on.
-        let undeclared = NodeChecks::of(&project(json!({ "build": "tsc" }), &[]));
+        let undeclared = checks_of(&project(json!({ "build": "tsc" }), &[]));
         assert_eq!(
             gap_for(&undeclared, ScriptRole::Test),
             &MissingKind::NotDeclared,
@@ -899,13 +1193,12 @@ mod tests {
                 });
         }
 
-        let checks = NodeChecks::of(&found);
+        let checks = checks_of(&found);
         // Four for the root, four for `packages/web`, none for `packages/api`.
-        assert_eq!(checks.proposed().len() + checks.missing().len(), 8);
+        assert_eq!(proposals(&checks).len() + checks.missing().len(), 8);
 
-        let titles: Vec<&str> = checks
-            .proposed()
-            .iter()
+        let titles: Vec<&str> = proposals(&checks)
+            .into_iter()
             .map(CheckProposal::title)
             .chain(checks.missing().iter().map(MissingCommand::title))
             .collect();
@@ -921,9 +1214,8 @@ mod tests {
 
         // And the identities are distinct, because two of them describe the same
         // role in two directories.
-        let mut ids: Vec<&str> = checks
-            .proposed()
-            .iter()
+        let mut ids: Vec<&str> = proposals(&checks)
+            .into_iter()
             .map(|proposal| proposal.id().as_str())
             .chain(checks.missing().iter().map(|missing| missing.id().as_str()))
             .collect();
@@ -951,7 +1243,7 @@ mod tests {
                 tooling: Vec::new(),
                 typescript: Default::default(),
             };
-            let checks = NodeChecks::of(&project);
+            let checks = checks_of(&project);
             assert!(checks.is_empty(), "{state:?} produced {checks:?}");
             assert!(checks.not_checked(&FingerprintId::generate()).is_empty());
         }
@@ -963,7 +1255,7 @@ mod tests {
         // only an acceptable design while nothing is ever refused. This is the
         // test that would fail first if a proposal here lost its title, its
         // reason or its action.
-        let checks = NodeChecks::of(&a_complete_project());
+        let checks = checks_of(&a_complete_project());
         let mut builder = PlanBuilder::new(
             sure_domain::execution::ExecutionMode::HostConfirmed,
             sure_domain::execution::ExecutionPermissions {
@@ -975,14 +1267,14 @@ mod tests {
 
         assert!(builder.refused().is_empty(), "{:?}", builder.refused());
         let schedule = builder.build();
-        assert_eq!(schedule.len(), checks.proposed().len());
+        assert_eq!(schedule.len(), proposals(&checks).len());
         assert!(
             schedule.duplicates().is_empty(),
             "{:?}",
             schedule.duplicates()
         );
         assert_eq!(schedule.may_run().count(), schedule.len());
-        assert!(schedule.get(checks.proposed()[0].id()).is_some());
+        assert!(schedule.get(proposals(&checks)[0].id()).is_some());
     }
 
     #[test]
@@ -993,7 +1285,7 @@ mod tests {
         // gaps where a lesser design would have got three absent rows.
         let fingerprint = FingerprintId::generate();
         let results = |scripts: serde_json::Value| {
-            let checks = NodeChecks::of(&project(scripts, &[("yarn.lock", PackageManager::Yarn)]));
+            let checks = checks_of(&project(scripts, &[("yarn.lock", PackageManager::Yarn)]));
             assert_eq!(
                 checks.missing().len(),
                 checks.not_checked(&fingerprint).len()

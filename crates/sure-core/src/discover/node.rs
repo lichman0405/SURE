@@ -640,17 +640,44 @@ impl Package {
     /// command is a plan, and running it is a later step with its own
     /// authorisation.
     ///
+    /// **This is [`Self::invocation_for`] rendered**, and that is the only rule:
+    /// the line a report prints and the program a check would start are one
+    /// decision shown two ways, so neither can be changed without the other.
+    ///
     /// `None` when the project declared no script under that name, which is the
     /// same answer [`Self::script`] gives and for the same reason.
     #[must_use]
     pub fn command_for(&self, manager: PackageManager, role: ScriptRole) -> Option<String> {
+        let (manager, arguments) = self.invocation_for(manager, role)?;
+        Some(format!("{} {}", manager.as_str(), arguments.join(" ")))
+    }
+
+    /// The program and arguments a check would run for one conventional script.
+    ///
+    /// `("npm", ["test"])` for a `test` script and `("npm", ["run", "build"])`
+    /// for `build` — the two cases npm spells differently, kept apart as
+    /// arguments rather than as a string. **The vector is the executable half and
+    /// the string is the readable one**: `P18-T003` plans a declared check as
+    /// typed work, and a caller that took the rendered line and split it again
+    /// would be reconstructing this from the wrong direction. A script name with
+    /// a space in it is one argument here and stays one, whatever the rendering
+    /// looks like.
+    ///
+    /// `pub(crate)` rather than `pub`: its caller is the crate's own Node check
+    /// builder, and the public door for "what command would I run" is
+    /// [`Self::command_for`], which is this value and not a second rule.
+    #[must_use]
+    pub(crate) fn invocation_for(
+        &self,
+        manager: PackageManager,
+        role: ScriptRole,
+    ) -> Option<(PackageManager, Vec<String>)> {
         let script = self.script(role)?;
         Some(match (manager, role) {
             (PackageManager::Npm, ScriptRole::Test | ScriptRole::Start) => {
-                format!("npm {}", script.name)
+                (PackageManager::Npm, vec![script.name.clone()])
             }
-            (PackageManager::Npm, _) => format!("npm run {}", script.name),
-            (manager, _) => format!("{} run {}", manager.as_str(), script.name),
+            (manager, _) => (manager, vec!["run".to_owned(), script.name.clone()]),
         })
     }
 }

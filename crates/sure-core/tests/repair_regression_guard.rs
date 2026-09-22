@@ -23,6 +23,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sure_core::paths::CaseSensitivity;
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::recheck_lifecycle::{LifecycleInputs, reconcile};
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
@@ -85,6 +86,23 @@ fn repair_contract(recheck: Vec<CheckId>) -> RepairContract {
     }
 }
 
+/// The plan entry for a fixture proposal: since `P18-T003` a proposal **and** the
+/// operation beside it.
+///
+/// **A candidate observation, because that is the whole of what this fixture
+/// establishes.** Nothing here starts a process — the checks below are typed in by
+/// hand so that the rule they are about can be read from outside the module that
+/// implements it. The honest value is therefore *nothing has settled this check*,
+/// which maps to a warning and never to a pass, and never to a green.
+fn work(proposal: CheckProposal) -> PlannedWork {
+    PlannedWork::new(
+        proposal,
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
+    )
+}
+
 fn schedule_with(recheck: CheckId, regression: CheckId, affected: CheckId) -> CheckSchedule {
     let mut builder = PlanBuilder::new(
         ExecutionMode::HostConfirmed,
@@ -96,7 +114,7 @@ fn schedule_with(recheck: CheckId, regression: CheckId, affected: CheckId) -> Ch
 
     // The original re-check for the finding: did the provider get called?
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             recheck,
             "provider is called on send",
             Severity::MustFix,
@@ -106,12 +124,12 @@ fn schedule_with(recheck: CheckId, regression: CheckId, affected: CheckId) -> Ch
                 path: "src/email/send.rs".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
 
     // A check that overlaps the repair location: the send path itself.
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             affected,
             "send path behaves correctly",
             Severity::MustFix,
@@ -121,14 +139,14 @@ fn schedule_with(recheck: CheckId, regression: CheckId, affected: CheckId) -> Ch
                 path: "src/email/send.rs".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
 
     // A serious regression check: it runs project code but is about a different
     // module. A repair that only fixes the email path could break payment
     // processing if the shared HTTP client is changed carelessly.
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             regression,
             "payment provider is called on charge",
             Severity::MustFix,
@@ -138,7 +156,7 @@ fn schedule_with(recheck: CheckId, regression: CheckId, affected: CheckId) -> Ch
                 path: "src/payment/charge.rs".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
 
     builder.build()

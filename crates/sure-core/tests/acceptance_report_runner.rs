@@ -69,6 +69,7 @@ use sure_core::discover::node::{MANIFEST, NodeProject, ScriptRole};
 use sure_core::discover::{DiscoverOptions, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, content_fingerprint, project_fingerprint};
 use sure_core::paths::CaseSensitivity;
+use sure_core::planned_work::PlannedWork;
 use sure_core::process::{
     Cancellation, Environment, Limits, Outcome, ProcessRequest, Termination, run,
 };
@@ -1460,10 +1461,11 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         panic!("the Node report carried {:?} findings", report.findings);
     };
 
-    let checks = NodeChecks::of(node);
+    let checks = NodeChecks::of(node, copy.path());
     let proposed: Vec<&CheckProposal> = checks
-        .proposed()
+        .planned()
         .iter()
+        .map(PlannedWork::proposal)
         .filter(|proposal| {
             let manifest = declared_in(proposal);
             manifest == manifest_of(CHECKOUT) || manifest == manifest_of(BILLING)
@@ -1475,8 +1477,9 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         "the fixture's two members each declare one test script, so the checks layer proposes two \
          checks for them: {:?}",
         checks
-            .proposed()
+            .planned()
             .iter()
+            .map(PlannedWork::proposal)
             .map(|proposal| (declared_in(proposal), proposal.title().to_owned()))
             .collect::<Vec<_>>()
     );

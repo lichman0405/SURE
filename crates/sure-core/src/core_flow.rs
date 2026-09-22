@@ -638,6 +638,7 @@ mod tests {
     use crate::components::ComponentGraph;
     use crate::discover::DiscoverOptions;
     use crate::discover::Ecosystem;
+    use crate::planned_work::PlannedWork;
     use crate::schedule::PlanBuilder;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -988,8 +989,17 @@ steps:
                 connect_service: true,
             },
         );
+        // A step's proposal enters the plan paired with the placeholder
+        // operation `P18-T003` puts beside every check that is not a declared
+        // command: expanding a flow proves a candidate from a description and
+        // starts nothing. See `checks::nothing_observed_yet`.
         for proposal in proposals {
-            builder.propose(proposal).unwrap();
+            builder
+                .propose(PlannedWork::new(
+                    proposal,
+                    crate::checks::nothing_observed_yet(),
+                ))
+                .unwrap();
         }
 
         let schedule = builder.build();

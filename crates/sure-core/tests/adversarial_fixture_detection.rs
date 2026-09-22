@@ -178,6 +178,7 @@ use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_proj
 use sure_core::noop_heuristics::NoOpHeuristics;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome};
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::project_intent::explicit_goal;
 use sure_core::project_verdict::render_summary;
 use sure_core::recording_projection::{BuildTestKind, StandardProjection, project};
@@ -4588,8 +4589,16 @@ fn declared_mode(id: &str, name: &str, declared: &Value) -> (ExecutionMode, Exec
     (mode, granted)
 }
 
-/// One declared check, as the proposal the plan builder is handed.
-fn declared_proposal(id: &str, check: &Value) -> CheckProposal {
+/// One declared check, as the plan entry the plan builder is handed: since
+/// `P18-T003` a proposal **and** the operation beside it.
+///
+/// **A candidate observation, and the most this file can honestly supply.** The
+/// fixture declares checks as data and nothing here starts a process, so the only
+/// true thing to say about each of them at plan time is *nothing has settled this
+/// check* — a warning if a run ever reached it, never a pass. What is graded below
+/// is the plan's shape and the mode it ran under, not how a check is carried out;
+/// `P18-T004` replaces the placeholders on the product's own paths.
+fn declared_proposal(id: &str, check: &Value) -> PlannedWork {
     let declared_id = check["id"]
         .as_str()
         .unwrap_or_else(|| panic!("{id}: a declared check has no id"));
@@ -4617,18 +4626,23 @@ fn declared_proposal(id: &str, check: &Value) -> CheckProposal {
         .iter()
         .map(|action| from_wire(id, "an action", action))
         .collect();
-    CheckProposal::new(
-        check_id,
-        check["title"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{id}: a declared check has no title")),
-        severity,
-        check["critical"].as_bool().unwrap_or_else(|| {
-            panic!("{id}: a declared check does not say whether it is critical")
-        }),
-        evidence,
-        reason,
-        &actions,
+    PlannedWork::new(
+        CheckProposal::new(
+            check_id,
+            check["title"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: a declared check has no title")),
+            severity,
+            check["critical"].as_bool().unwrap_or_else(|| {
+                panic!("{id}: a declared check does not say whether it is critical")
+            }),
+            evidence,
+            reason,
+            &actions,
+        ),
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
     )
 }
 
@@ -6304,7 +6318,11 @@ fn severities_the_detector_produced(id: &str, row: &Value) -> Vec<Severity> {
             id,
             surface,
             row,
-            RustChecks::of(&rust_project_of(id)).proposed(),
+            &RustChecks::of(&rust_project_of(id), &fixture(id))
+                .planned()
+                .iter()
+                .map(|work| work.proposal().clone())
+                .collect::<Vec<_>>(),
         ),
         "external_service" => {
             let checks = ExternalServiceChecks::of(&discovery(id));

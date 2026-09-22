@@ -65,7 +65,8 @@ use sure_domain::vocabulary::SupportLevel;
 use super::pattern;
 use super::read::{self, Budget, Probe, ReadFile, UnreadReason};
 use super::{
-    DiscoverOptions, Ecosystem, EcosystemReport, Findings, MemberManifest, Source, Unread,
+    DiscoverOptions, Ecosystem, EcosystemReport, Findings, Invocation, MemberManifest, Source,
+    Unread,
 };
 use crate::scan::Scan;
 
@@ -1548,6 +1549,12 @@ impl ToolDeclarations {
 /// The command for one role, or `None` when nothing the project declared runs
 /// it.
 ///
+/// **The line a report prints, rendered from [`invocation_for`].** Since
+/// `P18-T003` this is one way of showing the plan rather than the plan itself,
+/// so that a check that is going to *start* something does not have to cut the
+/// string at its spaces to find the program. The two cannot come apart: this is
+/// [`Invocation::rendered`] and nothing else.
+///
 /// **Returned and never executed.** Choosing a command is a plan; running it is
 /// a later step with its own authorisation.
 fn command_for(
@@ -1555,6 +1562,40 @@ fn command_for(
     role: CommandRole,
     declared: &ToolDeclarations,
 ) -> Option<String> {
+    invocation_for_declared(project, role, declared).map(|invocation| invocation.rendered())
+}
+
+/// The plan behind [`command_for`]: which program, and with which arguments.
+///
+/// **The typed form exists where the knowledge is.** The program is `cargo` and
+/// the subcommands are the constants below, both chosen here because this is the
+/// module that read the manifest and the toolchain file and knows which roles
+/// this project has. See [`Invocation`] for why the program is a name and never
+/// a path: which `cargo` this machine would start is
+/// [`ProgramPath`](crate::planned_work::ProgramPath)'s answer, taken where the
+/// work runs, and a plan outlives one machine's path.
+///
+/// **Deliberately the same answer as [`command_for`]**, including for a role
+/// that is not planned: `None` here is `None` there, and every arm that returns
+/// a command returns one whose [`rendered`](Invocation::rendered) is the string
+/// `command_for` returns. A test sweeps every role and holds the two together.
+#[must_use]
+pub fn invocation_for(project: &RustProject, role: CommandRole) -> Option<Invocation> {
+    invocation_for_declared(project, role, &ToolDeclarations::of(project))
+}
+
+/// [`invocation_for`], with the declarations its caller has already read.
+///
+/// **Split out so that [`conventional_commands`] reads the project's tool
+/// declarations once** for all nine roles rather than nine times: reading them
+/// is what walks the manifest, the workspace and the toolchain file, and doing
+/// it per role would make the sweep at the end of `conventional_commands`
+/// quadratic in work nobody sees.
+fn invocation_for_declared(
+    project: &RustProject,
+    role: CommandRole,
+    declared: &ToolDeclarations,
+) -> Option<Invocation> {
     // A role is planned only where SURE read a manifest, because without one
     // there is nothing that says a `cargo` command would act on this project at
     // all. A virtual manifest passes this: a workspace SURE read is a workspace
@@ -1567,21 +1608,29 @@ fn command_for(
             // decision rather than a default: clippy without it does not lint
             // the test and example code, so the plan would report on a smaller
             // program than the one the project has.
-            Some("cargo clippy --all-targets".to_owned())
+            Some(Invocation::of("cargo", &["clippy", "--all-targets"]))
         }
-        CommandRole::Format if declared.declares("rustfmt") => Some("cargo fmt".to_owned()),
-        CommandRole::Build => Some("cargo build".to_owned()),
-        CommandRole::Test => Some("cargo test".to_owned()),
-        CommandRole::Check => Some("cargo check --all-targets".to_owned()),
-        CommandRole::Document => Some("cargo doc".to_owned()),
-        CommandRole::Clean => Some("cargo clean".to_owned()),
+        CommandRole::Format if declared.declares("rustfmt") => {
+            // `cargo fmt` and not `cargo fmt --check`, which is the form that
+            // changes nothing: this is the discovery's plan, and the *check* the
+            // formatter needs is this plan with one more argument. That argument
+            // belongs to the check, where `checks::rust` adds it, because a
+            // discovery that returned `--check` would be claiming the project's
+            // formatting is a discovery rather than a verdict.
+            Some(Invocation::of("cargo", &["fmt"]))
+        }
+        CommandRole::Build => Some(Invocation::of("cargo", &["build"])),
+        CommandRole::Test => Some(Invocation::of("cargo", &["test"])),
+        CommandRole::Check => Some(Invocation::of("cargo", &["check", "--all-targets"])),
+        CommandRole::Document => Some(Invocation::of("cargo", &["doc"])),
+        CommandRole::Clean => Some(Invocation::of("cargo", &["clean"])),
         // A program to run. `cargo run` needs a package, and a virtual manifest
         // has none, so this asks for both a package and a binary target: either
         // one missing means there is nothing to run.
         CommandRole::Run
             if project.package().is_some() && project.has_target(TargetKind::Binary) =>
         {
-            Some("cargo run".to_owned())
+            Some(Invocation::of("cargo", &["run"]))
         }
         // A benchmark to run. `cargo bench` with no bench target is a command
         // that succeeds and does nothing, which is the shape of answer this
@@ -1593,7 +1642,7 @@ fn command_for(
                     .next()
                     .is_some() =>
         {
-            Some("cargo bench".to_owned())
+            Some(Invocation::of("cargo", &["bench"]))
         }
         CommandRole::Lint | CommandRole::Format | CommandRole::Run | CommandRole::Bench => None,
     }

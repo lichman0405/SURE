@@ -65,6 +65,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sure_core::aggregation::{CriticalCheck, RunRefused, aggregate_run};
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::scan::{ScanOptions, scan};
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder, ScheduledCheck};
 use sure_domain::evidence::EvidenceClass;
@@ -164,7 +165,7 @@ fn propose(
     action: ActionKind,
 ) {
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             id,
             title,
             severity,
@@ -172,8 +173,26 @@ fn propose(
             EvidenceClass::DeterministicCheck,
             CheckReason::ProjectWide,
             &[action],
-        ))
+        )))
         .unwrap();
+}
+
+/// The plan entry for a proposal, since `P18-T003` a proposal plus its operation.
+///
+/// **A candidate observation, because that is the whole of what these fixtures
+/// establish.** Every check this file builds is built by hand and nothing here
+/// starts a process: the value is *nothing has settled this check*, which maps to
+/// a warning and never to a pass — the one answer that claims nothing. This file is
+/// about what a run's results aggregate to, not about how a check is carried out,
+/// so what it supplies beside the proposal is the most conservative thing it can
+/// honestly say; `P18-T004` replaces the placeholders on the product's own paths.
+fn work(proposal: CheckProposal) -> PlannedWork {
+    PlannedWork::new(
+        proposal,
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
+    )
 }
 
 /// The four checks every plan below is built from, in the order they are handed

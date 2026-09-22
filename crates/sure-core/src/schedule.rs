@@ -18,6 +18,28 @@
 //! decision. **P4-T001's acceptance is about the schedule**: *"Ordered plan
 //! includes reason, evidence class and execution requirements per check."*
 //!
+//! # The operation travels beside the proposal
+//!
+//! Since `P18-T003` a check is not only a thing to show: it carries the typed work
+//! it would perform. [`PlannedWork`] is one value holding both halves — the
+//! proposal a report reads, and a [`CheckOperation`] that is a program with its
+//! argument vector or evidence SURE has already gathered — and it is the only
+//! thing [`PlanBuilder::propose`] accepts.
+//!
+//! **The pair is made where the check is made**, by whoever knows the command, and
+//! this module never takes one half without the other. The alternative — a second
+//! list of operations keyed by identifier, filled by the same walk — is the defect
+//! `docs/adr/0014-planned-check-execution-contract.md` rejected: the two lists can
+//! disagree, and the disagreement is invisible, because it looks like a check that
+//! failed rather than a plan that was never complete. One field makes that
+//! disagreement unrepresentable rather than unlikely.
+//!
+//! Nothing about a proposal changed to make room for this. It stays what a report,
+//! a coverage summary and the consent prompt read, [`ScheduledCheck::proposal`] is
+//! still how they reach it, and the operation is reachable beside it through
+//! [`ScheduledCheck::operation`] by a caller that means to run the check rather
+//! than describe it.
+//!
 //! # What "ordered" has to mean
 //!
 //! Not "in the order the caller thought of them", which would make the plan a
@@ -90,7 +112,8 @@
 //! proposer landed, it did, and the list is where that arrival was recorded.
 //!
 //! **It does not run anything.** Nothing here builds a
-//! [`Command`](std::process::Command), and the checks a schedule admits are
+//! [`Command`](std::process::Command), and nothing here can start one: a schedule
+//! holds the operation a check would perform and the checks a schedule admits are
 //! admitted by [`Enforcement`](crate::enforce::Enforcement) afterwards — this
 //! module says what a check *would* need, and [`ExecutionDecision`] is [`decide`]'s
 //! answer rather than a second opinion about it. **It does not ask the user
@@ -113,6 +136,7 @@ use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::consent::PlannedCheck;
+use crate::planned_work::{CheckOperation, PlannedWork};
 
 /// Why a check is in the schedule.
 ///
@@ -660,9 +684,14 @@ impl CheckProposal {
 }
 
 /// One check placed in the schedule.
+///
+/// The entry holds the [`PlannedWork`] it was proposed as, and not a copy of the
+/// proposal beside a reference to an operation somewhere else: an entry that could
+/// name a check whose operation lived in a second list would be an entry that could
+/// disagree with itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledCheck {
-    proposal: CheckProposal,
+    work: PlannedWork,
     position: usize,
     decision: ExecutionDecision,
     blocked_by: Option<Permission>,
@@ -672,7 +701,20 @@ impl ScheduledCheck {
     /// The check, with its reason, evidence class and requirements.
     #[must_use]
     pub const fn proposal(&self) -> &CheckProposal {
-        &self.proposal
+        self.work.proposal()
+    }
+
+    /// The work this check would perform, or the evidence behind it.
+    ///
+    /// Read by a caller that means to run the check — the runner that
+    /// [`Enforcement`](crate::enforce::Enforcement) admits, or a report that says
+    /// what a check *would* do rather than what it found. **It is deliberately not
+    /// part of the proposal**: what a person reads and what a machine starts are
+    /// two halves of one value here, and a renderer that wanted the executable half
+    /// has to ask for it by name.
+    #[must_use]
+    pub const fn operation(&self) -> &CheckOperation {
+        self.work.operation()
     }
 
     /// Where the check sits in the schedule, counting from zero.
@@ -716,11 +758,12 @@ impl ScheduledCheck {
         if self.may_run() {
             return None;
         }
+        let proposal = self.proposal();
         Some(CheckResult::not_run(
-            self.proposal.id.clone(),
-            self.proposal.title.clone(),
-            self.proposal.severity,
-            self.proposal.critical,
+            proposal.id.clone(),
+            proposal.title.clone(),
+            proposal.severity,
+            proposal.critical,
             NotCheckedReason::ExecutionNotAuthorized,
             project_fingerprint.clone(),
         ))
@@ -729,11 +772,12 @@ impl ScheduledCheck {
     /// The sentence a report shows for this entry.
     #[must_use]
     pub fn plain_description(&self) -> String {
+        let proposal = self.proposal();
         let mut line = format!(
             "{} - {} ({})",
-            self.proposal.title,
-            self.proposal.reason.plain_description(),
-            self.proposal.evidence_class.as_str()
+            proposal.title,
+            proposal.reason.plain_description(),
+            proposal.evidence_class.as_str()
         );
         // Three outcomes rather than two, because "will not run" covers two
         // situations a reader acts on differently: one where granting a permission
@@ -799,7 +843,7 @@ impl CheckSchedule {
     pub fn get(&self, id: &CheckId) -> Option<&ScheduledCheck> {
         self.checks
             .iter()
-            .find(|scheduled| scheduled.proposal.id == *id)
+            .find(|scheduled| scheduled.proposal().id() == id)
     }
 
     /// The checks that would run, in plan order.
@@ -844,11 +888,12 @@ impl CheckSchedule {
         self.checks
             .iter()
             .map(|scheduled| {
+                let proposal = scheduled.proposal();
                 PlannedCheck::new(
-                    scheduled.proposal.id.clone(),
-                    scheduled.proposal.title.clone(),
-                    scheduled.proposal.severity,
-                    scheduled.proposal.critical,
+                    proposal.id.clone(),
+                    proposal.title.clone(),
+                    proposal.severity,
+                    proposal.critical,
                 )
             })
             .collect()
@@ -908,7 +953,7 @@ impl fmt::Display for ProposalRefused {
 
 impl std::error::Error for ProposalRefused {}
 
-/// Builds a [`CheckSchedule`] out of proposals.
+/// Builds a [`CheckSchedule`] out of planned work.
 ///
 /// See the module documentation for the ordering rules. Held mutably rather than
 /// chained, because a builder that returns `Self` makes the *order the proposals
@@ -918,7 +963,7 @@ impl std::error::Error for ProposalRefused {}
 pub struct PlanBuilder {
     mode: ExecutionMode,
     permissions: ExecutionPermissions,
-    proposals: Vec<CheckProposal>,
+    work: Vec<PlannedWork>,
     refused: Vec<ProposalRefused>,
 }
 
@@ -929,33 +974,45 @@ impl PlanBuilder {
         Self {
             mode,
             permissions,
-            proposals: Vec::new(),
+            work: Vec::new(),
             refused: Vec::new(),
         }
     }
 
-    /// Hand in a check.
+    /// Hand in a check, with the work it would perform.
     ///
     /// Returns `Err` with the reason when the proposal cannot be part of a plan;
     /// see [`ProposalRefused`]. **A refused proposal is remembered rather than
     /// discarded**, so a caller that ignores the return value still finds out:
     /// [`Self::refused`] lists them, and that is where a caller checks that what it
-    /// proposed is what the plan holds.
-    pub fn propose(&mut self, proposal: CheckProposal) -> Result<(), ProposalRefused> {
-        let refusal = if proposal.title.trim().is_empty() {
-            Some(ProposalRefused::NoTitle {
-                id: proposal.id.clone(),
-            })
-        } else if !proposal.reason.names_something() {
-            Some(ProposalRefused::EmptyReason {
-                id: proposal.id.clone(),
-            })
-        } else if proposal.requirements.is_empty() {
-            Some(ProposalRefused::NoActions {
-                id: proposal.id.clone(),
-            })
-        } else {
-            None
+    /// proposed is what the plan holds. The operation comes back with the refusal,
+    /// in the caller's hands, because a builder that kept it would have to invent a
+    /// check to attach it to.
+    ///
+    /// **The proposal is validated exactly as it was before** — a title to show, a
+    /// reason that names something, at least one action — and the operation is not
+    /// examined here at all. A [`CheckOperation`] is a value a proposer either could
+    /// build or could not, and a proposer that cannot build one does not propose the
+    /// check rather than proposing one with nothing behind it; this module does not
+    /// have a second opinion about what a check may carry.
+    pub fn propose(&mut self, work: PlannedWork) -> Result<(), ProposalRefused> {
+        let refusal = {
+            let proposal = work.proposal();
+            if proposal.title.trim().is_empty() {
+                Some(ProposalRefused::NoTitle {
+                    id: proposal.id.clone(),
+                })
+            } else if !proposal.reason.names_something() {
+                Some(ProposalRefused::EmptyReason {
+                    id: proposal.id.clone(),
+                })
+            } else if proposal.requirements.is_empty() {
+                Some(ProposalRefused::NoActions {
+                    id: proposal.id.clone(),
+                })
+            } else {
+                None
+            }
         };
 
         match refusal {
@@ -964,7 +1021,7 @@ impl PlanBuilder {
                 Err(refusal)
             }
             None => {
-                self.proposals.push(proposal);
+                self.work.push(work);
                 Ok(())
             }
         }
@@ -984,40 +1041,56 @@ impl PlanBuilder {
     /// The schedule, ordered and with every decision made.
     #[must_use]
     pub fn build(self) -> CheckSchedule {
-        let mut proposals = self.proposals;
+        let mut work = self.work;
         // Rule three has to be inside the comparison rather than a second pass, so
         // that the identifier is the *last* word: a `sort_by_key` on the first two
         // rules would leave equal checks in submission order, which is exactly the
         // order this module promises not to depend on.
-        proposals.sort_by(|left, right| {
-            ordering_key(left)
-                .cmp(&ordering_key(right))
-                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        work.sort_by(|left, right| {
+            ordering_key(left.proposal())
+                .cmp(&ordering_key(right.proposal()))
+                .then_with(|| {
+                    left.proposal()
+                        .id()
+                        .as_str()
+                        .cmp(right.proposal().id().as_str())
+                })
         });
 
         let mut seen: Vec<CheckId> = Vec::new();
         let mut duplicates: Vec<CheckId> = Vec::new();
         let mut checks: Vec<ScheduledCheck> = Vec::new();
 
-        for proposal in proposals {
-            if seen.contains(&proposal.id) {
-                // The first occurrence keeps its place and the second is reported.
-                // Keeping the second would move the check to wherever the duplicate
-                // happened to sort, and keeping both would produce two results for
-                // one check.
-                if !duplicates.contains(&proposal.id) {
-                    duplicates.push(proposal.id.clone());
+        // The whole `PlannedWork` is moved into the entry, so the operation that was
+        // proposed is the operation the entry carries -- there is no second lookup
+        // and no way for the two to come from different iterations.
+        for entry in work {
+            {
+                let proposal = entry.proposal();
+                if seen.contains(proposal.id()) {
+                    // The first occurrence keeps its place and the second is
+                    // reported. Keeping the second would move the check to wherever
+                    // the duplicate happened to sort, and keeping both would produce
+                    // two results for one check.
+                    if !duplicates.contains(proposal.id()) {
+                        duplicates.push(proposal.id().clone());
+                    }
+                    continue;
                 }
-                continue;
+                seen.push(proposal.id().clone());
             }
-            seen.push(proposal.id.clone());
-            let decision = proposal.requirements.decision(self.mode, &self.permissions);
-            let blocked_by = proposal.requirements.blocked_by(&self.permissions);
+            let (decision, blocked_by) = {
+                let proposal = entry.proposal();
+                (
+                    proposal.requirements.decision(self.mode, &self.permissions),
+                    proposal.requirements.blocked_by(&self.permissions),
+                )
+            };
             checks.push(ScheduledCheck {
                 position: checks.len(),
                 decision,
                 blocked_by,
-                proposal,
+                work: entry,
             });
         }
 
@@ -1047,7 +1120,14 @@ fn ordering_key(proposal: &CheckProposal) -> (bool, std::cmp::Reverse<u8>) {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
     use sure_domain::status::CheckStatus;
+
+    use crate::planned_work::{CommandSpec, PrecomputedEvidence};
+    use crate::process::{Environment, Limits};
 
     fn a_proposal(
         title: &str,
@@ -1074,6 +1154,24 @@ mod tests {
                 ..ExecutionPermissions::inspect_only()
             },
         )
+    }
+
+    /// Hand a proposal to a builder, with an operation behind it.
+    ///
+    /// These tests are about the plan's ordering and its decisions rather than about
+    /// what a check would run, so the operation they carry is the one that settles
+    /// nothing: a candidate, which the vocabulary maps to a warning at most and never
+    /// to a pass, and which is honest about a fixture that read no project. **That
+    /// the operation a check was proposed with is the one its entry carries** is a
+    /// separate claim, and `an_entry_carries_the_operation_it_was_proposed_with`
+    /// holds it.
+    fn proposed(builder: &mut PlanBuilder, proposal: CheckProposal) -> Result<(), ProposalRefused> {
+        builder.propose(PlannedWork::new(
+            proposal,
+            CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+                "the fixture observed nothing",
+            )),
+        ))
     }
 
     fn titles(schedule: &CheckSchedule) -> Vec<&str> {
@@ -1160,22 +1258,26 @@ mod tests {
     #[test]
     fn a_check_that_runs_nothing_comes_before_one_that_does() {
         let mut builder = a_builder();
-        builder
-            .propose(a_proposal(
+        proposed(
+            &mut builder,
+            a_proposal(
                 "runs the tests",
                 Severity::MustFix,
                 EvidenceClass::DeterministicCheck,
                 &[ActionKind::RunTests],
-            ))
-            .unwrap();
-        builder
-            .propose(a_proposal(
+            ),
+        )
+        .unwrap();
+        proposed(
+            &mut builder,
+            a_proposal(
                 "reads the manifest",
                 Severity::Note,
                 EvidenceClass::ObservedFact,
                 &[ActionKind::ReadMetadata],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
 
         let schedule = builder.build();
         // The more serious check runs project code and comes second anyway: rule
@@ -1204,14 +1306,16 @@ mod tests {
             ("can fix later", Severity::CanFixLater),
             ("should fix first", Severity::ShouldFixFirst),
         ] {
-            builder
-                .propose(a_proposal(
+            proposed(
+                &mut builder,
+                a_proposal(
                     title,
                     severity,
                     EvidenceClass::ObservedFact,
                     &[ActionKind::ReadFile],
-                ))
-                .unwrap();
+                ),
+            )
+            .unwrap();
         }
 
         assert_eq!(
@@ -1274,7 +1378,7 @@ mod tests {
         for order in permutations_of(5) {
             let mut builder = a_builder();
             for index in &order {
-                builder.propose(proposals[*index].clone()).unwrap();
+                proposed(&mut builder, proposals[*index].clone()).unwrap();
             }
             let schedule = builder.build();
             let seen: Vec<CheckId> = schedule
@@ -1346,12 +1450,12 @@ mod tests {
         };
 
         let mut one = a_builder();
-        one.propose(proposal_for(low.clone(), "low")).unwrap();
-        one.propose(proposal_for(high.clone(), "high")).unwrap();
+        proposed(&mut one, proposal_for(low.clone(), "low")).unwrap();
+        proposed(&mut one, proposal_for(high.clone(), "high")).unwrap();
 
         let mut other = a_builder();
-        other.propose(proposal_for(high.clone(), "high")).unwrap();
-        other.propose(proposal_for(low.clone(), "low")).unwrap();
+        proposed(&mut other, proposal_for(high.clone(), "high")).unwrap();
+        proposed(&mut other, proposal_for(low.clone(), "low")).unwrap();
 
         // The two proposals differ only in their identifiers, so the titles are
         // the wrong thing to compare -- the order of the ids is the property.
@@ -1390,7 +1494,7 @@ mod tests {
         let schedule_under = |mode: ExecutionMode, permissions: ExecutionPermissions| {
             let mut builder = PlanBuilder::new(mode, permissions);
             for proposal in &proposals {
-                builder.propose(proposal.clone()).unwrap();
+                proposed(&mut builder, proposal.clone()).unwrap();
             }
             builder.build()
         };
@@ -1443,8 +1547,9 @@ mod tests {
         // The acceptance sentence, checked over a plan rather than over one
         // proposal: every entry, not the first one.
         let mut builder = a_builder();
-        builder
-            .propose(CheckProposal::new(
+        proposed(
+            &mut builder,
+            CheckProposal::new(
                 CheckId::generate(),
                 "the lockfile matches the manifest",
                 Severity::MustFix,
@@ -1454,10 +1559,12 @@ mod tests {
                     path: "package-lock.json".to_owned(),
                 },
                 &[ActionKind::ReadFile, ActionKind::ReadMetadata],
-            ))
-            .unwrap();
-        builder
-            .propose(CheckProposal::new(
+            ),
+        )
+        .unwrap();
+        proposed(
+            &mut builder,
+            CheckProposal::new(
                 CheckId::generate(),
                 "the declared tests pass",
                 Severity::MustFix,
@@ -1468,8 +1575,9 @@ mod tests {
                     command: "npm test".to_owned(),
                 },
                 &[ActionKind::RunTests],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
 
         let schedule = builder.build();
         assert!(!schedule.is_empty());
@@ -1504,8 +1612,9 @@ mod tests {
             ExecutionMode::InspectOnly,
             ExecutionPermissions::inspect_only(),
         );
-        builder
-            .propose(CheckProposal::new(
+        proposed(
+            &mut builder,
+            CheckProposal::new(
                 CheckId::generate(),
                 "the declared tests pass",
                 Severity::MustFix,
@@ -1516,8 +1625,9 @@ mod tests {
                 EvidenceClass::DeterministicCheck,
                 CheckReason::ProjectWide,
                 &[ActionKind::RunTests],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
 
         let schedule = builder.build();
         assert_eq!(
@@ -1559,14 +1669,23 @@ mod tests {
         // not a pass, but it does not on its own forbid a green verdict. The two
         // results differ in exactly that one field.
         let ordinary = ScheduledCheck {
-            proposal: CheckProposal::new(
-                CheckId::generate(),
-                "a nice-to-have",
-                Severity::Note,
-                false,
-                EvidenceClass::DeterministicCheck,
-                CheckReason::ProjectWide,
-                &[ActionKind::RunTests],
+            work: PlannedWork::new(
+                CheckProposal::new(
+                    CheckId::generate(),
+                    "a nice-to-have",
+                    Severity::Note,
+                    false,
+                    EvidenceClass::DeterministicCheck,
+                    CheckReason::ProjectWide,
+                    &[ActionKind::RunTests],
+                ),
+                // The check is denied before it runs, so its work is never
+                // reached; the value is here because a scheduled check carries
+                // one by construction, and there is no shape in which it does
+                // not.
+                CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+                    "this fixture never runs its checks",
+                )),
             ),
             position: 0,
             decision: ExecutionDecision::Denied,
@@ -1588,14 +1707,16 @@ mod tests {
     #[test]
     fn a_check_that_would_run_has_no_not_run_result_at_all() {
         let mut builder = a_builder();
-        builder
-            .propose(a_proposal(
+        proposed(
+            &mut builder,
+            a_proposal(
                 "reads the manifest",
                 Severity::Note,
                 EvidenceClass::ObservedFact,
                 &[ActionKind::ReadMetadata],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
         let schedule = builder.build();
         let scheduled = &schedule.checks()[0];
         assert!(scheduled.may_run());
@@ -1623,14 +1744,16 @@ mod tests {
                 ..ExecutionPermissions::inspect_only()
             },
         );
-        builder
-            .propose(a_proposal(
+        proposed(
+            &mut builder,
+            a_proposal(
                 "runs the declared tests",
                 Severity::MustFix,
                 EvidenceClass::ObservedFact,
                 &[ActionKind::RunTests],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
         let schedule = builder.build();
         let scheduled = &schedule.checks()[0];
 
@@ -1793,15 +1916,13 @@ mod tests {
         };
         let under = |mode: ExecutionMode, permissions: ExecutionPermissions| {
             let mut builder = PlanBuilder::new(mode, permissions);
-            builder
-                .propose(proposal("reads", &[ActionKind::ReadFile]))
-                .unwrap();
-            builder
-                .propose(proposal("tests", &[ActionKind::RunTests]))
-                .unwrap();
-            builder
-                .propose(proposal("installs", &[ActionKind::InstallDependencies]))
-                .unwrap();
+            proposed(&mut builder, proposal("reads", &[ActionKind::ReadFile])).unwrap();
+            proposed(&mut builder, proposal("tests", &[ActionKind::RunTests])).unwrap();
+            proposed(
+                &mut builder,
+                proposal("installs", &[ActionKind::InstallDependencies]),
+            )
+            .unwrap();
             builder.build()
         };
         let line_for = |schedule: &CheckSchedule, title: &str| {
@@ -1999,7 +2120,7 @@ mod tests {
             &[ActionKind::ReadFile],
         );
         assert!(matches!(
-            builder.propose(no_title),
+            proposed(&mut builder, no_title),
             Err(ProposalRefused::NoTitle { .. })
         ));
 
@@ -2015,7 +2136,7 @@ mod tests {
             &[ActionKind::ReadFile],
         );
         assert!(matches!(
-            builder.propose(empty_reason),
+            proposed(&mut builder, empty_reason),
             Err(ProposalRefused::EmptyReason { .. })
         ));
 
@@ -2029,7 +2150,7 @@ mod tests {
             &[],
         );
         assert!(matches!(
-            builder.propose(no_actions),
+            proposed(&mut builder, no_actions),
             Err(ProposalRefused::NoActions { .. })
         ));
 
@@ -2085,12 +2206,13 @@ mod tests {
         );
 
         let mut builder = a_builder();
-        builder.propose(proposal.clone()).unwrap();
+        proposed(&mut builder, proposal.clone()).unwrap();
         // The same identifier with a different title, which is the case that
         // matters: deduplicating by value would keep both and produce two results
         // for one check.
-        builder
-            .propose(CheckProposal::new(
+        proposed(
+            &mut builder,
+            CheckProposal::new(
                 id.clone(),
                 "a different title entirely",
                 Severity::MustFix,
@@ -2098,8 +2220,9 @@ mod tests {
                 EvidenceClass::DeterministicCheck,
                 CheckReason::ProjectWide,
                 &[ActionKind::RunTests],
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
 
         let schedule = builder.build();
         assert_eq!(schedule.len(), 1);
@@ -2115,7 +2238,7 @@ mod tests {
         // is per check rather than per extra proposal.
         let mut builder = a_builder();
         for _ in 0..3 {
-            builder.propose(proposal.clone()).unwrap();
+            proposed(&mut builder, proposal.clone()).unwrap();
         }
         let schedule = builder.build();
         assert_eq!(schedule.len(), 1);
@@ -2133,14 +2256,16 @@ mod tests {
             ("a", Severity::MustFix, ActionKind::ReadFile),
             ("b", Severity::MustFix, ActionKind::Build),
         ] {
-            builder
-                .propose(a_proposal(
+            proposed(
+                &mut builder,
+                a_proposal(
                     title,
                     severity,
                     EvidenceClass::DeterministicCheck,
                     &[action],
-                ))
-                .unwrap();
+                ),
+            )
+            .unwrap();
         }
 
         let schedule = builder.build();
@@ -2255,5 +2380,110 @@ mod tests {
                 "{reason:?} should not count as naming something"
             );
         }
+    }
+
+    /// The pairing rule, and the failure it exists to make impossible.
+    ///
+    /// A schedule that kept proposals in one list and operations in another could be
+    /// built with the two in different orders, or with an entry missing from one of
+    /// them, and nothing about the plan would look wrong — the operation would simply
+    /// belong to a different check, or to none. Here the work a check was proposed
+    /// with is read back off the entry the plan put it in, after the ordering rules
+    /// and the duplicate rule have each had their chance to move things.
+    #[test]
+    fn an_entry_carries_the_operation_it_was_proposed_with() {
+        let mut builder = a_builder();
+        // Three checks proposed in an order the plan changes, each with a command
+        // whose argument names its own check, so a pairing that came from position
+        // or from arrival order would be visible rather than merely wrong.
+        for (title, severity, action) in [
+            (
+                "runs the declared tests",
+                Severity::MustFix,
+                ActionKind::RunTests,
+            ),
+            ("reads the manifest", Severity::Note, ActionKind::ReadFile),
+            (
+                "builds the project",
+                Severity::ShouldFixFirst,
+                ActionKind::Build,
+            ),
+        ] {
+            let proposal = a_proposal(
+                title,
+                severity,
+                EvidenceClass::DeterministicCheck,
+                &[action],
+            );
+            builder
+                .propose(PlannedWork::new(
+                    proposal,
+                    CheckOperation::Command(
+                        CommandSpec::new(
+                            "the-check",
+                            PathBuf::from(r"C:\project"),
+                            Environment::inherited(),
+                            Limits::new(Duration::from_secs(60), 4096, 4096),
+                        )
+                        .with_arguments(["runs", title]),
+                    ),
+                ))
+                .unwrap();
+        }
+
+        let schedule = builder.build();
+        assert_eq!(schedule.len(), 3);
+        assert_ne!(
+            titles(&schedule),
+            [
+                "runs the declared tests",
+                "reads the manifest",
+                "builds the project"
+            ],
+            "the plan did not reorder anything, so this test would pass even if it \
+             paired by arrival order"
+        );
+
+        for scheduled in schedule.checks() {
+            let CheckOperation::Command(spec) = scheduled.operation() else {
+                panic!(
+                    "{} was proposed with a command and its entry carries {}",
+                    scheduled.proposal().title(),
+                    scheduled.operation().plain_description()
+                );
+            };
+            assert!(scheduled.operation().starts_a_process());
+            let expected = vec![
+                OsString::from("runs"),
+                OsString::from(scheduled.proposal().title()),
+            ];
+            assert_eq!(
+                spec.arguments(),
+                expected.as_slice(),
+                "the entry's operation belongs to a different check"
+            );
+        }
+
+        // And the pairing is not a property of command work only: a check a detector
+        // already answered for carries that observation, and the plan can say so.
+        let mut builder = a_builder();
+        builder
+            .propose(PlannedWork::new(
+                a_proposal(
+                    "no TODO markers in the shipped sources",
+                    Severity::Note,
+                    EvidenceClass::Inference,
+                    &[ActionKind::ReadFile],
+                ),
+                CheckOperation::Precomputed(PrecomputedEvidence::candidate("two markers")),
+            ))
+            .unwrap();
+        let schedule = builder.build();
+        let entry = &schedule.checks()[0];
+        assert!(!entry.operation().starts_a_process());
+        assert_eq!(
+            entry.operation().plain_description(),
+            "already observed while the plan was made"
+        );
     }
 }

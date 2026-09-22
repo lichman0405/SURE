@@ -197,6 +197,96 @@ impl Source {
     }
 }
 
+/// One command a discovery planned, as a program and the arguments it is started
+/// with.
+///
+/// **A value rather than a rendered line, and that is `P18-T003`'s whole point.** A
+/// caller that means to *start* something cannot use a string: cutting
+/// `uv run pytest` at its spaces is parsing a display string into a program, and a
+/// space in a path or a tool name is enough to make that the wrong program. So each
+/// discovery that knows a command turns it into this, and the line a report carries
+/// is [`Self::rendered`] — derived here, from the same two fields, so that a plan
+/// and the sentence describing it cannot come apart.
+///
+/// **The program is a name and never a path.** `npm`, `uv` and `cargo` are what a
+/// person types. Which executable those name on this machine — and whether this
+/// machine can start them at all — is a question for the machine the work runs on,
+/// so it is `planned_work::ProgramPath`'s answer and [`crate::checks`]'s callers
+/// take it there. Resolving it here would resolve it against whatever machine the
+/// *plan* was made on.
+///
+/// Shared between the ecosystems rather than re-declared in each: `npm run build`,
+/// `uv run pytest` and `cargo clippy --all-targets` are the same three facts about
+/// three different projects, and three copies of one type is three places for the
+/// rendering rule to drift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invocation {
+    /// The program's name, as a command line spells it.
+    program: String,
+    /// The arguments, one per argument, in the order they are passed.
+    arguments: Vec<String>,
+}
+
+impl Invocation {
+    /// A program and its arguments.
+    ///
+    /// The arguments are taken as string slices because every caller has constants
+    /// or already-owned names, and the whole of the type's rule is that an argument
+    /// with a space in it stays *one* argument: nothing here splits anything.
+    #[must_use]
+    pub fn of(program: &str, arguments: &[&str]) -> Self {
+        Self {
+            program: program.to_owned(),
+            arguments: arguments
+                .iter()
+                .map(|argument| (*argument).to_owned())
+                .collect(),
+        }
+    }
+
+    /// The program's name, as a command line spells it.
+    ///
+    /// **A name, not a path, and not necessarily startable.** See the type's own
+    /// documentation.
+    #[must_use]
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    /// The arguments, one per argument.
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+
+    /// The same plan with one more argument.
+    ///
+    /// **An argument appended to the plan, not to its rendering.** `checks::rust`
+    /// needs `cargo fmt --check` where the discovery plans `cargo fmt`, and doing
+    /// that by formatting a string and splitting it again is the parse this type
+    /// exists to make unnecessary.
+    #[must_use]
+    pub fn with_argument(&self, argument: &str) -> Self {
+        let mut arguments = self.arguments.clone();
+        arguments.push(argument.to_owned());
+        Self {
+            program: self.program.clone(),
+            arguments,
+        }
+    }
+
+    /// The line a person reads and a report prints.
+    ///
+    /// A space and the vector joined, which is how every command these modules have
+    /// ever produced was spelled: none of the programs, tools or subcommands in one
+    /// contains a space. **The string is a rendering and nothing reads it back into
+    /// a program** — the vector is what a runner is handed.
+    #[must_use]
+    pub fn rendered(&self) -> String {
+        format!("{} {}", self.program, self.arguments.join(" "))
+    }
+}
+
 /// Whether a workspace member has a manifest of its own.
 ///
 /// Answered without reading it, so this is about what is at the name rather than

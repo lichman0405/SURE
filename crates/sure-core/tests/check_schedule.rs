@@ -64,6 +64,7 @@
 
 use sure_core::consent::PermissionPlan;
 use sure_core::enforce::Enforcement;
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::scan::{ScanOptions, scan};
 use sure_core::schedule::{
     CheckProposal, CheckReason, CheckSchedule, ExecutionRequirements, PlanBuilder, ScheduledCheck,
@@ -387,6 +388,21 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          proposer arriving in the module that reads results, and this entry is not \
          cover for it**",
     ),
+    (
+        "src/planned_work.rs",
+        "`P18-T002`, and the sixth entry here that decides nothing: it is the value \
+         that carries a check's proposal beside the operation that would carry the \
+         check out, so a caller that has one of the two cannot have the other \
+         missing. It names `CheckProposal` because it *holds* one — a field, a \
+         constructor and an accessor — and every proposal that reaches it was built \
+         by a module in the entries above and is stored and handed back unchanged. \
+         **A line here that built a proposal of its own, rather than storing and \
+         returning its caller's, would be a proposer**, and this entry is not cover \
+         for it. The entry was missing until `P18-T003` ran this rule against the \
+         file: the task that added it ran the module's own tests and not this one, \
+         so the rule was red for a whole task and nothing read it — which is the \
+         failure mode the list is written down to make visible",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could
@@ -501,6 +517,25 @@ fn proposal(
     )
 }
 
+/// The plan entry for a proposal, since `P18-T003` a proposal plus its operation.
+///
+/// **A candidate observation, because that is the whole of what these fixtures
+/// establish.** Every check below is built by hand and nothing here starts a
+/// process or reads a file: the value is *nothing has settled this check*, which
+/// maps to a warning and never to a pass — the one answer that claims nothing.
+/// These files are about ordering, decisions and enforcement rather than about
+/// operations, so what they supply beside the proposal is the most conservative
+/// thing they can honestly say, and `P18-T004` is the task that replaces the
+/// placeholders on the product's own paths with real observations.
+fn work(proposal: CheckProposal) -> PlannedWork {
+    PlannedWork::new(
+        proposal,
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
+    )
+}
+
 fn titles(schedule: &CheckSchedule) -> Vec<&str> {
     schedule
         .checks()
@@ -527,7 +562,7 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
     // rather than about code that can reach private fields.
     let mut builder = an_executing_builder();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the lockfile matches the manifest",
             Severity::MustFix,
@@ -537,10 +572,10 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 path: "package-lock.json".to_owned(),
             },
             &[ActionKind::ReadFile, ActionKind::ReadMetadata],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the declared tests pass",
             Severity::MustFix,
@@ -551,10 +586,10 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 command: "npm test".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "nothing surprising in the layout",
             Severity::CanFixLater,
@@ -565,7 +600,7 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 stack: "node".to_owned(),
             },
             &[ActionKind::ListDirectory],
-        ))
+        )))
         .unwrap();
 
     let schedule = builder.build();
@@ -683,7 +718,7 @@ fn the_order_is_the_one_the_rules_describe_whatever_order_the_checks_arrived_in(
     for order in permutations(4) {
         let mut builder = an_executing_builder();
         for index in &order {
-            builder.propose(proposals[*index].clone()).unwrap();
+            builder.propose(work(proposals[*index].clone())).unwrap();
         }
         let built_schedule = builder.build();
         assert_eq!(
@@ -740,7 +775,7 @@ fn a_check_that_cannot_run_stays_in_the_plan_and_can_only_be_skipped() {
         ExecutionPermissions::inspect_only(),
     );
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the declared tests pass",
             Severity::MustFix,
@@ -751,16 +786,16 @@ fn a_check_that_cannot_run_stays_in_the_plan_and_can_only_be_skipped() {
                 command: "npm test".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(proposal(
+        .propose(work(proposal(
             CheckId::generate(),
             "the manifest is readable",
             Severity::CanFixLater,
             EvidenceClass::ObservedFact,
             &[ActionKind::ReadMetadata],
-        ))
+        )))
         .unwrap();
 
     let schedule = builder.build();
@@ -838,13 +873,13 @@ fn the_schedule_hands_enforcement_its_checks_in_the_same_order() {
         ("lists", Severity::MustFix, ActionKind::ListDirectory),
     ] {
         builder
-            .propose(proposal(
+            .propose(work(proposal(
                 CheckId::generate(),
                 title,
                 severity,
                 EvidenceClass::DeterministicCheck,
                 &[action],
-            ))
+            )))
             .unwrap();
     }
 

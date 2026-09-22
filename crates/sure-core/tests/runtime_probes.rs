@@ -67,6 +67,7 @@ use sure_core::components::ComponentGraph;
 use sure_core::config::{CheckPreference, ChecksConfig, ScopeReduction};
 use sure_core::discover::node::MANIFEST;
 use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, discover};
+use sure_core::planned_work::PlannedWork;
 use sure_core::runtime_probes::{
     NotPlanned, NotPlannedBecause, PlanRefused, ProbeKind, ProbePlan, RuntimeProbe,
 };
@@ -722,9 +723,10 @@ fn a_component_nothing_starts_is_a_gap_and_not_a_missing_row() {
     // `packages/api` has a `build` script and no way to start: the two roles are
     // different questions, and the gap is about starting.
     assert!(
-        NodeChecks::of(&fixture.node())
-            .proposed()
+        NodeChecks::of(&fixture.node(), &fixture.project)
+            .planned()
             .iter()
+            .map(PlannedWork::proposal)
             .any(|proposal| proposal.title() == "build the project in packages/api"),
         "the fixture's build script is not a declared check, so the gap above is \
          not evidence that starting and checking are different questions"

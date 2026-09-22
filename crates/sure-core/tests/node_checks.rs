@@ -47,7 +47,8 @@ use sure_core::checks::MissingKind;
 use sure_core::checks::node::NodeChecks;
 use sure_core::discover::node::{MANIFEST, ScriptRole};
 use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, discover};
-use sure_core::schedule::{CheckReason, CheckSchedule, PlanBuilder};
+use sure_core::planned_work::PlannedWork;
+use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_domain::execution::{ActionKind, ExecutionDecision, ExecutionMode, ExecutionPermissions};
 use sure_domain::ids::FingerprintId;
 use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
@@ -177,15 +178,24 @@ fn host_confirmed() -> ExecutionPermissions {
     }
 }
 
+/// The proposals alone, for the assertions that are about a proposal.
+///
+/// Since `P18-T003` a check enters the plan as one value holding its proposal and
+/// the operation that would carry it out, so a reader that wants the proposal asks
+/// the value for it rather than reading a second list that could be paired wrong.
+fn proposals(checks: &NodeChecks) -> Vec<&CheckProposal> {
+    checks.planned().iter().map(PlannedWork::proposal).collect()
+}
+
 /// Every title either list accounts for, sorted.
 ///
 /// The cover statement, in one function: a role that appears in neither list is a
 /// role the report says nothing about.
 fn titles(checks: &NodeChecks) -> Vec<String> {
     let mut titles: Vec<String> = checks
-        .proposed()
+        .planned()
         .iter()
-        .map(|proposal| proposal.title().to_owned())
+        .map(|work| work.proposal().title().to_owned())
         .chain(
             checks
                 .missing()
@@ -231,8 +241,8 @@ fn a_declared_check_runs_only_under_a_mode_that_allows_it() {
     );
     fixture.write("package-lock.json", "{}\n");
 
-    let checks = NodeChecks::of(&fixture.node());
-    assert_eq!(checks.proposed().len(), 2, "build and test are declared");
+    let checks = NodeChecks::of(&fixture.node(), fixture.path());
+    assert_eq!(proposals(&checks).len(), 2, "build and test are declared");
 
     // One: the permission is not granted, so `decide` answers `Denied` before the
     // mode is consulted at all.
@@ -241,7 +251,7 @@ fn a_declared_check_runs_only_under_a_mode_that_allows_it() {
         ExecutionMode::InspectOnly,
         ExecutionPermissions::inspect_only(),
     );
-    assert_eq!(denied.len(), checks.proposed().len());
+    assert_eq!(denied.len(), proposals(&checks).len());
     assert_eq!(denied.may_run().count(), 0);
     assert_eq!(denied.blocked().count(), denied.len());
     for entry in denied.checks() {
@@ -348,14 +358,14 @@ fn every_role_the_acceptance_names_is_either_a_check_or_a_skipped_result() {
     );
     fixture.write("pnpm-lock.yaml", "");
 
-    let checks = NodeChecks::of(&fixture.node());
+    let checks = NodeChecks::of(&fixture.node(), fixture.path());
     assert_eq!(
         titles(&checks),
         the_four_titles(),
         "a role the acceptance names is in neither the plan nor the gaps"
     );
 
-    assert_eq!(checks.proposed().len(), 1, "only build has a command");
+    assert_eq!(proposals(&checks).len(), 1, "only build has a command");
     let results = checks.not_checked(&FingerprintId::generate());
     assert_eq!(results.len(), 3);
     for result in &results {
@@ -414,7 +424,7 @@ fn a_project_that_declares_nothing_is_not_a_project_that_fails() {
     fixture.write(MANIFEST, r#"{"name":"bare","scripts":{"build":"tsc -b"}}"#);
     fixture.write("package-lock.json", "{}\n");
 
-    let checks = NodeChecks::of(&fixture.node());
+    let checks = NodeChecks::of(&fixture.node(), fixture.path());
     assert_eq!(gap(&checks, ScriptRole::Test), &MissingKind::NotDeclared);
 
     let results = checks.not_checked(&FingerprintId::generate());
@@ -439,10 +449,9 @@ fn the_reason_names_the_command_sure_would_run_and_not_the_script_text() {
     );
     fixture.write("yarn.lock", "");
 
-    let checks = NodeChecks::of(&fixture.node());
-    let build = checks
-        .proposed()
-        .iter()
+    let checks = NodeChecks::of(&fixture.node(), fixture.path());
+    let build = proposals(&checks)
+        .into_iter()
         .find(|proposal| proposal.title() == ScriptRole::Build.plain_description())
         .expect("build is declared, so it is checked");
 
@@ -517,8 +526,8 @@ fn the_manifest_path_is_the_one_discovery_reads_and_the_one_a_check_names() {
 
     // And the check layer's component is that same path, so a result can be
     // joined to the file it is about.
-    let checks = NodeChecks::of(&project);
-    match checks.proposed()[0].reason() {
+    let checks = NodeChecks::of(&project, fixture.path());
+    match proposals(&checks)[0].reason() {
         CheckReason::DeclaredCommand { declared_in, .. } => {
             assert_eq!(declared_in, MANIFEST);
             assert!(
@@ -543,12 +552,12 @@ fn a_manifest_sure_did_not_read_is_not_a_manifest_that_declares_nothing() {
     // would be four false statements about the project.
     let broken = Fixture::new("broken-manifest");
     broken.write(MANIFEST, "{ this is not json");
-    let broken = broken.node();
+    let broken_project = broken.node();
     assert!(
-        broken.package().is_none(),
+        broken_project.package().is_none(),
         "the fixture's manifest is not JSON and discovery read it anyway"
     );
-    let checks = NodeChecks::of(&broken);
+    let checks = NodeChecks::of(&broken_project, broken.path());
     assert!(
         checks.is_empty(),
         "a manifest SURE could not read produced checks: {checks:?}"
@@ -559,9 +568,9 @@ fn a_manifest_sure_did_not_read_is_not_a_manifest_that_declares_nothing() {
     // cannot read, which is the same answer for a different reason.
     let no_manifest = Fixture::new("no-manifest");
     no_manifest.write("package-lock.json", "{}\n");
-    let no_manifest = no_manifest.node();
-    assert!(no_manifest.package().is_none());
-    assert!(NodeChecks::of(&no_manifest).is_empty());
+    let no_manifest_project = no_manifest.node();
+    assert!(no_manifest_project.package().is_none());
+    assert!(NodeChecks::of(&no_manifest_project, no_manifest.path()).is_empty());
 
     // And the control: the same project with the same lockfile *and* a readable
     // manifest does produce gaps, so the two assertions above are about the
@@ -569,9 +578,9 @@ fn a_manifest_sure_did_not_read_is_not_a_manifest_that_declares_nothing() {
     let control = Fixture::new("control");
     control.write("package-lock.json", "{}\n");
     control.write(MANIFEST, r#"{"name":"control"}"#);
-    let control = NodeChecks::of(&control.node());
-    assert_eq!(control.missing().len(), 4);
-    assert!(control.proposed().is_empty());
+    let control_checks = NodeChecks::of(&control.node(), control.path());
+    assert_eq!(control_checks.missing().len(), 4);
+    assert!(control_checks.planned().is_empty());
 }
 
 #[test]
@@ -591,7 +600,7 @@ fn a_workspace_member_is_checked_under_its_own_identifier_and_its_own_title() {
     );
     fixture.write("pnpm-lock.yaml", "");
 
-    let checks = NodeChecks::of(&fixture.node());
+    let checks = NodeChecks::of(&fixture.node(), fixture.path());
     let titles = titles(&checks);
     assert!(
         titles.contains(&ScriptRole::Build.plain_description().to_owned()),
@@ -615,9 +624,9 @@ fn a_workspace_member_is_checked_under_its_own_identifier_and_its_own_title() {
     // Every identifier is distinct, which is the property that keeps a member's
     // check from being dropped as a duplicate of the root's.
     let mut ids: Vec<&str> = checks
-        .proposed()
+        .planned()
         .iter()
-        .map(|proposal| proposal.id().as_str())
+        .map(|work| work.proposal().id().as_str())
         .chain(checks.missing().iter().map(|missing| missing.id().as_str()))
         .collect();
     let total = ids.len();
@@ -633,7 +642,7 @@ fn a_workspace_member_is_checked_under_its_own_identifier_and_its_own_title() {
     // And the plan holds every one of them, with nothing refused and nothing
     // merged away.
     let planned = plan(&checks, ExecutionMode::HostConfirmed, host_confirmed());
-    assert_eq!(planned.len(), checks.proposed().len());
+    assert_eq!(planned.len(), checks.planned().len());
     assert!(
         planned.duplicates().is_empty(),
         "{:?}",
@@ -662,9 +671,9 @@ fn the_same_project_is_checked_under_the_same_identifiers_every_time() {
 
     let identities = |checks: &NodeChecks| -> Vec<String> {
         let mut ids: Vec<String> = checks
-            .proposed()
+            .planned()
             .iter()
-            .map(|proposal| proposal.id().as_str().to_owned())
+            .map(|work| work.proposal().id().as_str().to_owned())
             .chain(
                 checks
                     .missing()
@@ -676,8 +685,8 @@ fn the_same_project_is_checked_under_the_same_identifiers_every_time() {
         ids
     };
 
-    let first = identities(&NodeChecks::of(&fixture.node()));
-    let second = identities(&NodeChecks::of(&fixture.node()));
+    let first = identities(&NodeChecks::of(&fixture.node(), fixture.path()));
+    let second = identities(&NodeChecks::of(&fixture.node(), fixture.path()));
     assert_eq!(first, second, "an unchanged project was named two ways");
     assert_eq!(first.len(), 8);
     for id in &first {
@@ -702,7 +711,7 @@ fn the_same_project_is_checked_under_the_same_identifiers_every_time() {
         "packages/web/package.json",
         r#"{"name":"web","scripts":{"lint":"biome check ."}}"#,
     );
-    let third = identities(&NodeChecks::of(&fixture.node()));
+    let third = identities(&NodeChecks::of(&fixture.node(), fixture.path()));
     assert_eq!(
         first, third,
         "a script's *command* changed and the check's identity moved with it; the \

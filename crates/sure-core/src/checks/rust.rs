@@ -21,7 +21,7 @@
 //! disk afterwards. Evidence from that run cannot be bound to the current state,
 //! because by the time the run ends there is no state it is still true of. The
 //! read-only form is the same tool's own `--check` flag, and it is what
-//! [`format_command`] builds; the reason it is built here rather than read out of
+//! [`check_invocation`] adds; the reason it is added here rather than read out of
 //! the discovery is that function's own.
 //!
 //! That is where this module parts company with [`super::node`] and
@@ -92,6 +92,36 @@
 //! **It is not the plan.** No check here has been ordered, deduplicated or gated by a
 //! mode; that is [`crate::schedule`]'s work and `tests/rust_checks.rs` is where the
 //! two are put together.
+//!
+//! # A check is planned as work, and not only as a line
+//!
+//! Since `P18-T003` every check here is a proposal **and the operation that would
+//! carry it out** ([`PlannedWork`](crate::planned_work::PlannedWork)): the program is
+//! `cargo`, the arguments are the discovery's own subcommand, and the directory is the
+//! project root.
+//!
+//! **The rendered line stays a rendering.** [`CheckReason::DeclaredCommand`] still
+//! carries `cargo test`, because that is what a report prints and what a person is
+//! being asked to allow — and nothing reads it back into a program. The line and the
+//! vector are one value seen twice: both come from the discovery's
+//! [`invocation_for`](crate::discover::rust::invocation_for), which is also what
+//! [`command_for`](crate::discover::rust::RustProject::conventional_commands) renders,
+//! so a check cannot be shown one command and started with another.
+//!
+//! **The program's name is not completed for the platform.** `cargo` is a name and not
+//! a path, and nothing here appends `.exe` to it or wraps it in `cmd.exe /c`: whether a
+//! name is startable is
+//! [`ProgramPath`](crate::planned_work::ProgramPath)'s answer, taken where the work
+//! runs, and constructing an interpreter is the thing ADR 0014 says SURE must not do.
+//!
+//! **`--check` is an argument here and not in the discovery**, which is the same split
+//! the paragraph above the table describes, seen from the operation's side: the
+//! discovery answers *what command formats this project* and this module answers *is
+//! that a question or an edit*, so the flag is added to the discovery's own argument
+//! vector — [`Invocation::with_argument`](crate::discover::Invocation::with_argument) —
+//! and never to a string cut apart to find the program again.
+
+use std::path::Path;
 
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
@@ -99,10 +129,12 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::severity::Severity;
 use sure_domain::status::CheckResult;
 
-use crate::discover::rust::{CommandRole, MANIFEST, RustProject, ToolchainState};
+use crate::discover::Invocation;
+use crate::discover::rust::{CommandRole, MANIFEST, RustProject, ToolchainState, invocation_for};
+use crate::planned_work::PlannedWork;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
-use super::{MissingCommand, MissingKind, check_id};
+use super::{MissingCommand, MissingKind, check_id, command_operation};
 
 /// What SURE proposes for one role.
 ///
@@ -206,7 +238,7 @@ const CHECKS: &[(CommandRole, RoleCheck)] = &[
 /// fmt` rewrites every file it disagrees with; `cargo fmt --check` writes nothing and
 /// exits non-zero when it disagrees. A check is a question, so the second is what SURE
 /// runs, and the reason it matters here rather than in the discovery is
-/// [`format_command`]'s.
+/// [`check_invocation`]'s.
 const FORMAT_CHECK_FLAG: &str = "--check";
 
 /// What SURE would check in a Rust project, and what it could not.
@@ -215,7 +247,7 @@ const FORMAT_CHECK_FLAG: &str = "--check";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustChecks {
     component: Option<String>,
-    proposed: Vec<CheckProposal>,
+    proposed: Vec<PlannedWork>,
     missing: Vec<MissingCommand>,
 }
 
@@ -229,8 +261,17 @@ impl RustChecks {
     /// about a manifest that could not be read: four "you declare nothing" rows for a
     /// file SURE never opened would be four false statements about the project, and the
     /// unread manifest is already a value in the discovery result.
+    ///
+    /// **`root` is the project root, and it is a parameter rather than a field of the
+    /// discovery result** because every check here is planned as typed work and
+    /// [`CommandSpec`](crate::planned_work::CommandSpec) requires an absolute working
+    /// directory, while a discovery result carries paths relative to whatever it was
+    /// read from. The scan refuses a root that is not absolute (`scan::open_root`), so
+    /// the directory handed to a [`CommandSpec`](crate::planned_work::CommandSpec) is
+    /// absolute whenever the discovery is a value at all — which is what makes it a
+    /// value a runner could be given rather than a path that happens to look right.
     #[must_use]
-    pub fn of(project: &RustProject) -> Self {
+    pub fn of(project: &RustProject, root: &Path) -> Self {
         let mut checks = Self {
             component: component(project),
             proposed: Vec::new(),
@@ -241,20 +282,19 @@ impl RustChecks {
             return checks;
         };
 
-        let commands = project.conventional_commands();
-
         for &(role, check) in CHECKS {
             let id = check_id(&component, &format!("rust{}", role.as_str()));
             let title = titled(role);
-            // The discovery's own row, found by role rather than by position, so that
-            // a role added to `CommandRole::ALL` cannot shift this by one and hand
-            // every check its neighbour's evidence.
-            let planned = commands
-                .iter()
-                .find(|row| row.role == role)
-                .and_then(|row| row.command.as_deref());
 
-            match format_command(role, planned) {
+            // **The plan, asked for once**, and both the line the reason carries and
+            // the operation beside it are derived from it: `invocation_for` is what
+            // the discovery's `command_for` renders, so the row a report prints and
+            // the program a runner would start cannot come from two decisions. The
+            // role is the key rather than the discovery's rendered string, for the
+            // reason [`super::node`] gives: cutting a command line at its spaces is
+            // parsing a display into a program, and a space in a path is enough to
+            // make that the wrong program.
+            match check_invocation(role, invocation_for(project, role)) {
                 // **No command, and why is [`gap_kind`]'s question.** The two roles
                 // that can reach here are the two whose tools are separate installs.
                 None => checks.missing.push(MissingCommand::new(
@@ -265,20 +305,36 @@ impl RustChecks {
                     check.critical,
                     gap_kind(project),
                 )),
-                Some(command) => checks.proposed.push(CheckProposal::new(
-                    id,
-                    title,
-                    check.severity,
-                    check.critical,
-                    // The same answer the other two proposers give, and for the same
-                    // reason: a declared command watched for what it does is
-                    // deterministic, and the same project state gives the same answer.
-                    EvidenceClass::DeterministicCheck,
-                    CheckReason::DeclaredCommand {
-                        declared_in: component.clone(),
-                        command,
-                    },
-                    &[check.action],
+                Some(invocation) => checks.proposed.push(PlannedWork::new(
+                    CheckProposal::new(
+                        id,
+                        title,
+                        check.severity,
+                        check.critical,
+                        // The same answer the other two proposers give, and for the same
+                        // reason: a declared command watched for what it does is
+                        // deterministic, and the same project state gives the same answer.
+                        EvidenceClass::DeterministicCheck,
+                        CheckReason::DeclaredCommand {
+                            declared_in: component.clone(),
+                            // The rendered line, and only the rendered line: it is what
+                            // a report prints, and the program that would run is the
+                            // `CommandSpec` beside it. Nothing reads this string back
+                            // into a program -- ADR 0014 rejected exactly that, and the
+                            // pairing is what makes it unnecessary.
+                            command: invocation.rendered(),
+                        },
+                        &[check.action],
+                    ),
+                    command_operation(
+                        invocation.program(),
+                        root,
+                        &invocation
+                            .arguments()
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                    ),
                 )),
             }
         }
@@ -312,8 +368,13 @@ impl RustChecks {
     /// **No particular order is the honest description**: [`PlanBuilder`] sorts them,
     /// and a caller that read an order out of this list would be depending on the order
     /// of [`CHECKS`], which is the acceptance's rather than the project's.
+    ///
+    /// Each value is a proposal **with the work that would carry it out** — the
+    /// program, its arguments and the directory, as typed fields. A caller that wants a
+    /// proposal alone asks a value in this list for one; there is no second list,
+    /// because a pair kept in two places can be put together wrong.
     #[must_use]
-    pub fn proposed(&self) -> &[CheckProposal] {
+    pub fn planned(&self) -> &[PlannedWork] {
         &self.proposed
     }
 
@@ -366,12 +427,16 @@ impl RustChecks {
     /// module builds can be refused in the first place: every proposal has a title, a
     /// reason naming a file and a command, and exactly one action, and
     /// `nothing_this_module_builds_is_refused` holds that rather than this sentence.
+    ///
+    /// **The work is handed over with the proposal, not beside it.** A check enters the
+    /// plan as one value carrying both, so a schedule cannot hold a proposal whose
+    /// operation stayed behind in this module — see [`PlanBuilder::propose`].
     pub fn add_to(&self, builder: &mut PlanBuilder) {
-        for proposal in &self.proposed {
+        for work in &self.proposed {
             // The `Err` is the refusal, and it is not dropped: `propose` has already
             // pushed it onto the builder's own list by the time this returns it, which
             // is the contract that function documents.
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            if let Err(refusal) = builder.propose(work.clone()) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"
@@ -408,12 +473,12 @@ fn component(project: &RustProject) -> Option<String> {
     project.manifest.manifest().map(|_| MANIFEST.to_owned())
 }
 
-/// The command for a role as a *check*, which is not always as the discovery planned
+/// The plan for a role as a *check*, which is not always as the discovery planned
 /// it.
 ///
 /// # Why this exists for one role out of four
 ///
-/// For `check`, `clippy` and `test` this is the discovery's string unchanged, and the
+/// For `check`, `clippy` and `test` this is the discovery's value unchanged, and the
 /// function is an identity on three of its four inputs. The fourth is
 /// [`Format`](CommandRole::Format), and this is the whole reason it is a function
 /// rather than a field read.
@@ -426,22 +491,31 @@ fn component(project: &RustProject) -> Option<String> {
 /// Both are true, and the second is not the discovery's to decide: a plan is allowed to
 /// contain a command that writes, and a check is not.
 ///
-/// **One flag, appended to the discovery's own string rather than replacing it.** SURE
-/// does not choose the program (`cargo`) or the verb (`fmt`) — those come from the row
-/// — and `a_format_check_is_the_discoverys_command_with_one_flag` holds the two
-/// together so that a change to the discovery's answer moves this one with it instead
-/// of leaving a stale copy behind. Composing a whole command here would be the second
-/// answer this module refuses to have.
-fn format_command(role: CommandRole, planned: Option<&str>) -> Option<String> {
-    let command = planned?;
+/// **One argument appended to the discovery's own plan rather than a command composed
+/// here.** SURE does not choose the program (`cargo`) or the verb (`fmt`) — those come
+/// from the discovery's [`Invocation`] — and
+/// [`with_argument`](Invocation::with_argument) adds `--check` to the end of the vector
+/// that plan already is.
+/// `a_format_check_is_the_discoverys_command_with_one_flag` holds the two together, so
+/// that a change to the discovery's answer moves this one with it instead of leaving a
+/// stale copy behind. Composing a whole command here would be the second answer this
+/// module refuses to have.
+///
+/// **This is also where the flag cannot become a parsing problem.** It is pushed onto a
+/// vector, so the discovery's program stays the first element and its arguments stay in
+/// their order; an earlier shape appended it to the rendered line, which was only ever
+/// safe because nothing read the line back — and nothing does, which is why the reason
+/// still carries the rendered form and the operation carries this one.
+fn check_invocation(role: CommandRole, planned: Option<Invocation>) -> Option<Invocation> {
+    let invocation = planned?;
     match role {
         // `cargo fmt` rewrites the source, and a check that rewrites the source
         // invalidates its own evidence: the fingerprint it would be bound to is the
         // state before the run, and after the run that state is gone. So the check is
         // the read-only form, which is the same tool's own flag and is what a Rust CI
         // job runs.
-        CommandRole::Format => Some(format!("{command} {FORMAT_CHECK_FLAG}")),
-        _ => Some(command.to_owned()),
+        CommandRole::Format => Some(invocation.with_argument(FORMAT_CHECK_FLAG)),
+        _ => Some(invocation),
     }
 }
 
@@ -492,7 +566,7 @@ fn gap_kind(project: &RustProject) -> MissingKind {
 /// directory would be noise. Rust needs no suffix for a second reason as well — the
 /// commands are workspace-wide, so there is genuinely one of each.
 ///
-/// **`Format` is the exception, and it is [`format_command`]'s consequence.**
+/// **`Format` is the exception, and it is [`check_invocation`]'s consequence.**
 /// [`CommandRole::plain_name`] answers *"rewrite the source to a style"*, which is what
 /// `cargo fmt` does and is the opposite of what this check does: the title is what a
 /// person reads before allowing the check to run, and a title that said SURE will
@@ -512,11 +586,45 @@ mod tests {
     use super::*;
     use crate::discover::UnreadReason;
     use crate::discover::rust::{Manifest, ManifestState, PackageSection, Toolchain, Workspaces};
+    use crate::planned_work::CheckOperation;
+    use std::ffi::{OsStr, OsString};
+    use std::path::PathBuf;
     use sure_domain::evidence::{
         AnchorSubject, EvidenceAnchor, Freshness, StalenessReason, freshness,
     };
     use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
     use sure_domain::status::{CheckStatus, NotCheckedReason};
+
+    /// The root these fixtures are read from.
+    ///
+    /// **A directory and not a manifest path**, because that is what a check's
+    /// working directory is: the project root, for a project whose manifest is at
+    /// the top of it. Written with a space so that a path assembled by pasting
+    /// strings together has somewhere to go wrong — the Windows discipline this
+    /// repository holds to — and absolute, because
+    /// [`CommandSpec`](crate::planned_work::CommandSpec) refuses anything else.
+    fn root() -> PathBuf {
+        PathBuf::from(r"C:\projects\my crate")
+    }
+
+    /// The checks SURE would plan for this project, read from [`root`].
+    fn checks_of(project: &RustProject) -> RustChecks {
+        RustChecks::of(project, &root())
+    }
+
+    /// The proposals alone, for the assertions that are about a proposal.
+    fn proposals(checks: &RustChecks) -> Vec<&CheckProposal> {
+        checks.planned().iter().map(PlannedWork::proposal).collect()
+    }
+
+    /// The work behind one role's check, by the title a person reads.
+    fn work_for(checks: &RustChecks, role: CommandRole) -> &PlannedWork {
+        checks
+            .planned()
+            .iter()
+            .find(|work| work.proposal().title() == titled(role))
+            .unwrap_or_else(|| panic!("{role:?} was not proposed: {:?}", checks.missing()))
+    }
 
     /// A project whose root `Cargo.toml` SURE read, with these declarations.
     ///
@@ -612,17 +720,10 @@ mod tests {
 
     /// The command a role's proposal carries, or a panic naming the gap.
     fn command_of(checks: &RustChecks, role: CommandRole) -> String {
-        checks
-            .proposed()
-            .iter()
-            .find(|proposal| proposal.title() == titled(role))
-            .map_or_else(
-                || panic!("{role:?} has no command: {:?}", checks.missing()),
-                |proposal| match proposal.reason() {
-                    CheckReason::DeclaredCommand { command, .. } => command.clone(),
-                    other => panic!("the {role:?} check's reason is {other:?}"),
-                },
-            )
+        match work_for(checks, role).proposal().reason() {
+            CheckReason::DeclaredCommand { command, .. } => command.clone(),
+            other => panic!("the {role:?} check's reason is {other:?}"),
+        }
     }
 
     /// The gap for one role, by the title a missing command carries.
@@ -732,39 +833,63 @@ mod tests {
     #[test]
     fn a_format_check_is_the_discoverys_command_with_one_flag() {
         // **The rewrite, held as a relation rather than as a string.** The point of
-        // composing `--check` here rather than writing the whole command out is that the
+        // appending `--check` here rather than writing the whole command out is that the
         // program and the verb stay the discovery's; a test that compared against the
-        // literal `"cargo fmt --check"` would pass just as well if this module had
-        // started inventing its own commands.
-        for planned in ["cargo fmt", "cargo +nightly fmt"] {
-            let composed = format_command(CommandRole::Format, Some(planned))
-                .unwrap_or_else(|| panic!("{planned} is a command"));
-            assert!(
-                composed.starts_with(planned),
-                "{composed} is not {planned} with something added"
+        // literal `cargo fmt --check` would pass just as well if this module had started
+        // inventing its own commands. Since `P18-T003` the relation is held over the
+        // typed plans — program, arguments — rather than over rendered lines, which is
+        // strictly more: the flag is the last *argument* rather than a suffix.
+        for planned in [
+            Invocation::of("cargo", &["fmt"]),
+            Invocation::of("cargo", &["+nightly", "fmt"]),
+        ] {
+            let composed = check_invocation(CommandRole::Format, Some(planned.clone()))
+                .unwrap_or_else(|| panic!("{planned:?} is a plan"));
+
+            // The program is the discovery's and the arguments are the discovery's,
+            // unchanged and in order, with one more on the end.
+            assert_eq!(composed.program(), planned.program(), "{planned:?}");
+            assert_eq!(
+                composed.arguments().split_at(planned.arguments().len()).0,
+                planned.arguments(),
+                "{composed:?} is not {planned:?} with something added"
             );
-            assert!(
-                composed.ends_with(FORMAT_CHECK_FLAG),
-                "the formatting check writes the source tree: {composed}"
+            assert_eq!(
+                composed.arguments().len(),
+                planned.arguments().len() + 1,
+                "{composed:?} is not {planned:?} with one argument added"
+            );
+            assert_eq!(
+                composed.arguments().last().map(String::as_str),
+                Some(FORMAT_CHECK_FLAG),
+                "the formatting check writes the source tree: {composed:?}"
             );
             assert_ne!(
                 composed, planned,
                 "the check is the form that rewrites every file it disagrees with"
             );
+
+            // And the line a report prints is that vector rendered, so the flag is in
+            // the sentence a person consents to as well as in the work.
+            assert!(
+                composed.rendered().ends_with(FORMAT_CHECK_FLAG),
+                "{composed:?}"
+            );
         }
 
         // The other three are the discovery's answer unchanged, written out so that
         // format's special case cannot quietly spread to its neighbours.
+        let something = Invocation::of("cargo", &["something"]);
         for role in [CommandRole::Check, CommandRole::Lint, CommandRole::Test] {
             assert_eq!(
-                format_command(role, Some("cargo something")).as_deref(),
-                Some("cargo something"),
+                check_invocation(role, Some(something.clone())),
+                Some(something.clone()),
                 "{role:?} must run what the discovery planned"
             );
         }
 
         // And a role with no command has no command, whatever the flag would be.
-        assert_eq!(format_command(CommandRole::Format, None), None);
+        assert_eq!(check_invocation(CommandRole::Format, None), None);
     }
 
     #[test]
@@ -794,10 +919,9 @@ mod tests {
 
         // The whole thing over a real proposal, because the two halves are only
         // together once `of` has run.
-        let checks = RustChecks::of(&complete_project());
-        let proposal = checks
-            .proposed()
-            .iter()
+        let checks = checks_of(&complete_project());
+        let proposal = proposals(&checks)
+            .into_iter()
             .find(|proposal| *proposal.id() == check_id(MANIFEST, "rustformat"))
             .expect("a project with a rustfmt config gets a format check");
         assert_eq!(proposal.title(), titled(CommandRole::Format));
@@ -820,9 +944,9 @@ mod tests {
         // command is written out because each one is a decision: `cargo fmt` is the
         // discovery's and gets a flag, `--all-targets` on clippy and check is the
         // discovery's own and must survive, and `cargo test` is unchanged.
-        let checks = RustChecks::of(&complete_project());
+        let checks = checks_of(&complete_project());
         assert!(checks.missing().is_empty(), "{:?}", checks.missing());
-        assert_eq!(checks.proposed().len(), 4);
+        assert_eq!(checks.planned().len(), 4);
         assert!(!checks.is_empty());
         assert_eq!(checks.component(), Some(MANIFEST));
 
@@ -845,7 +969,7 @@ mod tests {
         // result is compared against the run before it, and an identity that moved with
         // the *plan* rather than the project would make every comparison a difference.
         let mut ids = Vec::new();
-        for proposal in checks.proposed() {
+        for proposal in proposals(&checks) {
             assert_eq!(proposal.evidence_class(), EvidenceClass::DeterministicCheck);
             assert_eq!(proposal.requirements().actions().len(), 1);
             match proposal.reason() {
@@ -860,8 +984,7 @@ mod tests {
             }
             ids.push(proposal.id().as_str().to_owned());
         }
-        let again: Vec<String> = RustChecks::of(&complete_project())
-            .proposed()
+        let again: Vec<String> = proposals(&checks_of(&complete_project()))
             .iter()
             .map(|proposal| proposal.id().as_str().to_owned())
             .collect();
@@ -885,9 +1008,9 @@ mod tests {
         // project that names `clippy` and `rustfmt` as toolchain components and has no
         // configuration file for either is a project that asked for both, and the
         // discovery is where that was decided.
-        let checks = RustChecks::of(&pinned_project());
+        let checks = checks_of(&pinned_project());
         assert!(checks.missing().is_empty(), "{:?}", checks.missing());
-        assert_eq!(checks.proposed().len(), 4);
+        assert_eq!(checks.planned().len(), 4);
         assert_eq!(
             command_of(&checks, CommandRole::Lint),
             "cargo clippy --all-targets"
@@ -905,8 +1028,8 @@ mod tests {
         // with a readable manifest has them; `clippy` and `rustfmt` are separate
         // installs, so a project that never named one gets a sentence rather than a
         // check.
-        let checks = RustChecks::of(&bare_project());
-        assert_eq!(checks.proposed().len(), 2);
+        let checks = checks_of(&bare_project());
+        assert_eq!(checks.planned().len(), 2);
         assert_eq!(checks.missing().len(), 2);
         assert_eq!(
             command_of(&checks, CommandRole::Check),
@@ -925,7 +1048,7 @@ mod tests {
         // And it is not empty, which is the whole of the accessor's second half: a
         // caller reading "empty" as "nothing was proposed" would print a report silent
         // about both of these gaps.
-        assert!(checks.proposed().len() < CHECKS.len());
+        assert!(checks.planned().len() < CHECKS.len());
         assert!(!checks.is_empty());
 
         // Neither of these is a defect either, which is the other side of the split: a
@@ -949,7 +1072,7 @@ mod tests {
         // a project whose toolchain file SURE could not parse is a project SURE cannot
         // say asked for nothing. Reporting it as "you declare no linter" would be a
         // claim about a file made from a failure to read it.
-        let checks = RustChecks::of(&unread_toolchain());
+        let checks = checks_of(&unread_toolchain());
         for role in [CommandRole::Format, CommandRole::Lint] {
             assert_eq!(
                 gap_for(&checks, role),
@@ -1005,10 +1128,10 @@ mod tests {
                 ..bare_project()
             },
         ] {
-            let checks = RustChecks::of(&project);
+            let checks = checks_of(&project);
             assert!(checks.is_empty(), "{checks:?}");
             assert!(checks.component().is_none());
-            assert!(checks.proposed().is_empty());
+            assert!(checks.planned().is_empty());
             assert!(checks.missing().is_empty());
             assert!(checks.not_checked(&FingerprintId::generate()).is_empty());
         }
@@ -1046,7 +1169,7 @@ mod tests {
                 },
             ),
         ] {
-            let checks = RustChecks::of(&project);
+            let checks = checks_of(&project);
             assert_eq!(checks.is_empty(), checks.component().is_none(), "{what}");
             if checks.is_empty() {
                 empty += 1;
@@ -1065,9 +1188,9 @@ mod tests {
                 for role in [CommandRole::Check, CommandRole::Test] {
                     assert!(
                         checks
-                            .proposed()
+                            .planned()
                             .iter()
-                            .any(|proposal| proposal.title() == titled(role)),
+                            .any(|work| work.proposal().title() == titled(role)),
                         "{what}: {role:?} is not proposed, so `proposed` could be empty \
                          while `missing` is not, and the two halves of `is_empty` would \
                          part company — revisit that method's documentation"
@@ -1251,6 +1374,76 @@ mod tests {
     }
 
     #[test]
+    fn the_work_behind_a_check_is_the_typed_form_of_the_line_a_report_prints() {
+        // **The pairing, held rather than asserted about.** A report prints
+        // `cargo test` and a runner is handed a program and an argument vector; the
+        // two are one value seen twice, so rendering the vector has to give back the
+        // line a person was shown — over every role, including the one whose
+        // arguments this module adds to (`Format`'s `--check`).
+        let checks = checks_of(&complete_project());
+        let expected: &[(CommandRole, &str, &[&str])] = &[
+            (CommandRole::Format, "cargo", &["fmt", "--check"]),
+            (CommandRole::Check, "cargo", &["check", "--all-targets"]),
+            (CommandRole::Lint, "cargo", &["clippy", "--all-targets"]),
+            (CommandRole::Test, "cargo", &["test"]),
+        ];
+        assert_eq!(
+            checks.planned().len(),
+            expected.len(),
+            "{:?}",
+            checks.missing()
+        );
+
+        for (role, program, arguments) in expected {
+            let work = work_for(&checks, *role);
+            let CheckReason::DeclaredCommand { command, .. } = work.proposal().reason() else {
+                panic!("{role:?} is not a declared command");
+            };
+            let CheckOperation::Command(spec) = work.operation() else {
+                panic!(
+                    "{role:?} is not a command operation: {:?}",
+                    work.operation()
+                );
+            };
+
+            assert_eq!(spec.program(), OsStr::new(*program), "{role:?}");
+            // **A name, and not one this module completed.** On Windows a name
+            // Windows cannot complete is not a program, and appending `.exe` to make
+            // it one would be SURE inventing a program — see the module documentation.
+            assert!(
+                !spec.program().to_string_lossy().contains('.'),
+                "{role:?} names a program with an extension: {:?}",
+                spec.program()
+            );
+            let planned: Vec<OsString> = arguments.iter().map(OsString::from).collect();
+            assert_eq!(spec.arguments(), planned.as_slice(), "{role:?}");
+            assert_eq!(spec.working_directory(), root(), "{role:?}");
+
+            // The line and the vector cannot describe different commands: the line
+            // *is* this vector rendered, character for character.
+            let rendered = std::iter::once(spec.program().to_owned())
+                .chain(spec.arguments().iter().cloned())
+                .map(|word| word.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(&rendered, command, "{role:?}");
+        }
+
+        // And the format check's flag is an argument rather than a suffix: the
+        // discovery's own plan is the first two, and the vector is longer than it.
+        let work = work_for(&checks, CommandRole::Format);
+        let CheckOperation::Command(spec) = work.operation() else {
+            panic!("the format check is not a command operation");
+        };
+        assert_eq!(
+            spec.arguments().len(),
+            2,
+            "one argument was added, not one word"
+        );
+        assert_eq!(spec.arguments()[1], OsString::from(FORMAT_CHECK_FLAG));
+    }
+
+    #[test]
     fn nothing_this_module_builds_is_refused() {
         // The builder refuses a proposal with no title, a reason naming nothing, or no
         // action — three things this module claims never to get wrong. Claimed here
@@ -1264,8 +1457,8 @@ mod tests {
             ("has an unread toolchain", unread_toolchain()),
             ("has an unread manifest", unread_manifest()),
         ] {
-            let checks = RustChecks::of(&project);
-            proposals += checks.proposed().len();
+            let checks = checks_of(&project);
+            proposals += checks.planned().len();
 
             let mut builder = PlanBuilder::new(
                 ExecutionMode::HostConfirmed,
@@ -1283,7 +1476,7 @@ mod tests {
 
             // And what went in is what the plan holds, with no identity used twice.
             let schedule = builder.build();
-            assert_eq!(schedule.len(), checks.proposed().len(), "{what}");
+            assert_eq!(schedule.len(), checks.planned().len(), "{what}");
             assert!(schedule.duplicates().is_empty(), "{what}");
             assert_eq!(schedule.may_run().count(), schedule.len(), "{what}");
         }
@@ -1304,7 +1497,7 @@ mod tests {
             ("asks for both tools", complete_project(), 0),
             ("has an unread manifest", unread_manifest(), 0),
         ] {
-            let checks = RustChecks::of(&project);
+            let checks = checks_of(&project);
             let results = checks.not_checked(&fingerprint);
             assert_eq!(results.len(), expected, "{what}");
             assert_eq!(results.len(), checks.missing().len(), "{what}");

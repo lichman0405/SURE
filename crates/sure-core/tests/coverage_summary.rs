@@ -7,6 +7,7 @@
 
 use sure_core::aggregation::aggregate_run;
 use sure_core::coverage_summary::summarize;
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::schedule::{CheckProposal, CheckReason, PlanBuilder};
 use sure_domain::capability::{CapabilityReport, CapabilityTier};
 use sure_domain::evidence::EvidenceClass;
@@ -23,21 +24,36 @@ fn capability() -> CapabilityReport {
     CapabilityReport::cli()
 }
 
-fn a_proposal(
+/// The plan entry for a fixture proposal, since `P18-T003` a proposal **and** the
+/// operation beside it.
+///
+/// **A candidate observation, because that is the whole of what these fixtures
+/// establish.** Every check this file builds is built by hand and nothing here
+/// starts a process: the value is *nothing has settled this check*, which maps to
+/// a warning and never to a pass — the one answer that claims nothing. This file is
+/// about what a summary counts, not about how a check is carried out, so what it
+/// supplies beside the proposal is the most conservative thing it can honestly say;
+/// `P18-T004` replaces the placeholders on the product's own paths.
+fn planned_proposal(
     id: CheckId,
     title: &str,
     severity: Severity,
     critical: bool,
     action: ActionKind,
-) -> CheckProposal {
-    CheckProposal::new(
-        id,
-        title,
-        severity,
-        critical,
-        EvidenceClass::DeterministicCheck,
-        CheckReason::ProjectWide,
-        &[action],
+) -> PlannedWork {
+    PlannedWork::new(
+        CheckProposal::new(
+            id,
+            title,
+            severity,
+            critical,
+            EvidenceClass::DeterministicCheck,
+            CheckReason::ProjectWide,
+            &[action],
+        ),
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
     )
 }
 
@@ -97,7 +113,7 @@ fn all_checks_checked_produces_a_complete_summary() {
     let id_a = CheckId::generate();
     let id_b = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_a,
             "read the manifest",
             Severity::MustFix,
@@ -106,7 +122,7 @@ fn all_checks_checked_produces_a_complete_summary() {
         ))
         .unwrap();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_b,
             "check the lockfile",
             Severity::CanFixLater,
@@ -141,7 +157,7 @@ fn one_skipped_and_one_could_not_run_are_counted_and_listed() {
     let id_a = CheckId::generate();
     let id_b = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_a,
             "run the tests",
             Severity::MustFix,
@@ -150,7 +166,7 @@ fn one_skipped_and_one_could_not_run_are_counted_and_listed() {
         ))
         .unwrap();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_b,
             "check formatting",
             Severity::CanFixLater,
@@ -199,7 +215,7 @@ fn a_critical_skipped_check_sets_has_critical_gaps() {
     let mut builder = an_inspecting_builder();
     let id = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id,
             "run the tests",
             Severity::MustFix,
@@ -245,7 +261,7 @@ fn ordering_is_deterministic() {
     let id_b = CheckId::generate();
     let id_c = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_a.clone(),
             "zzz non-critical",
             Severity::Note,
@@ -254,7 +270,7 @@ fn ordering_is_deterministic() {
         ))
         .unwrap();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_b.clone(),
             "aaa non-critical",
             Severity::MustFix,
@@ -263,7 +279,7 @@ fn ordering_is_deterministic() {
         ))
         .unwrap();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id_c.clone(),
             "critical note",
             Severity::Note,
@@ -291,7 +307,7 @@ fn control_characters_in_check_titles_are_escaped() {
     let mut builder = an_inspecting_builder();
     let id = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id,
             "check\nline",
             Severity::MustFix,
@@ -319,7 +335,7 @@ fn control_characters_in_error_reasons_are_escaped() {
     let mut builder = an_inspecting_builder();
     let id = CheckId::generate();
     builder
-        .propose(a_proposal(
+        .propose(planned_proposal(
             id.clone(),
             "check formatting",
             Severity::CanFixLater,

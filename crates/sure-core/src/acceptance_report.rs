@@ -48,6 +48,7 @@ use serde_json::Value;
 use crate::aggregation::{NOTHING_CAME_BACK, aggregate_run};
 use crate::candidate_scanner::CandidateScanner;
 use crate::capability::CapabilityTier;
+use crate::checks::nothing_observed_yet;
 use crate::claim_capture::AGENT_CLAIM_EVENT_TYPE;
 use crate::claim_checker::{ClaimDocument, check_claims_against_events};
 use crate::config::{Authority, Config, ExecutionSettings};
@@ -70,6 +71,7 @@ use crate::intent_implementation::compare_intent_to_project;
 use crate::noop_heuristics::NoOpHeuristics;
 use crate::paths::Paths;
 use crate::pipeline::Pipeline;
+use crate::planned_work::PlannedWork;
 use crate::project_verdict::render_summary;
 use crate::route_consistency::RouteConsistency;
 use crate::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
@@ -2363,8 +2365,15 @@ fn declared_schedule(
                     "the `{what}` run schedules `{name}` and no such check is declared"
                 ),
             })?;
+        // **The operation is the placeholder `P18-T003` puts beside every check
+        // that is not a declared command.** A corpus check is declared by the
+        // fixture's `scenario.json` and its result is declared there too, so
+        // nothing is observed here at all: the proposal is paired with work that
+        // is a candidate observation and starts no process, which is the only one
+        // of the four answers that claims nothing. `P18-T004` replaces it.
+        let work = PlannedWork::new(declared_proposal(id, check)?, nothing_observed_yet());
         builder
-            .propose(declared_proposal(id, check)?)
+            .propose(work)
             .map_err(|refused| CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
                 message: format!(

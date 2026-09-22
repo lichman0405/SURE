@@ -301,8 +301,11 @@ impl NodeChecks {
     ///
     /// **`root` is the project root, and it is a parameter rather than a field of
     /// the discovery result** because a check's command is planned as typed work
-    /// and [`CommandSpec`](crate::planned_work::CommandSpec) requires an absolute
-    /// working directory. The discovery carries the root and the members carry
+    /// and a command that runs must have an absolute working directory — the rule
+    /// is [`process`](crate::process)'s, and
+    /// [`CommandSpec::new`](crate::planned_work::CommandSpec::new) documents
+    /// itself as *not* restating it, so nothing here should be read as a
+    /// constructor having checked. The discovery carries the root and the members carry
     /// their own paths; what a member's check needs is the two joined, which is
     /// the fact a member's *rendered* command does not hold — ADR 0014 rejected
     /// parsing that string partly because it cannot say where the command runs.

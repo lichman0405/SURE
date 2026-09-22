@@ -1578,7 +1578,17 @@ fn command_for(
 /// **Deliberately the same answer as [`command_for`]**, including for a role
 /// that is not planned: `None` here is `None` there, and every arm that returns
 /// a command returns one whose [`rendered`](Invocation::rendered) is the string
-/// `command_for` returns. A test sweeps every role and holds the two together.
+/// `command_for` returns.
+///
+/// **That is a fact about the two definitions and not a property a test
+/// checks.** `command_for` above *is* [`invocation_for_declared`] with
+/// `rendered` applied, so there is no second decision for the two to disagree
+/// about; a test that swept every role and compared them would assert that a
+/// value equals itself. An earlier version of this paragraph ended "A test
+/// sweeps every role and holds the two together", and no test in this file
+/// named either function — recorded here rather than quietly deleted, because
+/// a comment that promises coverage is the one kind of comment nobody goes
+/// looking behind.
 #[must_use]
 pub fn invocation_for(project: &RustProject, role: CommandRole) -> Option<Invocation> {
     invocation_for_declared(project, role, &ToolDeclarations::of(project))

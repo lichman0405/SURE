@@ -233,11 +233,17 @@ const CHECK_LIMITS: Limits = Limits::new(Duration::from_secs(15 * 60), 256 * 102
 /// typed, which is the whole of `P18-T003`: the `npm run build` a report prints is
 /// a rendering of the same decision and not its source.
 ///
-/// **`directory` must be absolute**, which is [`CommandSpec::new`]'s own rule and
-/// [`process`](crate::process)'s: every caller passes the scan's root joined with a
-/// component path, and `scan::open_root` refuses a root that is not absolute, so
-/// there is no path from here to a command whose directory is relative to whatever
-/// SURE happened to be started in.
+/// **`directory` must be absolute**, and that is [`process`](crate::process)'s
+/// rule — `ProcessRequest` refuses a relative directory, and
+/// [`CommandSpec::new`](crate::planned_work::CommandSpec::new) deliberately does
+/// not repeat the refusal, so that there is one place it is enforced rather than
+/// two that can disagree. What holds the rule here is the callers and their
+/// source: every one passes the scan's root joined with a component path, and
+/// `scan::open_root` refuses a root that is not absolute, so there is no path from
+/// here to a command whose directory is relative to whatever SURE happened to be
+/// started in. **This function does not enforce it**, and a reader who takes the
+/// guarantee from the constructor rather than from the refusal downstream would
+/// be reading it from the wrong place.
 ///
 /// **The environment is SURE's own**, because of what a check is: `npm` finds
 /// `node`, and `cargo` finds the linker, by name and through `PATH`. ADR 0014's

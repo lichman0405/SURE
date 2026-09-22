@@ -394,8 +394,11 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          that carries a check's proposal beside the operation that would carry the \
          check out, so a caller that has one of the two cannot have the other \
          missing. It names `CheckProposal` because it *holds* one — a field, a \
-         constructor and an accessor — and every proposal that reaches it was built \
-         by a module in the entries above and is stored and handed back unchanged. \
+         constructor and an accessor, plus `PrecomputedEvidence::to_result`, which \
+         is handed a proposal and **reads** its weight rather than building one, so \
+         it is a consumer and not a proposer either. Every proposal that reaches \
+         the file was built by a module in the entries above and is stored, handed \
+         back unchanged, or read for the severity and identity it already carries. \
          **A line here that built a proposal of its own, rather than storing and \
          returning its caller's, would be a proposer**, and this entry is not cover \
          for it. The entry was missing until `P18-T003` ran this rule against the \

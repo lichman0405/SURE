@@ -5115,3 +5115,59 @@ that the authority is not the part that decides where a request goes, and
 because it is the reason the assertion is written where it is. The control test
 asserts the same host for six ordinary paths, so that refusing everything cannot
 pass as a fix.
+
+## P18-T007 — the runner is a field and not a default, and the ceiling's old reason is dead
+
+`pipeline.rs` now builds a `PermissionPlan` from the mode and the permissions the
+run was **handed**, asks `Enforcement::of` about every check the schedule holds,
+and gives the admitted ones to `run_scheduled_checks`. Three decisions came with
+that, and the third is the one a reader should not miss.
+
+**A `runner` field rather than a default.** `Pipeline` gained
+`pub runner: &'a dyn CommandRunner`, so every caller names the value that carries
+out an admitted command. The rejected alternative is a default, and the cost of it
+is the whole argument: `ProcessRunner` is the only runner in the product that
+starts a process, so a default would put the one implementation that can start
+something one omitted field away from every construction site in the crate. A
+field makes the choice a sentence in each caller instead — and the callers now
+read as a list of who may run what: `sure check` hands a live `ProcessRunner`,
+and every fixture, corpus and privacy path hands one that is pre-cancelled or
+that records being called and starts nothing.
+
+**The support ceiling stays `SupportLevel::InspectOnly`, and its reason is
+replaced rather than restated.** The sentence `support.rs` rested on — *this build
+runs no project code* — is false as of this commit and is now written nowhere in
+`crates/` or `docs/`. What replaces it is a claim about **platforms**, not about
+capability: level B is "run approved generic checks" *wherever SURE runs*, a Node
+check whose only program on the machine is `npm.cmd` comes back
+`InterpreterRequired` from `planned_work.rs` rather than a command, and this
+branch's macOS and Linux legs are unmeasured here. A ceiling left alone with a
+true reason beats a ceiling raised to match a sentence, and the tripwire
+`the_ceiling_todays_build_claims_is_never_above_inspect_only` is untouched — two
+`assert_ne!`s, only their failure messages rewritten. **What that leaves owed: the
+measurements that could earn level B are `P18-T012`'s, and they do not exist.**
+
+**`container` mode admits host commands in a build with no container executor,
+and this commit is what made that reachable.** The admission rule at
+`consent.rs:504` cannot fire for `Container` because
+`ExecutionMode::Container.runs_project_code()` is `true` (`execution.rs:332`),
+while the build's own `container.rs` says a run under that mode reaches no
+container. Dormant until now because no product path reached a runner. **It is
+recorded in the tree in three places and filed as [#12] rather than repaired
+here**, because the repair is a decision about what `container` mode should *do*
+in a build that cannot carry it out — it changes `sure-domain`'s mode semantics
+and needs a reason the frozen `NotCheckedReason` vocabulary does not have.
+
+**The part of that worth carrying past this task: the guard that looks like it
+covers the case cannot.** `enforce.rs`'s
+`even_a_mode_that_runs_nothing_admits_only_commands_that_run_no_project_code`
+loops `ExecutionMode::ALL` over `permission_sets()`, `everything()` included, and
+asserts `!runs_project_code(effects) || mode.runs_project_code()`. For `Container`
+the second operand is `true`, so the disjunction holds whatever was admitted —
+**the guard reads the same predicate the admission rule reads, and agrees with the
+defect by construction.** That is a worse thing than a missing test and it is why
+[#12] carries the line number: a test written from inside the rule it is testing
+is green for the wrong reason, which is the class this repository treats as
+serious.
+
+[#12]: https://github.com/lichman0405/SURE/issues/12

@@ -66,7 +66,7 @@
         }
       }
     },
-    "why_not_the_pipeline": "**No assertion in this fixture runs `sure`'s pipeline over a project.** The pipeline plans checks from a `Discovery`, and this build has no runner for a planned check: every allowed check it plans is recorded as `unknown` because none of them reported anything (`crates/sure-core/src/pipeline.rs`, the `StaticChecks` and `DynamicChecks` stage descriptions). Grading that would measure the *absence of a runner* rather than the aggregation rule, and on the day a runner arrives the fixture would go red for a reason that has nothing to do with this case. So the schedule and the results are declared here and handed to `aggregate_run` directly, which is the one function that decides what a check with no result is.",
+    "why_not_the_pipeline": "**No assertion in this fixture runs `sure`'s pipeline over a project.** The pipeline plans checks from a `Discovery`, and the reason this declaration hands its schedule and results to `aggregate_run` directly is the fixture's own reach: this directory ships no project, so there is no run here whose results could be read, and grading one would measure the pipeline rather than the aggregation rule this case is about. That reason was once written as *this build has no runner for a planned check, so every allowed check it plans is recorded as unknown* — `P18-T007` wired the runner and made that sentence false, and this declaration did not change with it, which is the same thing said again: what is declared here is the rule under test and not the state of the build. `aggregate_run` is the one function that decides what a check with no result is.",
     "control": {
       "moved": {
         "what": "what came back for the check",

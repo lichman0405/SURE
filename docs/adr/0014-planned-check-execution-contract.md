@@ -4,6 +4,15 @@ Status: Accepted
 
 Date: 2026-09-22
 
+Implementation: **wired on 2026-09-22 by `P18-T007`** — `crates/sure-core/src/pipeline.rs`
+now builds the `PermissionPlan` from the mode and the permissions the run was handed,
+asks `Enforcement::of` about every scheduled check, and hands the admitted commands to
+`planned_check_runner`. Read the **Context** section below as the state at `47e13c0`
+rather than as today: the sentence it quotes from stages 5 and 6 (*"This build has no
+runner for a planned check, so none of them ran"*) is gone from the tree, and the two
+sentences written in the present tense about an unwired pipeline — decision 5 and the
+last consequence — are corrected in place below.
+
 ## Context
 
 SURE plans checks and runs none of them. Measured at `47e13c0`:
@@ -31,7 +40,7 @@ Two facts make the gap harder than "wire up the runner".
 
 4. **`Enforcement::admitted()` remains the only door.** `AdmittedCommand::new` stays private, no convenience constructor is added beside it, and the runner takes its work from `Enforcement::admitted()`. A command constant or a `CommandSpec` is not a launch: the runner cannot start one without the admitted wrapper, and that is a fact about a type rather than a rule for a reader.
 
-5. **`inspect_only` is a value, not an absence.** Under `inspect_only` every project-running operation is `Denied` by `consent::decide_for` before any runner sees it, and the pipeline reaches no process. The property is checked in two places: the census in `tests/spawn_sites.rs`, and an end-to-end fixture that runs `sure check` over a project whose declared tests would write a file, and asserts the file is not there.
+5. **`inspect_only` is a value, not an absence.** Under `inspect_only` every project-running operation is `Denied` by `consent::decide_for` before any runner sees it, and **a run under it reaches no process** — which, since `P18-T007` wired the runner, is a measurement rather than a reading: `pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing` drives the real path with a runner that records being called and asserts the record is empty. The property is checked in two places: the census in `tests/spawn_sites.rs`, which since that task holds *which files may name the types on the route* rather than the absence of a route, and an end-to-end fixture that runs `sure check` over a project whose declared tests would write a file, and asserts the file is not there.
 
 6. **Every scheduled check produces exactly one explicit result.** A check the mode stopped keeps the plan's own stopped result. A check the mode admitted and the runner produced nothing for becomes `Error` — never a silence, never a pass. Two results for one `CheckId` is an internal error and stops the run. `aggregate`'s existing rule that an unreported critical check is `NotEnoughChecked` is unchanged and is now reached rarely rather than always.
 
@@ -76,7 +85,7 @@ If one of these turns out to be necessary, it stops here and becomes its own rec
 - `CheckSchedule` carries work that is not report metadata. It stays core-internal; `sure-cli` reads `proposal()` and never the operation.
 - On Windows, Node checks whose only runner is `npm.cmd`, `yarn.cmd`, `pnpm.cmd` or `bun.cmd` are stopped by the classifier rather than run. This is a real loss of coverage on the primary development platform and it is the honest reading of "a name is not evidence of behaviour". A project that declares a `node.exe`-based runner is unaffected.
 - The support ceiling in `support::CEILING` moves only if the measurements in `P18-T012` earn it. The default outcome of this ADR is that it does not move: level B says SURE can run approved generic checks, and a build that runs them on one platform and not on another has not earned a single sentence for both.
-- `tests/spawn_sites.rs` fails the day the first check reaches the runner. That is intended; the census, the paragraphs above it and the support ceiling move together, and the new file is added with a reason rather than excused.
+- `tests/spawn_sites.rs` was written to fail the day the first check reaches the runner. **It did not fail, and the reason is worth keeping**: `P18-T007`'s wiring named no type that census is about (`pipeline.rs` names `CommandRunner`, not `ProcessRequest`), so what went false was a paragraph rather than a rule. The paragraph, the entry for `process/request.rs` and the ceiling's own reason were rewritten in that task; the constant did not move, for the reason two bullets above.
 
 ## Frozen semantics
 

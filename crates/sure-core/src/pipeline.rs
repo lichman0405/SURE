@@ -37,19 +37,37 @@
 //! because it had nothing checkable to record a gap against, would be invisible
 //! to the aggregate and visible here. A reviewer can see both.
 //!
-//! # What runs, and what cannot
+//! # What runs
 //!
-//! This build plans every check the discovery supports and **runs none of them**.
-//! There is no runner for a planned check: the only one in the tree is
-//! [`crate::runtime_start::StartSmoke`], and reaching it from a product path is
-//! what `tests/spawn_sites.rs`'s census forbids until `sure_core::support`'s
-//! ceiling moves, which is a different task's decision. So a check the execution
-//! mode refuses is recorded as the plan's own
-//! [`ScheduledCheck::not_run`](crate::schedule::ScheduledCheck::not_run), and a
-//! check the mode permits is recorded by [`crate::aggregation::aggregate_run`] as
-//! `unknown` — a check the plan said would run and that reported nothing. Neither
-//! is a pass, and [`StageOutcome::NotRun`] on stages 5 and 6 says so in the run's
-//! own words.
+//! Stage 4 builds three things and not one: the schedule, the [`PermissionPlan`]
+//! holding every command the schedule names, and the [`Enforcement`] that applies
+//! the execution mode to both. It then hands the schedule and the enforcement to
+//! [`run_scheduled_checks`](crate::planned_check_runner::run_scheduled_checks),
+//! which is the plan carried out — and that one call is the whole of what stages 5
+//! and 6 describe.
+//!
+//! Its contract is one result per scheduled check, in the plan's order, so that
+//! **no check that produced nothing can become green**. A check the plan stopped
+//! keeps the plan's own
+//! [`not_run`](crate::schedule::ScheduledCheck::not_run); a check the mode
+//! admitted whose runner reported nothing is an `Error`; two results for one check
+//! is a refusal that stops the run rather than a rule for choosing. Static detector
+//! checks carry their own observation and reach no process at all — they are
+//! [`CheckOperation::Precomputed`](crate::planned_work::CheckOperation::Precomputed),
+//! and the runner reads their result out of the evidence.
+//!
+//! # What a run a user did not grant does
+//!
+//! **Nothing, and that is a reading rather than a promise.**
+//! [`crate::consent::decide_for`] refuses any command that runs the project's code
+//! in a mode that does not, so under [`ExecutionSettings::inspect_only`] the
+//! enforcement admits no such command and the runner is never reached. The
+//! measurement is `tests::a_run_a_user_did_not_grant_starts_nothing` below, which
+//! hands this pipeline a runner that records being called and cannot start
+//! anything: what it observes is that the recording is empty. The same seam, under
+//! a granted authority, observes a run *reaching* the runner — which is why the
+//! seam is a field rather than a default nobody can substitute.
+
 //!
 //! # The store
 //!
@@ -79,15 +97,18 @@ use crate::components::ComponentGraph;
 use crate::config::AnalysisProvider;
 use crate::config::Config;
 use crate::config::ExecutionSettings;
+use crate::consent::{PermissionPlan, PlannedCheck};
 use crate::coverage_summary::{CoverageNotCheckedSummary, summarize};
 use crate::demo_data_heuristics::DemoDataHeuristics;
 use crate::discover::{self, DiscoverOptions, Discovery, Ecosystem, Findings};
+use crate::enforce::Enforcement;
 use crate::false_completion_aggregator;
 use crate::findings_from_checks::findings_from_checks;
 use crate::fingerprint::{self, project_fingerprint};
 use crate::intent_implementation::compare_intent_to_project;
 use crate::intent_model;
 use crate::noop_heuristics::NoOpHeuristics;
+use crate::planned_check_runner::{CommandRunner, run_scheduled_checks};
 use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::project_intent;
 use crate::project_verdict::build_verdict;
@@ -584,6 +605,28 @@ pub struct Pipeline<'a> {
     /// checked against a different intent would be recording something it did not
     /// use.
     pub goal: Option<&'a str>,
+    /// What carries out the commands the enforcement admits.
+    ///
+    /// **A field rather than a default**, and that is the whole of why it is
+    /// here: *what may this run start?* is a question about this run, so the
+    /// answer is given where the run is described — at the call site — rather
+    /// than buried in the stage that happens to need it. A caller that hands a
+    /// runner which records being called and starts nothing is then measuring
+    /// this pipeline rather than a copy of it, which is how the acceptance
+    /// *a run a user did not grant starts nothing* is read rather than argued.
+    ///
+    /// [`ProcessRunner`](crate::planned_check_runner::ProcessRunner) is the only
+    /// runner in the product that starts a process. Nothing else in the product
+    /// implements [`CommandRunner`], and a caller's own is exactly that: a
+    /// caller's own.
+    ///
+    /// It is consulted only through
+    /// [`run_scheduled_checks`](crate::planned_check_runner::run_scheduled_checks),
+    /// which hands it an
+    /// [`AdmittedRun`](crate::planned_check_runner::AdmittedRun) and nothing
+    /// else — a value only an [`Enforcement`] can produce — so this field cannot
+    /// be used to start something the mode did not admit.
+    pub runner: &'a dyn CommandRunner,
 }
 
 /// A stage that stopped the run.
@@ -708,16 +751,78 @@ impl Pipeline<'_> {
             },
         );
 
-        // The results every later stage aggregates. A check the mode stopped is the
-        // plan's own answer and nothing here invents one; a check the mode permits
-        // is left unreported, and `aggregate_run` records it as a check that
-        // reported nothing.
-        let mut results: Vec<CheckResult> = Vec::new();
-        for scheduled in schedule.checks() {
-            if let Some(stopped) = scheduled.not_run(&fingerprint) {
-                results.push(stopped);
+        // The plan of commands, and the decision about every one of them.
+        //
+        // Built here because this is the first point at which the fingerprint and
+        // the schedule exist together, and built from **the mode and the
+        // permissions this run was handed** — `self.execution`, which comes from
+        // `Authority::execution` — rather than from the project's own
+        // configuration. A plan built from `self.config.execution` would be a
+        // project granting itself the right to run its own code, which is the
+        // defect the authority layer exists to close and the one thing this
+        // wiring must not reintroduce.
+        //
+        // Only a check that holds one command has a command to plan. A detector's
+        // own observation, a service and a browser page are not commands, and
+        // `Enforcement` has an answer for a check with no command: it is a check
+        // that launches nothing, and nothing is admitted for it.
+        let scheduled: Vec<PlannedCheck> = schedule.planned_checks();
+        debug_assert_eq!(
+            scheduled.len(),
+            schedule.checks().len(),
+            "`planned_checks` is one entry per scheduled check, in this schedule's order"
+        );
+        let mut permission_plan =
+            PermissionPlan::new(mode, fingerprint.clone(), permissions.clone());
+        for (scheduled_check, check) in schedule.checks().iter().zip(&scheduled) {
+            if let CheckOperation::Command(spec) = scheduled_check.operation() {
+                permission_plan.add(check.clone(), spec.program(), spec.arguments().to_vec());
             }
         }
+        // The plan a report is built from, named the way a person reads it: the
+        // command they ran, `sure check` or `sure repair` or `sure recheck`
+        // (`Purpose::as_str`). The name reaches `CheckPlan::id` and nowhere else
+        // today — `Enforcement::check_plan()` is the only door onto it, the plan is
+        // not part of `RunOutcome`, and no render surface prints it — so this is
+        // the plan's identity for a caller, not a line in front of a reader.
+        let enforcement = Enforcement::of(
+            format!("sure {}", self.purpose.as_str()),
+            permission_plan,
+            &scheduled,
+        );
+
+        // The plan carried out, and the whole of what stages 5 and 6 describe.
+        //
+        // The runner's contract is one result per scheduled check, in the plan's
+        // order, and it is asked for every check — including the ones the mode
+        // stopped, whose result is the plan's own. So the results below are
+        // exactly as many as the schedule is long, and a check that produced
+        // nothing is an `Error` rather than a missing row: **there is no path
+        // from here to a check that quietly became green.**
+        //
+        // A refusal is not a shorter list of results — it is a plan this runner
+        // cannot read — so it stops the run at the stage that would have consumed
+        // the results, which is what `aggregate_run`'s own refusal does one stage
+        // later. Nothing is invented for a refusal and no repair is attempted.
+        let run_results =
+            match run_scheduled_checks(&schedule, &enforcement, &fingerprint, self.runner) {
+                Ok(results) => results,
+                Err(refusal) => {
+                    return self.stopped_at(
+                        stages,
+                        Stopped {
+                            stage: Stage::StaticChecks,
+                            detail: refusal.to_string(),
+                        },
+                    );
+                }
+            };
+
+        // The runner's results, and then the one kind of check it has never heard
+        // of: a declared command the project does not have was never scheduled, so
+        // it is not in the schedule the runner was handed and its own declaration
+        // is what stands in for an observation.
+        let mut results: Vec<CheckResult> = run_results.results().to_vec();
         for declaration in &planned.missing {
             results.push(declaration.not_checked(&fingerprint));
         }
@@ -729,6 +834,17 @@ impl Pipeline<'_> {
             .filter(|scheduled| !scheduled.proposal().requirements().runs_project_code())
             .count();
         let dynamic_checks = schedule.checks().len() - static_checks;
+        let stopped_static = schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| !scheduled.proposal().requirements().runs_project_code())
+            .filter(|scheduled| {
+                enforcement
+                    .stopped()
+                    .iter()
+                    .any(|result| &result.id == scheduled.proposal().id())
+            })
+            .count();
         stages.push(
             Stage::StaticChecks,
             if static_checks == 0 {
@@ -737,12 +853,13 @@ impl Pipeline<'_> {
                         .to_owned(),
                 }
             } else {
-                StageOutcome::NotRun {
-                    reason: None,
+                StageOutcome::Ran {
                     detail: format!(
                         "{static_checks} of the planned checks read your project's files and run \
-                         nothing. This build has no runner for a planned check, so none of them \
-                         reported a result and each is recorded as unknown rather than passed."
+                         nothing. Each of them has a result: {stopped_static} were stopped by the \
+                         execution mode and are recorded as not checked rather than passed, and the \
+                         rest are the runner's answer — a detector's own observation where the check \
+                         carries one, and its command's outcome where the plan holds a command."
                     ),
                 }
             },
@@ -751,7 +868,7 @@ impl Pipeline<'_> {
         // ---- 6. Approved dynamic checks --------------------------------------
         stages.push(
             Stage::DynamicChecks,
-            describe_dynamic(&schedule, dynamic_checks),
+            describe_dynamic(&schedule, &enforcement, dynamic_checks),
         );
 
         // ---- 7. Completeness analysis ----------------------------------------
@@ -1576,36 +1693,69 @@ fn describe_plan(
     parts.join(" ")
 }
 
-fn describe_dynamic(schedule: &CheckSchedule, dynamic: usize) -> StageOutcome {
+/// Stage 6, in the terms of what the run did with each dynamic check.
+///
+/// **The enforcement's answer and not the schedule's**, because the two are two
+/// views of one decision and it is the enforcement's that stops a command: a
+/// check the plan allowed whose command the mode did not admit is stopped here,
+/// and a stage that read `schedule.blocked()` would report it as one that ran.
+/// `run_scheduled_checks` asks the same two questions in the same order, so this
+/// description and that result set cannot disagree about which checks ran.
+fn describe_dynamic(
+    schedule: &CheckSchedule,
+    enforcement: &Enforcement,
+    dynamic: usize,
+) -> StageOutcome {
     if dynamic == 0 {
         return StageOutcome::NotPartOfWork {
             detail: "no check in the plan would run your project's code.".to_owned(),
         };
     }
-    let blocked: Vec<&str> = schedule
-        .blocked()
-        .filter(|scheduled: &&ScheduledCheck| {
-            scheduled.proposal().requirements().runs_project_code()
+    let dynamic_checks = || {
+        schedule
+            .checks()
+            .iter()
+            .filter(|scheduled: &&ScheduledCheck| {
+                scheduled.proposal().requirements().runs_project_code()
+            })
+    };
+    let stopped: Vec<&str> = dynamic_checks()
+        .filter(|scheduled| {
+            enforcement
+                .stopped()
+                .iter()
+                .any(|result| &result.id == scheduled.proposal().id())
         })
         .map(|scheduled| scheduled.proposal().title())
         .collect();
-    if blocked.is_empty() {
+    if stopped.len() == dynamic {
         return StageOutcome::NotRun {
-            reason: None,
+            reason: Some(NotCheckedReason::ExecutionNotAuthorized),
             detail: format!(
-                "{dynamic} check(s) would run your project's code and the mode allows it. This \
-                 build has no runner for a planned check, so none of them ran and each is \
-                 recorded as unknown rather than passed."
+                "{dynamic} check(s) would run your project's code and the execution mode stopped \
+                 every one of them, so none was carried out and each is recorded as not checked \
+                 rather than passed: {}.",
+                stopped.join(", ")
+            ),
+        };
+    }
+    if stopped.is_empty() {
+        return StageOutcome::Ran {
+            detail: format!(
+                "{dynamic} check(s) would run your project's code and the execution mode allowed \
+                 them. Each one has a result: the runner reports one for every scheduled check, \
+                 and a check it produced nothing for is an error rather than a pass."
             ),
         };
     }
     StageOutcome::NotRun {
         reason: Some(NotCheckedReason::ExecutionNotAuthorized),
         detail: format!(
-            "{dynamic} check(s) would run your project's code. {} of them were stopped by the \
-             execution mode and are recorded as not checked: {}.",
-            blocked.len(),
-            blocked.join(", ")
+            "{dynamic} check(s) would run your project's code. The execution mode stopped {} of \
+             them and those are recorded as not checked: {}. The rest were carried out and each \
+             has a result.",
+            stopped.len(),
+            stopped.join(", ")
         ),
     }
 }
@@ -1627,6 +1777,10 @@ fn describe_candidates(candidates: &Candidates) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    use crate::planned_check_runner::ProcessRunner;
+    use crate::process::Cancellation;
 
     #[test]
     fn every_purpose_performs_a_contiguous_run_of_the_documented_stages() {
@@ -1796,6 +1950,7 @@ mod tests {
 
         let store = Store::open_at(&store_dir.join("sure.db")).expect("the store opens");
         let config = Config::default();
+        let runner = nothing_starts();
         let run_recheck = |store: &Store| {
             Pipeline {
                 project: &project,
@@ -1804,6 +1959,7 @@ mod tests {
                 execution: ExecutionSettings::inspect_only(),
                 store: Some(store),
                 goal: None,
+                runner: &runner,
             }
             .run()
         };
@@ -1927,5 +2083,257 @@ mod tests {
             "a run whose stage 12 could not read what the last run left open reported itself \
              as clean"
         );
+    }
+
+    // --- what a run may start, read rather than argued --------------------
+
+    /// A runner that starts nothing, because a stop has already been asked for.
+    ///
+    /// **This is the product's own runner with one thing already decided**, and
+    /// that is the point of using it here rather than a fake: `process::run`
+    /// checks whether a stop has been asked for *before* it spawns anything, so
+    /// the answer this runner gives — [`Termination::CancelledBeforeStart`] — is
+    /// a real answer the product really produces, and no process can have been
+    /// started to produce it. A fake returning a canned pass would be able to
+    /// agree with this one on everything except the thing being measured.
+    ///
+    /// [`Termination::CancelledBeforeStart`]: crate::process::Termination::CancelledBeforeStart
+    fn nothing_starts() -> ProcessRunner {
+        let stop = Cancellation::new();
+        stop.cancel();
+        ProcessRunner::new(stop)
+    }
+
+    /// A runner that records every command it is handed, and starts nothing.
+    ///
+    /// The recording is the measurement: it answers *was the runner reached at
+    /// all?*, which is the question the acceptance's second clause is about and
+    /// a question a silenced runner could not answer. The answer it returns is
+    /// [`nothing_starts`]'s.
+    #[derive(Debug)]
+    struct Recording {
+        asked: RefCell<Vec<String>>,
+        runner: ProcessRunner,
+    }
+
+    impl Recording {
+        fn new() -> Self {
+            Self {
+                asked: RefCell::new(Vec::new()),
+                runner: nothing_starts(),
+            }
+        }
+
+        /// What the runner was asked to run, in the order it was asked.
+        fn asked(&self) -> Vec<String> {
+            self.asked.borrow().clone()
+        }
+    }
+
+    impl CommandRunner for Recording {
+        fn run(
+            &self,
+            work: &crate::planned_check_runner::AdmittedRun<'_>,
+        ) -> crate::planned_work::CommandRun {
+            let spec = work.command();
+            self.asked.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            self.runner.run(work)
+        }
+    }
+
+    /// A small Rust project on disk, under a directory of this test's own.
+    ///
+    /// Rust because its declared checks are the ones this build turns into
+    /// commands it would have to run: `cargo check --all-targets`, `cargo
+    /// clippy --all-targets` and `cargo test` all run the project's code, so a
+    /// run that carries one of them out is a run that starts a process.
+    fn a_rust_project(name: &str) -> std::path::PathBuf {
+        let root = crate::store::scratch_root().join(format!("{name}-{}", std::process::id()));
+        match std::fs::remove_dir_all(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot clear {}: {error}", root.display()),
+        }
+        std::fs::create_dir_all(root.join("src")).expect("a scratch project directory");
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"thing\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("a manifest");
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn add(a: u32, b: u32) -> u32 {\n    a + b\n}\n",
+        )
+        .expect("a source file");
+        std::fs::write(
+            root.join("README.md"),
+            "# A project SURE was pointed at\n\nIt is small on purpose: what this test is about is \
+             what SURE would run for it.\n",
+        )
+        .expect("a project file");
+        root
+    }
+
+    /// The checks in a run's plan that would run the project's own code.
+    fn would_run_the_project_code(run: &RunOutcome) -> Vec<String> {
+        run.schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| scheduled.proposal().requirements().runs_project_code())
+            .map(|scheduled| scheduled.proposal().title().to_owned())
+            .collect()
+    }
+
+    /// The second acceptance clause, read rather than promised.
+    ///
+    /// **What is measured is the number of commands the runner was handed**, and
+    /// the instrument is a runner that records every one and starts nothing —
+    /// see [`Recording`]. Under [`ExecutionSettings::inspect_only`] the plan
+    /// holds checks that would run this project's code and the mode admits none
+    /// of them, so the recording must be empty: not "a process was reported as
+    /// stopped", but *the runner was never reached*. The guard below is what
+    /// makes that a measurement rather than a walk over an empty plan — a
+    /// fixture that planned nothing dynamic would satisfy the empty recording
+    /// while measuring nothing, which is the shape of a test that cannot fail.
+    #[test]
+    fn a_run_a_user_did_not_grant_starts_nothing() {
+        let project = a_rust_project("pipeline-inspect-only");
+        let config = Config::default();
+        let runner = Recording::new();
+
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: ExecutionSettings::inspect_only(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::InspectOnly);
+        assert!(
+            !run.permissions.run_project_code,
+            "the default settings grant execution, so this test is not measuring the default"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(
+            !dynamic.is_empty(),
+            "this project planned no check that would run its code, so an empty recording would \
+             measure nothing: {:?}",
+            run.schedule.plain_description()
+        );
+
+        let asked = runner.asked();
+        assert!(
+            asked.is_empty(),
+            "a run the user granted nothing started {} command(s): {asked:?}",
+            asked.len()
+        );
+    }
+
+    /// The control for the measurement above, and the proof the seam is live.
+    ///
+    /// The same project and the same runner, with the user's own configuration
+    /// file granting execution. One thing moves, and it is the user's file — read
+    /// through [`Authority::load`], which is the route `sure check` reads it by
+    /// rather than a literal handed to the pipeline.
+    ///
+    /// Two readings, and the second is why this test is here at all. The runner
+    /// **is** reached now, which is what stops the first test from being
+    /// satisfied by a stage that never consults a runner at all. And what comes
+    /// back for those checks is *nothing ran* — this runner has been asked to
+    /// stop before it started — reported as an `Error` and never as a pass, which
+    /// is the same false-green rule read from the other side.
+    #[test]
+    fn a_run_a_user_granted_reaches_the_runner_and_is_never_reported_as_passed() {
+        let project = a_rust_project("pipeline-granted");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+        let runner = Recording::new();
+
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::HostConfirmed);
+        assert!(
+            run.permissions.run_project_code,
+            "the user's own file did not move the mode, so this test is not the control it claims \
+             to be"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(
+            !dynamic.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            run.schedule.plain_description()
+        );
+
+        let asked = runner.asked();
+        assert!(
+            !asked.is_empty(),
+            "the user granted execution and the runner was never reached, so the run above is \
+             satisfied by a runner nothing consults: {dynamic:?}"
+        );
+        for result in run.report.results() {
+            if dynamic.contains(&result.title) {
+                // `Error`, and not merely "not `Pass`". The weaker assertion is
+                // the one a reader writes first, and it is not enough here:
+                // `CriticalState::from_status` maps `Warning` to `Passed`, so a
+                // regression that made this arm a warning would satisfy
+                // `!= Pass` and put a green on the check that matters most. The
+                // doc comment above says `Error`; this is it as a measurement.
+                assert_eq!(
+                    result.status,
+                    sure_domain::status::CheckStatus::Error,
+                    "{} was admitted, the runner started nothing, and the run reports it as \
+                     something other than an error: {}",
+                    result.title,
+                    result.reason
+                );
+                assert!(
+                    result
+                        .reason
+                        .contains("cancelled before the command was started"),
+                    "{} is reported with a reason that does not say what happened: {}",
+                    result.title,
+                    result.reason
+                );
+            }
+        }
     }
 }

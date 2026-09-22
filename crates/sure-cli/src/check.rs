@@ -84,7 +84,9 @@ use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::intent::IntentSource;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome, Stage, StageOutcome};
+use sure_core::planned_check_runner::ProcessRunner;
 use sure_core::privacy::{ModelUse, PrivacyStatement};
+use sure_core::process::Cancellation;
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
 use sure_core::recheck_lifecycle::store_run;
 use sure_core::repair_impact::select_impacted_checks;
@@ -286,6 +288,18 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         .as_ref()
         .map_or(goal, |recorded| Some(recorded.goal.as_str()));
 
+    // What carries out the commands the plan holds, and **this is the product
+    // path**: `sure check` on a project whose user has granted `run_project_code`
+    // runs that project's own checks through this value. A user who has granted
+    // nothing is untouched by it, because `Enforcement` admits nothing that runs
+    // project code under `inspect_only` — the default, and the mode a project
+    // file cannot move in either direction (`Authority::execution_mode`).
+    //
+    // The cancellation is the handle a stop would be asked through. Nothing holds
+    // the other end of it yet — `sure check` has no interrupt path — so today it
+    // is a value that says *nothing has asked this run to stop*, and the bound on
+    // any one check is the deadline its plan carries.
+    let runner = ProcessRunner::new(Cancellation::new());
     let run = Pipeline {
         project,
         purpose,
@@ -293,6 +307,7 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         execution: authority.execution(),
         store: store.as_ref(),
         goal: goal_as_recorded,
+        runner: &runner,
     }
     .run();
 
@@ -1182,8 +1197,11 @@ mod tests {
     ///
     /// * planned checks that were refused by the mode, recorded as skipped with
     ///   [`ExecutionNotAuthorized`](sure_core::status::NotCheckedReason::ExecutionNotAuthorized);
-    /// * planned checks the mode allows that nothing can run, recorded as
-    ///   unknown rather than passed;
+    /// * checks the mode has nothing to refuse, whose result comes from the
+    ///   evidence the check itself carries rather than from a process — a
+    ///   detector's observation is not a command, and since `P18-T007` the
+    ///   pipeline carries one to a result instead of leaving it unknown because no
+    ///   runner existed;
     /// * two stages that could not do their work and must be recorded as gaps.
     ///
     /// A Python file with no manifest plans nothing at all, and every stage then
@@ -1318,9 +1336,10 @@ mod tests {
 
     #[test]
     fn no_check_this_build_can_run_is_ever_reported_as_clean() {
-        // The false green, over a real project. This build plans checks and runs
-        // none of them, so every stage that had work and did not do it must show
-        // up as a gap, and a run with a gap must never be reported as clean.
+        // The false green, over a real project. Under the default mode the checks
+        // this project declares are refused and none of them runs, so every stage
+        // that had work and did not do it must show up as a gap, and a run with a
+        // gap must never be reported as clean.
         let fixture = Fixture::new("never-green");
         a_rust_project(&fixture);
         let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
@@ -1328,7 +1347,8 @@ mod tests {
         let check = checked(&report);
         assert!(
             !check.is_green(),
-            "a build with no runner reported a project as clean: {:?}",
+            "a run that carried out none of the project's own checks reported a project as clean: \
+             {:?}",
             check.run
         );
         assert_eq!(
@@ -1342,8 +1362,8 @@ mod tests {
         // And the reason is visible rather than implied: the stages that had
         // work and could not do it are recorded as gaps, and the run says so in
         // the report a person reads. The two that always have work and never
-        // finish in this build are the project's own checks and the model
-        // assessment — with no runner and no provider respectively.
+        // finish here are the project's own checks — refused by the mode this run
+        // is under — and the model assessment, which has no provider.
         for stage in [Stage::DynamicChecks, Stage::ModelAssessment] {
             assert!(
                 check.run.stage(stage).outcome.is_a_gap(),
@@ -1777,11 +1797,11 @@ privacy:
         // run's own account of what it decided under, so this is a statement
         // about the plan and not about the settings file.
         //
-        // What it cannot be is an assertion about a *run*: this build has no
-        // runner for a planned check (`pipeline.rs`), so a check the mode allows
-        // is recorded as one nothing carried out. What the mode changes here is
-        // which checks are refused, and that is observable — so the second half
-        // below reads the refusal this mode produced.
+        // What it cannot be is an assertion about a *run*: under the mode this
+        // fixture lands on, `inspect_only`, no command that starts a process is
+        // admitted, so what the mode changes here is which checks are refused
+        // rather than what any check did — and that is observable, so the second
+        // half below reads the refusal this mode produced.
         let fixture = Fixture::new("pipeline-project-mode");
         a_rust_project(&fixture);
         fixture.write("sure.yaml", A_PROJECT_ASKING_FOR_EVERYTHING);
@@ -1856,8 +1876,26 @@ privacy:
         // The plan moved with it: under the default mode this project's own
         // checks are refused as unauthorised, and under the mode the user granted
         // there is nothing to refuse them for. Asserted as an absence of that one
-        // reason rather than as a count, because a check that is not refused is
-        // still not a check that ran — nothing in this build carries one out.
+        // reason rather than as a count, because what the assertion is about is
+        // the refusal and not the outcome — and since `P18-T007` a check that is
+        // *not* refused is handed to the runner this test passes the pipeline.
+        //
+        // What the checks are stopped by instead is a different permission, and it
+        // is worth being exact because the runner here is live. This project's two
+        // commands are `cargo test` and `cargo check --all-targets`, and
+        // `sure_core::safety` classifies both as `[DynamicHost, Network]`; the
+        // user's file granted `run_project_code` and installation but not
+        // `allow_network`, so both come back `Skipped` with `NetworkNotPermitted`
+        // and nothing reaches the runner. Measured rather than assumed, with a
+        // runner that records instead of spawning over a scratch crate with these
+        // same two commands: `pipeline.rs`'s test module with
+        // `execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n`
+        // and a `Recording` runner reports `mode=HostConfirmed
+        // run_project_code=true install=true network=false`, an empty recording,
+        // and for both checks `Skipped | reason=Some(NetworkNotPermitted)`,
+        // "Checking this needs internet access, and you have not allowed it."
+        // That is also the reason a test that additionally granted `allow_network`
+        // is not written: it would start `cargo` on whatever machine ran it.
         assert!(
             !run.report
                 .results()

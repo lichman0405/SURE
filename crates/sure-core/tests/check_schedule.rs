@@ -330,7 +330,9 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          handed and reads back the plan they produced: `PlanBuilder::refused` is \
          what lets it report a candidate that could not become a check, and the \
          schedule it builds is what the aggregate, the coverage summary and the \
-         verdict are all computed over. **If this file ever gains a line that \
+         verdict are all computed over — and, since `P18-T007`, what the runner is \
+         handed, which is a fact about the check's *operation* rather than about \
+         who proposed it. **If this file ever gains a line that \
          constructs a `CheckProposal`, that is a proposer and belongs in a \
          `checks/` module rather than here** — which is the distinction this entry \
          is written down to make checkable rather than assumed",
@@ -342,10 +344,17 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          module, where a fixture builds a one-check schedule so that a check's \
          frame, its exit status and its two streams can be tested against a run \
          that has a clean variant and an unclean one. A real project cannot \
-         supply the clean variant in this build — stage 5 reads every static \
-         check as `unknown` and stage 8 has no provider, so `sure check` is 1 for \
-         every project it can read — which is why the pair is built rather than \
-         observed. The shipped half of the file proposes nothing; **a line naming \
+         supply the clean variant in this build — every check that would run the \
+         project's code is stopped by the mode a run starts in, and stage 8 has \
+         no provider — so `sure check` is 1 for both projects it was measured \
+         over: a scratch crate (`0 of 2` produced a result, both stopped by \
+         `inspect_only`) and this repository (`14 of 18` produced a result, the \
+         four dynamic ones stopped), which is why the pair is built rather than \
+         observed. **The first half of that reason was written as *stage 5 reads \
+         every static check as `unknown`*, and `P18-T007` made that false** by \
+         wiring the runner: stage 5 now reports the 14 static checks' own \
+         results, as the run above its second reading shows. The shipped half of \
+         the file proposes nothing; **a line naming \
          a proposer word above `#[cfg(test)]` would be a proposer arriving in the \
          CLI, and this entry is not cover for it**",
     ),

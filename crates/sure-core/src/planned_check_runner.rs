@@ -125,7 +125,15 @@ const NOTHING_WAS_REPORTED: &str = "SURE admitted this check and the runner repo
 /// The method takes [`AdmittedRun`] and not a [`CommandSpec`], which is what makes
 /// "an unadmitted command cannot reach a process" a property of the signature
 /// rather than a promise in a comment.
-pub trait CommandRunner {
+///
+/// **[`fmt::Debug`] is a supertrait, and the reason is one field rather than this
+/// module.** `Pipeline` holds a `&dyn CommandRunner` — a run is built with the
+/// runner it will use, so that a caller answering "what may this run start?" is
+/// answering it at the place the run is described — and `Pipeline` prints itself
+/// when a test fails, so the runner it holds has to be printable. Nothing about
+/// running a command needs this; what needs it is a runner being part of a value a
+/// person reads.
+pub trait CommandRunner: fmt::Debug {
     /// Carry out one admitted command and report what came of it.
     ///
     /// [`CommandRun`] rather than a `Result`, because the runner's two answers —

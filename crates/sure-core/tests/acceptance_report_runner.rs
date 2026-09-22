@@ -900,7 +900,10 @@ fn the_limitations_are_in_the_document_rather_than_in_a_commit_message() {
             "the closing half of the repair loop is unreached, and why",
             "The closing half of the repair loop is unreached here",
         ),
-        ("no project code runs from a product path", "inspect_only"),
+        (
+            "this report's own drives run nothing that runs project code",
+            "inspect_only",
+        ),
         ("nothing touched the store", "store: None"),
         ("what is deterministic about it", "byte-identical"),
     ] {

@@ -76,15 +76,19 @@
 //!
 //! # What this does not establish
 //!
-//! **Nothing has been run.** This module builds the gate and the record; it does not
-//! open it. There is still no caller of `sure_core::process::run`, and
-//! `sure_core::support`'s ceiling of *inspect only* is still true. The census that
-//! ceiling rests on gained a site in `P5-T004` — the browser launcher — and gained
-//! nothing that reaches it: the list is a list of ways SURE *could* run something,
-//! and what keeps the ceiling true is that no product path takes any of them. The
-//! day something runs a command, that changes, and it changes in the same commit as
-//! this paragraph: they are the two places that would otherwise go on claiming
-//! nothing executes.
+//! **Nothing has been run *by this module*.** It builds the gate and the record; it
+//! does not open it. The callers of `sure_core::process::run` are
+//! `sure_core::service` and `sure_core::planned_check_runner`, and both accept only
+//! a value an admission built — since `P18-T007` the second is reached from
+//! `sure_core::pipeline`, so a project's checks do drive through a gate like this
+//! one. What is still true is narrower than the sentence this paragraph used to
+//! carry: `sure_core::support`'s ceiling of *inspect only* has not moved, and the
+//! reason is no longer that nothing can run. Level B is a claim about every
+//! platform SURE runs on — `support`'s module comment and
+//! `docs/adr/0014-planned-check-execution-contract.md` state it, and the
+//! measurements that would change the answer are `P18-T012`'s. The census is still
+//! a list of ways SURE *could* run something; what it holds today is that no way is
+//! added quietly, not that none is taken.
 //!
 //! **Nothing about what an approved command will do.** Approving `cargo test`
 //! approves a command line, not the code behind it. [`crate::safety`] says the same

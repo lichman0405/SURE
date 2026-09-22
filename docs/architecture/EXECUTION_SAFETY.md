@@ -62,10 +62,13 @@ SURE must show what it intends to run when approval is required.
 ### container
 When Docker/Podman or another supported container runtime is present, SURE may
 work out the command line that would execute a supported check in a container,
-according to an explicit plan. Working it out is the whole of it in this build:
-`sure_core::container`'s own module comment is "**Nothing here runs anything, and
-nothing here builds a `Command`**", and every mention of a `ContainerPlan`
-outside the file that defines the type is in a test.
+according to an explicit plan. Working it out is the whole of what this mode
+*does* in this build: `sure_core::container`'s own module comment is "**Nothing
+here runs anything, and nothing here builds a `Command`**", and every mention of
+a `ContainerPlan` outside the file that defines the type is in a test. **What
+this build does under the mode is a different thing from what this mode
+promises, and the difference is a defect recorded below rather than a
+description left implicit.**
 
 That is **limited isolation, not a perfect security boundary**, and the plan is
 what makes the sentence checkable rather than aspirational: the image, the
@@ -83,32 +86,63 @@ does not mean is that the checks run on the host instead.** Absence changes
 *inside what* a command would run and not *whether* it may — the
 `container` bullet under [How a mode is enforced](#how-a-mode-is-enforced) says
 the same thing from the other side — so the answer with no runtime is the answer
-with one: the checks this build admits and never runs. That was measured rather
-than reasoned about. With `execution.mode: container` granted by the user's own
-settings file and neither `docker` nor `podman` on `PATH`, the plan stage reports
-the checks admitted under `container`, and the stage after it reports that *"none
-of them ran and each is recorded as unknown rather than passed."* A reader who
-took absence to mean "it ran on this machine anyway" would believe a check of
-their project had happened when nothing did.
+with one: what a check does, and what a settings file decides.
+
+**And one thing this build does not make true, recorded here rather than
+repaired here: a run whose mode is `container` reaches no container.** The mode,
+the `ContainerPlan` and the runtime probe are all values; there is no executor
+between them and the runner, and no file on the run path asks whether the mode
+is `container` — `sure_core::pipeline` hands the admitted commands to the same
+host runner whatever the mode says. So a user whose own settings file names
+`execution.mode: container` and grants `run_project_code` is promised, by
+`ExecutionMode::Container`'s own consent sentence, that *"SURE will run supported
+checks in a container on this computer"* — and the command is admitted and
+handed to the runner that starts processes here. That contradicts the mode's own
+promise and `docs/adr/0014-planned-check-execution-contract.md`'s exclusion of
+*"container execution or a container fallback for host work"*. It is **not**
+repaired in `P18-T007` because the repair is a decision about what `container`
+mode should do in a build with no container executor: refusing the run outright
+would need a sentence true of a user who *did* allow the command, and
+`NotCheckedReason` has no variant for it. `sure_core::container`'s module comment
+carries the same paragraph from the mode's side.
 
 ## What runs in this build
 
-**Nothing does.** The three modes above are decisions about what *may* run, and
-in this build no planned check gets as far as running: `sure_core::enforce` says
-that `Enforcement::admitted()` is the only door a launched project process may
-take its command line from and that **no check drives on that road yet**, and
-`sure_core::support::CEILING` is `InspectOnly` for the same reason — level A and
-level B both require running something, and this build runs no project code. A
-run says so rather than leaving it to be inferred: the dynamic stage's sentence
-is that the checks *"would run your project's code and the mode allows it"* and
-that *"none of them ran and each is recorded as unknown rather than passed."*
+**What a mode admits, on this computer.** The three modes above are decisions
+about what *may* run, and since `P18-T007` a check walks the road:
+`sure_core::pipeline` builds the `PermissionPlan` from the mode and the
+permissions the run was handed, asks `sure_core::enforce` about every scheduled
+check, and hands the admitted commands to `sure_core::planned_check_runner` —
+the one file that turns a planned command into a request for
+`sure_core::process`'s runner. A granted run therefore runs the project's checks
+**here, on the user's machine**: there is no container in this build, and no
+sandbox.
 
-The consequence is the one a reader deciding whether to grant a mode needs:
-**a permission changes what SURE may do and not what SURE does.** Putting
-`run_project_code` in reach through the user's own settings file moves the mode
-in effect and moves nothing else, so every dynamic check is still recorded as
-unknown — and an unknown check is not a pass. `host_confirmed` and `container`
-are what SURE is built to answer with; neither is being answered with yet.
+**A run that was not granted still reaches no process.** `inspect_only` is the
+mode a run starts in and the mode a project's own file cannot move in either
+direction, and under it `sure_core::consent` refuses every project-running
+command before a runner sees it. That is a measurement rather than a reading:
+`pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing` drives the real
+pipeline with a runner that records being called and asserts the record is
+empty. Stage 6 reports which of the two happened instead of leaving it to be
+inferred — *"N check(s) would run your project's code and the execution mode
+stopped every one of them"*, or *"…and the execution mode allowed them. Each one
+has a result"* — and a check the runner produced nothing for is an error rather
+than a pass.
+
+**And the level SURE reports about a project has not moved.**
+`sure_core::support::CEILING` is `InspectOnly`, for the reason
+`docs/adr/0014-planned-check-execution-contract.md` states as its own
+consequence: level A and level B both require running something, and level B is
+a claim about every platform SURE runs on — a claim one platform has not earned
+for both. So the ceiling is no longer "this build runs no project code" (it
+does) but "this build runs approved checks on one platform and not on another."
+
+The consequence a reader deciding whether to grant a mode needs, and it has two
+halves since `P18-T007`: **a permission decides what SURE may do, and now also
+what SURE does.** A granted run carries the project's checks out and reports one
+result per check; a run that was not granted is recorded check by check as not
+checked. An unknown check is not a pass in either case.
 
 ## How a mode is enforced
 
@@ -130,16 +164,21 @@ before anything runs, and what comes out is a value:
 - `sure_core::container` says what the command line around an admitted command
   would look like in `container` mode — the image, the mount and its access, the
   network mode and the working directory — as a value, without starting anything.
-  It is listed last because it is downstream of the other two: enforcement
-  decides *whether* a command may run, and this decides *inside what*. A runtime
-  that is not installed changes the second and not the first, which is why its
-  absence is not an error.
+  It is listed last because it is meant to be downstream of the other two:
+  enforcement decides *whether* a command may run, and this decides *inside
+  what*. **Nothing in this build stands between them today** — there is no
+  executor that reads a `ContainerPlan` — so what the mode says and what a run
+  does are apart, which is the defect the section above records rather than a
+  description of how the two compose. A runtime that is not installed changes
+  the second and not the first, which is why its absence is not an error.
 
 **The commands that may run are the ones `Enforcement::admitted()` yields, and
 that iterator is the only door.** Anything that launches a project process takes
-its command line from there. That is a rule about the caller, not something the
-type system can hold on its own, so it is stated here and will be tested where
-the runner's spawn sites are enumerated.
+its command line from there, and since `P18-T007` something does:
+`sure_core::pipeline` is that caller. That is a rule about the caller rather
+than something the type system can hold on its own, so it is also checked where
+the runner's spawn sites are enumerated — `crates/sure-core/tests/spawn_sites.rs`
+holds which files may name the types on the route.
 
 Two limits belong with it, because a reader who takes the mechanism for more than
 it is will be wrong in the direction that matters:

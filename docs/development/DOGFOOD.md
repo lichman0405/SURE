@@ -54,10 +54,14 @@ The run is under **`inspect_only`**, and that needs no flag:
   is absent), so nothing could have moved the mode in either direction, and
   `sure doctor` reports `"settings_location": "platform"`, `"presence":
   "absent"`.
-* It is also the only mode this build acts on. `EXECUTION_SAFETY.md`: "**Nothing
-  does.** … no check drives on that road yet". The other two modes are
-  decisions about what *may* run, and a permission "changes what SURE may do and
-  not what SURE does".
+* At `169098d` it was also the only mode this build acted on:
+  `EXECUTION_SAFETY.md` then read *"**Nothing does.** … no check drives on that
+  road yet"*, and that quoted sentence is gone from the tree — `P18-T007` wired
+  the pipeline to the runner and rewrote it. What has not changed is the run:
+  a run still starts in `inspect_only`, the mode a project's own file cannot
+  move, and under it no command that starts a process is admitted.
+  `EXECUTION_SAFETY.md` now says that, and `support::CEILING` is still
+  `InspectOnly` for the platform reason rather than the old one.
 
 No `--settings-file` was passed and no setting was changed at any scope. Nothing
 was installed, and no execution policy was weakened anywhere.
@@ -183,6 +187,26 @@ for it."* The two reasons behind that, from stages 5 and 6:
   5/12. Read the project and check it: 14 of the planned checks read your project's files and run nothing. This build has no runner for a planned check, so none of them reported a result and each is recorded as unknown rather than passed. (NOT CHECKED)
   6/12. Run the project's own checks: 4 check(s) would run your project's code. 4 of them were stopped by the execution mode and are recorded as not checked: run the tests, look for probable mistakes, check that it compiles, check that the source is formatted. (NOT CHECKED)
 ```
+
+The two stage lines above are **this run's output at `169098d`**, quoted as it
+was printed. Stage 5's sentence is not what today's build says — `P18-T007`
+wired `pipeline.rs` to the runner and both stage descriptions were rewritten
+with it. This run is unaffected: it was under `inspect_only`, its 4 dynamic
+checks are still unrun, and the numbers below are the numbers it printed. What
+stage 5 says instead, measured rather than described: the same command over this
+repository, an empty store and `inspect_only` named in a settings file outside
+the project, on the working tree while `P18-T007` was being written (so the
+counts are that tree's and not this chapter's):
+
+```text
+  5/12. Read the project and check it: 14 of the planned checks read your project's files and run nothing. Each of them has a result: 0 were stopped by the execution mode and are recorded as not checked rather than passed, and the rest are the runner's answer — a detector's own observation where the check carries one, and its command's outcome where the plan holds a command.
+  6/12. Run the project's own checks: 4 check(s) would run your project's code and the execution mode stopped every one of them, so none was carried out and each is recorded as not checked rather than passed: run the tests, look for probable mistakes, check that it compiles, check that the source is formatted. (NOT CHECKED)
+```
+
+The 14 static checks produce their results now, which is the whole difference
+`P18-T007` made to a run under `inspect_only`; the 4 that would run still do not,
+and the verdict is still `not_green` — the run above exited 1 with 14 of 18
+checks reporting.
 
 So the honest headline is **not** "SURE found five must-fix problems in its own
 repository". It is: SURE planned eighteen checks, ran none of them, located
@@ -322,7 +346,7 @@ reader cannot miss:
 
 | Not checked | Where the run says so |
 | --- | --- |
-| All 14 static detector checks (this build has no runner for a planned check) | Stage 5, `(NOT CHECKED)`, plus a `Could not check` entry per check |
+| All 14 static detector checks (at `169098d`, because this build had no runner for a planned check) | Stage 5, `(NOT CHECKED)`, plus a `Could not check` entry per check |
 | The 4 project commands, stopped by the mode | Stage 6, `(NOT CHECKED)`, each named, with the mode's own sentence |
 | Model-backed assessment | Stage 8, `(NOT CHECKED)`, "no analysis provider is configured" |
 | Claim checking against recorded events | Stage 9, `(NOT CHECKED)` for `check`; for `recheck`, "the history holds no claims about this project" |

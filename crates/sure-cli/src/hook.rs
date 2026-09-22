@@ -2033,9 +2033,10 @@ mod tests {
     ///
     /// This is where `execution.mode` comes from and nowhere else. A project's
     /// `sure.yaml` naming `host_confirmed` is a *request*
-    /// (`Config::requested_privileges`) and this build refuses it like every
-    /// other request, so a test that wrote the mode into the project's file
-    /// would be testing a machine on which no project code runs —
+    /// (`Config::requested_privileges`) and is refused like every other request
+    /// — `Authority::execution_mode` says *"a project file cannot move it in
+    /// either direction"* — so a test that wrote the mode into the project's file
+    /// would be testing nothing about the mode:
     /// `a_project_asking_to_run_its_own_code_is_refused` is that test, and it is
     /// the one that keeps this helper honest.
     ///

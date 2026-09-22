@@ -517,6 +517,12 @@ mod tests {
     /// anything is read, planned or executed — which is the honest fixture for
     /// "this run never reached the stage that asks a model".
     fn stopped_run() -> PipelineOutcome {
+        // A runner that cannot start anything. The project does not exist, so
+        // this run never reaches the plan at all; the runner is here because the
+        // type asks for one, and it is one that provably starts nothing.
+        let stop = crate::process::Cancellation::new();
+        stop.cancel();
+        let runner = crate::planned_check_runner::ProcessRunner::new(stop);
         Pipeline {
             project: Path::new("this-project-does-not-exist"),
             purpose: Purpose::Check,
@@ -524,6 +530,7 @@ mod tests {
             execution: ExecutionSettings::inspect_only(),
             store: None,
             goal: None,
+            runner: &runner,
         }
         .run()
     }

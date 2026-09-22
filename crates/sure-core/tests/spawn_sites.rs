@@ -1,10 +1,17 @@
-//! Where SURE starts a process, and whether anything in the product does yet.
+//! Where SURE starts a process, and what stands in front of each site.
 //!
 //! `P3-T001` added the general process runner, and with it the first thing in
-//! this crate that *can* be pointed at a project. Everything the product claims
-//! about not running project code now depends on that runner having no caller,
-//! so the claim is checked here rather than written down and hoped for — the
-//! same technique, and for the same reason, as
+//! this crate that *can* be pointed at a project. Until `P18-T007` everything
+//! the product claimed about not running project code rested on that runner
+//! having no caller at all; it has one now — `pipeline.rs` builds a
+//! `PermissionPlan`, asks `Enforcement::of` about every check the schedule holds,
+//! and hands the admitted ones to `planned_check_runner` — so the claim this file
+//! holds is no longer *"nothing calls it"* but **"what calls it can only start
+//! what the mode admitted, and every file that may name the types on that route
+//! is named here"**. The default run is still inert, and what makes it inert is
+//! the plan and the enforcement rather than the runner's isolation. That is a
+//! claim about source text, so it is checked here rather than written down and
+//! hoped for — the same technique, and for the same reason, as
 //! `fingerprint_git.rs`'s `git_is_started_in_exactly_one_place` and
 //! `scan_project.rs`'s rule about the scanner not opening files.
 //!
@@ -56,9 +63,10 @@
 //! `nothing_depends_on_the_testkit_in_production` keeps out of the product, so
 //! no ship path reaches this line, and every caller gives it
 //! `sure_testkit::repository_root()` — the checkout it was compiled in, never a
-//! directory SURE was pointed at. `support::CEILING` is justified by no
-//! *project* code running from a product path, and this runs `git` over SURE's
-//! own tree.
+//! directory SURE was pointed at. `support::CEILING` rests on what this build can
+//! run on every platform it ships on rather than on whether a project command can
+//! run at all — the paragraph on the runner below says why — and this entry runs
+//! `git` over SURE's own tree besides.
 //!
 //! **Two: nothing outside [`MAY_NAME_A_PROCESS_REQUEST`] mentions
 //! [`ProcessRequest`].** This is the tightest of the three, and until `P3-T009`
@@ -93,13 +101,34 @@
 //! [`THE_SPAWN_SITES`]: it builds no `Command`, and the runner it names is
 //! `process::run`, which `request.rs` above already accounts for.
 //!
-//! **No product path reaches it yet.** `pipeline.rs` still reports that no runner
-//! is wired, so this file is a door with nothing on the other side of it, and
-//! that absence is what keeps `support::CEILING` where it is — the same kind of
-//! absence rules three and four are about. The day a product path does reach it,
-//! **this list, the paragraphs above it and the ceiling are one commit**, because
-//! the ceiling is justified by no project code running from a product path and a
-//! runner that a run reaches is exactly that.
+//! **A product path reaches it, as of `P18-T007`, and this paragraph is the one
+//! that moved.** `pipeline.rs` now builds a `PermissionPlan` from the mode and
+//! the permissions the run was handed plus the commands the schedule holds, asks
+//! `Enforcement::of` about every check, and passes the admitted ones to
+//! `run_scheduled_checks`; so the runner is not a door with nothing behind it any
+//! more, and *"no product path reaches it"* is a sentence this file may not say.
+//! What the file says instead is what is still true, and it is the whole of what
+//! holds the default run inert: **the plan admits nothing under `inspect_only`,
+//! the default mode, and the mode a project file cannot move**, so the tests in
+//! `pipeline.rs` and `planned_check_runner.rs` that record a runner being called
+//! observe an empty list. That is a weaker claim than an absence, and the entry
+//! is here so that a reader can see it weakened rather than find a paragraph that
+//! still reads like the old one.
+//!
+//! **The ceiling did not move with it, and the reason is not "no product path
+//! reaches the runner" any more.** It is the argument ADR 0014 wrote down as its
+//! own consequence: level B is "SURE can run approved generic checks", and a
+//! build that runs them on one platform and not on another — a Node check whose
+//! only program on the machine is `npm.cmd` comes back `InterpreterRequired` from
+//! `planned_work.rs`'s `classify` rather than a command, which is the ADR's own
+//! rejected alternative, and this branch's macOS and Linux test steps have never
+//! run — has not earned a single sentence for both.
+//! So `support::CEILING` stays at `InspectOnly` with the reason beside it, and
+//! `planned_check_runner.rs` still not being in [`THE_SPAWN_SITES`] is the one
+//! entry decision this task did not change: it builds no `Command`, and the
+//! runner it names is `process::run`, which `request.rs` above already accounts
+//! for. The day the measurements in `P18-T012` earn the ceiling a level, the
+//! reason there is what has to be replaced.
 //!
 //! **Three: nothing outside [`MAY_NAME_A_SUPERVISOR`] mentions `Supervisor`.**
 //! This is the rule that carries the claim the second one used to carry. The
@@ -129,11 +158,22 @@
 //! Not today — but the day anything wires a `StartSmoke` up to `sure check`,
 //! this fails, and it should. **Two things have to move together at that
 //! moment**: a product path exists, so this list and the paragraphs above it are
-//! wrong; and `sure_core::support`'s ceiling of level C is justified by *no
-//! project code running from a product path*, so `CEILING` and
+//! wrong; and `sure_core::support`'s ceiling of level C is a claim about what
+//! SURE can run, so `CEILING` and
 //! `the_ceiling_todays_build_claims_is_never_above_inspect_only` are in question
 //! in the same commit. A false green is more serious than a visible error, and
 //! this is the error that would rather be visible.
+//!
+//! **That moment came once already, in `P18-T007`, and what happened is worth
+//! more than what was predicted.** The pipeline began handing admitted commands
+//! to the runner — the first product path to reach it — and **this test did not
+//! fail**: it passed before the wiring and after it, because the file that
+//! changed names no type this census is about. What was wrong was the paragraph
+//! above, and a paragraph is not a name a source check can see. So the rule this
+//! file earned is the one written here for the next reader: **this file catches a
+//! new name, and a claim that goes false without one is caught by a test that
+//! measures the path — `pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing`
+//! is the one that does it for the default run — or it is not caught at all.**
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -151,7 +191,9 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
     ),
     (
         "sure-core/src/process/request.rs",
-        "the general runner, called by `sure-core/src/service.rs` and by nothing that starts one",
+        "the general runner: what `sure-core/src/service.rs` starts a service with, \
+         and what `sure-core/src/planned_check_runner.rs` carries an admitted \
+         project command to since `P18-T007`",
     ),
     (
         "sure-core/src/process/terminate.rs",
@@ -186,8 +228,10 @@ const THE_RUNNER: &str = "sure-core/src/process/";
 /// that names a request is a file that can run something, so every one of them is
 /// named here and a new one is a decision**". The local-command provider runs a
 /// command the user configured for analysis; the planned-check runner can run
-/// only what `Enforcement::admitted` produced. Neither is reached from a product
-/// path in this release, and neither changes `support::CEILING`.
+/// only what `Enforcement::admitted` produced. The provider is still not reached
+/// from a product path in this release; **the planned-check runner is, since
+/// `P18-T007`**, and neither changes `support::CEILING` — the reason stands where
+/// the ceiling is rather than here, and it is no longer an absent caller.
 const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[
     THE_RUNNER,
     THE_SUPERVISOR,
@@ -434,7 +478,9 @@ fn nothing_outside_the_named_files_names_a_process_request() {
     // file that cannot name the type cannot run anything through it. This is
     // what `process/mod.rs` said as "no product path calls `run` yet" until
     // `P3-T009` gave the runner a caller; the caller is on the list above, and
-    // the claim that moved is rule three's.
+    // the claim that moved is rule three's. Since `P18-T007` one of those callers
+    // is on a product path, which is the thing this rule was always about: the
+    // list is the answer, not the absence.
     let callers = namers_of("ProcessRequest", MAY_NAME_A_PROCESS_REQUEST);
 
     assert!(
@@ -443,8 +489,10 @@ fn nothing_outside_the_named_files_names_a_process_request() {
          runner. That is a real change and not a test to update: it means SURE \
          is able to execute code from a project. Either name it in \
          MAY_NAME_A_PROCESS_REQUEST and say why in the paragraph above, or take \
-         the name back out — and if the new caller is on a product path, \
-         `sure_core::support`'s level-C ceiling moves in the same commit. \
+         the name back out — and if the new caller is on a product path, it is \
+         `sure_core::support`'s paragraphs and this file's own that have to move: \
+         the ceiling's reason is a claim about every platform SURE runs on, not \
+         the absence of a caller. \
          Found:\n  {}",
         callers.join("\n  ")
     );
@@ -464,8 +512,10 @@ fn nothing_outside_the_named_files_names_a_supervisor() {
          service. That is a real change and not a test to update: it means SURE \
          is able to start a project's service. Either name it in \
          MAY_NAME_A_SUPERVISOR and say why in the paragraph above, or take the \
-         name back out — and if the new caller is on a product path, \
-         `sure_core::support`'s level-C ceiling moves in the same commit. \
+         name back out — and if the new caller is on a product path, it is \
+         `sure_core::support`'s paragraphs and this file's own that have to move: \
+         the ceiling's reason is a claim about every platform SURE runs on, not \
+         the absence of a caller. \
          Found:\n  {}",
         namers.join("\n  ")
     );

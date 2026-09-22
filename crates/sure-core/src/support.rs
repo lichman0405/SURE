@@ -52,21 +52,46 @@
 //! project with a runner that records being called, and asserts the record is
 //! empty.
 //!
-//! **And level B is a claim about every platform SURE runs on, which one platform
-//! does not earn.** The product doc's level B is *"run approved generic checks"*
-//! — a level SURE reports about a person's project on that person's machine — and
-//! this build runs a check on one platform and not on another: a Node check whose
-//! only program there is `npm.cmd` comes back `Resolution::InterpreterRequired`
-//! from `planned_work.rs` rather than a command (the alternative
-//! `docs/adr/0014-planned-check-execution-contract.md` rejected), and the macOS
-//! and Linux legs of this branch have never run at all. That ADR states the rule
-//! this module is following as its own consequence: *"The support ceiling in
-//! `support::CEILING` moves only if the measurements in `P18-T012` earn it. The
-//! default outcome of this ADR is that it does not move: level B says SURE can
-//! run approved generic checks, and a build that runs them on one platform and
-//! not on another has not earned a single sentence for both."* The end-to-end
-//! measurements are that task's; `P18-T007` wired the path and left the ceiling
-//! where the ADR put it.
+//! **And that is measured, in three parts that do not agree**
+//! (`docs/adr/0015-support-ceiling-evidence.md` holds the readings; this
+//! paragraph is the answer they produced).
+//!
+//! * **Windows, a Node project: the check is stopped.** Measured on this
+//!   workstation through this module's own resolver —
+//!   `ProgramPath::of_this_machine().resolve(OsStr::new("npm"))` answers
+//!   `Resolution::InterpreterRequired("C:\Program Files\nodejs\npm.cmd")` and
+//!   `is_startable()` is false, and the same is true of `npx` and `pnpm`.
+//!   **The extensionless `npm` file is on `PATH` and is not the answer**: the
+//!   Windows completion table probes `com`/`exe`/`bat`/`cmd`/`ps1` and never the
+//!   bare name, so the file that would run on macOS resolves to a batch file
+//!   this build declines to start (the alternative
+//!   `docs/adr/0014-planned-check-execution-contract.md` rejected).
+//! * **Windows, a Rust project: the runner is reached, and no test runs the
+//!   check to completion.** `cargo` and `git` resolve `Executable`, and
+//!   `pipeline.rs`'s `a_run_a_user_granted_reaches_the_runner_and_is_never_
+//!   reported_as_passed` shows a run under a user's own grant reaching a runner.
+//!   Every product-path test that reaches the real runner hands it a
+//!   `Cancellation` cancelled before the run began, so **what is measured is the
+//!   seam and not a project's check finishing and passing** — on any platform.
+//! * **macOS and Linux: the table says yes and the legs are green.** The
+//!   non-Windows completion resolves a bare `npm` file to `Executable`
+//!   (`planned_work.rs`'s `WITHOUT_PATHEXT`, tested on Windows by
+//!   `a_platform_that_completes_a_bare_name_with_nothing_finds_the_name_itself`),
+//!   and `ci`'s `rust (macos-latest)` and `rust (ubuntu-latest)` legs passed on
+//!   `f8db077`. **This paragraph said the opposite until `P18-T012`** — that
+//!   those legs "have never run at all" — and that was a recollection rather
+//!   than a reading; it is the one part of the ceiling's stated reason a
+//!   measurement contradicted.
+//!
+//! Level B is one sentence and those three parts do not agree, so the ceiling
+//! takes the weaker one. A constant cannot say *yes for a Rust project on
+//! Windows, no for a Node project on the same machine, and unmeasured on the
+//! other two platforms*, and reporting the yes would be the same defect one
+//! level up as reporting a check as passed because nothing went wrong. ADR 0014
+//! stated the rule this module follows — a ceiling moves when measurements earn
+//! it, and its default outcome is that it does not — and `P18-T012` is where
+//! those measurements were taken: **they did not earn it, for a reason this
+//! module now states as a reading rather than as the absence of one.**
 //!
 //! **The census that used to be the evidence for the ceiling is now the evidence
 //! for something narrower, and deliberately so.** `tests/spawn_sites.rs` holds
@@ -141,14 +166,17 @@ use crate::discover::Discovery;
 /// The best level any project can reach in this build.
 ///
 /// [`SupportLevel::InspectOnly`], and since `P18-T007` the reason is **not** that
-/// this build runs no project code — it does. The reason is that level B is a
-/// claim about running approved generic checks wherever SURE runs, and this build
-/// runs them on one platform and not on another; the module comment carries the
-/// argument, its measurements are `P18-T012`'s, and
-/// `docs/adr/0014-planned-check-execution-contract.md` carries the rule that says
-/// so. Raising this to [`SupportLevel::Generic`] is the whole of the change the
-/// day those readings earn it; the tests in this module are written to fail at
-/// that moment rather than to accommodate it.
+/// this build runs no project code — it does. The reason is the measured
+/// asymmetry `docs/adr/0015-support-ceiling-evidence.md` records: level B is one
+/// sentence about running approved generic checks, and the three cases
+/// `P18-T012` measured do not agree — a Node project on Windows is stopped by the
+/// classifier, a Rust project's runner is reached but no test runs its check to
+/// completion, and the macOS and Linux legs are green over tests that likewise
+/// run no project's check. **This doc used to say one platform had never been
+/// tried; that was wrong, and the module comment says what replaced it.** Raising
+/// this to [`SupportLevel::Generic`] is the whole of the change the day a
+/// measurement earns it; the tests in this module are written to fail at that
+/// moment rather than to accommodate it.
 pub const CEILING: SupportLevel = SupportLevel::InspectOnly;
 
 /// Classify the project a discovery was made of.

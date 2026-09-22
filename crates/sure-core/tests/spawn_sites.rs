@@ -120,19 +120,23 @@
 //! still reads like the old one.
 //!
 //! **The ceiling did not move with it, and the reason is not "no product path
-//! reaches the runner" any more.** It is the argument ADR 0014 wrote down as its
-//! own consequence: level B is "SURE can run approved generic checks", and a
-//! build that runs them on one platform and not on another — a Node check whose
-//! only program on the machine is `npm.cmd` comes back `InterpreterRequired` from
-//! `planned_work.rs`'s `classify` rather than a command, which is the ADR's own
-//! rejected alternative, and this branch's macOS and Linux test steps have never
-//! run — has not earned a single sentence for both.
-//! So `support::CEILING` stays at `InspectOnly` with the reason beside it, and
+//! reaches the runner" any more.** It is the measured platform asymmetry ADR 0014
+//! said `P18-T012` would settle, and that task has now measured it: a Node check
+//! whose only program on this machine is `npm.cmd` comes back
+//! `InterpreterRequired` from `planned_work.rs`'s `classify` rather than a
+//! command, a Rust project's runner *is* reached under a user's own grant while no
+//! test runs a project's check to completion on any platform, and the macOS and
+//! Linux legs — **which have run, and are green**; this paragraph said the
+//! opposite, which is one of the sentences `P18-T012` corrected — are green over
+//! tests that likewise run no project's check.
+//! Level B is one sentence and those three do not agree, so `support::CEILING`
+//! stays at `InspectOnly` with the reading beside it
+//! (`docs/adr/0015-support-ceiling-evidence.md` is the record), and
 //! `planned_check_runner.rs` still not being in [`THE_SPAWN_SITES`] is the one
-//! entry decision this task did not change: it builds no `Command`, and the
+//! entry decision `P18-T007` did not change: it builds no `Command`, and the
 //! runner it names is `process::run`, which `request.rs` above already accounts
-//! for. The day the measurements in `P18-T012` earn the ceiling a level, the
-//! reason there is what has to be replaced.
+//! for. The day a measurement shows a project's own check running to completion
+//! and passing, the reason beside the ceiling is what has to be replaced.
 //!
 //! **Three: nothing outside [`MAY_NAME_A_SUPERVISOR`] mentions `Supervisor`.**
 //! This is the rule that carries the claim the second one used to carry. The
@@ -195,12 +199,14 @@
 //! and `StartSmoke::planned(`). The first of the two things above moved with it —
 //! the list, this section and the failure message are `P18-T009`'s edit. The second
 //! did not, and that is a decision rather than an omission: `support::CEILING`'s
-//! reason was rewritten in `P18-T007` to the platform argument (`npm.cmd` comes
-//! back `InterpreterRequired` on Windows, and this branch's macOS and Linux test
-//! steps have never run) rather than the absence of a caller, so *a caller exists
-//! now* is not evidence against it. `P18-T012` owns those measurements. A reader
-//! who thinks a product path alone should move the ceiling should read the
-//! paragraph beside the ceiling before changing it.
+//! reason was rewritten in `P18-T007` to the platform argument rather than the
+//! absence of a caller, so *a caller exists now* is not evidence against it.
+//! **`P18-T012` took those measurements and the ceiling still did not move** —
+//! `docs/adr/0015-support-ceiling-evidence.md` is the record, and one sentence
+//! `P18-T007` wrote into the reason turned out to be false and was corrected
+//! there: the macOS and Linux legs have run, and are green. A reader who thinks a
+//! product path alone should move the ceiling should read the paragraph beside
+//! the ceiling before changing it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -301,10 +307,11 @@ const MAY_NAME_A_SUPERVISOR: &[&str] = &[THE_SUPERVISOR, THE_START_SMOKE];
 ///
 /// **What this entry does not do is move `support::CEILING`**, and a reader
 /// arriving from the failure message needs that sentence: the ceiling's reason is
-/// the platform argument written beside it in `P18-T007`, and `P18-T012` is where
-/// the measurements that could change it live. That a caller exists now is not
-/// evidence against a claim about which platforms SURE has been shown to run
-/// project code on.
+/// the measured platform asymmetry written beside it, `P18-T012` has now taken
+/// those measurements and the ceiling did not move, and
+/// `docs/adr/0015-support-ceiling-evidence.md` is the record. That a caller exists
+/// now is not evidence against a claim about where SURE has been shown to run a
+/// project's own check.
 ///
 /// Split from [`MAY_NAME_A_SUPERVISOR`] even though the first entry is the same
 /// file, because they are two rules that today share an entry and the failure

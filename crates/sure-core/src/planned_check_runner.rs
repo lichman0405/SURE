@@ -2439,6 +2439,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_admission_that_does_not_cover_a_checks_command_is_an_error_and_never_a_pass() {
+        // The arm above proves the pairing is refused. This one takes the
+        // refusal through the run, because **a refusal nothing calls is not a
+        // rule**: `carry_out` turns it into a row, and what that row says is the
+        // whole of what a user sees when the two halves of SURE's own decision
+        // disagree.
+        //
+        // `pipeline.rs` cannot produce this state today — it builds the schedule
+        // and the permission plan from the same walk, so the two agree by
+        // construction — and that is a fact about one caller rather than about
+        // this function, which takes the schedule and the enforcement as two
+        // values. What is asserted here is about the second value: a check whose
+        // work the admission does not cover must be an `Error` that blocks green
+        // and must not be carried to a runner at all.
+        let fingerprint = FingerprintId::generate();
+        let schedule = schedule_of([work(
+            "differs",
+            "a check whose admission does not cover its command",
+            ActionKind::RunTests,
+            a_command("python", &["-m", "pytest"]),
+        )]);
+        // The same program, one more argument: the case a comparison of rendered
+        // command lines would let through, and the one `P18-T006` chose to refuse.
+        let plan = permission_plan(
+            &fingerprint,
+            &[("differs", "python", &["-m", "pytest", "-x"])],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let runner = FakeRunner::succeeding();
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("a check and its admission disagreeing is a row, not a refused run");
+
+        let result = results
+            .get(&check_id("differs"))
+            .expect("the check is a row and not an absence");
+        assert_eq!(
+            result.status,
+            CheckStatus::Error,
+            "nothing was observed, so nothing may be reported as an observation: {}",
+            result.reason
+        );
+        assert!(
+            result.blocks_green(),
+            "a critical check SURE could not carry out has to keep the run out of green"
+        );
+        assert!(
+            result
+                .reason
+                .contains("could not run the work this check holds"),
+            "the row says what happened rather than reporting a status alone: {}",
+            result.reason
+        );
+        assert!(
+            result.reason.contains("python -m pytest -x"),
+            "and it names the command that was admitted, which is what a reader needs \
+             to see the disagreement: {}",
+            result.reason
+        );
+        assert!(
+            runner.asked().is_empty(),
+            "the refused pairing reached a runner, so the refusal is a sentence rather \
+             than a door: {:?}",
+            runner.asked()
+        );
+    }
+
     // ---- the translation, field for field -----------------------------------
 
     #[test]

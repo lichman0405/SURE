@@ -192,6 +192,27 @@ pub const NOTHING_CAME_BACK: &str = "Nothing was reported for this check, so SUR
 /// result of its own and one has to be made for it; a declared check has no
 /// result of its own for the same reason and is made one the same way.
 ///
+/// # `missing` is the one argument a caller can pass empty and be wrong about
+///
+/// **A recorded risk, left standing deliberately** (`P18-T012` measured it and
+/// decided against a guard). One product caller passes a non-empty slice —
+/// `pipeline.rs`, which passes the declarations the same walk produced — and
+/// every other caller in the tree passes `&[]`. An empty slice makes this
+/// function's second loop a no-op, so a caller that *had* declarations and passed
+/// `&[]` would produce a report that is silent about checks the project declared,
+/// which is the false green the module comment above is about.
+///
+/// What is not done about it, and why: the type cannot tell the two cases apart —
+/// `&[]` means *no declarations* and *declarations I forgot* with one value — and
+/// a guard would need a second parameter that only a real second caller could
+/// justify. **No such caller exists, and inventing one to hang a test on would be
+/// a test with no product behind it.** What holds the property instead is the
+/// measurement rather than the type: `crates/sure-core/tests/declared_commands.rs`
+/// drives the real `sure check` pipeline over a project with a broken manifest and
+/// asserts the declaration's row is a `Skipped` that blocks green and is counted —
+/// and `P18-T012` proved that test red by deleting this function's second loop,
+/// which is the mutation a guard would have had to catch.
+///
 /// # Errors
 /// Returns [`RunRefused`] when the rows cannot be aggregated honestly: two
 /// answers for one check — two results, or a result and a declaration, or two

@@ -5362,3 +5362,71 @@ exists.
   shipped planner that emits `CheckOperation::Browser`, so the door has no producer
   and there is no end-to-end browser check; the wiring is measured with a fake and the
   driver's verdict table separately, and the two are never presented as one run.
+
+## P18-T011 — a declaration no runner can carry is a row of the run, and the total counts it
+
+- **The false green was a value whose own test passed while the product threw it
+  away.** `MissingCommand::not_checked` built a `CheckResult` for a declared check no
+  runner accepts, and `pipeline.rs` pushed that row into `results` itself.
+  `aggregate_run` walks `schedule.checks()`, so an id the plan never proposed was left
+  over in `RunReport::unscheduled` — a field documented as "reported and not
+  aggregated" that **no renderer and no product path reads**. `checks/mod.rs` asserted
+  `result.blocks_green()` about it: true of the value, false of the system. A critical
+  `"test": ["jest"]` was a green run. The value's test was never wrong; nothing was
+  giving the value a chance to matter.
+
+- **The declarations are an argument now, and the typing is the safety rather than a
+  rule the function has to get right.** `aggregate_run` takes `missing:
+  &[MissingCommand]` beside the schedule and pushes one `not_checked` row per
+  declaration. A `MissingCommand` can only produce a `Skipped` result against the state
+  being aggregated, so no caller can declare a check into a pass. Three
+  `TwoAnswersForOneCheck` refusals keep declaration, result and schedule from answering
+  for one id twice. Exactly one product call site passes it — `pipeline.rs` with
+  `&planned.missing` — and that was established by enumerating every call site rather
+  than by assuming the argument had been threaded.
+
+- **The same hole was open a second time, in the sentence a person reads first.**
+  `coverage_summary::summarize` counted the schedule alone, so a report holding a row
+  no count accounted for answered *"SURE checked all 5 checks."* Both halves of the
+  walk now share one `Tally`, because they are one rule applied to two halves of one
+  set. The `None => continue` for a scheduled check with no row was measured to be
+  **unreachable** rather than assumed so: `aggregate_run`'s `(None, None)` arm pushes a
+  row for every scheduled check by construction. That row is `Unknown` and never
+  `Pass` — the runner layer's "missing output becomes Error" and this layer's "no row
+  at all becomes Unknown" are different layers and both hold.
+
+- **Three `dead_code` suppressions came off with nothing deleted underneath them.**
+  `human_report.rs`, `json_report.rs` and `portable_report.rs` each carried
+  `#![allow(dead_code, reason = "…awaits the check engine…")]`; the diff is five removed
+  lines each and no function removed. Clippy stays clean at `-D warnings` afterwards,
+  which is the proof the modules are reachable rather than a claim that they are. The
+  repository's answer to a warning is to make the claim true, not to quiet it.
+
+- **The red proof was re-taken, and the restore is why it means anything.** Replacing
+  the declaration loop with `let _ = &declared;` exits 101 and reports *"the run holds
+  no row for Test, so it says nothing about that role: [("build the project",
+  Skipped)]"* — the four-row run telling a reader about one. Restored byte-identical
+  (`git hash-object` back to `c8b16eaba8bf65ec76b2cbcec8f31b7cc426e5a6`) **and
+  touched**, because a `Copy-Item` restore keeps the old `LastWriteTime` and cargo
+  would have reused the mutated binary; the recompile line in the green re-run is what
+  confirms the touch took.
+
+- **The adversarial fixture moved against green, and its verdicts did not move at
+  all.** `dynamic-not-authorized`'s `not_checked_count` goes 1 → 4 because three
+  undeclared roles are now rows of the run. All three are `Skipped` with
+  `NotApplicable` and `blocks_green` false, so `blocking` and `critical_not_checked`
+  are untouched, the aggregate is still `not_enough_checked`, and the control's
+  negative assertion is still what decides it. The fixture declares `moved.keys` and
+  the harness compares it against actual movement, so "unchanged rather than widened"
+  is measured rather than asserted.
+
+- **What this does not decide.** No runtime check's result is measured here — the
+  fixture is `inspect_only`, so every claim is about what a run *reports*, not about
+  anything SURE ran. `&[]` remains a silent way to re-open this hole at a future
+  product call site, and nothing structural prevents it; the guard is behavioural
+  (`declared_commands.rs` drives the real pipeline, so a regression at the one real
+  call site goes red), and the risk is recorded rather than filed, because filing an
+  Issue against a hypothetical caller would be turning an inference into a fact. The
+  stale ceiling sentence at `tests/acceptance_report_runner.rs:25-26` — *"`sure_core::support`'s
+  ceiling of level C rests on no product path running project code"* — was verified
+  still present and still false, and is `P18-T012`'s.

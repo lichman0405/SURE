@@ -73,7 +73,7 @@ use crate::aggregation::{RunReport, aggregate_run};
 use crate::analysis_provider;
 use crate::candidate_scanner::CandidateScanner;
 use crate::capability_report;
-use crate::checks::{self, check_id, nothing_observed_yet};
+use crate::checks::{self, check_id};
 use crate::claim_checker::{self, CheckedClaim};
 use crate::components::ComponentGraph;
 use crate::config::AnalysisProvider;
@@ -88,7 +88,7 @@ use crate::fingerprint::{self, project_fingerprint};
 use crate::intent_implementation::compare_intent_to_project;
 use crate::intent_model;
 use crate::noop_heuristics::NoOpHeuristics;
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::project_intent;
 use crate::project_verdict::build_verdict;
 use crate::recheck_lifecycle::{self, LifecycleInputs, LifecycleUpdate};
@@ -1371,20 +1371,41 @@ fn propose_everything(
     // SURE would run, and leaving them out of the plan would make the plan a
     // shorter and greener thing than the run.
     //
-    // **The operation beside each is the placeholder `P18-T003` puts beside every
-    // check that is not a declared command.** A candidate scanner proves a
-    // *candidate* from a reading of the source and starts nothing, so the honest
-    // observation at this point in the run is the one that claims neither a pass
-    // nor a defect; `P18-T004` replaces it with the observation the scanner made.
+    // **The observation beside each is the one every one of these scanners made:
+    // a reading, and nothing settled by it.** Stage 7 reads source files and
+    // never runs the project, so a candidate it found is a
+    // `StaticObservation::Candidate` with the place it was read from in the
+    // sentence — the one answer that claims neither a pass nor a defect. It is
+    // not `CouldNotRun`: a scanner that could not read a file produced no
+    // proposal for it, and the reading that did happen is what this carries.
+    //
     // Nothing here changes how the plan is assembled: the proposal, the missing
     // commands and the refusals are exactly what they were before.
     for proposal in completeness_proposals(discovery, intent) {
         // A refusal is remembered by the builder rather than lost, and the plan
         // stage reports it. Nothing here second-guesses the decision.
-        drop(builder.propose(PlannedWork::new(proposal, nothing_observed_yet())));
+        let observation = reading_observation(&proposal);
+        drop(builder.propose(PlannedWork::new(proposal, observation)));
     }
 
     planned
+}
+
+/// The work beside one stage-7 candidate: the reading that produced it.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this stage's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+/// [`crate::false_completion_aggregator`] files these as candidates, and a
+/// candidate is what the placeholder used to say on their behalf: since
+/// `P18-T004` each scanner says it in its own words, and stage 7 says it here
+/// because this loop is where five scanners and the intent comparison meet.
+fn reading_observation(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: it was read from the source, and no command has \
+         been run for it.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Stage 7: the completeness scanners, and the aggregator that orders them.

@@ -638,7 +638,9 @@ mod tests {
     use crate::components::ComponentGraph;
     use crate::discover::DiscoverOptions;
     use crate::discover::Ecosystem;
+    use crate::planned_work::CheckOperation;
     use crate::planned_work::PlannedWork;
+    use crate::planned_work::PrecomputedEvidence;
     use crate::schedule::PlanBuilder;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -989,15 +991,24 @@ steps:
                 connect_service: true,
             },
         );
-        // A step's proposal enters the plan paired with the placeholder
-        // operation `P18-T003` puts beside every check that is not a declared
-        // command: expanding a flow proves a candidate from a description and
-        // starts nothing. See `checks::nothing_observed_yet`.
-        for proposal in proposals {
+        // A step's proposal enters the plan paired with the observation a
+        // *description* can honestly make: expanding a flow proves a candidate
+        // and starts nothing, so the value is a candidate naming the step and no
+        // pass is available from it (`planned_work::to_result` refuses one on
+        // this observation under the flow's `Inference` class). `P18-T004`
+        // deleted the one placeholder these sites used to share; a flow step has
+        // no caller in the product yet, so this test writes the sentence its own
+        // reading supports rather than reaching for a helper no product path has.
+        for step in &proposals {
+            let observation = PrecomputedEvidence::candidate(format!(
+                "{} Nothing has settled it: the flow describes this step, and the \
+                 project has not been started for it.",
+                step.reason().plain_description()
+            ));
             builder
                 .propose(PlannedWork::new(
-                    proposal,
-                    crate::checks::nothing_observed_yet(),
+                    step.clone(),
+                    CheckOperation::Precomputed(observation),
                 ))
                 .unwrap();
         }

@@ -27,10 +27,10 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
-use crate::checks::{check_id, nothing_observed_yet};
+use crate::checks::check_id;
 use crate::discover::node::{MANIFEST, NodeProject, Package};
 use crate::discover::{Discovery, Ecosystem};
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
@@ -252,17 +252,32 @@ impl ExternalServiceChecks {
 
     /// Hands every proposal to a plan builder.
     ///
-    /// **Each proposal is paired with the operation that would carry it out, and
-    /// the operation here is the placeholder `P18-T003` puts beside every check
-    /// that is not a declared command.** These checks can only be confirmed
-    /// against the real outside service, which has not been contacted at the
-    /// moment the plan is made — so the honest observation is the one that claims
-    /// neither a pass nor a defect. `P18-T004` replaces it with the observation
-    /// this detector actually made, and ADR 0014's decision 11 is where the
-    /// separate question of what a *service* check may be given is answered.
+    /// **Each proposal is paired with the observation this detector actually
+    /// made**: a dependency or an environment variable was read, and nothing
+    /// about the outside service was asked. That is
+    /// [`StaticObservation::Candidate`] — the file is the evidence and the
+    /// service is untouched — and it starts no process and opens no connection,
+    /// which is ADR 0014 decision 11's separate question about what a *service*
+    /// check may be given.
+    ///
+    /// **It is deliberately not [`StaticObservation::CouldNotRun`], which the
+    /// four answers would otherwise tempt this module into.** The read this
+    /// detector needed — the manifest, the source — succeeded; what cannot
+    /// happen here is the *confirmation*, which is a property of the check and
+    /// not of the reading, and it is already said in the one place this module
+    /// states results: [`Self::not_checked`] reports every one of these as
+    /// `skipped` with [`NotCheckedReason::ExternalServiceUnavailable`], which
+    /// `fixtures/adversarial/external-unverified/scenario.json` requires and
+    /// whose forbidden outcomes are a pass *and* a failure — *the honest answer
+    /// is cannot confirm*. An `Error` here would report a detector failure that
+    /// did not happen, and a `Holds` would report the local pass the fixture
+    /// exists to forbid.
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
+    /// [`StaticObservation::CouldNotRun`]: crate::planned_work::StaticObservation::CouldNotRun
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            let work = PlannedWork::new(proposal.clone(), nothing_observed_yet());
+            let work = PlannedWork::new(proposal.clone(), observation_of(proposal));
             if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
@@ -295,6 +310,19 @@ impl ExternalServiceChecks {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this module's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: the file was read, and confirming this needs the \
+         real outside service, which has not been contacted.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Scan a Node project's dependencies for external service signals.

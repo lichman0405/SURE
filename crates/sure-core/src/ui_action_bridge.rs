@@ -26,10 +26,10 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::classify_path;
-use crate::checks::{check_id, nothing_observed_yet};
+use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::redact::escape_control_characters;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
@@ -214,15 +214,23 @@ impl UiActionBridge {
 
     /// Hands every proposal to a plan builder.
     ///
-    /// **Each proposal is paired with the operation that would carry it out, and
-    /// the operation here is the placeholder `P18-T003` puts beside every check
-    /// that is not a declared command.** These are inferences from a reading of
-    /// the UI and its handlers rather than anything SURE has driven, so the honest
-    /// observation is the one that claims neither a pass nor a defect. `P18-T004`
-    /// replaces it with the observation this bridge actually made.
+    /// **Each proposal is paired with the observation this bridge actually
+    /// made, which is a [`StaticObservation::Candidate`] in both of its two
+    /// shapes.** The static shape
+    /// read a binding in a frontend file and never watched the handler; the
+    /// runtime shape had a browser observe an element that matches the declared
+    /// action, and still never watched what the action does — no click is
+    /// performed here, and the module comment above says this bridge does not
+    /// read a handler body. So neither is a `Holds`: a pass would say the action
+    /// works, and the element being on the page is not that. The difference
+    /// between the two shapes is the *class* on the proposal, which is
+    /// `ObservedFact` when a browser saw the element and `Inference` when it did
+    /// not, and that is where P6-T006's acceptance lives — not in the status.
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in self.proposals() {
-            let work = PlannedWork::new(proposal, nothing_observed_yet());
+            let work = PlannedWork::new(proposal.clone(), observation_of(&proposal));
             if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
@@ -254,6 +262,26 @@ impl UiActionBridge {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// **The class decides which of the two sentences is true, and nothing else
+/// changes.** Both are the reason's own rendering — the same sentences a report
+/// prints — with what was *not* seen after it, because that is the half a
+/// candidate claims.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    let unsettled = if proposal.evidence_class() == EvidenceClass::ObservedFact {
+        "a browser saw a matching element on the page; what the action does when \
+         somebody uses it was not watched"
+    } else {
+        "the binding was read in the source; the handler was never watched, and \
+         nothing here says what it does"
+    };
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: {unsettled}.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Whether an observed element matches a declared UI action.

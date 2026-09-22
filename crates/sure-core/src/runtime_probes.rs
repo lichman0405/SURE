@@ -185,11 +185,11 @@ use sure_domain::severity::Severity;
 use sure_domain::variants::variants;
 
 use crate::checks::node::{Runner, command_for, components};
-use crate::checks::{MissingKind, check_id, nothing_observed_yet};
+use crate::checks::{MissingKind, check_id};
 use crate::components::ComponentGraph;
 use crate::config::{CheckPreference, ChecksConfig, ScopeReduction};
 use crate::discover::node::{NodeProject, Package, ScriptRole};
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
@@ -776,19 +776,33 @@ impl ProbePlan {
     ///
     /// [`NodeChecks::add_to`]: crate::checks::node::NodeChecks::add_to
     ///
-    /// **The operation beside each probe is the placeholder `P18-T003` puts
-    /// beside every check that is not a declared command.** A probe is a check
-    /// that starts the project and looks at it, and *nothing has been started* at
-    /// the moment the plan is made — the probe's own command is what a later stage
-    /// would run, and until it does there is nothing to report about it. So the
-    /// honest observation is the one that claims neither a pass nor a defect, and
-    /// `P18-T004` is where this becomes the command the probe would run.
+    /// **The operation beside each probe is the reading this module made, and it
+    /// is not a command — deliberately.** What a probe *is* is a check that
+    /// starts the project and looks at it, and at plan time nothing has been
+    /// started, so the honest observation is a
+    /// [`StaticObservation::Candidate`] naming the manifest whose script the
+    /// probe would run. It is not a `CouldNotRun`: this module got as far as
+    /// resolving a serving command, and a component it could not have resolved
+    /// is in [`Self::not_planned`] with its own reason instead of here.
+    ///
+    /// **It is not a `Command` or a `Service` either, and the reason is the one
+    /// thing this file cannot do.** The only form the command takes here is
+    /// [`serving_command`]'s rendered line — `npm run dev` as a `String` — and
+    /// turning that line back into a program and an argument vector is the
+    /// parse `docs/adr/0014-planned-check-execution-contract.md` rejected. The
+    /// typed form comes from the discovery that knows the package manager and
+    /// the script as values, which is what [`crate::checks::node`] holds for the
+    /// four declared checks and what a service-shaped probe would need here.
+    /// Until something holds it, this module plans an observation rather than
+    /// promising a run it cannot spell.
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for probe in &self.probes {
             // The `Err` is the refusal, and it is not dropped: `propose` has
             // already pushed it onto the builder's own list by the time this
             // returns it, which is the contract that function documents.
-            let work = PlannedWork::new(probe.proposal.clone(), nothing_observed_yet());
+            let work = PlannedWork::new(probe.proposal.clone(), observation_of(probe));
             if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
@@ -807,6 +821,19 @@ impl ProbePlan {
             .chain(self.not_planned.iter().map(NotPlanned::plain_description))
             .collect()
     }
+}
+
+/// The work beside one probe: the reading that produced it, and no more.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering a
+/// report prints — with this module's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+fn observation_of(probe: &RuntimeProbe) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: the component has not been started, so nothing \
+         about it while it runs has been seen.",
+        probe.proposal.reason().plain_description()
+    )))
 }
 
 /// The component directory a manifest path sits in.

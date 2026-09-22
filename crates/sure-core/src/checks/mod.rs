@@ -112,13 +112,17 @@
 //! the same limit [`crate::browser`] states about its drivers.
 //!
 //! **A detector's proposal needs an operation too, and it has no program to
-//! name.** Since `P18-T003` every proposed check carries one, so the handful of
-//! places that propose from a *reading* rather than from a declared command —
-//! the candidate scanners, the runtime probes, the flow steps and the corpus
-//! fixtures — take [`nothing_observed_yet`], which is a candidate observation and
-//! therefore never a pass. It is a placeholder with an owner: `P18-T004` replaces
-//! each one with the observation the detector actually made, and until then the
-//! honest answer is the one that claims nothing.
+//! name.** Since `P18-T003` every proposed check carries one, so the places that
+//! propose from a *reading* rather than from a declared command — the candidate
+//! scanners, the runtime probes, the flow steps and the corpus fixtures — carry
+//! a [`PrecomputedEvidence`](crate::planned_work::PrecomputedEvidence) built from
+//! the reading they made. `P18-T003` gave every one of them one shared
+//! placeholder for that and named `P18-T004` as its owner; `P18-T004` removed it,
+//! and each site now writes its own detector's observation. Every one of them is
+//! a *candidate*, because a reading settles nothing about a project that was
+//! never run — and a candidate is never a pass. The three ecosystem proposers
+//! above are untouched by that: they hold a program and an argument vector and
+//! plan a command.
 
 pub mod node;
 pub mod python;
@@ -133,7 +137,7 @@ use sure_domain::severity::Severity;
 use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
 
 use crate::fingerprint::digest::Digest;
-use crate::planned_work::{CheckOperation, CommandSpec, PrecomputedEvidence};
+use crate::planned_work::{CheckOperation, CommandSpec};
 use crate::process::{Environment, Limits};
 
 /// The domain tag for a check identifier.
@@ -262,41 +266,6 @@ pub(crate) fn command_operation(
         CommandSpec::new(program, directory, Environment::inherited(), CHECK_LIMITS)
             .with_arguments(arguments.iter().copied()),
     )
-}
-
-/// The operation for a check nothing has observed yet.
-///
-/// **`P18-T003`'s placeholder, and `P18-T004` is the task that replaces it.** Every
-/// check in this product is now proposed with the work that would carry it out or
-/// with the evidence behind it, and the three ecosystem proposers can answer
-/// properly because they hold a program and an argument vector. The detectors, the
-/// runtime probes and the flow steps do not: what they hold is a *candidate* — a
-/// pattern in a source file, an external service that is not reachable, a route
-/// nothing answers — and no command has been started for any of them at the moment
-/// the plan is made.
-///
-/// So the answer is [`StaticObservation::Candidate`], which
-/// [`PrecomputedEvidence::to_result`] maps to
-/// [`Warning`](sure_domain::status::CheckStatus::Warning). That is the only value
-/// among the four that claims nothing: a detector that said [`Holds`] would be
-/// reporting a pass it never established, one that said [`Contradicted`] would be
-/// reporting a defect it never confirmed, and [`CouldNotRun`] would be reporting a
-/// failure that has not happened yet — the false green and the false red in one
-/// line each.
-///
-/// **The detail is a constant SURE writes and never project text**, like every
-/// other sentence in this module. It says exactly what is true: a reading happened,
-/// and nothing has settled it.
-///
-/// [`Holds`]: crate::planned_work::StaticObservation::Holds
-/// [`Contradicted`]: crate::planned_work::StaticObservation::Contradicted
-/// [`CouldNotRun`]: crate::planned_work::StaticObservation::CouldNotRun
-#[must_use]
-pub(crate) fn nothing_observed_yet() -> CheckOperation {
-    CheckOperation::Precomputed(PrecomputedEvidence::candidate(
-        "nothing has settled this check yet: it was proposed from a reading of the \
-         project, and no command has been run for it",
-    ))
 }
 
 /// The absolute directory a component's manifest sits in.

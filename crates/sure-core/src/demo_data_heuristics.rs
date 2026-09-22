@@ -30,10 +30,10 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::{CandidateContext, classify_path};
-use crate::checks::{check_id, nothing_observed_yet};
+use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -335,16 +335,18 @@ impl DemoDataHeuristics {
 
     /// Hands every proposal to a plan builder.
     ///
-    /// **Each proposal is paired with the operation that would carry it out, and
-    /// the operation here is the placeholder `P18-T003` puts beside every check
-    /// that is not a declared command.** What this module proves is a *candidate*
-    /// from a reading of the source — it starts nothing, and at the moment the
-    /// plan is made nothing has settled any of these checks — so the honest
-    /// observation is the one that claims neither a pass nor a defect. `P18-T004`
-    /// replaces it with the observation this scanner actually made.
+    /// **Each proposal is paired with the observation this scanner actually
+    /// made**, which is a [`StaticObservation::Candidate`] naming the file and
+    /// line the pattern stands on: this module reads source files and starts
+    /// nothing, and demo data in a file has not been followed to anything a user
+    /// sees. It is not a `Holds` (nothing was run), not a `Contradicted` (a
+    /// sample record is not proof that the product shows sample data), and not a
+    /// `CouldNotRun` (every check here comes from a file that was read).
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            let work = PlannedWork::new(proposal.clone(), nothing_observed_yet());
+            let work = PlannedWork::new(proposal.clone(), observation_of(proposal));
             if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
@@ -375,6 +377,19 @@ impl DemoDataHeuristics {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this module's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: this is a pattern in the source, and where the \
+         data reaches has not been followed.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Scan source files for hard-coded demo-data patterns.

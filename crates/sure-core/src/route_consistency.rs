@@ -52,11 +52,11 @@ use sure_domain::ids::FingerprintId;
 use sure_domain::status::{CheckResult, NotCheckedReason};
 
 use crate::candidate_context::classify_path;
-use crate::checks::{check_id, nothing_observed_yet};
+use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
 use crate::http_routes::RouteReading;
-use crate::planned_work::PlannedWork;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -195,16 +195,18 @@ impl RouteConsistency {
 
     /// Hands every proposal to a plan builder.
     ///
-    /// **Each proposal is paired with the operation that would carry it out, and
-    /// the operation here is the placeholder `P18-T003` puts beside every check
-    /// that is not a declared command.** What this module proves is a *candidate*
-    /// from a reading of the source — it starts nothing, and at the moment the
-    /// plan is made nothing has settled any of these checks — so the honest
-    /// observation is the one that claims neither a pass nor a defect. `P18-T004`
-    /// replaces it with the observation this scanner actually made.
+    /// **Each proposal is paired with the observation this comparison actually
+    /// made**, which is a [`StaticObservation::Candidate`] naming the frontend
+    /// file and line the expectation stands on: the comparison is static, both
+    /// sides were read, and no request was sent. It is not a `Contradicted`,
+    /// and the module comment is where that is decided — the backend route may
+    /// be declared in a file SURE did not read, or mounted under a prefix this
+    /// comparison does not follow, so *not seen* is not *not there*.
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            let work = PlannedWork::new(proposal.clone(), nothing_observed_yet());
+            let work = PlannedWork::new(proposal.clone(), observation_of(proposal));
             if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
@@ -237,6 +239,19 @@ impl RouteConsistency {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this module's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: both sides were read and no request was sent, so \
+         a route SURE did not find is not a route that is absent.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Scan source files for frontend route expectations.

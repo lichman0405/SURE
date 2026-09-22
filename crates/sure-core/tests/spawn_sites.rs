@@ -72,6 +72,35 @@
 //! real caller, and the honest response to a rule breaking is to say why the
 //! exception is one rather than to widen the rule until it stops noticing.
 //!
+//! **The fourth entry is this task's, and it is the one the exempted file's own
+//! comment asked for.** `planned_work.rs` deliberately has no method that turns
+//! a `CommandSpec` into a request, and says why in the place a reader would look
+//! for it: *"doing that is the moment this module names
+//! `process::ProcessRequest` in code rather than in prose, and
+//! `tests/spawn_sites.rs` reads that name as the statement 'this file can call
+//! the runner'."* So the translation needed a file, and
+//! `planned_check_runner.rs` is the one that owns it: `CommandSpec`'s program,
+//! arguments, working directory, environment and limits go into
+//! `ProcessRequest::new(...).with_arguments(...).with_environment(...)` field for
+//! field, and nothing there is rendered, split or re-parsed. That is what the
+//! exemption is for, and the reason it is an exemption rather than a widening is
+//! that the file **cannot run anything the mode did not admit**: its only way to
+//! see a command is `Enforcement::admitted`, whose item type has a private
+//! constructor and is produced by exactly one function, and the type a runner is
+//! handed cannot be built without one. The seam itself is a trait, so every test
+//! of that property is made with a value that has no process behind it — no test
+//! in the file starts anything, which is why it is not also an entry in
+//! [`THE_SPAWN_SITES`]: it builds no `Command`, and the runner it names is
+//! `process::run`, which `request.rs` above already accounts for.
+//!
+//! **No product path reaches it yet.** `pipeline.rs` still reports that no runner
+//! is wired, so this file is a door with nothing on the other side of it, and
+//! that absence is what keeps `support::CEILING` where it is — the same kind of
+//! absence rules three and four are about. The day a product path does reach it,
+//! **this list, the paragraphs above it and the ceiling are one commit**, because
+//! the ceiling is justified by no project code running from a product path and a
+//! runner that a run reaches is exactly that.
+//!
 //! **Three: nothing outside [`MAY_NAME_A_SUPERVISOR`] mentions `Supervisor`.**
 //! This is the rule that carries the claim the second one used to carry. The
 //! runner is no longer uncalled, so "nothing calls the runner" is now false and
@@ -147,18 +176,23 @@ const THE_RUNNER: &str = "sure-core/src/process/";
 /// The files that may name a [`ProcessRequest`], which is the whole of what rule
 /// two exempts.
 ///
-/// Three entries. The runner builds requests; `service.rs` is the caller
+/// Four entries. The runner builds requests; `service.rs` is the caller
 /// `P3-T009` added; `analysis_provider/mod.rs` is the one `P12-T001` added for
-/// the local-command analysis backend. The rule is not "the runner is the only
-/// place a request is named" — that was never the point — but "**a file that
-/// names a request is a file that can run something, so every one of them is
+/// the local-command analysis backend; `planned_check_runner.rs` is the one
+/// `P18-T006` added, and it is the one the rule is *for* — it owns the
+/// `CommandSpec`-to-request translation that `planned_work.rs` declined to hold,
+/// and rule two's paragraph above is its argument. The rule is not "the runner is
+/// the only place a request is named" — that was never the point — but "**a file
+/// that names a request is a file that can run something, so every one of them is
 /// named here and a new one is a decision**". The local-command provider runs a
-/// command the user configured for analysis; it is not reached from a product
-/// path in this release, and it does not change `support::CEILING`.
+/// command the user configured for analysis; the planned-check runner can run
+/// only what `Enforcement::admitted` produced. Neither is reached from a product
+/// path in this release, and neither changes `support::CEILING`.
 const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[
     THE_RUNNER,
     THE_SUPERVISOR,
     "sure-core/src/analysis_provider/mod.rs",
+    THE_PLANNED_CHECK_RUNNER,
 ];
 
 /// The two files that may name a [`Supervisor`], which is the whole of what rule
@@ -183,6 +217,14 @@ const THE_START_SMOKE: &str = "sure-core/src/runtime_start.rs";
 
 /// The file that builds a [`Supervisor`] and admits what it starts.
 const THE_SUPERVISOR: &str = "sure-core/src/service.rs";
+
+/// The file that carries an admitted command to the process runner.
+///
+/// `P18-T006` added it, and rule two's paragraph above is why it may name a
+/// [`ProcessRequest`]: it owns the translation `planned_work.rs` declined to
+/// hold, and it takes its work from `Enforcement::admitted` rather than from the
+/// plan.
+const THE_PLANNED_CHECK_RUNNER: &str = "sure-core/src/planned_check_runner.rs";
 
 /// Every **shipped** `.rs` file under `crates/`, with its text.
 ///
@@ -462,6 +504,7 @@ fn every_exemption_is_one_a_file_actually_needs() {
         (THE_RUNNER, "ProcessRequest"),
         (THE_SUPERVISOR, "ProcessRequest"),
         ("sure-core/src/analysis_provider/mod.rs", "ProcessRequest"),
+        (THE_PLANNED_CHECK_RUNNER, "ProcessRequest"),
         (THE_SUPERVISOR, "Supervisor"),
         (THE_START_SMOKE, "Supervisor"),
         (THE_START_SMOKE, "StartSmoke"),

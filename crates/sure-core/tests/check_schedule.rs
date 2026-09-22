@@ -406,6 +406,24 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          so the rule was red for a whole task and nothing read it — which is the \
          failure mode the list is written down to make visible",
     ),
+    (
+        "src/planned_check_runner.rs",
+        "`P18-T006`, and the seventh entry here that decides nothing: it is the door \
+         between a plan and a process, and it proposes for no project. Every line of \
+         the file that names one of the four words is inside its `#[cfg(test)]` \
+         module. `PlanBuilder::new` is the only door any code in this tree has to a \
+         `CheckSchedule`, and the runner's own rules — one result per scheduled \
+         check, an admitted check that reported nothing is an `Error` rather than a \
+         missing row, and a command the enforcement did not admit never reaching the \
+         runner — can only be exercised against a schedule that really has checks in \
+         it, so the fixtures build one and the words appear there and nowhere else. \
+         The shipped half reads `scheduled.proposal()` for the identity and the \
+         weight it already carries, in the same way `findings_from_checks.rs` above \
+         reads a result it was handed; it constructs no proposal and hands no \
+         proposal to a builder. **A line above `#[cfg(test)]` naming any of the four \
+         would be a proposer arriving in the runner, and this entry is not cover for \
+         it**",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

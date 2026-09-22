@@ -52,6 +52,7 @@ pub mod normalizer;
 pub mod paths;
 pub mod pipeline;
 pub mod plain_language_finding;
+pub mod planned_check_runner;
 pub mod planned_work;
 pub mod privacy;
 pub mod probe;

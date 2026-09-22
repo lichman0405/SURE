@@ -85,10 +85,10 @@ use std::time::Duration;
 
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::ids::FingerprintId;
-use sure_domain::status::CheckResult;
+use sure_domain::status::{CheckResult, CheckStatus};
 
 use crate::probe::{Endpoint, EndpointError};
-use crate::process::{Environment, Limits};
+use crate::process::{Environment, Limits, Outcome, ProcessError, Stop, Termination};
 use crate::schedule::CheckProposal;
 
 /// One check, and the work that would carry it out if it runs.
@@ -358,6 +358,368 @@ impl PrecomputedEvidence {
 /// change, and a reader of either one would have to guess which was current.
 fn carries_a_pass(class: EvidenceClass) -> bool {
     class.can_alone_support_must_fix()
+}
+
+/// What came of one run of a planned command.
+///
+/// **Two answers in one type, because they are one question** — *what did
+/// running this command establish?* A caller holds either what the operating
+/// system let SURE start or the error that stands in its place, and a caller
+/// that had to hold the two separately would be carrying the distinction this
+/// type exists to make in two places. `crate::process::error` states the second
+/// half in its own words — *"every one of these means the process did not run"*
+/// — and that is what makes an error a status here rather than a gap in a
+/// report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandRun {
+    /// The process ran. What came of it, both streams included.
+    Ran(Outcome),
+    /// The process did not run, and this is why.
+    NeverStarted(ProcessError),
+}
+
+impl From<Result<Outcome, ProcessError>> for CommandRun {
+    /// What the runner handed back, as this type.
+    ///
+    /// `process::run` returns exactly this `Result`, so the conversion is the
+    /// step from the machinery to [`CommandRun::to_result`] rather than a
+    /// reshape every caller writes and keeps right of its own.
+    fn from(result: Result<Outcome, ProcessError>) -> Self {
+        match result {
+            Ok(outcome) => Self::Ran(outcome),
+            Err(error) => Self::NeverStarted(error),
+        }
+    }
+}
+
+impl CommandRun {
+    /// The run, when there was one.
+    #[must_use]
+    pub const fn outcome(&self) -> Option<&Outcome> {
+        match self {
+            Self::Ran(outcome) => Some(outcome),
+            Self::NeverStarted(_) => None,
+        }
+    }
+
+    /// Why nothing ran, when nothing did.
+    #[must_use]
+    pub const fn error(&self) -> Option<&ProcessError> {
+        match self {
+            Self::Ran(_) => None,
+            Self::NeverStarted(error) => Some(error),
+        }
+    }
+
+    /// What this run supports, before any check is named.
+    ///
+    /// Separate from [`Self::to_result`] for the reason
+    /// [`ProbeOutcome::status`](crate::probe::ProbeOutcome::status) is separate
+    /// from `ProbeOutcome::verdict`: a caller — or a test — can ask what a run
+    /// is worth without building a proposal and a fingerprint first. The two
+    /// cannot disagree, because `to_result` is written against this.
+    ///
+    /// **One status here can come back weaker from `to_result`**, and the
+    /// difference is a rule rather than a disagreement: a `Pass` is only
+    /// reported as a pass when the check's own evidence class can carry one, so
+    /// a run that maps to `Pass` becomes `Unknown` under a proposal that claims
+    /// a class `carries_a_pass` says no to.
+    #[must_use]
+    pub fn status(&self) -> CheckStatus {
+        match self {
+            // The error module's first sentence is the whole of this arm: every
+            // `ProcessError` means the process did not run. `Error` and not
+            // `Unknown`, because `unknown` means SURE has evidence that
+            // supports no verdict, and a run that never began produced none.
+            Self::NeverStarted(_) => CheckStatus::Error,
+            Self::Ran(outcome) => match outcome.termination() {
+                // The only pass in this mapping, and it takes both halves:
+                // the command's own account of itself, and SURE's copy of
+                // what it said being a whole rather than a beginning.
+                Termination::Exited { code: Some(0) } if output_is_complete(outcome) => {
+                    CheckStatus::Pass
+                }
+                // A zero exit whose output SURE holds only part of. See
+                // `incompleteness`: the exit code is one fact about the run
+                // and the streams are the rest of what a check reads.
+                Termination::Exited { code: Some(0) } => CheckStatus::Unknown,
+                Termination::Exited { code: Some(_) } => CheckStatus::Fail,
+                // `None` is not a clean exit, and it is not an absence either:
+                // the operating system ended the process with a signal, which is
+                // a Unix fact this tree models as `None` rather than as a
+                // fabricated code.
+                Termination::Exited { code: None } => CheckStatus::Fail,
+                Termination::TimedOut { .. } | Termination::Cancelled { .. } => {
+                    CheckStatus::Unknown
+                }
+                // A start that was cancelled before it began. `process::run`
+                // really returns this — `Outcome::never_started` — so it is a
+                // reachable answer rather than a defensive arm, and nothing ran
+                // when it comes back.
+                Termination::CancelledBeforeStart => CheckStatus::Error,
+            },
+        }
+    }
+
+    /// One line of plain language: what happened, in the terms a report can
+    /// quote.
+    ///
+    /// The status says what the run is worth and this says why, and the two
+    /// carry different facts on purpose: a stop that reached only the process
+    /// is a fact about SURE's own operation and about what may still be running
+    /// on this machine, and it changes no status — see [`Self::to_result`].
+    #[must_use]
+    pub fn reason(&self) -> String {
+        match self {
+            // The error's own text, whole. `crate::process::error` writes it for
+            // a person, and it is the only place that says which of "not
+            // installed", "not a program this build starts" and "the directory
+            // moved" happened — paraphrasing it here would be a second copy of
+            // a careful text, and the copy is the one a report would quote.
+            Self::NeverStarted(error) => format!(
+                "SURE could not run the command this check is about, so nothing about it was \
+                 observed: {error}"
+            ),
+            Self::Ran(outcome) => {
+                let mut clauses: Vec<String> = Vec::new();
+                match outcome.termination() {
+                    Termination::Exited { code } => clauses.push(match code {
+                        Some(code) => format!("the command ran and ended with exit code {code}"),
+                        None => "the command was ended by the operating system and never \
+                                 reported an exit code of its own"
+                            .to_owned(),
+                    }),
+                    Termination::TimedOut { stopped } => {
+                        clauses.push(
+                            "the command was still running when the time it was given ran out, \
+                             so SURE stopped it"
+                                .to_owned(),
+                        );
+                        clauses.push(stop_clause(stopped).to_owned());
+                    }
+                    Termination::Cancelled { stopped } => {
+                        clauses.push(
+                            "the run was cancelled before the command finished, so SURE stopped \
+                             it"
+                            .to_owned(),
+                        );
+                        clauses.push(stop_clause(stopped).to_owned());
+                    }
+                    Termination::CancelledBeforeStart => clauses.push(
+                        "the run was cancelled before the command was started, so nothing \
+                               ran"
+                        .to_owned(),
+                    ),
+                }
+                if let Some(incomplete) = incompleteness(outcome) {
+                    clauses.push(incomplete);
+                }
+                clauses.join("; ")
+            }
+        }
+    }
+
+    /// This run as the result of the check it belongs to.
+    ///
+    /// The check's severity, criticality, evidence class and identity come from
+    /// its proposal, so a run cannot report a weight its check did not claim.
+    /// That is [`PrecomputedEvidence::to_result`]'s rule, and it is the same
+    /// rule because it is the same question: what may this evidence be turned
+    /// into?
+    ///
+    /// # The mapping, in full
+    ///
+    /// | what the runner reported | status | why |
+    /// | --- | --- | --- |
+    /// | `Exited { code: Some(0) }`, both streams read to the end | `pass` | the command ran to its own end, reported success, and SURE kept the whole of what it said |
+    /// | `Exited { code: Some(0) }`, a stream truncated or unfinished | `unknown` | the exit code is the command's own account of itself, and SURE's copy of what it said is a beginning rather than a whole |
+    /// | `Exited { code: Some(n) }`, `n` not zero | `fail` | the command ran, ended on its own, and reported failure |
+    /// | `Exited { code: None }` | `fail` | the operating system ended it, which is not a clean exit |
+    /// | `TimedOut { .. }` | `unknown` | SURE cut the run short at its own deadline: the command neither succeeded nor was shown to fail |
+    /// | `Cancelled { .. }` | `unknown` | the run was cut short from outside, so nothing about the command's outcome was observed |
+    /// | `CancelledBeforeStart` | `error` | nothing ran, so there is no observation to weigh |
+    /// | any `ProcessError` | `error` | nothing ran, and `process::error` says exactly that of every variant |
+    ///
+    /// **No row of that table is a `Warning`, and that is not a detail of
+    /// taste.** `CriticalState::from_status` maps `CheckStatus::Warning` to
+    /// `CriticalState::Passed` — deliberately, so that a warning degrades a run
+    /// to `needs_attention` rather than blocking it — and
+    /// [`CheckResult::blocks_green`] is that mapping read back. So a warning on
+    /// a **critical** check is a false green on exactly the checks where it
+    /// matters most. Everything in this mapping that means *SURE did not observe
+    /// a completed, trustworthy success* is therefore `Unknown`, `Error` or
+    /// `Fail`, because those are the three statuses whose `CriticalState`
+    /// blocks.
+    ///
+    /// # Why the cut-short rows are `Unknown` rather than `Fail`
+    ///
+    /// The rejected alternative is the one a reader reaches for first, so it is
+    /// named here rather than left to be rediscovered: a timeout looks like the
+    /// project's failure, and `Fail` would be a status that blocks. It is not
+    /// what SURE observed. A command still running when its deadline passed is a
+    /// command whose outcome SURE never saw — a slow build is not a broken one,
+    /// and `Fail` would be SURE accusing the project of something it did not
+    /// measure. `Unknown` is the honest report of the same run: SURE has
+    /// evidence and the evidence supports no verdict. The `Warning` reading of
+    /// the same rows is rejected one paragraph above, and for a stronger reason.
+    ///
+    /// # `Exited { code: None }` is a failure, and it is the opposite answer to
+    /// the same shape elsewhere
+    ///
+    /// `runtime_start.rs`'s `observe` maps every `Termination::Exited` to
+    /// `CheckStatus::Fail` **regardless of the code**, because its check is
+    /// about a service that was meant to stay up: there, a service that ended by
+    /// itself is the failure, and the code is printed as detail rather than read
+    /// as a verdict. Here the check is whether a command completes successfully,
+    /// so exit zero is the pass and a code is read. The two mappings read the
+    /// same enum in opposite directions, and neither can call the other.
+    ///
+    /// Within this table, `Exited { code: None }` is `fail` and not `unknown`
+    /// because something *was* observed: the process ended, and not on its own
+    /// terms. SURE's own stops are `TimedOut` and `Cancelled` and are never this
+    /// variant, so a signal reaching a process SURE started came from outside
+    /// the run — a crash, or something on this machine ending it.
+    ///
+    /// # A stop that could not be confirmed changes the sentence, not the status
+    ///
+    /// [`Stop::ProcessOnly`] means SURE stopped the process it held and reached
+    /// nothing else, so anything the command started may still be running, with
+    /// the project's files open or a port bound. It is carried in
+    /// [`Self::reason`] rather than in a status, and the reason it can be is
+    /// where it occurs: `Stop` is a field of `TimedOut` and `Cancelled` and of
+    /// nothing else, so a run whose stop was unconfirmed is already a run that
+    /// was cut short and already `Unknown`. What the sentence adds is the one
+    /// fact the status cannot carry — the process SURE holds was stopped, and
+    /// the rest of the tree was not.
+    ///
+    /// # A pass is only built from a class that can carry one
+    ///
+    /// A zero exit with both streams read to the end is reported as `Unknown`
+    /// rather than `Pass` when the proposal claims an evidence class that the
+    /// private `carries_a_pass` refuses — the same gate
+    /// [`PrecomputedEvidence::to_result`] applies through the same predicate,
+    /// and for the same reason: the class is what makes a pass a promise, and a
+    /// run cannot be promoted past the weight its own check claimed. It is not a
+    /// formality on this path either. A proposal that claims `Inference` while
+    /// its operation runs a command is a proposal whose two halves disagree, and
+    /// the honest report of that is *SURE has evidence that supports no
+    /// verdict*, never a green.
+    #[must_use]
+    pub fn to_result(&self, proposal: &CheckProposal, fingerprint: &FingerprintId) -> CheckResult {
+        let (id, title) = (proposal.id().clone(), proposal.title().to_owned());
+        let (severity, critical) = (proposal.severity(), proposal.critical());
+        let class = proposal.evidence_class();
+        let reason = self.reason();
+        let status = self.status();
+        match status {
+            CheckStatus::Pass if !carries_a_pass(class) => {
+                CheckResult::unknown(id, title, severity, critical, class, fingerprint.clone())
+                    .with_reason(format!(
+                        "{reason} A check established by `{}` evidence cannot be reported as \
+                         passed.",
+                        class.as_str()
+                    ))
+            }
+            CheckStatus::Pass => {
+                CheckResult::pass(id, title, severity, critical, class, fingerprint.clone())
+                    .with_reason(reason)
+            }
+            CheckStatus::Fail => {
+                CheckResult::fail(id, title, severity, critical, class, fingerprint.clone())
+                    .with_reason(reason)
+            }
+            CheckStatus::Unknown => {
+                CheckResult::unknown(id, title, severity, critical, class, fingerprint.clone())
+                    .with_reason(reason)
+            }
+            CheckStatus::Error => {
+                CheckResult::errored(id, title, severity, critical, reason, fingerprint.clone())
+            }
+            // The two statuses this mapping never returns, named rather than
+            // swallowed by `_` so that adding a status to `CheckStatus` is a
+            // compile error here instead of a silent mis-mapping. Both are sent
+            // to `errored` because that is the one constructor that cannot carry
+            // a pass: a status arriving here by a future bug would be reported
+            // as a failure of SURE's own check, which is what it would be.
+            CheckStatus::Warning | CheckStatus::Skipped => CheckResult::errored(
+                id,
+                title,
+                severity,
+                critical,
+                format!(
+                    "SURE cannot say what this run established: it is worth `{}`, which this \
+                     mapping never produces.",
+                    status.as_str()
+                ),
+                fingerprint.clone(),
+            ),
+        }
+    }
+}
+
+/// What a stop reached, in the words a report uses.
+///
+/// `WholeTree` is the operating system's own account of the tree — what
+/// `taskkill /T /F` reporting success means on Windows — and it is stated rather
+/// than left out because "the thing you started is gone, and so is what it
+/// started" is a fact a person waiting on a run wants and cannot otherwise
+/// check.
+fn stop_clause(stop: Stop) -> &'static str {
+    match stop {
+        Stop::WholeTree => "the stop reached the command and the programs it started",
+        Stop::ProcessOnly => {
+            "the stop reached only the command itself, so anything it started may still be \
+             running"
+        }
+    }
+}
+
+/// What SURE is missing from a run's streams, when it is missing anything.
+///
+/// `None` means both streams were read to the end and neither was cut short by
+/// the output bound: SURE holds the whole of what the process said.
+///
+/// **Two different facts make a stream less than the whole, and they are one
+/// answer here.** [`CapturedOutput::was_truncated`] is bytes SURE *chose* not to
+/// keep, and [`CapturedOutput::unfinished`] is a stream SURE *could not* read to
+/// the end; the module documentation of `process::outcome` keeps them apart
+/// because they mean opposite things about why. A reader's question is a third
+/// thing — *am I holding a beginning or a whole?* — and the answer is the same
+/// either way, which is why this returns one sentence per stream rather than a
+/// two-field verdict.
+fn incompleteness(outcome: &Outcome) -> Option<String> {
+    let mut clauses: Vec<String> = Vec::new();
+    for (name, stream) in [
+        ("standard output", outcome.stdout()),
+        ("standard error", outcome.stderr()),
+    ] {
+        if stream.was_truncated() {
+            clauses.push(format!(
+                "SURE kept the first {} bytes of {name} and {} more were written and not kept, \
+                 so what SURE has is a beginning rather than the whole of it",
+                stream.bytes().len(),
+                stream.discarded_bytes()
+            ));
+        }
+        if let Some(reason) = stream.unfinished() {
+            clauses.push(format!("{name} was not read to its end ({reason})"));
+        }
+    }
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join("; "))
+    }
+}
+
+/// Whether SURE holds the whole of what the process said on both streams.
+///
+/// Written as *nothing to report from [`incompleteness`]* rather than as its own
+/// pair of checks, so that the status and the sentence cannot come from two
+/// rules that disagree — a stream the reason calls partial is a stream this
+/// calls incomplete, by construction rather than by review.
+fn output_is_complete(outcome: &Outcome) -> bool {
+    incompleteness(outcome).is_none()
 }
 
 /// One command: a program, its arguments, and the rules it runs under.
@@ -912,12 +1274,13 @@ fn classify(path: &Path) -> Resolution {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::process::Limits;
+    use crate::process::{CapturedOutput, Limits};
     use crate::schedule::CheckReason;
+    use std::time::SystemTime;
     use sure_domain::evidence::EvidenceClass;
     use sure_domain::ids::CheckId;
     use sure_domain::severity::Severity;
-    use sure_domain::status::CheckStatus;
+    use sure_domain::status::{AggregateSeverity, CheckStatus, aggregate};
 
     fn a_proposal() -> CheckProposal {
         CheckProposal::new(
@@ -1073,6 +1436,658 @@ mod tests {
         assert_eq!(result.severity, Severity::ShouldFixFirst);
         assert!(result.critical);
         assert_eq!(result.project_fingerprint, fingerprint);
+    }
+
+    /// An outcome, as the runner would have produced it, with both streams read
+    /// to the end.
+    fn an_outcome(termination: Termination) -> Outcome {
+        an_outcome_saying(termination, said(""), said(""))
+    }
+
+    /// The same, with the two streams handed in.
+    fn an_outcome_saying(
+        termination: Termination,
+        stdout: CapturedOutput,
+        stderr: CapturedOutput,
+    ) -> Outcome {
+        Outcome::new(
+            OsString::from("npm"),
+            termination,
+            stdout,
+            stderr,
+            SystemTime::now(),
+            Duration::from_millis(1_500),
+        )
+    }
+
+    /// A stream SURE read to its end.
+    fn said(text: &str) -> CapturedOutput {
+        CapturedOutput::new(text.as_bytes().to_vec(), 0, None)
+    }
+
+    /// A stream with more bytes in it than SURE keeps.
+    fn said_more_than_it_kept(text: &str, discarded: u64) -> CapturedOutput {
+        CapturedOutput::new(text.as_bytes().to_vec(), discarded, None)
+    }
+
+    /// A stream SURE could not read to the end.
+    fn never_finished(text: &str, why: &str) -> CapturedOutput {
+        CapturedOutput::new(text.as_bytes().to_vec(), 0, Some(why.to_owned()))
+    }
+
+    /// A run of a command that ended in this way.
+    fn a_run_that_ended(termination: Termination) -> CommandRun {
+        CommandRun::Ran(an_outcome(termination))
+    }
+
+    /// A short name for a termination, for a failure message — **and the tie
+    /// between [`every_termination`] and the enum**.
+    ///
+    /// This function matches every variant with no `_` arm, so a termination
+    /// added to `crate::process` stops this module compiling, and it stops it
+    /// here: next to the list a case has to be added to, rather than at some
+    /// assertion far away. `Termination` has no `ALL` — it belongs to
+    /// `crate::process`, and this task adds a mapping rather than a variant list
+    /// to it — so a sweep has to name its cases itself, and a hand-written list
+    /// is exactly the thing that goes stale. This is what keeps it honest.
+    fn termination_name(termination: Termination) -> &'static str {
+        match termination {
+            Termination::Exited { code: Some(0) } => "Exited { code: Some(0) }",
+            Termination::Exited { code: Some(_) } => "Exited { code: Some(non-zero) }",
+            Termination::Exited { code: None } => "Exited { code: None }",
+            Termination::TimedOut {
+                stopped: Stop::WholeTree,
+            } => "TimedOut { stopped: WholeTree }",
+            Termination::TimedOut {
+                stopped: Stop::ProcessOnly,
+            } => "TimedOut { stopped: ProcessOnly }",
+            Termination::Cancelled {
+                stopped: Stop::WholeTree,
+            } => "Cancelled { stopped: WholeTree }",
+            Termination::Cancelled {
+                stopped: Stop::ProcessOnly,
+            } => "Cancelled { stopped: ProcessOnly }",
+            Termination::CancelledBeforeStart => "CancelledBeforeStart",
+        }
+    }
+
+    /// Every termination the runner can report.
+    ///
+    /// The four variants, and every combination of the fields they carry: both
+    /// stops for each of the two that have one, and three exit codes rather than
+    /// one, because *which* non-zero code came back is a thing SURE prints and
+    /// never a thing it decides a status by.
+    fn every_termination() -> Vec<Termination> {
+        vec![
+            Termination::Exited { code: Some(0) },
+            Termination::Exited { code: Some(1) },
+            Termination::Exited { code: Some(9_009) },
+            Termination::Exited { code: None },
+            Termination::TimedOut {
+                stopped: Stop::WholeTree,
+            },
+            Termination::TimedOut {
+                stopped: Stop::ProcessOnly,
+            },
+            Termination::Cancelled {
+                stopped: Stop::WholeTree,
+            },
+            Termination::Cancelled {
+                stopped: Stop::ProcessOnly,
+            },
+            Termination::CancelledBeforeStart,
+        ]
+    }
+
+    /// A short name for a `ProcessError`, on the same terms as
+    /// [`termination_name`]: exhaustive, no `_` arm, so a variant added to the
+    /// error type stops this module compiling.
+    fn error_name(error: &ProcessError) -> &'static str {
+        match error {
+            ProcessError::WorkingDirectoryNotAbsolute { .. } => "WorkingDirectoryNotAbsolute",
+            ProcessError::WorkingDirectoryUnusable { .. } => "WorkingDirectoryUnusable",
+            ProcessError::NotStarted { .. } => "NotStarted",
+            ProcessError::CouldNotBeWatched { .. } => "CouldNotBeWatched",
+        }
+    }
+
+    /// One of every `ProcessError` the runner can report — the four shapes
+    /// `process::run` returns in place of an outcome.
+    fn every_process_error() -> Vec<ProcessError> {
+        vec![
+            ProcessError::WorkingDirectoryNotAbsolute {
+                working_directory: PathBuf::from("relative/dir"),
+            },
+            ProcessError::WorkingDirectoryUnusable {
+                working_directory: PathBuf::from(r"C:\moved away"),
+                message: "the system cannot find the path specified".to_owned(),
+            },
+            ProcessError::NotStarted {
+                program: OsString::from("npm"),
+                working_directory: PathBuf::from(r"C:\project"),
+                message: "the system cannot find the file specified".to_owned(),
+            },
+            ProcessError::CouldNotBeWatched {
+                program: OsString::from("npm"),
+                message: "the handle is invalid".to_owned(),
+            },
+        ]
+    }
+
+    #[test]
+    fn every_termination_the_runner_can_report_gets_an_answer_and_never_a_warning() {
+        // The acceptance's third clause, and the sweep it asks for is driven by
+        // `every_termination` rather than by a list written into this test —
+        // with `termination_name` as the tie that refuses to compile when a
+        // variant is added. What it asserts is not the table (every row has its
+        // own test below) but the two things that must hold for *every* case: an
+        // answer comes back, and it is never one of the two statuses this
+        // mapping does not have a case for.
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+        for case in every_termination() {
+            let run = a_run_that_ended(case);
+            // Asked of the mapping's own answer first, and of the result
+            // second, because the two can differ: `to_result` sends a status it
+            // never produces to `errored` rather than believing it, so a
+            // `Warning` introduced into `status` alone would be caught there and
+            // hidden here. Both halves are asserted so that a single-line
+            // mutation shows up whichever line it was made on.
+            assert!(
+                matches!(
+                    run.status(),
+                    CheckStatus::Pass
+                        | CheckStatus::Fail
+                        | CheckStatus::Unknown
+                        | CheckStatus::Error
+                ),
+                "{} came back as `{}`, which this mapping must never produce: a warning on a \
+                 critical check is read as `CriticalState::Passed` and does not block green",
+                termination_name(case),
+                run.status().as_str()
+            );
+            let result = run.to_result(&proposal, &fingerprint);
+            assert!(
+                matches!(
+                    result.status,
+                    CheckStatus::Pass
+                        | CheckStatus::Fail
+                        | CheckStatus::Unknown
+                        | CheckStatus::Error
+                ),
+                "{} came back as `{}`, which this mapping must never produce",
+                termination_name(case),
+                result.status.as_str()
+            );
+            assert!(
+                !result.reason.trim().is_empty(),
+                "{} produced a result with nothing said about it",
+                termination_name(case)
+            );
+        }
+        for error in every_process_error() {
+            let result = CommandRun::NeverStarted(error.clone()).to_result(&proposal, &fingerprint);
+            assert_eq!(result.status, CheckStatus::Error, "{}", error_name(&error));
+            assert!(
+                !result.reason.trim().is_empty(),
+                "{} produced a result with nothing said about it",
+                error_name(&error)
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_command_that_exited_zero_with_both_streams_read_to_the_end_is_a_pass() {
+        // The acceptance's first clause, both halves, over the whole sweep
+        // rather than over the two cases that name it: "exit 0 is a pass" is a
+        // claim about one row and "everything else is not" is a claim about all
+        // of them. `blocks_green` is asserted as well as the status, because a
+        // critical check that came back `warning` would satisfy a status-only
+        // reading and still be a green.
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+        for case in every_termination() {
+            let result = a_run_that_ended(case).to_result(&proposal, &fingerprint);
+            let is_the_pass_case = case == (Termination::Exited { code: Some(0) });
+            assert_eq!(
+                result.status == CheckStatus::Pass,
+                is_the_pass_case,
+                "{} came back as `{}`: a pass is exactly the zero exit with both streams read to \
+                 the end",
+                termination_name(case),
+                result.status.as_str()
+            );
+            assert_eq!(
+                result.blocks_green(),
+                !is_the_pass_case,
+                "{} came back as `{}`, and a run that is not the passing one must block a green \
+                 verdict on a critical check",
+                termination_name(case),
+                result.status.as_str()
+            );
+        }
+    }
+
+    /// The acceptance's second clause, as one test: *a spawn failure, a timeout,
+    /// a cancellation, a stop that could not be confirmed and materially
+    /// incomplete output are never a pass.*
+    ///
+    /// **This is the test that has to fail if the mapping softens**, so the
+    /// assertion is [`CheckResult::blocks_green`] and not `status != Pass`. The
+    /// tempting mutation is `Warning` — the status that reads like "it ran and
+    /// something is worth a caution" — and a status-only assertion would let it
+    /// through, because `Warning` is not `Pass` and `CriticalState::from_status`
+    /// maps it to `Passed`, where it blocks nothing. Asserting what the product
+    /// actually reads (`aggregate_run` reads exactly this method) is the
+    /// difference between a test and a test that cannot fail.
+    ///
+    /// Each case is asserted twice — once on the status the mapping returns and
+    /// once on the result it builds — because the two are not the same line: a
+    /// `Warning` reaching `to_result` is refused by the arm that exists to
+    /// refuse it, so a mutation in `status` alone would show up only in the
+    /// first assertion and a mutation in that refusal only in the second.
+    #[test]
+    fn a_run_that_was_cut_short_never_leaves_a_critical_check_green() {
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+
+        let mut cases: Vec<(String, CommandRun)> = Vec::new();
+        for case in every_termination() {
+            if case == (Termination::Exited { code: Some(0) }) {
+                // The one case that is a pass, and it is held out here rather
+                // than left out of the sweep: its incomplete twins are added
+                // below, which is the "materially incomplete output" half of the
+                // clause.
+                continue;
+            }
+            cases.push((termination_name(case).to_owned(), a_run_that_ended(case)));
+        }
+        for error in every_process_error() {
+            cases.push((
+                error_name(&error).to_owned(),
+                CommandRun::NeverStarted(error),
+            ));
+        }
+        cases.push((
+            "exit 0 with standard output cut short by the bound".to_owned(),
+            CommandRun::Ran(an_outcome_saying(
+                Termination::Exited { code: Some(0) },
+                said_more_than_it_kept("the first part of what it said", 4_096),
+                said(""),
+            )),
+        ));
+        cases.push((
+            "exit 0 with standard error cut short by the bound".to_owned(),
+            CommandRun::Ran(an_outcome_saying(
+                Termination::Exited { code: Some(0) },
+                said(""),
+                said_more_than_it_kept("the first part of what it said", 4_096),
+            )),
+        ));
+        cases.push((
+            "exit 0 with a stream SURE could not read to the end".to_owned(),
+            CommandRun::Ran(an_outcome_saying(
+                Termination::Exited { code: Some(0) },
+                never_finished("a beginning", "the reader did not finish"),
+                said(""),
+            )),
+        ));
+
+        for (name, run) in cases {
+            // The mapping's own answer, asked before the result is built. It has
+            // to be here as well as the `blocks_green` assertion below, because
+            // `to_result` refuses to believe a status the table never produces —
+            // so a cut-short run mapped to `Warning` in `status` alone would come
+            // out as an `error` and slip past the assertion that is about the
+            // false green. The two assertions fail on different mutations, and
+            // one of them is the mutation this test exists for.
+            assert!(
+                !matches!(run.status(), CheckStatus::Pass | CheckStatus::Warning),
+                "{name}: a run SURE did not see finish, or did not see the whole of, is worth \
+                 `{}`. It must be `unknown`, `error` or `fail`: a `pass` would be a green on a \
+                 run nobody saw end, and a `warning` is read as `CriticalState::Passed` and \
+                 blocks nothing",
+                run.status().as_str()
+            );
+            let result = run.to_result(&proposal, &fingerprint);
+            assert_ne!(
+                result.status,
+                CheckStatus::Pass,
+                "{name}: a run SURE did not see finish, or did not see the whole of, came back as \
+                 a pass"
+            );
+            assert!(
+                result.blocks_green(),
+                "{name}: a critical check came back as `{}` and does not block green. A timeout, a \
+                 cancellation, a stop that could not be confirmed or output SURE holds only part \
+                 of must be `unknown`, `error` or `fail`: `warning` is read as \
+                 `CriticalState::Passed`, which is the false green this product exists to prevent",
+                result.status.as_str()
+            );
+            assert!(
+                !aggregate(std::slice::from_ref(&result)).is_green(),
+                "{name}: the run as a whole came out green from a check that never saw its \
+                 command finish"
+            );
+        }
+
+        // The control, without which everything above would pass for a mapping
+        // that never passes anything: the held-out case really is a pass, and a
+        // real one does not block.
+        let passed = a_run_that_ended(Termination::Exited { code: Some(0) })
+            .to_result(&proposal, &fingerprint);
+        assert_eq!(
+            passed.status,
+            CheckStatus::Pass,
+            "the control case is no longer a pass: {}",
+            passed.reason
+        );
+        assert!(!passed.blocks_green());
+        assert!(aggregate(&[passed]).is_green());
+    }
+
+    #[test]
+    fn a_non_zero_exit_is_a_failure_of_the_check_and_the_reason_says_which_code() {
+        // The other half of the first clause. The code is read into the
+        // sentence and never into the status, which is the same rule
+        // `runtime_start.rs` follows for the same field — there the status is
+        // `fail` whatever the code says, and here every non-zero code is one
+        // answer because the check's question is "did this succeed".
+        for code in [1, 2, 9_009] {
+            let result = a_run_that_ended(Termination::Exited { code: Some(code) })
+                .to_result(&a_proposal(), &a_fingerprint());
+            assert_eq!(result.status, CheckStatus::Fail, "exit code {code}");
+            assert!(result.blocks_green(), "exit code {code}");
+            assert!(
+                result.reason.contains(&format!("exit code {code}")),
+                "exit code {code}: the sentence does not say which code came back: {}",
+                result.reason
+            );
+            assert_eq!(
+                aggregate(std::slice::from_ref(&result)).severity,
+                AggregateSeverity::NotReady,
+                "exit code {code}: a failed critical check must not aggregate to anything gentler"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_the_operating_system_ended_is_not_a_clean_exit() {
+        // `None` is what a process the operating system ended with a signal
+        // looks like — a Unix fact with no Windows equivalent, modelled as
+        // `None` rather than as a fabricated code. It is `fail` and not
+        // `unknown` because something *was* observed: the process ended, and not
+        // on its own terms. SURE's own stops are `TimedOut` and `Cancelled` and
+        // are never this variant, so whatever ended this process was not SURE.
+        let result = a_run_that_ended(Termination::Exited { code: None })
+            .to_result(&a_proposal(), &a_fingerprint());
+        assert_eq!(result.status, CheckStatus::Fail);
+        assert!(result.blocks_green());
+        assert!(
+            result.reason.contains("ended by the operating system"),
+            "the sentence must say who ended it: {}",
+            result.reason
+        );
+        assert!(
+            !result.reason.contains("exit code 0"),
+            "a process the operating system ended must never read as a clean exit: {}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn a_run_cancelled_before_it_started_is_an_error_rather_than_an_observation() {
+        // `process::run` really returns this outcome — `Outcome::never_started`
+        // is what a request already cancelled comes back as — so this is a
+        // reachable answer rather than a defensive arm. Nothing ran, so there is
+        // no observation to weigh, and `error` says that where `unknown` would
+        // claim SURE has evidence.
+        let result = a_run_that_ended(Termination::CancelledBeforeStart)
+            .to_result(&a_proposal(), &a_fingerprint());
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.evidence_class, EvidenceClass::Unknown);
+        assert!(result.blocks_green());
+        assert!(
+            result.reason.contains("so nothing ran"),
+            "the sentence must say that nothing ran: {}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn output_sure_holds_only_part_of_turns_a_zero_exit_into_an_unknown() {
+        // `CapturedOutput::was_truncated`'s own documentation supplies the
+        // reason: *"a reader that treats a truncated stream as the complete
+        // output is reading a partial answer as a full one, which is the shape
+        // of failure this product exists to prevent."* An exit code is one fact
+        // about a run and the streams are the rest of what a check reads, so a
+        // run whose output is a beginning and not a whole supports no verdict.
+        //
+        // The two causes are here together because they are one answer to a
+        // reader — bytes SURE chose not to keep, and a stream SURE could not
+        // read to the end — while `process::outcome` keeps them apart for the
+        // report that has to say why.
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+
+        // The control: the same run with both streams read to the end is a pass,
+        // so what the cases below measure is the incompleteness and not the
+        // shape of the fixture.
+        let whole = CommandRun::Ran(an_outcome_saying(
+            Termination::Exited { code: Some(0) },
+            said("built the thing\n"),
+            said(""),
+        ))
+        .to_result(&proposal, &fingerprint);
+        assert_eq!(
+            whole.status,
+            CheckStatus::Pass,
+            "the control is no longer a pass: {}",
+            whole.reason
+        );
+
+        let cases = [
+            (
+                "standard output",
+                said_more_than_it_kept("the first part of what it said", 4_096),
+                said(""),
+            ),
+            (
+                "standard error",
+                said(""),
+                said_more_than_it_kept("the first part of what it said", 4_096),
+            ),
+            (
+                "standard output",
+                never_finished("a beginning", "the reader did not finish"),
+                said(""),
+            ),
+            (
+                "standard error",
+                said(""),
+                never_finished("a beginning", "the reader did not finish"),
+            ),
+        ];
+        for (stream, stdout, stderr) in cases {
+            let result = CommandRun::Ran(an_outcome_saying(
+                Termination::Exited { code: Some(0) },
+                stdout,
+                stderr,
+            ))
+            .to_result(&proposal, &fingerprint);
+            assert_eq!(
+                result.status,
+                CheckStatus::Unknown,
+                "{stream}: a zero exit with output SURE holds only part of came back as `{}`",
+                result.status.as_str()
+            );
+            assert!(result.blocks_green(), "{stream}");
+            assert!(
+                result.reason.contains(stream),
+                "{stream}: the sentence does not say which stream is incomplete: {}",
+                result.reason
+            );
+            assert!(
+                result.reason.contains("beginning")
+                    || result.reason.contains("not read to its end"),
+                "{stream}: the sentence does not say what is missing: {}",
+                result.reason
+            );
+        }
+    }
+
+    #[test]
+    fn a_stop_that_could_not_be_confirmed_is_said_out_loud() {
+        // The unconfirmed stop is handled in the sweep above, where it is one of
+        // the cases that must never leave a critical check green. What is left
+        // for this test is the fact the status cannot carry: `ProcessOnly` means
+        // anything the command started may still be running on this machine,
+        // with the project's files open or a port bound, and a report that did
+        // not say so would leave a person with a process they cannot see.
+        for stop in [Stop::WholeTree, Stop::ProcessOnly] {
+            for termination in [
+                Termination::TimedOut { stopped: stop },
+                Termination::Cancelled { stopped: stop },
+            ] {
+                let run = a_run_that_ended(termination);
+                let reason = run.reason();
+                assert_eq!(
+                    run.status(),
+                    CheckStatus::Unknown,
+                    "{termination:?}: the stop changes the sentence, not the status"
+                );
+                match stop {
+                    Stop::WholeTree => {
+                        assert!(
+                            reason.contains("the programs it started"),
+                            "{termination:?}: a stop that reached the tree must say so: {reason}"
+                        );
+                        assert!(
+                            !reason.contains("may still be running"),
+                            "{termination:?}: nothing may still be running after a whole-tree \
+                             stop, and saying so would be a warning about nothing: {reason}"
+                        );
+                    }
+                    Stop::ProcessOnly => {
+                        assert!(
+                            reason.contains("only the command itself")
+                                && reason.contains("may still be running"),
+                            "{termination:?}: a stop that reached only the process must say what \
+                             it did not reach: {reason}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pass_from_a_command_is_only_built_from_a_class_that_can_carry_one() {
+        // The same rule the precomputed path holds, one layer along, asked
+        // through the same predicate rather than through a list written here: a
+        // run cannot be promoted past the weight its own check claimed. It is
+        // not a formality on this path — a proposal that claims a pattern guess
+        // while its operation runs a command has two halves that disagree, and
+        // the honest report of that is *SURE has evidence that supports no
+        // verdict*, never a green.
+        let fingerprint = a_fingerprint();
+        for &class in EvidenceClass::ALL {
+            let result = a_run_that_ended(Termination::Exited { code: Some(0) })
+                .to_result(&a_critical_proposal_weighted(class), &fingerprint);
+            assert_eq!(
+                result.evidence_class, class,
+                "{class:?}: the result relabelled the evidence the check claimed"
+            );
+            if class.can_alone_support_must_fix() {
+                assert_eq!(result.status, CheckStatus::Pass, "{class:?}");
+                assert!(
+                    !result.blocks_green(),
+                    "{class:?}: a pass that can carry a verdict must not block green"
+                );
+            } else {
+                assert_eq!(
+                    result.status,
+                    CheckStatus::Unknown,
+                    "{class:?}: a command that exited zero came back as a pass from evidence that \
+                     cannot carry one"
+                );
+                assert!(
+                    result.blocks_green(),
+                    "{class:?}: a critical check that supports no verdict must not leave a run \
+                     green"
+                );
+                assert!(
+                    result.reason.contains("cannot be reported as passed"),
+                    "{class:?}: the reason does not say why this is not a pass: {}",
+                    result.reason
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_run_that_never_happened_leaves_no_observation_behind() {
+        // Every `ProcessError` is one answer for one reason: `process::error`'s
+        // module documentation says of all of them that the process did not run.
+        // `errored` fixes the class at `EvidenceClass::Unknown`, and
+        // `checks::evidence_of` records no evidence for a result of that class —
+        // so a check SURE could not perform leaves nothing behind that a later
+        // reader could mistake for a measurement.
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+        for error in every_process_error() {
+            let name = error_name(&error);
+            let result = CommandRun::NeverStarted(error.clone()).to_result(&proposal, &fingerprint);
+            assert_eq!(result.status, CheckStatus::Error, "{name}");
+            assert!(result.blocks_green(), "{name}");
+            assert_eq!(result.evidence_class, EvidenceClass::Unknown, "{name}");
+            assert!(
+                result.not_checked_reason.is_none(),
+                "{name}: an error means the check was attempted, which a skip means it was not"
+            );
+            assert!(
+                result.reason.contains(&error.to_string()),
+                "{name}: the sentence does not carry the error's own words: {}",
+                result.reason
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_result_carries_the_proposals_own_weight_and_the_fingerprint_it_was_given() {
+        let proposal = a_proposal();
+        let fingerprint = a_fingerprint();
+        let result = a_run_that_ended(Termination::Exited { code: Some(0) })
+            .to_result(&proposal, &fingerprint);
+        assert_eq!(result.evidence_class, EvidenceClass::ObservedFact);
+        assert_eq!(result.severity, Severity::ShouldFixFirst);
+        assert!(result.critical);
+        assert_eq!(result.project_fingerprint, fingerprint);
+        assert_eq!(result.id, *proposal.id());
+        assert_eq!(result.title, proposal.title());
+    }
+
+    #[test]
+    fn the_runners_own_answer_is_what_a_command_run_is_built_from() {
+        // `process::run` returns a `Result<Outcome, ProcessError>`, and the
+        // conversion is here so that the step from the machinery to the mapping
+        // is one call rather than a match every caller writes and keeps right.
+        // The accessors are what a caller reads back without matching again.
+        let outcome = an_outcome(Termination::Exited { code: Some(0) });
+        let ran = CommandRun::from(Ok(outcome.clone()));
+        assert_eq!(ran, CommandRun::Ran(outcome.clone()));
+        assert_eq!(ran.outcome(), Some(&outcome));
+        assert!(ran.error().is_none());
+
+        let error = ProcessError::NotStarted {
+            program: OsString::from("npm"),
+            working_directory: PathBuf::from(r"C:\project"),
+            message: "the system cannot find the file specified".to_owned(),
+        };
+        let never = CommandRun::from(Err(error.clone()));
+        assert_eq!(never, CommandRun::NeverStarted(error.clone()));
+        assert!(never.outcome().is_none());
+        assert_eq!(never.error(), Some(&error));
     }
 
     /// A service that answers on `port`, for the fixtures below.

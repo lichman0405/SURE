@@ -5430,3 +5430,86 @@ exists.
   stale ceiling sentence at `tests/acceptance_report_runner.rs:25-26` — *"`sure_core::support`'s
   ceiling of level C rests on no product path running project code"* — was verified
   still present and still false, and is `P18-T012`'s.
+## P18-T012 — the walk that was one crate short, and the ceiling whose reason was a recollection
+
+- **The ceiling does not move, and its reason is replaced rather than repaired.**
+  Three measurements were taken and they disagree. On this workstation `npm` resolves
+  to `npm.cmd` → `InterpreterRequired` with `is_startable()` false — and the
+  extensionless `npm` shell script is on `PATH` beside it and is never the answer,
+  because the Windows completion table probes `com`/`exe`/`bat`/`cmd`/`ps1` and the
+  bare name not at all. `cargo` and `git` resolve `Executable`, and the runner is
+  reached under a user's grant. The `ci` legs on `f8db077` are green on macOS and
+  Linux, where the non-Windows table answers `Executable` for a bare name. Level B is
+  **one** sentence and those three cases do not agree, so the ceiling takes the weaker
+  one. Moving it to `Generic` would put one word over a set the evidence separates,
+  which is the same defect one level up as reporting a check as passed because nothing
+  went wrong. ADR 0014's rule — a ceiling moves when measurements earn it — is followed
+  and is not quoted as evidence for itself; on these measurements it is not earned, and
+  the default outcome ADR 0014 predicted is the one that holds, **for a reason this
+  task measured rather than for the reason that ADR wrote down.**
+
+- **The false sentence was a recollection, and the correction is the third of its
+  kind in this phase.** `support.rs` said the macOS and Linux legs *"have never run at
+  all"*. They had, and they are green. What replaced it is not a tidier version of the
+  same argument — the old reason's shape was *"the other platforms have not been
+  tried"*, and the measurement says the interesting failure is on the platform that
+  **has** been tried. A reason that survives its own contradicted premise by keeping
+  the premise's shape is the thing this record exists to avoid. The sibling instance
+  was `acceptance_report_runner.rs:25-26`, which stated in the present tense that the
+  ceiling "rests on no product path running project code" — false since `P18-T007`,
+  while the conclusion it supported is still true, which is the defect shape that keeps
+  reading as correct after its support has gone.
+
+- **The census passed by not looking, and that is worse than a visible error.**
+  Rule five of `tests/browser_probe.rs` walked `crates/sure-core` alone, so it could
+  not see `sure-cli/src/check.rs:328`, where `P18-T010` put the product's one
+  `.with_page_driver(...)`. The rule forbade a name it never read while the thing it
+  forbids was shipping one crate away. The walk now covers every shipped crate,
+  matching `tests/spawn_sites.rs`, and the composition root is exempted **by name**
+  with the hole stated in the comment above the constant. The guard against a silently
+  narrowed walk is two-part rather than a count: a floor, and a per-crate assertion
+  that both `sure-cli/src/` and `sure-core/src/` are reached.
+
+- **Two red proofs, and they establish different halves.** Removing
+  `THE_COMPOSITION_ROOT` from the exemption list fails the rule and prints
+  `sure-cli/src/check.rs:328: .with_page_driver(Box::new(sure_core::browser_driver::Browser::system()));`
+  — a line the parent commit's walk could not have produced, which is the proof that
+  the widening is real and not cosmetic. Narrowing the walk instead trips the per-crate
+  vacuity assertion. Taking `refused_result`'s `Error` back to `CheckResult::pass`
+  fails the new test at `:2479` with `left: Pass, right: Error`. **Neither proof
+  establishes that a guard is complete**: the exemption still exempts a file by name,
+  and the new test reaches the runner directly because `pipeline.rs` cannot produce the
+  state it covers.
+
+- **An arm that existed and nothing drove is now driven, and the honest reason it was
+  dead is written beside it.** `refused_result` covers an admission that exists but
+  does not *cover* the check's command. `pipeline.rs` cannot produce that state — it
+  builds the schedule and the permission plan from the same walk, so the two agree by
+  construction. That is a fact about one caller, not about the function, which takes
+  the schedule and the enforcement as two values. The test says so in its own comment
+  rather than implying the state is reachable in production.
+
+- **Two more live false sentences were found by auditing for the shape, and two
+  occurrences of the same words were left alone deliberately.**
+  `fixtures/adversarial/check-crash/scenario.json` said in the present tense that
+  *"this build plans checks and runs none of them"*, in the `why` of an acceptance
+  entry and in its `notes`. The same directory had already corrected that premise twice
+  (`why_not_the_pipeline`, its `README.md`), so these were the last places still
+  asserting it as current. The manifest's objection to touching a fixture is not a real
+  one — it is regenerated by one command and must move for `progress/*` anyway — so the
+  sentences were corrected and `SHA256SUMS.txt` regenerated with them, as one step,
+  because the writer refuses to run while a listed path is not in the index. Left
+  alone: `docs/development/DOGFOOD.md:187`, which is inside a `text` transcript where
+  the repair is a **re-run** rather than an edit of the record, and `FINAL_REPORT.md:174`,
+  which is under an explicit instruction not to touch it.
+
+- **What this does not decide.** No test in this repository runs a project's own
+  declared check to completion through the product path, on any platform: every
+  product-path test that reaches the real runner hands it a `Cancellation` cancelled
+  before the run began, so what is measured is the seam and not a check finishing and
+  passing. Closing that distance means starting a real project command inside the
+  suite, which is a decision about the gate rather than a measurement this task could
+  take. `aggregate_run`'s `&[]` argument also stays a recorded risk rather than a
+  guard, because the type cannot tell *no declarations* from *declarations I forgot*
+  and a guard that fired only for a hypothetical second caller would be a test with no
+  product behind it.

@@ -5012,3 +5012,106 @@ already records (exit 1 is not Claude Code's blocking status, which is 2), and
 neither is a green. The two families simply disagree about which non-zero code to
 use, and nothing reads the difference. Written down because a reader comparing
 the two launchers' exit codes on this path will meet it.
+
+## P18 — the console code page, and seventeen red tests that were not the tree
+
+The first `P18` reading was taken to establish a baseline before any of the
+phase's code existed, and it came back red: `test=101`, `result-lines=90
+passed=2801 failed=17 ignored=13`, with `red: tests\install_flow.rs` (9),
+`red: tests\quickstart_flow.rs` (2) and `red: tests\winget_manifest.rs` (6). At
+`47e13c0`, a commit that had just passed the same seven gates. The reading is
+`target/tmp/gates-baseline-before-planned-check-runner.txt`.
+
+**The same command, at the same commit, from a UTF-8 console, is green.**
+`chcp.com 65001` first, then the identical `pwsh -NoProfile -File
+scripts/gates.ps1` invocation: `test=0`, `result-lines=90 passed=2818 failed=0
+ignored=13`, `red: none`, `halt: exit 0 (clean)`, and `store identical: True`.
+That reading is `target/tmp/gates-baseline2-utf8-console.txt`. The only
+difference between the two runs that the logs record is
+`[Console]::OutputEncoding` — `gb2312` (CP936) against `utf-8`.
+
+**The mechanism, and the measurement that rules the tree out.** `quickstart_flow.rs`'s
+`a_release_archive` does `let archive = PathBuf::from(run.stdout.trim());`, and the
+staging fixture deliberately puts the archive under `target/tmp/sure install flow
+é中文 and spaces/`. Windows PowerShell 5.1 writes a redirected child's stdout in the
+**console's code page**, and `Run::of` decodes those bytes as UTF-8, so a path
+holding `é` and `中文` does not survive the round trip. What settles it is that the
+archive and its `.sha256` sidecar are on disk at exactly the path the failing test
+calls empty — `target/tmp/sure install flow é中文 and spaces/run-28692/launcher-3/`.
+A test that cannot see a file which is there is a defect in the reading, not in
+the tree, and the fixture only reaches it because it put non-ASCII in the path on
+purpose.
+
+**What was ruled out, because the obvious suspect is wrong.** It is not the
+execution policy, and the gate log says so itself: line 5 records
+`Process=Bypass`, and line 8 records that the shell the tests start
+(`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`) loaded a local
+`.ps1` with exit 0 — the gate measures this precisely because the six
+`.ps1`-spawning targets need it. The related trap is real and is a different
+one: Windows PowerShell 5.1 and `pwsh` 7 read different registry keys, so 5.1
+can be `Undefined` (and therefore `Restricted`) on a machine where 7 reads
+`RemoteSigned`. That is what `-ExecutionPolicy Bypass` sets a *process-scoped*
+preference for, inherited through `PSExecutionPolicyPreference`.
+
+**Not repaired here.** It is out of `P18`'s scope, it is not in the pipeline
+this phase builds, and it is a defect in three `sure-cli` test targets rather
+than in the engine. It is written down for two reasons: so that a red reading of
+those three targets on a non-UTF-8 console is not mistaken for a regression, and
+so that `P18`'s own readings are comparable with the ones this repository took
+before it — which is why every `P18` gate reading below is taken from a UTF-8
+console, and says so. The honest repair is either `Run::of` decoding in the
+child's actual console encoding or the fixture not putting non-ASCII in a path
+it then reads back out of a child's stdout; neither is done here, and this entry
+does not claim the class is fixed by a console setting.
+
+## P18 — a browser check's path is an `Endpoint`, because a URL cannot be assembled from a `String`
+
+`P18-T002`'s `Readiness::Answers` held `port: u16, path: String`, and both it and
+`BrowserCheckSpec` built their URL with `format!("http://127.0.0.1:{port}{path}")`.
+That is not a safe way to make a URL, and the reason is one sentence long.
+
+**The mechanism.** A URL's authority ends at the first `/`, so a path that does
+not begin with one does not extend the path — it extends the **host**:
+
+```
+http://127.0.0.1:8080@evil.example/
+  authority  127.0.0.1:8080@evil.example   <- reads as loopback
+  host       evil.example                  <- where the request goes
+```
+
+Everything before the `@` is userinfo. A value that looked like a loopback
+address was in fact a username, and the check would have gone to `evil.example`.
+The repository's "no silent external network validation" invariant would have
+rested on every caller passing a well-formed path rather than on the type.
+
+**The decision.** Both types now hold a `probe::Endpoint`, the type the local
+probe already uses for exactly this question. Its fields are private, and both
+its constructors refuse a non-loopback address and a path that is not
+`path_is_safe`, which requires the leading `/` — the character that terminates
+the authority. The URL above is unrepresentable rather than unreviewed.
+**The deciding argument was reuse and not just validation**: this is the same
+type `browser::Target` wraps, for the reason that type records in its own doc —
+two copies of a refusal rule are two rules the day one of them is changed — and
+writing a third copy here would have made this module that day.
+
+`BrowserCheckSpec::new` becomes fallible and returns a new `WorkRefusal` value:
+`ServiceNamesNoPort` where a browser check was built on a service that says only
+that it stays up — previously a silent `None` that every caller would have had
+to remember to handle — and `Endpoint(EndpointError)` where the path was
+refused. `loopback_url` is no longer an `Option`, because a browser check with no
+URL cannot be built.
+
+**Honest about how it was found.** No shipped path was affected: nothing outside
+`planned_work.rs` called any of it, and the first caller would have been
+`P18-T010`'s browser check. It was found by reading the module, not by a failing
+test.
+
+**What the regression test records that its first version did not.** The test
+carries the counterfactual string and asserts on its **host**, not its
+authority. The first version of the helper stopped at the authority and failed
+with `left: "127.0.0.1:8080@evil.example"` — a string that reads as loopback.
+That failure is kept in the helper's doc, because it is the measurement showing
+that the authority is not the part that decides where a request goes, and
+because it is the reason the assertion is written where it is. The control test
+asserts the same host for six ordinary paths, so that refusing everything cannot
+pass as a fix.

@@ -5513,3 +5513,29 @@ exists.
   guard, because the type cannot tell *no declarations* from *declarations I forgot*
   and a guard that fired only for a hypothetical second caller would be a test with no
   product behind it.
+
+- **A correction to this entry, added after it was written: "they are green" is a
+  reading of one run and not a property of the leg.** The two bullets above rest the
+  ceiling's third measurement on the CI legs being green. They were green on `f8db077`
+  — `gh run view 35720783926`, `rust (macos-latest)` and `rust (ubuntu-latest)` both
+  success — and that reading stands unchanged. What was measured afterwards, and was
+  not known when this entry was written, is that `rust (ubuntu-latest)` is
+  **intermittent**. `07e244d` produced **two runs of the identical tree**:
+  `35725157896` (`push`) is green on all five jobs, and `35725236889`
+  (`pull_request`) is red on that leg — with the same three
+  `crates/sure-core/tests/browser_driver.rs` real-browser tests reading `... ok` in
+  the one and `... FAILED` in the other, the failing detail being
+  `Absence { reason: DriverWouldNotStart, … }` after `/usr/bin/chromium` ran the full
+  `30.018 seconds` budget without writing `DevToolsActivePort`. It is a **false red
+  and not a false green** — the product reported an explicit absence carrying its
+  reason rather than a page it never saw — and it is **deliberate**, because `opened()`
+  at `browser_driver.rs:426` panics by design when a browser is found and cannot be
+  driven. Filed as Issue #15; no rate is claimed, since three observations with one
+  failure are not a rate and the failure was not reproduced deliberately.
+  **The ceiling decision does not move on this.** Its third measurement is that the
+  non-Windows completion table answers `Executable` for a bare name, which is a
+  reading of the code and not of a CI leg, and the browser driver is not the
+  name-completion path — so the two disagreeing cases and the one agreeing case are
+  exactly as ADR 0015 records them. What the correction changes is how much weight the
+  green legs carry when they are cited: **"the legs execute and their tests pass when
+  they run"**, which is the narrower claim this entry should have made.

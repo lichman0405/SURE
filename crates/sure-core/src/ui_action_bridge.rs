@@ -702,6 +702,83 @@ mod tests {
         assert!(schedule.duplicates().is_empty());
     }
 
+    /// The two sentences a planned bridge check can carry, and which one the
+    /// class picks.
+    ///
+    /// `P18-T004` made the observation class-dependent, and a class-dependent
+    /// sentence with one of its branches never run is a sentence nobody has
+    /// read: the unobserved shape is the one `UiActionBridge::of` produces, the
+    /// observed one needs evidence a browser would supply, and the two must not
+    /// claim the same thing about the handler.
+    #[test]
+    fn the_two_shapes_of_a_bridge_check_say_what_was_seen_and_what_was_not() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-ui-observation-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        std::fs::write(
+            temp.join("App.tsx"),
+            "<button onClick={handleSave}>Save</button>\n",
+        )
+        .unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+
+        let observed = UiActionBridge::of(&discovery).with_evidence(UiRuntimeEvidence {
+            elements: vec![ObservedElement {
+                kind: ObservedElementKind::Button,
+                label: "Save".to_owned(),
+            }],
+        });
+        let detail = planned_detail(&observed);
+        assert!(
+            detail.contains("a browser saw a matching element on the page"),
+            "an observed element is what the browser added, and the sentence has to \
+             say it: {detail}"
+        );
+        assert!(
+            detail.contains("what the action does when somebody uses it was not watched"),
+            "seeing the element is not seeing the action work: {detail}"
+        );
+
+        let read = UiActionBridge::of(&discovery);
+        let detail = planned_detail(&read);
+        assert!(
+            detail.contains("the binding was read in the source"),
+            "nothing was observed about this one: {detail}"
+        );
+        assert!(
+            !detail.contains("a browser saw"),
+            "no browser ran for the static shape, so nothing may claim one did: {detail}"
+        );
+        assert!(
+            detail.contains(&read.proposals()[0].reason().plain_description()),
+            "the detail must name the place the proposal's own reason names: {detail}"
+        );
+    }
+
+    /// The sentence the plan holds for a bridge's single check.
+    fn planned_detail(bridge: &UiActionBridge) -> String {
+        let mut builder = PlanBuilder::new(
+            sure_domain::execution::ExecutionMode::HostConfirmed,
+            sure_domain::execution::ExecutionPermissions::inspect_only(),
+        );
+        bridge.add_to(&mut builder);
+        let schedule = builder.build();
+        let CheckOperation::Precomputed(evidence) = schedule.checks()[0].operation() else {
+            panic!("a bridge check that starts a process is not what this module plans");
+        };
+        evidence.detail().to_owned()
+    }
+
     #[test]
     fn a_link_click_is_detected() {
         let temp = std::env::temp_dir().join(format!(

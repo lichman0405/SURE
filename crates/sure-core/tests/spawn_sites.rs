@@ -139,13 +139,21 @@
 //! rule is about, and it moved from "one file may name it" to "two files may,
 //! and here is what each is for".
 //!
-//! **Four: nothing outside `sure-core/src/runtime_start.rs` mentions
-//! `StartSmoke`.** This is rule three's own technique applied one level higher
-//! again, and for rule three's own reason: `runtime_start.rs` *can* start a
-//! service, and **nothing in the product constructs a `StartSmoke`**, so no ship
-//! path reaches it. That is the same kind of absence as the one rule two held
-//! and the one rule three held before it, checked the same way — a file that
-//! never names the type cannot be the thing that builds one.
+//! **Four: nothing outside [`MAY_NAME_A_START_SMOKE`] mentions `StartSmoke`.**
+//! This is rule three's own technique applied one level higher again, and for
+//! rule three's own reason: `runtime_start.rs` can start **and stop** a service,
+//! and the files that may name a `StartSmoke` are the files that decide *when* one
+//! is started. The list is two files as of `P18-T009`. `runtime_start.rs` builds
+//! one for a render line; `planned_check_runner.rs` builds one too, through
+//! `StartSmoke::planned`, for a scheduled `CheckOperation::Service` — so **a
+//! product path does construct a `StartSmoke`, and this is the moment the section
+//! below was written to catch.** What the rule holds now is the part a name check
+//! can hold, and it is the part rule three holds after its own moment came: the
+//! list is the answer and a third file naming one is a decision somebody has to
+//! write down. What is **not** the rule, and was never quite it, is the ceiling:
+//! `sure_core::support`'s level is a claim about every platform SURE runs on, and
+//! an absent caller was one argument for it rather than the whole of it — the
+//! paragraph on `support::CEILING` is where that reason lives.
 //!
 //! All three `contains` rules have the same known hole and it is the same hole
 //! rule one's matcher was fixed for once: a `use crate::service::Supervisor as
@@ -155,25 +163,40 @@
 //!
 //! # This test is meant to fail
 //!
-//! Not today — but the day anything wires a `StartSmoke` up to `sure check`,
-//! this fails, and it should. **Two things have to move together at that
-//! moment**: a product path exists, so this list and the paragraphs above it are
-//! wrong; and `sure_core::support`'s ceiling of level C is a claim about what
-//! SURE can run, so `CEILING` and
-//! `the_ceiling_todays_build_claims_is_never_above_inspect_only` are in question
-//! in the same commit. A false green is more serious than a visible error, and
-//! this is the error that would rather be visible.
+//! The moment it predicted has come twice, and the second one is the one it was
+//! written for. A false green is more serious than a visible error, and this is
+//! the error that would rather be visible.
 //!
-//! **That moment came once already, in `P18-T007`, and what happened is worth
-//! more than what was predicted.** The pipeline began handing admitted commands
-//! to the runner — the first product path to reach it — and **this test did not
-//! fail**: it passed before the wiring and after it, because the file that
-//! changed names no type this census is about. What was wrong was the paragraph
-//! above, and a paragraph is not a name a source check can see. So the rule this
-//! file earned is the one written here for the next reader: **this file catches a
-//! new name, and a claim that goes false without one is caught by a test that
-//! measures the path — `pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing`
-//! is the one that does it for the default run — or it is not caught at all.**
+//! **Predicted**: the day anything wires a `StartSmoke` up to `sure check`, this
+//! fails, and it should. **Two things have to move together at that moment**: a
+//! product path exists, so this list and the paragraphs above it are wrong; and
+//! `sure_core::support`'s ceiling of level C is a claim about what SURE can run,
+//! so `CEILING` and
+//! `the_ceiling_todays_build_claims_is_never_above_inspect_only` are in question
+//! in the same commit.
+//!
+//! **The first failure, in `P18-T007`, was not this test.** The pipeline began
+//! handing admitted commands to the runner — the first product path to reach it —
+//! and this test passed both before and after, because the file that changed names
+//! no type this census is about. What was wrong was the paragraph above, and a
+//! paragraph is not a name a source check can see. So the rule this file earned is
+//! the one written here for the next reader: **this file catches a new name, and a
+//! claim that goes false without one is caught by a test that measures the path —
+//! `pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing` is the one that does
+//! it for the default run — or it is not caught at all.**
+//!
+//! **The second failure is this test, in `P18-T009`**, and it failed exactly where
+//! it said it would: `planned_check_runner.rs` began naming `StartSmoke`, and this
+//! rule flagged the two lines (`use crate::runtime_start::{LimitsError, StartSmoke}`
+//! and `StartSmoke::planned(`). The first of the two things above moved with it —
+//! the list, this section and the failure message are `P18-T009`'s edit. The second
+//! did not, and that is a decision rather than an omission: `support::CEILING`'s
+//! reason was rewritten in `P18-T007` to the platform argument (`npm.cmd` comes
+//! back `InterpreterRequired` on Windows, and this branch's macOS and Linux test
+//! steps have never run) rather than the absence of a caller, so *a caller exists
+//! now* is not evidence against it. `P18-T012` owns those measurements. A reader
+//! who thinks a product path alone should move the ceiling should read the
+//! paragraph beside the ceiling before changing it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -251,12 +274,40 @@ const MAY_NAME_A_PROCESS_REQUEST: &[&str] = &[
 ///
 /// Split from [`MAY_NAME_A_PROCESS_REQUEST`] even though the first entry is the
 /// same file, because they are two rules that today share an entry and the
-/// failure messages differ. Rule four is what carries the claim this one can no
-/// longer carry on its own.
+/// failure messages differ. Rule four is the same technique one level up again,
+/// and since `P18-T009` it is a list too: **the answer is the list, not an
+/// absence.**
 const MAY_NAME_A_SUPERVISOR: &[&str] = &[THE_SUPERVISOR, THE_START_SMOKE];
 
-/// The one file that may name a [`StartSmoke`], which is the whole of what rule
+/// The two files that may name a [`StartSmoke`], which is the whole of what rule
 /// four exempts.
+///
+/// **`runtime_start.rs` builds one and `planned_check_runner.rs` builds one**, and
+/// the second entry is `P18-T009`'s, added deliberately and not because a test
+/// asked for it. `StartSmoke::planned` is the second door into that module: the
+/// first takes a probe's command and answers a render line, and the second takes a
+/// scheduled [`ServiceCheckSpec`] and carries out a check the plan holds. Routing a
+/// service check anywhere else would have been a second implementation of *start
+/// it, wait for the window, ask the one question, stop it on every path* — the
+/// verdict table this repository has already measured once, in
+/// `tests/runtime_start.rs`, against real processes. So the file is here because
+/// the alternative was a second answer to *did this service work*, not because the
+/// route was convenient.
+///
+/// **What this entry does not do is move `support::CEILING`**, and a reader
+/// arriving from the failure message needs that sentence: the ceiling's reason is
+/// the platform argument written beside it in `P18-T007`, and `P18-T012` is where
+/// the measurements that could change it live. That a caller exists now is not
+/// evidence against a claim about which platforms SURE has been shown to run
+/// project code on.
+///
+/// Split from [`MAY_NAME_A_SUPERVISOR`] even though the first entry is the same
+/// file, because they are two rules that today share an entry and the failure
+/// messages differ.
+const MAY_NAME_A_START_SMOKE: &[&str] = &[THE_START_SMOKE, THE_PLANNED_CHECK_RUNNER];
+
+/// The file that may build a [`StartSmoke`] and start, question and stop a
+/// service.
 const THE_START_SMOKE: &str = "sure-core/src/runtime_start.rs";
 
 /// The file that builds a [`Supervisor`] and admits what it starts.
@@ -525,18 +576,25 @@ fn nothing_outside_the_named_files_names_a_supervisor() {
 fn nothing_outside_the_start_smoke_names_a_start_smoke() {
     // The rule the third one used to be, one level higher up again. The file
     // that may name a `Supervisor` is the file that *can* start a service; the
-    // file that may name a `StartSmoke` is the file that *decides when one
-    // should be started*, and that decision is the one a product path would
-    // have to reach before any project code ran.
-    let namers = namers_of("StartSmoke", &[THE_START_SMOKE]);
+    // files that may name a `StartSmoke` are the files that *decide when one
+    // should be started*, and that decision is the one a product path reaches
+    // before any project code runs. Two files may, since `P18-T009`, and the
+    // paragraph on `MAY_NAME_A_START_SMOKE` is why the second one is there.
+    let namers = namers_of("StartSmoke", MAY_NAME_A_START_SMOKE);
 
     assert!(
         namers.is_empty(),
         "a shipped file has begun naming `StartSmoke`, so it can start and stop \
          a service. That is a real change and not a test to update: it means a \
-         path out of the product reaches the runner, which is what \
-         `sure_core::support`'s level-C ceiling is justified by the absence of. \
-         Move the ceiling in the same commit, or take the name back out. \
+         new path through the product reaches a service start. Either name it in \
+         MAY_NAME_A_START_SMOKE and say why in the paragraph above — the entries \
+         there are decisions, and the two that exist are `runtime_start.rs`, \
+         which builds one for a render line, and `planned_check_runner.rs`, \
+         which builds one to carry out a scheduled service check — or take the \
+         name back out. **Do not move `sure_core::support`'s ceiling because a \
+         caller exists**: the reason beside it is the platform argument written \
+         in `P18-T007`, and `P18-T012` owns the measurements that could change \
+         it. \
          Found:\n  {}",
         namers.join("\n  ")
     );
@@ -558,6 +616,7 @@ fn every_exemption_is_one_a_file_actually_needs() {
         (THE_SUPERVISOR, "Supervisor"),
         (THE_START_SMOKE, "Supervisor"),
         (THE_START_SMOKE, "StartSmoke"),
+        (THE_PLANNED_CHECK_RUNNER, "StartSmoke"),
     ] {
         // Asked as "would the rule have flagged this file if it were not
         // exempt?" — which is the only question that makes an exemption a

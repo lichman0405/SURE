@@ -28,17 +28,26 @@
 //! [`crate::safety::classify`], which is the decision and takes the same two
 //! things.
 //!
-//! # One seam, and no test in this file starts a process
+//! # Two kinds of work, one seam, and no test in this file starts a process
 //!
-//! [`CommandRunner`] is the whole of the machine: one method, from an admitted run
-//! to a [`CommandRun`]. [`ProcessRunner`] is the implementation that calls
-//! [`crate::process::run`], and it is the only one in this file that can start
-//! anything. Every proof below — that an unadmitted command never arrives, that
-//! one check produces one result, that a check which reported nothing becomes an
-//! error — is made with a fake that records what it was asked to run and answers
-//! from a value. **A test that starts a real process is a test that measures this
-//! machine rather than this code**, and nothing in this module's acceptance needs
-//! one: `tests/process_runner.rs` is where starting a process is the subject.
+//! [`CheckRunner`] is the whole of the machine: a method from an admitted command
+//! to a [`CommandRun`], and since `P18-T009` a method from an admitted service to
+//! the [`CheckResult`] it produced. [`ProcessRunner`] is the implementation that
+//! can start either, and it is the only one in this file. Every proof below —
+//! that an unadmitted command never arrives, that one check produces one result,
+//! that a check which reported nothing becomes an error, that a service gets the
+//! environment the plan holds — is made with a fake that records what it was asked
+//! for and answers from a value. **A test that starts a real process is a test
+//! that measures this machine rather than this code**, and nothing in this
+//! module's acceptance needs one: `tests/process_runner.rs` is where starting a
+//! process is the subject, and `tests/runtime_start.rs` is where the window, the
+//! question and the stop are.
+//!
+//! The two methods are on one trait rather than two, and that is the same
+//! argument the pipeline's own `runner` field makes: *what may this run start?* is
+//! one question with one answer, and two traits would let one run hold two
+//! runners that could disagree about it — a fake for commands and the real
+//! runner for services, or the other way round.
 //!
 //! # Exactly one result per scheduled check
 //!
@@ -71,30 +80,62 @@
 //! effect of this module's rule is that the aggregator's arm is now rare rather
 //! than always — which is what the ADR's consequence note says it should be.
 //!
+//! # A service check is carried out by the module that already ran one
+//!
+//! [`CheckOperation::Service`] holds a [`ServiceCheckSpec`], and there is exactly
+//! one implementation of what a service check *is* in this tree: the startup
+//! window, the one question, the stop on every path, and the verdict table in
+//! [`crate::runtime_start`]. So this module's job for a service is pairing and
+//! nothing more — the spec the schedule holds, the command the enforcement
+//! admitted for that check, and [`StartSmoke::planned`], the constructor
+//! `P18-T009` gave that door. A second mapping written here — start, poll, one
+//! HTTP call, stop — would be a second answer to *did this service work* that
+//! could disagree with the first, and the tests that hold the first are
+//! `tests/runtime_start.rs`'s, over real processes.
+//!
+//! **What this file's tests can hold instead is the wiring**: that a service
+//! check's own spec reaches the seam, that the admission is paired by check id
+//! and by program and argument vector, and that nothing of the sort happens for a
+//! check whose work is not a service. The window, the question and the stop are
+//! `runtime_start.rs`'s and are measured there.
+//!
+//! **The environment is the plan's own, and that is the whole of what this file
+//! decides about it.** [`AdmittedService`] carries a [`ServiceCheckSpec`] whose
+//! command holds the environment, and `StartSmoke::planned` reads it — so a
+//! service check is started with what the plan states rather than with whatever
+//! SURE was started with. That is the same rule the command path already follows
+//! in [`AdmittedRun::request`], where the spec's environment is the request's;
+//! the alternative, a service that inherits SURE's environment because nobody
+//! looked, is `service.rs`'s old gap and the accident this clause is about.
+//!
 //! # What this module does not do
 //!
 //! **It does not decide what may run.** Every "yes" comes from
 //! [`Enforcement::admitted`], and a caller holding every command the plan
 //! considered has nothing it can do with them here.
 //!
-//! **It does not carry out services or browsers.** [`CheckOperation::Service`] and
-//! [`CheckOperation::Browser`] are named rather than ignored — a check of either
-//! kind is reported as an `Error` saying this build has no runner for it — because
-//! a `match` with a wildcard arm would let a fifth kind of work arrive as a silent
-//! nothing. `P18-T009` and `P18-T010` are where those two doors are opened.
+//! **It does not carry out browsers.** [`CheckOperation::Browser`] is named
+//! rather than ignored — such a check is reported as an `Error` saying this build
+//! has no runner for it — because a `match` with a wildcard arm would let a fifth
+//! kind of work arrive as a silent nothing. `P18-T010` is where that door is
+//! opened, and the same paragraph said the same thing about services until
+//! `P18-T009` opened theirs.
 //!
 //! **It builds no command line.** The one translation here is field for field, and
 //! an argument holding a space is one argument before it and one argument after it.
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::time::Duration;
 
 use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::status::CheckResult;
 
 use crate::enforce::{AdmittedCommand, Enforcement};
-use crate::planned_work::{CheckOperation, CommandRun, CommandSpec};
+use crate::planned_work::{CheckOperation, CommandRun, CommandSpec, ServiceCheckSpec};
+use crate::probe;
 use crate::process::{self, Cancellation, ProcessRequest};
+use crate::runtime_start::{LimitsError, StartSmoke};
 use crate::schedule::{CheckSchedule, ScheduledCheck};
 
 /// What SURE says about a check the mode admitted that produced no result.
@@ -113,27 +154,39 @@ use crate::schedule::{CheckSchedule, ScheduledCheck};
 const NOTHING_WAS_REPORTED: &str = "SURE admitted this check and the runner reported nothing for \
                                     it, so nothing about it was observed.";
 
-/// The one seam at which an admitted command becomes a process.
+/// The one seam at which admitted work becomes a process.
 ///
 /// **A trait rather than a function**, for one reason that matters and one that
 /// follows from it. The reason that matters: an acceptance about *what may run*
 /// has to be provable without running anything, and a seam is what lets the proof
 /// be made with a value that records what it was asked for. The one that follows:
-/// the interface a fake has to satisfy is one method wide, so a fake cannot agree
-/// with the real runner on everything except the thing being tested.
+/// the interface a fake has to satisfy is two methods wide, so a fake cannot
+/// agree with the real runner on everything except the thing being tested.
 ///
-/// The method takes [`AdmittedRun`] and not a [`CommandSpec`], which is what makes
-/// "an unadmitted command cannot reach a process" a property of the signature
-/// rather than a promise in a comment.
+/// Both methods take a value only an [`Enforcement`] can produce — [`AdmittedRun`]
+/// for a command, [`AdmittedService`] for a service — which is what makes "work
+/// the mode did not admit cannot reach a process" a property of the signature
+/// rather than a promise in a comment. Neither is a defaulted method: an
+/// implementation that had not decided what to do with a service would otherwise
+/// compile, and *has not decided* is exactly the state clause one of `P18-T009`
+/// is about.
+///
+/// **The two answers have different shapes on purpose.** A command's run is a
+/// [`CommandRun`] because *the process ran, and this is what it said* and *the
+/// process never started, and this is why* are two states with one mapping to a
+/// result ([`CommandRun::to_result`]). A service's run is already a
+/// [`CheckResult`], because [`StartSmoke::run`] produces one: the window, the
+/// question and the stop are one indivisible row of a verdict table, and a
+/// wrapper type here would only be a place for this module to reshape that table.
 ///
 /// **[`fmt::Debug`] is a supertrait, and the reason is one field rather than this
-/// module.** `Pipeline` holds a `&dyn CommandRunner` — a run is built with the
+/// module.** `Pipeline` holds a `&dyn CheckRunner` — a run is built with the
 /// runner it will use, so that a caller answering "what may this run start?" is
 /// answering it at the place the run is described — and `Pipeline` prints itself
 /// when a test fails, so the runner it holds has to be printable. Nothing about
 /// running a command needs this; what needs it is a runner being part of a value a
 /// person reads.
-pub trait CommandRunner: fmt::Debug {
+pub trait CheckRunner: fmt::Debug {
     /// Carry out one admitted command and report what came of it.
     ///
     /// [`CommandRun`] rather than a `Result`, because the runner's two answers —
@@ -141,6 +194,17 @@ pub trait CommandRunner: fmt::Debug {
     /// and this is why* — are one question about one check, and
     /// [`CommandRun::to_result`] is where the answer is read.
     fn run(&self, work: &AdmittedRun<'_>) -> CommandRun;
+
+    /// Start one admitted service, ask it its one question, stop it, and report
+    /// what came of all three.
+    ///
+    /// **[`CheckResult`] rather than a `Result`, and that is
+    /// [`StartSmoke::run`]'s own rule** — every way a service check can go wrong
+    /// is a state the check has to report, and a caller that had to handle an
+    /// `Err` here would be deciding what to tell somebody about a check that did
+    /// not happen. An implementation is expected to route this to
+    /// [`StartSmoke::run`], which stops the service on every path.
+    fn run_service(&self, work: &AdmittedService<'_>) -> CheckResult;
 }
 
 /// The runner that starts a real process.
@@ -169,22 +233,59 @@ impl ProcessRunner {
     }
 }
 
-impl CommandRunner for ProcessRunner {
+impl CheckRunner for ProcessRunner {
     fn run(&self, work: &AdmittedRun<'_>) -> CommandRun {
         // One call, and the conversion is `CommandRun`'s own: `process::run`
         // returns exactly the `Result` that `From` is written for, so the step
         // from the machinery to the check's result is not a reshape written here.
         process::run(&work.request(&self.cancellation)).into()
     }
+
+    fn run_service(&self, work: &AdmittedService<'_>) -> CheckResult {
+        match StartSmoke::planned(
+            work.admitted(),
+            work.service(),
+            work.fingerprint(),
+            ONE_EXCHANGE,
+        ) {
+            // The verdict table is `runtime_start`'s and is not touched here: the
+            // window, the question, the stop and the mapping from what happened
+            // to a status all belong to that module, and this call is the whole
+            // of what `P18-T009` had to add to reach it.
+            Ok(smoke) => smoke.run(&self.cancellation),
+            // The plan's own numbers cannot be run — a window of zero, or one
+            // that cannot close before the command's budget runs out. Nothing was
+            // started, and this is an `Error` for the same reason
+            // `NOTHING_WAS_REPORTED` is: SURE said it would carry this check out.
+            Err(error) => service_refused(work, &error),
+        }
+    }
 }
+
+/// The bounds on the one exchange a planned service check is allowed to make.
+///
+/// **The one budget the plan does not hold.** A [`ServiceCheckSpec`] carries the
+/// window and the command's whole-life deadline; neither bounds a request, and
+/// [`probe::Limits`] is a decision rather than a default — *"a caller that does
+/// not choose a bound has not decided what the check is allowed to cost"* — so
+/// the caller is here, in the machinery, and the number is written down where a
+/// reader can disagree with it.
+///
+/// Half a second, because the exchange is a request to a process SURE is watching
+/// on loopback and a service that needs longer than that to answer one question
+/// has not answered it; 64 KiB, because the answer is a header line and whatever
+/// body came with it before the reader stopped, and a check that read more of a
+/// project's page than this would be reading the page rather than the fact that
+/// it was served.
+const ONE_EXCHANGE: probe::Limits = probe::Limits::new(Duration::from_millis(500), 64 * 1024);
 
 /// One scheduled check's command, paired with the admission that lets it run.
 ///
-/// **The only value a [`CommandRunner`] can be handed**, and it cannot be built
+/// **The only value [`CheckRunner::run`] can be handed**, and it cannot be built
 /// without an [`AdmittedCommand`] — a type with a private constructor that exactly
 /// one function produces. That is what makes *unadmitted work cannot reach a
 /// process* a fact about the type system rather than a rule about how callers
-/// ought to behave.
+/// ought to behave. [`AdmittedService`] is the same argument for the other door.
 ///
 /// It holds the [`CommandSpec`] as well as the admission because the admission is
 /// not the whole of the work: the enforcement decided about a program and an
@@ -280,17 +381,138 @@ impl<'a> AdmittedRun<'a> {
     }
 }
 
+/// One scheduled check's service, paired with the admission that lets it start.
+///
+/// **The only value [`CheckRunner::run_service`] can be handed**, and it cannot be
+/// built without an [`AdmittedCommand`] for the same reason [`AdmittedRun`] cannot:
+/// the type a runner is given is the type the enforcement produced, so *a service
+/// the mode did not admit cannot be started* is a fact about the type system
+/// rather than a rule for callers.
+///
+/// It holds the [`ServiceCheckSpec`] as well as the admission for the reason
+/// [`AdmittedRun`] does: the admission decided a program and an argument vector,
+/// and the window, the readiness, the directory and **the environment** live in
+/// the spec. That last one is clause one of `P18-T009` — the environment a service
+/// is given is the plan's own field and not a default discovered in the runner.
+///
+/// The fingerprint travels with it because the result a service produces is built
+/// by [`crate::runtime_start`], which needs the fingerprint of the run it belongs
+/// to; every other result in this module is built from the schedule's proposal and
+/// takes the same value from the caller.
+#[derive(Debug, Clone, Copy)]
+pub struct AdmittedService<'a> {
+    admitted: AdmittedCommand<'a>,
+    spec: &'a ServiceCheckSpec,
+    fingerprint: &'a FingerprintId,
+}
+
+impl<'a> AdmittedService<'a> {
+    /// Pair a scheduled check's service with the command the enforcement admitted
+    /// for it.
+    ///
+    /// **The same three refusals [`AdmittedRun::new`] makes, and for the same
+    /// reasons** — the work is not the kind this door carries, the admission
+    /// belongs to another check, or the admission covers a different command —
+    /// plus the same rule about the argument vector: compared element by element
+    /// and never as text. What the admission decided about is the *program and the
+    /// arguments of the service's own command*, so that is what is compared, and
+    /// the refusal names the pair the way a person reads it.
+    ///
+    /// # Errors
+    ///
+    /// [`AdmissionRefused`], for the reasons on that type.
+    pub fn new(
+        scheduled: &'a ScheduledCheck,
+        admitted: AdmittedCommand<'a>,
+        project_fingerprint: &'a FingerprintId,
+    ) -> Result<Self, AdmissionRefused> {
+        let proposal = scheduled.proposal();
+        let id = proposal.id();
+        let CheckOperation::Service(spec) = scheduled.operation() else {
+            return Err(AdmissionRefused::NotOneService {
+                id: id.clone(),
+                work: scheduled.operation().plain_description(),
+            });
+        };
+
+        let command = admitted.command();
+        if command.check().id() != id {
+            return Err(AdmissionRefused::ForADifferentCheck {
+                id: id.clone(),
+                admitted_for: command.check().id().clone(),
+            });
+        }
+        let service_command = spec.command();
+        if command.program() != service_command.program()
+            || command.arguments() != service_command.arguments()
+        {
+            return Err(AdmissionRefused::NotTheCommandThatWasAdmitted {
+                id: id.clone(),
+                planned: display_of(service_command),
+                admitted: command.display(),
+            });
+        }
+
+        Ok(Self {
+            admitted,
+            spec,
+            fingerprint: project_fingerprint,
+        })
+    }
+
+    /// The check this service belongs to.
+    #[must_use]
+    pub fn check(&self) -> &'a CheckId {
+        self.admitted.command().check().id()
+    }
+
+    /// The service as the plan holds it: the command that starts it, what counts
+    /// as ready, and the window.
+    #[must_use]
+    pub const fn service(&self) -> &'a ServiceCheckSpec {
+        self.spec
+    }
+
+    /// The admission that lets it start, for the one caller that needs to hand it
+    /// to [`crate::runtime_start`].
+    ///
+    /// Public because the seam's own production implementation is in this file and
+    /// a caller writing another one needs exactly this — and because an
+    /// [`AdmittedCommand`] is a value the enforcement produced, so handing it on
+    /// is not a way round the enforcement.
+    #[must_use]
+    pub const fn admitted(&self) -> AdmittedCommand<'a> {
+        self.admitted
+    }
+
+    /// The fingerprint of the run this check is part of.
+    #[must_use]
+    pub const fn fingerprint(&self) -> &'a FingerprintId {
+        self.fingerprint
+    }
+}
+
 /// Why an admitted command could not be paired with a scheduled check's work.
 ///
-/// Three ways to hand in a pair that is not one command, each refused rather than
-/// repaired. Repairing any of them would mean SURE running something the plan did
-/// not hold or something nobody admitted, and the second of those is the whole
-/// point of the type the pair is built from.
+/// Four variants, and each is refused rather than repaired: two about the kind of
+/// work — one per door, because a command and a service are paired by two
+/// constructors and each has to refuse the other's check — and two about the
+/// admission itself, which both doors make. Repairing any of them would mean SURE
+/// running something the plan did not hold or something nobody admitted, and the
+/// second of those is the whole point of the type the pair is built from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmissionRefused {
     /// The check's work is not one command, so there is no command for the
     /// admission to be about.
     NotOneCommand {
+        /// The check that was paired.
+        id: CheckId,
+        /// What the check's work is, in the words a report uses for it.
+        work: &'static str,
+    },
+    /// The check's work is not a service, so there is no service for the
+    /// admission to be about.
+    NotOneService {
         /// The check that was paired.
         id: CheckId,
         /// What the check's work is, in the words a report uses for it.
@@ -321,6 +543,11 @@ impl fmt::Display for AdmissionRefused {
                 f,
                 "the check {id} would be carried out as {work}, and an admission can only be \
                  paired with a check whose work is one command"
+            ),
+            Self::NotOneService { id, work } => write!(
+                f,
+                "the check {id} would be carried out as {work}, and an admission can only be \
+                 paired with a check whose work is a service"
             ),
             Self::ForADifferentCheck { id, admitted_for } => write!(
                 f,
@@ -514,12 +741,19 @@ impl RunResults {
 /// | the check will not run | — | the plan's own `Skipped` result with its reason |
 /// | it will run | the command was not admitted | the command's own `Skipped` result |
 /// | it will run | it was admitted | what the runner reported, through `CommandRun::to_result` |
+/// | it will run, as a service | it was admitted | what the runner reported, through `StartSmoke::run` |
 /// | it will run | nothing was admitted and nothing was stopped | an `Error` — nothing was observed |
 ///
 /// Static evidence never reaches a runner at all: a [`CheckOperation::Precomputed`]
 /// check is its own observation, and its result is read from the evidence by
 /// [`crate::planned_work::PrecomputedEvidence::to_result`], which is the same
 /// mapping the command path ends in.
+///
+/// The two rows that reach a runner differ in the shape of the answer and not in
+/// what happens next: a command's [`CommandRun`] is mapped here by
+/// [`CommandRun::to_result`], and a service's result is produced whole by
+/// [`crate::runtime_start`] — the table above has one row per kind of work, and
+/// only one of them is this module's to map.
 ///
 /// # Errors
 ///
@@ -533,7 +767,7 @@ pub fn run_scheduled_checks<R>(
     runner: &R,
 ) -> Result<RunResults, RunnerRefused>
 where
-    R: CommandRunner + ?Sized,
+    R: CheckRunner + ?Sized,
 {
     // The results the mode itself produced, by the check they are about. Keyed
     // rather than searched so that the two loops below read as the two questions
@@ -607,7 +841,7 @@ fn carry_out<R>(
     runner: &R,
 ) -> Option<CheckResult>
 where
-    R: CommandRunner + ?Sized,
+    R: CheckRunner + ?Sized,
 {
     match scheduled.operation() {
         // The answer was already observed while the plan was made. There is no
@@ -633,11 +867,26 @@ where
                 Err(refusal) => Some(refused_result(scheduled, &refusal, project_fingerprint)),
             }
         }
+        // A service is the other kind of work that starts something, and it goes
+        // to the other method: the admission is about the program and the
+        // arguments that start the service, and the window, the question and the
+        // stop belong to `runtime_start`, which is the only implementation of
+        // what a service check is.
+        CheckOperation::Service(_) => {
+            // The same answer as the command arm for a plan that holds no
+            // admission: nothing was admitted, so nothing was observed.
+            let command = admitted?;
+            match AdmittedService::new(scheduled, command, project_fingerprint) {
+                Ok(work) => Some(runner.run_service(&work)),
+                // The admission does not cover this check's service, so there is
+                // nothing SURE may start. An `Error`, and the same reasoning as
+                // the command arm's.
+                Err(refusal) => Some(refused_result(scheduled, &refusal, project_fingerprint)),
+            }
+        }
         // Named rather than swallowed by a wildcard, so that a fifth kind of work
         // is a compile error here instead of a check that quietly produces nothing.
-        CheckOperation::Service(_) | CheckOperation::Browser(_) => {
-            Some(no_runner_result(scheduled, project_fingerprint))
-        }
+        CheckOperation::Browser(_) => Some(no_runner_result(scheduled, project_fingerprint)),
     }
 }
 
@@ -692,11 +941,12 @@ fn refused_result(
 
 /// The result for a check whose kind of work this build cannot carry out.
 ///
-/// [`CheckOperation::Service`] and [`CheckOperation::Browser`] arrive here. The
-/// status is `Error` rather than `Unknown` for the same reason
-/// [`NOTHING_WAS_REPORTED`] is: the plan says the check would run, so the honest
-/// report of SURE having no way to run it is a failure of SURE's own check. A
-/// `Skipped` would read as a decision somebody made, and nobody decided this.
+/// [`CheckOperation::Browser`] arrives here, and nothing else: services arrived
+/// here too until `P18-T009` routed them to `runtime_start`. The status is `Error`
+/// rather than `Unknown` for the same reason [`NOTHING_WAS_REPORTED`] is: the plan
+/// says the check would run, so the honest report of SURE having no way to run it
+/// is a failure of SURE's own check. A `Skipped` would read as a decision somebody
+/// made, and nobody decided this.
 fn no_runner_result(
     scheduled: &ScheduledCheck,
     project_fingerprint: &FingerprintId,
@@ -713,6 +963,28 @@ fn no_runner_result(
             scheduled.operation().plain_description()
         ),
         project_fingerprint.clone(),
+    )
+}
+
+/// The result for a service check whose plan could not be turned into a run.
+///
+/// `Error` and never a pass, because nothing was started: the spec's own numbers
+/// cannot produce a verdict, and a check SURE said it would carry out is one it
+/// owes an answer to. The identity comes from the admitted command — which is the
+/// check the enforcement decided about, and the same place [`crate::runtime_start`]
+/// takes the identity of the results it produces — so the two paths cannot name
+/// one check differently.
+fn service_refused(work: &AdmittedService<'_>, error: &LimitsError) -> CheckResult {
+    let check = work.admitted().command().check();
+    CheckResult::errored(
+        check.id().clone(),
+        check.title().to_owned(),
+        check.severity(),
+        check.critical(),
+        format!(
+            "SURE could not set this service check up, so nothing about it was observed: {error}."
+        ),
+        work.fingerprint().clone(),
     )
 }
 
@@ -739,6 +1011,7 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::ffi::OsString;
+    use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
     use sure_domain::evidence::EvidenceClass;
@@ -747,7 +1020,10 @@ mod tests {
     use sure_domain::status::{CheckStatus, NotCheckedReason};
 
     use crate::consent::{PermissionPlan, PlannedCheck};
-    use crate::planned_work::{PlannedWork, PrecomputedEvidence, Readiness, ServiceCheckSpec};
+    use crate::planned_work::{
+        BrowserCheckSpec, PlannedWork, PrecomputedEvidence, Readiness, ServiceCheckSpec,
+    };
+    use crate::probe::Endpoint;
     use crate::process::{CapturedOutput, Outcome, ProcessError, Termination};
     use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
@@ -764,6 +1040,23 @@ mod tests {
         arguments: Vec<OsString>,
     }
 
+    /// What one call to a fake runner was asked to start as a service.
+    ///
+    /// The spec's own fields rather than a rendered line, and the environment is
+    /// in it on purpose: **the environment a service is given is clause one of
+    /// `P18-T009`**, and the only place it can be measured without starting a
+    /// process is where the plan's value crosses the seam.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct AskedService {
+        id: CheckId,
+        program: OsString,
+        arguments: Vec<OsString>,
+        working_directory: PathBuf,
+        environment: crate::process::Environment,
+        window: Duration,
+        endpoint: Option<Endpoint>,
+    }
+
     /// A runner with no process behind it.
     ///
     /// It records what it was asked for before it answers, so a test can assert
@@ -771,18 +1064,27 @@ mod tests {
     /// **No test in this file starts a process, and that is not a convenience** —
     /// these tests are about what may reach the seam, and a real run would answer a
     /// question about this machine instead.
+    ///
+    /// One fake for both methods rather than two, so that "the command runner was
+    /// not asked for a service" and "the service runner was not asked for a
+    /// command" are assertions about the same value a run was handed.
     #[derive(Debug)]
     struct FakeRunner {
         asked: RefCell<Vec<Asked>>,
         answer: CommandRun,
+        services: RefCell<Vec<AskedService>>,
+        verdict: CheckStatus,
     }
 
     impl FakeRunner {
-        /// A runner that reports `answer` for every command.
+        /// A runner that reports `answer` for every command and a `Pass` for every
+        /// service.
         fn reporting(answer: CommandRun) -> Self {
             Self {
                 asked: RefCell::new(Vec::new()),
                 answer,
+                services: RefCell::new(Vec::new()),
+                verdict: CheckStatus::Pass,
             }
         }
 
@@ -791,13 +1093,74 @@ mod tests {
             Self::reporting(CommandRun::Ran(an_outcome(Some(0))))
         }
 
+        /// The same fake, answering services with `verdict` instead of a pass.
+        fn answering_services_with(mut self, verdict: CheckStatus) -> Self {
+            self.verdict = verdict;
+            self
+        }
+
         /// Everything it was asked to run, in the order it was asked.
         fn asked(&self) -> Vec<Asked> {
             self.asked.borrow().clone()
         }
+
+        /// Every service it was asked to start, in the order it was asked.
+        fn services(&self) -> Vec<AskedService> {
+            self.services.borrow().clone()
+        }
+
+        /// The result a service run reports, with the identity of the check the
+        /// work belongs to.
+        ///
+        /// Built the way [`crate::runtime_start::StartSmoke::run`] builds one —
+        /// identity from the admitted command, class `ObservedFact`, status from
+        /// the verdict — because a fake whose result named a check the schedule
+        /// does not hold would be refused by [`RunResults::assemble`] and the
+        /// refusal would be about this fixture rather than about the runner.
+        fn a_service_result(&self, work: &AdmittedService<'_>) -> CheckResult {
+            let check = work.admitted().command().check();
+            let (id, title) = (check.id().clone(), check.title().to_owned());
+            let (severity, critical) = (check.severity(), check.critical());
+            let fingerprint = work.fingerprint().clone();
+            let class = EvidenceClass::ObservedFact;
+            match self.verdict {
+                CheckStatus::Pass => {
+                    CheckResult::pass(id, title, severity, critical, class, fingerprint)
+                }
+                CheckStatus::Fail => {
+                    CheckResult::fail(id, title, severity, critical, class, fingerprint)
+                }
+                CheckStatus::Warning => {
+                    CheckResult::warning(id, title, severity, critical, class, fingerprint)
+                }
+                CheckStatus::Unknown => {
+                    CheckResult::unknown(id, title, severity, critical, class, fingerprint)
+                }
+                CheckStatus::Error => CheckResult::errored(
+                    id,
+                    title,
+                    severity,
+                    critical,
+                    "this fake's verdict is an error",
+                    fingerprint,
+                ),
+                // Named rather than folded into the arm above, so that a service
+                // run reporting `Skipped` — which nothing in the product produces
+                // — is a compile error in this file rather than a status quietly
+                // mapped to the wrong word.
+                CheckStatus::Skipped => CheckResult::not_run(
+                    id,
+                    title,
+                    severity,
+                    critical,
+                    NotCheckedReason::ExecutionNotAuthorized,
+                    fingerprint,
+                ),
+            }
+        }
     }
 
-    impl CommandRunner for FakeRunner {
+    impl CheckRunner for FakeRunner {
         fn run(&self, work: &AdmittedRun<'_>) -> CommandRun {
             self.asked.borrow_mut().push(Asked {
                 id: work.check().clone(),
@@ -805,6 +1168,21 @@ mod tests {
                 arguments: work.command().arguments().to_vec(),
             });
             self.answer.clone()
+        }
+
+        fn run_service(&self, work: &AdmittedService<'_>) -> CheckResult {
+            let spec = work.service();
+            let command = spec.command();
+            self.services.borrow_mut().push(AskedService {
+                id: work.check().clone(),
+                program: command.program().to_os_string(),
+                arguments: command.arguments().to_vec(),
+                working_directory: command.working_directory().to_path_buf(),
+                environment: command.environment().clone(),
+                window: spec.window(),
+                endpoint: spec.readiness().endpoint().cloned(),
+            });
+            self.a_service_result(work)
         }
     }
 
@@ -912,6 +1290,56 @@ mod tests {
         ))
     }
 
+    /// The operation for a service whose spec differs from the defaults in every
+    /// field a request is built from.
+    ///
+    /// The program and the arguments are the admitted ones, because those are the
+    /// only ones an admission can be paired with. Everything else the spec holds
+    /// is free to differ, and this fixture makes every one of them differ — the
+    /// directory is not [`std::env::temp_dir`], the environment is not the
+    /// inherited one, the process limits are not the ones [`a_command`] uses, the
+    /// window is not [`a_service`]'s, and the readiness names an endpoint — so
+    /// that the assertions in
+    /// `a_service_check_that_is_admitted_reaches_the_service_runner` can only pass
+    /// if each value came from this spec and from nowhere else.
+    fn a_planned_service() -> CheckOperation {
+        let spec = CommandSpec::new(
+            ADMITTED_PROGRAM,
+            std::env::temp_dir().join("sure-fixture-service"),
+            crate::process::Environment::only([
+                (OsString::from("PATH"), OsString::from("/fixture/bin")),
+                (OsString::from("PORT"), OsString::from("5173")),
+            ]),
+            crate::process::Limits::new(Duration::from_secs(21), 4096, 8192),
+        )
+        .with_arguments(ADMITTED_ARGUMENTS);
+        CheckOperation::Service(ServiceCheckSpec::new(
+            spec,
+            Readiness::Answers {
+                endpoint: Endpoint::loopback(5173, "/health")
+                    .expect("the fixture names a loopback endpoint"),
+            },
+            Duration::from_secs(7),
+        ))
+    }
+
+    /// The operation for a check that reads a page a service serves.
+    ///
+    /// Built from a service that **answers**, because
+    /// [`BrowserCheckSpec::new`] refuses a service that only stays up: a service
+    /// that names no port has no page for a browser to open. So this fixture
+    /// cannot be built from [`a_service`], and the endpoint it does carry is the
+    /// one the browser would be sent to.
+    fn a_browser() -> CheckOperation {
+        let CheckOperation::Service(service) = a_planned_service() else {
+            panic!("the fixture builds a service");
+        };
+        CheckOperation::Browser(
+            BrowserCheckSpec::new(service, "/", "the page says the project is up")
+                .expect("the fixture's page is well formed"),
+        )
+    }
+
     /// A schedule built from these checks, in the plan's own order.
     ///
     /// The order that comes back is the plan's, not this function's — the plan
@@ -965,8 +1393,10 @@ mod tests {
     fn every_scheduled_check_comes_back_with_exactly_one_result() {
         let fingerprint = FingerprintId::generate();
         // Four kinds of check in one plan: one already observed, one that runs an
-        // admitted command, one the plan stopped, and one whose kind of work this
-        // build has no runner for.
+        // admitted command, one the plan stopped, and one that starts a service.
+        // The last two are the ones worth watching: the stopped check has an
+        // admission of its own that must not be used, and the service reaches the
+        // other half of the seam rather than the command runner.
         let schedule = schedule_of([
             work(
                 "observed",
@@ -998,6 +1428,7 @@ mod tests {
             &[
                 ("runs", "python", &["-m", "pytest"]),
                 ("stopped", "frobnicate", &["--everything"]),
+                ("served", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
             ],
         );
         let enforcement = enforcement_of(&schedule, plan);
@@ -1032,7 +1463,19 @@ mod tests {
         assert_eq!(
             runner.asked().len(),
             1,
-            "exactly one check in this plan reaches the runner"
+            "exactly one check in this plan reaches the command runner"
+        );
+        let services = runner.services();
+        assert_eq!(
+            services.len(),
+            1,
+            "exactly one check in this plan reaches the service runner, found: {services:?}"
+        );
+        assert_eq!(
+            services[0].id,
+            check_id("served"),
+            "the service runner is asked for the check that plans a service, and not for the check \
+             the plan stopped — a stopped check keeps the plan's own answer"
         );
     }
 
@@ -1570,32 +2013,411 @@ mod tests {
     #[test]
     fn a_check_this_build_has_no_runner_for_is_an_error_and_not_a_silence() {
         let fingerprint = FingerprintId::generate();
-        let schedule = schedule_of([work(
-            "served",
-            "a service this build cannot start",
-            ActionKind::LocalProbe,
-            a_service(),
-        )]);
+        // A browser check, which the plan admits and this build cannot carry out:
+        // driving a browser is `P18-T010`'s work and not this build's. The check
+        // reaches the runner with nothing to hand it to, so the answer has to be
+        // an error rather than a row that quietly went missing — and the fixture
+        // grants the one permission the action needs, because a check the plan
+        // stopped would be a different question with a different answer.
+        let (mode, permissions) = (
+            ExecutionMode::HostConfirmed,
+            ExecutionPermissions {
+                connect_service: true,
+                ..ExecutionPermissions::inspect_only()
+            },
+        );
+        let mut builder = PlanBuilder::new(mode, permissions);
+        builder
+            .propose(work(
+                "browsed",
+                "a page this build cannot open",
+                ActionKind::BrowserProbe,
+                a_browser(),
+            ))
+            .expect("the proposal is well formed");
+        let schedule = builder.build();
+        assert!(
+            schedule.checks()[0].may_run(),
+            "the plan allowed this check, which is what makes the missing runner a question SURE \
+             owes an answer to"
+        );
         let enforcement = enforcement_of(&schedule, permission_plan(&fingerprint, &[]));
         let runner = FakeRunner::succeeding();
 
         let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
             .expect("a kind of work this build cannot carry out is a result");
 
-        let result = results.get(&check_id("served")).expect("reported");
+        let result = results.get(&check_id("browsed")).expect("reported");
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.blocks_green());
         assert!(
             result
                 .reason
-                .contains("started, asked one question, and stopped"),
+                .contains("a page served on loopback, read by a browser"),
             "the reason names the work this build has no runner for: {}",
             result.reason
         );
         assert!(
-            runner.asked().is_empty(),
-            "a service is not carried out by the command runner"
+            runner.asked().is_empty() && runner.services().is_empty(),
+            "a browser is carried out by neither half of this seam"
         );
+    }
+
+    // ---- the service door: what may reach it, and with what environment ------
+
+    #[test]
+    fn a_service_check_that_is_admitted_reaches_the_service_runner() {
+        let fingerprint = FingerprintId::generate();
+        // Every field of this spec differs from a default: the directory is not
+        // the temp directory, the environment is not SURE's own, the window is
+        // not the one the other service fixture uses, and the readiness names an
+        // endpoint. So an assertion below can only pass if the value came from
+        // the plan.
+        let schedule = schedule_of([work(
+            "served",
+            "the project's server",
+            ActionKind::LocalProbe,
+            a_planned_service(),
+        )]);
+        let plan = permission_plan(
+            &fingerprint,
+            &[("served", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let runner = FakeRunner::succeeding();
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("nothing in this plan is ambiguous");
+
+        let services = runner.services();
+        assert_eq!(
+            services.len(),
+            1,
+            "one service reached the service runner, found: {services:?}"
+        );
+        let asked = &services[0];
+        assert_eq!(
+            asked.id,
+            check_id("served"),
+            "and it is this check's service"
+        );
+        assert_eq!(asked.program, OsString::from(ADMITTED_PROGRAM));
+        assert_eq!(
+            asked.arguments,
+            vec![OsString::from("-m"), OsString::from("pytest")],
+            "the argument vector arrives as elements, the way the admission decided it"
+        );
+        assert_eq!(
+            asked.working_directory,
+            std::env::temp_dir().join("sure-fixture-service"),
+            "the directory is the plan's, not one the runner chose"
+        );
+        assert_eq!(
+            asked.environment,
+            crate::process::Environment::only([
+                (OsString::from("PATH"), OsString::from("/fixture/bin")),
+                (OsString::from("PORT"), OsString::from("5173")),
+            ]),
+            "**the environment a service is given is the plan's own field** — not SURE's own \
+             environment, and not a default discovered here"
+        );
+        assert_eq!(
+            asked.window,
+            Duration::from_secs(7),
+            "the window is the plan's, and it is the window and not the process budget: the \
+             fixture's two durations differ"
+        );
+        assert_eq!(
+            asked.endpoint,
+            Some(Endpoint::loopback(5173, "/health").expect("the fixture's endpoint")),
+            "the question is sent where the plan says it is sent"
+        );
+        assert!(
+            runner.asked().is_empty(),
+            "a service is not carried out by the command runner, whatever its command is"
+        );
+        assert_eq!(
+            status_of(&results, "served"),
+            CheckStatus::Pass,
+            "the result is the one the service runner reported for this check"
+        );
+    }
+
+    #[test]
+    fn a_service_the_runner_failed_is_not_reported_as_a_pass_by_the_wiring() {
+        let fingerprint = FingerprintId::generate();
+        // The verdict itself is `runtime_start`'s and is measured there, with real
+        // processes: a service that ended inside its window fails. What this
+        // measures is the other half — that the wiring hands back the answer it
+        // was given. A wiring that laundered a `Fail` into a `Pass` would be the
+        // false green this repository treats as worse than an error, and a fixture
+        // whose fake answered a pass could not tell the two apart.
+        let schedule = schedule_of([work(
+            "dead",
+            "a service that ended during its window",
+            ActionKind::LocalProbe,
+            a_planned_service(),
+        )]);
+        let plan = permission_plan(
+            &fingerprint,
+            &[("dead", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let runner = FakeRunner::succeeding().answering_services_with(CheckStatus::Fail);
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("nothing in this plan is ambiguous");
+
+        let result = results.get(&check_id("dead")).expect("reported");
+        assert_eq!(result.id, check_id("dead"), "the result is this check's");
+        assert_eq!(
+            result.status,
+            CheckStatus::Fail,
+            "a service the runner reported as failed is a failed check and not a pass"
+        );
+        assert!(
+            result.blocks_green(),
+            "the check is critical, so failing it stops a green verdict"
+        );
+    }
+
+    #[test]
+    fn a_service_the_mode_did_not_admit_keeps_the_commands_own_stopping() {
+        let fingerprint = FingerprintId::generate();
+        // The same shape as the command door's own test: both checks may run as
+        // far as the plan is concerned, and one of them holds a program the
+        // classifier does not know, which is the whole of the difference.
+        let refused = CommandSpec::new(
+            "frobnicate",
+            std::env::temp_dir(),
+            crate::process::Environment::inherited(),
+            crate::process::Limits::new(Duration::from_secs(30), 1024, 2048),
+        )
+        .with_arguments(["--serve"]);
+        let schedule = schedule_of([
+            work(
+                "admitted",
+                "the project's server",
+                ActionKind::LocalProbe,
+                a_planned_service(),
+            ),
+            work(
+                "unadmitted",
+                "a service the mode will not start",
+                ActionKind::LocalProbe,
+                CheckOperation::Service(ServiceCheckSpec::new(
+                    refused,
+                    Readiness::StaysUp,
+                    Duration::from_secs(5),
+                )),
+            ),
+        ]);
+        let plan = permission_plan(
+            &fingerprint,
+            &[
+                ("admitted", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("unadmitted", "frobnicate", &["--serve"]),
+            ],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        assert_eq!(
+            enforcement.stopped().len(),
+            1,
+            "the enforcement stopped exactly the service it did not admit"
+        );
+        let runner = FakeRunner::succeeding();
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("a stopped service is a result and not a refusal");
+
+        assert_eq!(
+            status_of(&results, "unadmitted"),
+            CheckStatus::Skipped,
+            "the service whose command was not admitted keeps the command's own stopping"
+        );
+        assert!(
+            results
+                .get(&check_id("unadmitted"))
+                .expect("reported")
+                .not_checked_reason
+                .is_some(),
+            "and the stopping carries the enforcement's own reason for it; which reason is the \
+             command door's question and is asserted there"
+        );
+        let services = runner.services();
+        assert_eq!(
+            services.len(),
+            1,
+            "only the admitted service reached the service runner, found: {services:?}"
+        );
+        assert_eq!(services[0].id, check_id("admitted"));
+        assert_eq!(
+            status_of(&results, "admitted"),
+            CheckStatus::Pass,
+            "and the one that was admitted is the one that was carried out"
+        );
+    }
+
+    #[test]
+    fn a_service_whose_window_cannot_close_is_an_error_and_starts_nothing() {
+        let fingerprint = FingerprintId::generate();
+        // The window is three times the service's own budget, so the service
+        // would be stopped by its deadline before the window ever closed and SURE
+        // would never ask its question. `runtime_start` refuses that pairing
+        // rather than rounding it, and this door has to turn the refusal into a
+        // result rather than into a missing row.
+        //
+        // This is the one test here that uses the real runner, and it can: the
+        // refusal happens **before** anything could start. `StartSmoke::planned`
+        // returns the error and `StartSmoke::run` — the one function in that
+        // module that starts a process — is never reached. The cancellation handed
+        // in is already cancelled as well, so even a regression that got as far as
+        // a start would start nothing.
+        let endless = CommandSpec::new(
+            ADMITTED_PROGRAM,
+            std::env::temp_dir(),
+            crate::process::Environment::inherited(),
+            crate::process::Limits::new(Duration::from_secs(10), 1024, 2048),
+        )
+        .with_arguments(ADMITTED_ARGUMENTS);
+        let schedule = schedule_of([work(
+            "endless",
+            "a service whose window cannot close",
+            ActionKind::LocalProbe,
+            CheckOperation::Service(ServiceCheckSpec::new(
+                endless,
+                Readiness::StaysUp,
+                Duration::from_secs(30),
+            )),
+        )]);
+        let plan = permission_plan(
+            &fingerprint,
+            &[("endless", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let scheduled = schedule.get(&check_id("endless")).expect("scheduled");
+        let service = AdmittedService::new(scheduled, admitted, &fingerprint)
+            .expect("the plan and the enforcement agree about this command");
+        let stop = Cancellation::new();
+        stop.cancel();
+
+        let result = ProcessRunner::new(stop).run_service(&service);
+
+        assert_eq!(
+            result.id,
+            check_id("endless"),
+            "the result is the check's own"
+        );
+        assert_eq!(
+            result.status,
+            CheckStatus::Error,
+            "a service that could never be asked its question is an error, never a pass"
+        );
+        assert!(result.blocks_green());
+        assert!(
+            result.reason.contains("startup window"),
+            "the reason is the refusal's own words: {}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn the_service_door_refuses_the_same_three_pairings_the_command_door_does() {
+        let fingerprint = FingerprintId::generate();
+        let schedule = schedule_of([
+            work(
+                "mine",
+                "a service",
+                ActionKind::LocalProbe,
+                a_planned_service(),
+            ),
+            work(
+                "theirs",
+                "another service",
+                ActionKind::LocalProbe,
+                a_planned_service(),
+            ),
+            work(
+                "command",
+                "a check that runs one command",
+                ActionKind::RunTests,
+                runs_the_admitted_command(),
+            ),
+            work(
+                "differs",
+                "a service whose command and admission disagree",
+                ActionKind::LocalProbe,
+                a_planned_service(),
+            ),
+        ]);
+        // The last entry is the same program with one more argument: the case a
+        // comparison of rendered command lines would let through.
+        let plan = permission_plan(
+            &fingerprint,
+            &[
+                ("mine", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("theirs", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("command", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("differs", ADMITTED_PROGRAM, &["-m", "pytest", "-x"]),
+            ],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let admitted: BTreeMap<&CheckId, AdmittedCommand<'_>> = enforcement
+            .admitted()
+            .map(|command| (command.command().check().id(), command))
+            .collect();
+
+        // The pairing that really is one service.
+        let mine = schedule.get(&check_id("mine")).expect("scheduled");
+        let pair = AdmittedService::new(mine, admitted[&check_id("mine")], &fingerprint)
+            .expect("the plan and the enforcement agree about this command");
+        assert_eq!(pair.check(), &check_id("mine"));
+        assert_eq!(pair.service().window(), Duration::from_secs(7));
+
+        // The same admission, paired with another check's service.
+        let theirs = schedule.get(&check_id("theirs")).expect("scheduled");
+        let refused = AdmittedService::new(theirs, admitted[&check_id("mine")], &fingerprint)
+            .expect_err("an admission is about one check");
+        assert_eq!(
+            refused,
+            AdmissionRefused::ForADifferentCheck {
+                id: check_id("theirs"),
+                admitted_for: check_id("mine"),
+            }
+        );
+
+        // An admission paired with work that is not a service at all.
+        let command = schedule.get(&check_id("command")).expect("scheduled");
+        let refused = AdmittedService::new(command, admitted[&check_id("command")], &fingerprint)
+            .expect_err("one command once is not a service");
+        assert_eq!(
+            refused,
+            AdmissionRefused::NotOneService {
+                id: check_id("command"),
+                work: "one command, once, under a deadline",
+            }
+        );
+
+        // And the same program with a different argument vector.
+        let differs = schedule.get(&check_id("differs")).expect("scheduled");
+        match AdmittedService::new(differs, admitted[&check_id("differs")], &fingerprint)
+            .expect_err("the decision was about a different argument vector")
+        {
+            AdmissionRefused::NotTheCommandThatWasAdmitted {
+                id,
+                planned,
+                admitted,
+            } => {
+                assert_eq!(id, check_id("differs"));
+                assert_eq!(planned, "python -m pytest");
+                assert_eq!(admitted, "python -m pytest -x");
+            }
+            other => panic!("the refusal names the wrong reason: {other}"),
+        }
     }
 
     #[test]

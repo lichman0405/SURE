@@ -135,7 +135,7 @@ use crate::fingerprint::{self, project_fingerprint};
 use crate::intent_implementation::compare_intent_to_project;
 use crate::intent_model;
 use crate::noop_heuristics::NoOpHeuristics;
-use crate::planned_check_runner::{CommandRunner, run_scheduled_checks};
+use crate::planned_check_runner::{CheckRunner, run_scheduled_checks};
 use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::project_intent;
 use crate::project_verdict::build_verdict;
@@ -644,16 +644,17 @@ pub struct Pipeline<'a> {
     ///
     /// [`ProcessRunner`](crate::planned_check_runner::ProcessRunner) is the only
     /// runner in the product that starts a process. Nothing else in the product
-    /// implements [`CommandRunner`], and a caller's own is exactly that: a
+    /// implements [`CheckRunner`], and a caller's own is exactly that: a
     /// caller's own.
     ///
     /// It is consulted only through
     /// [`run_scheduled_checks`](crate::planned_check_runner::run_scheduled_checks),
     /// which hands it an
-    /// [`AdmittedRun`](crate::planned_check_runner::AdmittedRun) and nothing
-    /// else — a value only an [`Enforcement`] can produce — so this field cannot
-    /// be used to start something the mode did not admit.
-    pub runner: &'a dyn CommandRunner,
+    /// [`AdmittedRun`](crate::planned_check_runner::AdmittedRun) or an
+    /// [`AdmittedService`](crate::planned_check_runner::AdmittedService) and
+    /// nothing else — values only an [`Enforcement`] can produce — so this field
+    /// cannot be used to start something the mode did not admit.
+    pub runner: &'a dyn CheckRunner,
 }
 
 /// A stage that stopped the run.
@@ -789,8 +790,19 @@ impl Pipeline<'_> {
         // defect the authority layer exists to close and the one thing this
         // wiring must not reintroduce.
         //
-        // Only a check that holds one command has a command to plan. A detector's
-        // own observation, a service and a browser page are not commands, and
+        // A check that holds one command has a command to plan, and a service's
+        // own command is one: a service is started by a program with an argument
+        // vector, and the mode's decision about *that* program is what lets the
+        // service door pair an admission with a `ServiceCheckSpec`. A service whose
+        // command was never planned is a service the enforcement can only stop,
+        // which is the honest answer for a program this run was not granted.
+        //
+        // A detector's own observation is not a command and neither is a browser
+        // page — a browser check holds a service, and its command is not planned
+        // here because carrying a browser out is `P18-T010`'s work and nothing in
+        // this build consumes that admission yet. When it lands, the rule above is
+        // the one to apply to `CheckOperation::Browser` too.
+        //
         // `Enforcement` has an answer for a check with no command: it is a check
         // that launches nothing, and nothing is admitted for it.
         let scheduled: Vec<PlannedCheck> = schedule.planned_checks();
@@ -802,7 +814,12 @@ impl Pipeline<'_> {
         let mut permission_plan =
             PermissionPlan::new(mode, fingerprint.clone(), permissions.clone());
         for (scheduled_check, check) in schedule.checks().iter().zip(&scheduled) {
-            if let CheckOperation::Command(spec) = scheduled_check.operation() {
+            let command = match scheduled_check.operation() {
+                CheckOperation::Command(spec) => Some(spec),
+                CheckOperation::Service(service) => Some(service.command()),
+                CheckOperation::Browser(_) | CheckOperation::Precomputed(_) => None,
+            };
+            if let Some(spec) = command {
                 permission_plan.add(check.clone(), spec.program(), spec.arguments().to_vec());
             }
         }
@@ -2324,9 +2341,19 @@ mod tests {
     /// all?*, which is the question the acceptance's second clause is about and
     /// a question a silenced runner could not answer. The answer it returns is
     /// [`nothing_starts`]'s.
+    ///
+    /// `run_service` is unreachable through this pipeline today — nothing in this
+    /// build plans a [`CheckOperation::Service`] — so it records the check's
+    /// identity and delegates to the same cancelled runner rather than pretending
+    /// to answer. It is here rather than defaulted on the trait because a runner
+    /// that *cannot* be asked to start a service is a different claim from one
+    /// that answers nothing to every question.
+    ///
+    /// [`CheckOperation::Service`]: crate::planned_work::CheckOperation::Service
     #[derive(Debug)]
     struct Recording {
         asked: RefCell<Vec<String>>,
+        services: RefCell<Vec<String>>,
         runner: ProcessRunner,
     }
 
@@ -2334,6 +2361,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 asked: RefCell::new(Vec::new()),
+                services: RefCell::new(Vec::new()),
                 runner: nothing_starts(),
             }
         }
@@ -2342,9 +2370,14 @@ mod tests {
         fn asked(&self) -> Vec<String> {
             self.asked.borrow().clone()
         }
+
+        /// Which checks were handed to it as services, in order.
+        fn services(&self) -> Vec<String> {
+            self.services.borrow().clone()
+        }
     }
 
-    impl CommandRunner for Recording {
+    impl CheckRunner for Recording {
         fn run(
             &self,
             work: &crate::planned_check_runner::AdmittedRun<'_>,
@@ -2360,6 +2393,23 @@ mod tests {
                     .join(" ")
             ));
             self.runner.run(work)
+        }
+
+        fn run_service(
+            &self,
+            work: &crate::planned_check_runner::AdmittedService<'_>,
+        ) -> CheckResult {
+            let spec = work.service().command();
+            self.services.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            self.runner.run_service(work)
         }
     }
 
@@ -2457,6 +2507,12 @@ mod tests {
             "a run the user granted nothing started {} command(s): {asked:?}",
             asked.len()
         );
+        let services = runner.services();
+        assert!(
+            services.is_empty(),
+            "a run the user granted nothing started {} service(s): {services:?}",
+            services.len()
+        );
     }
 
     /// The control for the measurement above, and the proof the seam is live.
@@ -2522,6 +2578,18 @@ mod tests {
             !asked.is_empty(),
             "the user granted execution and the runner was never reached, so the run above is \
              satisfied by a runner nothing consults: {dynamic:?}"
+        );
+        // The service half of the same seam is **not** reached here, and that is a
+        // fact about this build rather than about the run: no planner in it emits
+        // a `CheckOperation::Service`, so a real project cannot plan one yet. The
+        // wiring that would carry one out is measured in
+        // `planned_check_runner.rs` with a runner that starts nothing, because a
+        // test that made this path live would have to start a real service.
+        assert!(
+            runner.services().is_empty(),
+            "nothing in this build plans a service check, so nothing should have been handed to \
+             the runner as one: {:?}",
+            runner.services()
         );
         for result in run.report.results() {
             if dynamic.contains(&result.title) {
@@ -2678,7 +2746,7 @@ mod tests {
         exit: Option<i32>,
     }
 
-    impl CommandRunner for Moves {
+    impl CheckRunner for Moves {
         fn run(
             &self,
             work: &crate::planned_check_runner::AdmittedRun<'_>,
@@ -2707,6 +2775,34 @@ mod tests {
                 std::time::SystemTime::now(),
                 std::time::Duration::ZERO,
             ))
+        }
+
+        /// Unreachable through this pipeline, and answered the way everything
+        /// unreachable in this file is: with an `Error`.
+        ///
+        /// No planner in this build emits a `CheckOperation::Service`, so a test
+        /// that needed this arm would have to plan one by hand, and a test that
+        /// made it live would have to start a real service. An `Error` rather than
+        /// a pass, so that a future path reaching it without measuring anything
+        /// cannot look like a success — the same rule the rest of this file is
+        /// written under.
+        fn run_service(
+            &self,
+            work: &crate::planned_check_runner::AdmittedService<'_>,
+        ) -> CheckResult {
+            let check = work.admitted().command().check();
+            self.asked
+                .borrow_mut()
+                .push(format!("service {}", check.id()));
+            CheckResult::errored(
+                check.id().clone(),
+                check.title().to_owned(),
+                check.severity(),
+                check.critical(),
+                "nothing in this build plans a service check, so this runner was asked about one \
+                 by something that is not the pipeline",
+                work.fingerprint().clone(),
+            )
         }
     }
 

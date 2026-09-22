@@ -28,6 +28,42 @@
 //! different check. What a mode stopped is answered by [`Enforcement::stopped`],
 //! which is the plan's own `Skipped` result and not a second one invented here.
 //!
+//! **There is a second door since `P18-T009`, and it is the one a product path
+//! uses.** [`StartSmoke::planned`] builds the same value from a scheduled
+//! [`ServiceCheckSpec`] and the command the enforcement admitted for that check:
+//! `planned_check_runner.rs` carries a `CheckOperation::Service` out through it.
+//! The two differ in what they were handed and in nothing else — `of` has a
+//! probe and a project root, `planned` has the plan's own spec, which carries the
+//! directory the command runs in — and both hand [`StartSmoke::run`] the same
+//! four things: one admitted command, a directory, bounds, and an environment.
+//!
+//! # The environment a service is started with, which is stated per door
+//!
+//! *What does this service start with* is one question with one answer, and since
+//! `P18-T009` the answer is written once per door rather than left to whichever
+//! default a request happened to carry.
+//!
+//! **A planned service gets the environment the plan holds.**
+//! [`StartSmoke::planned`] takes it from
+//! [`ServiceCheckSpec::command`] — the same rule the command path follows in
+//! `planned_check_runner.rs`, where the request ends in
+//! `.with_environment(spec.environment().clone())` — so the project's process
+//! starts with what the plan states and not with SURE's own variables.
+//!
+//! **A probe gets [`Environment::inherited`], and that is a choice rather than a
+//! leftover.** [`StartSmoke::of`] has no plan-side `CommandSpec` to read an
+//! environment from: what it is handed is an [`Enforcement`], and an admission is
+//! a decision about a program and an argument vector (`safety::classify`'s own
+//! limit). A service that cannot find the tools it needs by name is a service
+//! that fails to start — on Windows `CreateProcess` searches `PATH` — so
+//! inheritance is the value this door states, in its constructor, where a reader
+//! can find it rather than infer it from [`crate::service`]'s default.
+//!
+//! [`Supervisor::request`] is where either answer becomes the request a process
+//! is started from, and it is what this module's tests read: **no test here starts
+//! anything**, and the environment a service would be given is a value a test can
+//! hold.
+//!
 //! **The split is deliberately not here.** Turning a declared line — `npm start`
 //! — into a program and an argument vector is the executor's work, one step
 //! before this module, for the same reason [`crate::service`] does not do it: a
@@ -114,8 +150,9 @@ use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::status::{CheckResult, CheckStatus};
 
 use crate::enforce::{AdmittedCommand, Enforcement};
+use crate::planned_work::ServiceCheckSpec;
 use crate::probe::{self, Endpoint, Probe, ProbeOutcome};
-use crate::process::{self, Cancellation, Outcome, Termination};
+use crate::process::{self, Cancellation, Environment, Outcome, Termination};
 use crate::runtime_probes::{ProbeKind, RuntimeProbe};
 use crate::service::{Service, Supervisor};
 
@@ -311,19 +348,28 @@ impl std::error::Error for SmokeRefused {}
 
 /// One serve probe, the command the mode admitted for it, and the bounds.
 ///
-/// Built by [`StartSmoke::of`], which is the only constructor — the working
-/// directory comes from the probe's component, the command comes from the
-/// enforcement, and a type that could be assembled from a pair that disagree
-/// would be a type that could start one component's command in another
-/// component's directory.
+/// Built by [`StartSmoke::of`] or [`StartSmoke::planned`] — **the two
+/// constructors, and there is no third** — so that the working directory and the
+/// command cannot come from different places: `of` takes the directory from the
+/// probe's component and looks its command up by the probe's own check id, and
+/// `planned` takes both from the plan's own spec. A type assembled from a pair
+/// that disagree would be a type that could start one component's command in
+/// another component's directory.
 #[derive(Debug)]
 pub struct StartSmoke<'a> {
-    /// The directory the service is started in: the project root joined with the
-    /// probe's component, which is relative and empty for the root itself.
+    /// The directory the service is started in. From the probe's component for
+    /// [`StartSmoke::of`], and from the command's own working directory for
+    /// [`StartSmoke::planned`] — where the plan put it and where the admission
+    /// was a decision about a program and an argument vector, not about where it
+    /// runs.
     directory: PathBuf,
     admitted: AdmittedCommand<'a>,
     fingerprint: FingerprintId,
     limits: Limits,
+    /// What the service starts with. Per door, and the module comment argues
+    /// both: the plan's own environment for [`StartSmoke::planned`],
+    /// [`Environment::inherited`] for [`StartSmoke::of`].
+    environment: Environment,
 }
 
 impl<'a> StartSmoke<'a> {
@@ -333,6 +379,10 @@ impl<'a> StartSmoke<'a> {
     /// workspace member's `start` script runs where the manifest that declares
     /// it lives — which is the same rule `Package` uses to read that manifest,
     /// applied to the directory rather than to the file.
+    ///
+    /// The environment is [`Environment::inherited`], stated here rather than
+    /// left to the request's default; the module comment says why this door has
+    /// nothing else to state.
     ///
     /// # Errors
     ///
@@ -368,6 +418,59 @@ impl<'a> StartSmoke<'a> {
             // admitted for.
             fingerprint: enforcement.check_plan().fingerprint.clone(),
             limits,
+            environment: Environment::inherited(),
+        })
+    }
+
+    /// A smoke check for a scheduled service, out of the plan's own spec.
+    ///
+    /// This is the door a product path uses: `planned_check_runner.rs` pairs the
+    /// admitted command with the `CheckOperation::Service` the schedule holds and
+    /// calls this once. Every budget and both policies come from the spec or from
+    /// the caller rather than from a constant here:
+    ///
+    /// - the **window** and the **service's whole-life budget** are the spec's own
+    ///   ([`ServiceCheckSpec::window`] and the command's `limits`), and the
+    ///   address — when there is one — is [`Readiness::endpoint`]'s;
+    /// - the **working directory** is the command's, because the plan decided
+    ///   where this command runs;
+    /// - the **environment** is the command's, which is the whole of clause one of
+    ///   `P18-T009`: the project's process starts with what the plan states.
+    /// - `request` is the one budget neither the plan nor the command carries: how
+    ///   long the single exchange SURE makes with the service has, and how much of
+    ///   the answer it keeps. [`crate::probe::Limits`] says why a caller must
+    ///   choose it — *"a caller that does not choose a bound has not decided what
+    ///   the check is allowed to cost"* — and the caller here is the runner,
+    ///   which is where that decision belongs.
+    ///
+    /// [`Readiness::endpoint`]: crate::planned_work::Readiness::endpoint
+    ///
+    /// # Errors
+    ///
+    /// [`LimitsError`], from [`Limits::new`], when the spec's own numbers cannot
+    /// be run: a window of zero, or one that cannot close before the service's
+    /// budget runs out. **Refused here and not carried out**, because a plan
+    /// whose numbers cannot produce a verdict is a defect to report rather than a
+    /// check to run into a warning.
+    pub fn planned(
+        admitted: AdmittedCommand<'a>,
+        spec: &ServiceCheckSpec,
+        project_fingerprint: &FingerprintId,
+        request: probe::Limits,
+    ) -> Result<Self, LimitsError> {
+        let command = spec.command();
+        let limits = Limits::new(
+            spec.window(),
+            command.limits(),
+            request,
+            spec.readiness().endpoint().cloned(),
+        )?;
+        Ok(Self {
+            directory: command.working_directory().to_path_buf(),
+            admitted,
+            fingerprint: project_fingerprint.clone(),
+            limits,
+            environment: command.environment().clone(),
         })
     }
 
@@ -381,6 +484,26 @@ impl<'a> StartSmoke<'a> {
     #[must_use]
     pub const fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    /// What the service will be started with.
+    #[must_use]
+    pub const fn environment(&self) -> &Environment {
+        &self.environment
+    }
+
+    /// The supervisor every run from this value goes through.
+    ///
+    /// Built here and nowhere else, so that [`StartSmoke::run`] and a test read
+    /// the same value: the directory, the service's whole-life budget and the
+    /// environment are the three things a service is held to, and a test that
+    /// could only re-read the fields would be measuring a copy of the expression
+    /// rather than the expression itself. It builds no process — a `Supervisor`
+    /// is a description until [`Supervisor::start`] is called — so this is
+    /// reachable from a test that starts nothing.
+    fn supervisor(&self) -> Supervisor {
+        Supervisor::new(&self.directory, self.limits.service)
+            .with_environment(self.environment.clone())
     }
 
     /// Start it, watch it, ask it, stop it, and say what came of it.
@@ -451,7 +574,7 @@ impl<'a> StartSmoke<'a> {
             );
         }
 
-        let supervisor = Supervisor::new(&self.directory, self.limits.service);
+        let supervisor = self.supervisor();
         let service_cancellation = Cancellation::default();
         let service = match supervisor.start(self.admitted, service_cancellation) {
             Ok(service) => service,
@@ -701,6 +824,14 @@ mod tests {
     use crate::process::CapturedOutput;
     use std::ffi::OsString;
 
+    use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
+    use sure_domain::ids::{CheckId, FingerprintId};
+    use sure_domain::severity::Severity;
+
+    use crate::consent::{PermissionPlan, PlannedCheck};
+    use crate::enforce::Enforcement;
+    use crate::planned_work::{CommandSpec, Readiness};
+
     /// An outcome built by hand, which is the only place this module's quoting
     /// can be tested without a process: every branch of it is about text that
     /// arrived, and a real process writes whatever it likes.
@@ -944,5 +1075,178 @@ mod tests {
             ended_with(None).starts_with("no exit code"),
             "a fabricated code would be read as the program's own"
         );
+    }
+
+    // ---- the second door: a scheduled service, and what it is given ----------
+
+    /// An enforcement holding one admitted command, built the way the product
+    /// builds one: a permission plan holding this program, decided under a mode
+    /// that runs the project's code.
+    ///
+    /// **`npm run start` and not `python -m http.server`**, and the reason is a
+    /// measurement rather than a preference: the classifier knows `npm`'s `start`
+    /// verb as running the project's code, while `python -m http.server` names a
+    /// module the classifier does not know, so the command needs permissions this
+    /// fixture does not grant and nothing is admitted for it. A service is usually
+    /// a server, and this fixture is not about what the program does — it is about
+    /// what the door passes on.
+    fn an_enforcement(fingerprint: &FingerprintId) -> Enforcement {
+        let check = PlannedCheck::new(
+            CheckId::parse("chk_served").expect("a well-formed check id"),
+            "a service",
+            Severity::MustFix,
+            true,
+        );
+        let mut plan = PermissionPlan::new(
+            ExecutionMode::HostConfirmed,
+            fingerprint.clone(),
+            ExecutionPermissions {
+                run_project_code: true,
+                ..ExecutionPermissions::inspect_only()
+            },
+        );
+        plan.add(check.clone(), "npm", ["run", "start"]);
+        Enforcement::of("a fixture", plan, &[check])
+    }
+
+    /// A `ServiceCheckSpec` whose every field is a value this test chose, so that
+    /// the assertions below can only pass if each one came from the spec.
+    fn a_spec() -> ServiceCheckSpec {
+        ServiceCheckSpec::new(
+            CommandSpec::new(
+                "npm",
+                std::env::temp_dir().join("sure-planned-service"),
+                Environment::only([
+                    (OsString::from("PATH"), OsString::from("/usr/bin")),
+                    (OsString::from("PORT"), OsString::from("5173")),
+                ]),
+                process::Limits::new(Duration::from_secs(30), 4096, 8192),
+            )
+            .with_arguments(["run", "start"]),
+            Readiness::Answers {
+                endpoint: Endpoint::loopback(5173, "/health").expect("a loopback path"),
+            },
+            Duration::from_secs(2),
+        )
+    }
+
+    #[test]
+    fn a_planned_service_carries_the_plans_own_environment_and_bounds() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = a_spec();
+        let request = probe::Limits::new(Duration::from_millis(500), 64 * 1024);
+
+        let smoke = StartSmoke::planned(admitted, &spec, &fingerprint, request)
+            .expect("the spec's own numbers are runnable");
+
+        assert_eq!(
+            smoke.environment(),
+            spec.command().environment(),
+            "the service starts with the environment the plan holds, which is clause one of \
+             P18-T009 and the reason this door exists"
+        );
+        assert_eq!(
+            smoke.working_directory(),
+            spec.command().working_directory(),
+            "the directory is the command's own, because the plan decided where this command runs"
+        );
+        assert_eq!(smoke.limits().window(), spec.window());
+        assert_eq!(smoke.limits().service(), spec.command().limits());
+        assert_eq!(smoke.limits().request(), request);
+        assert_eq!(smoke.limits().endpoint(), spec.readiness().endpoint());
+    }
+
+    /// The joint the value above is only half of: what a run would actually hand
+    /// the supervisor. `run` is not called anywhere here — it is the one function
+    /// in this file that can start something — and the supervisor it would use is
+    /// reachable without one, because a `Supervisor` is a description until it is
+    /// asked to start anything.
+    #[test]
+    fn a_planned_service_hands_its_supervisor_the_same_three_things() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = a_spec();
+
+        let smoke = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect("the spec's own numbers are runnable");
+
+        let supervisor = smoke.supervisor();
+
+        assert_eq!(
+            supervisor.environment(),
+            spec.command().environment(),
+            "the environment reaches the supervisor and not only this struct's field"
+        );
+        assert_eq!(
+            supervisor.working_directory(),
+            spec.command().working_directory()
+        );
+        assert_eq!(supervisor.limits(), spec.command().limits());
+    }
+
+    #[test]
+    fn a_planned_service_whose_window_cannot_close_is_refused_rather_than_run() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        // The same command with a window that is not shorter than its own budget:
+        // `Limits::new`'s second refusal, reached through this door.
+        let spec = ServiceCheckSpec::new(
+            a_spec().command().clone(),
+            Readiness::StaysUp,
+            Duration::from_secs(30),
+        );
+
+        let refused = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect_err("a window that cannot close before the budget is not runnable");
+
+        assert_eq!(refused, LimitsError::WindowOutlastsTheBudget);
+    }
+
+    #[test]
+    fn a_planned_service_with_a_zero_window_is_refused_rather_than_rounded() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = ServiceCheckSpec::new(
+            a_spec().command().clone(),
+            Readiness::StaysUp,
+            Duration::ZERO,
+        );
+
+        let refused = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect_err("a zero window is refused, not rounded");
+
+        assert_eq!(refused, LimitsError::ZeroWindow);
     }
 }

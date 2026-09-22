@@ -772,8 +772,20 @@ mod tests {
     /// strings together has somewhere to go wrong — the Windows discipline this
     /// repository holds to — and absolute, because
     /// [`CommandSpec`](crate::planned_work::CommandSpec) refuses anything else.
+    ///
+    /// **Absolute on the platform this is compiled for, which is why the spelling
+    /// forks.** The sentence above was true on Windows and false on the other two
+    /// platforms this crate is built for: `C:\projects\my fixture` has no root that
+    /// Unix recognises, so off Windows the fixture root was a relative path while
+    /// the comment said otherwise. Nothing here asserts absoluteness yet, which is
+    /// why only `checks::node`'s copy of this fixture was red — the assertion there
+    /// is the one that noticed, and all three are the same decision made once.
     fn root() -> PathBuf {
-        PathBuf::from(r"C:\projects\my fixture")
+        if cfg!(windows) {
+            PathBuf::from(r"C:\projects\my fixture")
+        } else {
+            PathBuf::from("/projects/my fixture")
+        }
     }
 
     /// The checks SURE would plan for this project, read from [`root`].

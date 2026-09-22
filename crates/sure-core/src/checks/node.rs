@@ -682,8 +682,22 @@ mod tests {
     /// separator and pass for the wrong reason. It is a Windows-looking path on
     /// purpose: a working directory is a path, and the module is portable because
     /// it never parses one.
+    ///
+    /// **Absolute on every platform, and that is why it is written twice.** A
+    /// Windows absolute path is not one anywhere else: `Path::is_absolute` asks the
+    /// platform what a root is, and `C:\projects\fixture` has none off Windows. One
+    /// literal would therefore make
+    /// `a_members_check_runs_in_the_members_directory_and_the_roots_in_the_root`'s
+    /// `is_absolute` assertion a statement about where this file was compiled
+    /// rather than about the directory a check was given — which is what it was
+    /// until the two non-Windows legs of CI ran the test for the first time and it
+    /// failed on both.
     fn root() -> PathBuf {
-        PathBuf::from(r"C:\projects\fixture")
+        if cfg!(windows) {
+            PathBuf::from(r"C:\projects\fixture")
+        } else {
+            PathBuf::from("/projects/fixture")
+        }
     }
 
     /// The checks for a project, in the root above.

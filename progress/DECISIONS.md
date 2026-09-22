@@ -5171,3 +5171,62 @@ is green for the wrong reason, which is the class this repository treats as
 serious.
 
 [#12]: https://github.com/lichman0405/SURE/issues/12
+
+## P18-T008 — the project is read a second time, and the movement is reported even when nothing is replaced
+
+**The second read is inside stage 10 rather than a stage of its own.** It is the
+last reading that can still change anything, and it is about the results that
+stage is adding up. Nothing is discovered, planned, run or reported by it — it
+is a fact about whether this run's evidence is still current — so it belongs in
+the stage that has to act on the answer. A thirteenth stage would be a phase of
+checking nobody asked for, and a reader who wants to know what the verdict is
+about reads stage 10's line.
+
+**The comparison is `kind` and `digest`, never the `id`.** A `ProjectFingerprint`
+id is generated per computation, so comparing ids would answer *moved* for two
+reads of one unchanged project: every run would report every runtime check as
+stale, and a word that is always true is a word a reader stops reading.
+
+**A project SURE could not read again is not a project that stayed still.** The
+error arm answers `Some` rather than `None`. Of the two ways to be wrong about a
+project that could not be re-read, invalidating evidence SURE could not confirm
+costs a repeated check; the other costs a green about a project nobody looked at
+twice.
+
+**What is replaced is a `Pass` from a check that runs the project's own code,
+and nothing else.** A failing check is a finding the run actually made, and
+replacing it would buy no safety because `Fail` is not green either. A check that
+only reads files has evidence SURE can re-read. The replacement is
+`Unknown` with a reason and never `Warning`, which `CriticalState::from_status`
+maps to `Passed` and which therefore blocks nothing on the checks where it
+matters most. Each result keeps **its own** fingerprint: binding it to the newer
+state would make `aggregate_run` refuse the whole set and leave the run with no
+verdict at all, and binding it to the older one is simply true.
+
+**The decision the supervisor made rather than accepted: the movement is
+reported even when nothing was replaced.** The worker scoped the rule to runtime
+checks and reported the consequence it did not change, which was the right
+instinct. But the stage line spoke only when the withdrawal list was non-empty,
+so a run whose project moved and which had no pass to withdraw computed the
+movement and then dropped it — and that case is not a corner. It is **every run
+without a granted execution**, which is the default mode, and every run whose
+runtime checks all failed. It also contradicted the error arm one line above,
+which answers `Some` precisely so the movement is not silently dropped. `moved`
+and `stale` are two different facts — *the project is not where stage 3 found
+it*, and *this run withdrew these passes* — and the line now speaks for the first
+whether or not the second is empty.
+
+**The red-proof is what makes that decision evidence rather than preference.**
+With the arm mutated back to silence, the new test fails and the aggregate line
+reads only `"… 2 check(s) produced a result, 0 did not run."`, while the
+**pre-existing** test still passes. The older assertions could not have caught
+this path, because they only ever exercised the withdrawal arm.
+
+**What this does not decide, named so it is not read as settled.** A static
+detector's `Pass` is still not withdrawn when the project moves. That follows the
+task's title and the phase invariant, which are about *runtime* evidence, and a
+check that only reads files has evidence SURE can re-read — but the run does not
+re-read it, so a green verdict made in inspect-only mode still describes the
+state stage 3 saw. The strengthening above means the run now *says* so rather
+than being silent, which is the honest half. Whether a static pass should also be
+withdrawn is a question about detector design and is not this task's.

@@ -83,6 +83,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use sure_domain::evidence::EvidenceClass;
 use sure_domain::ids::FingerprintId;
 use sure_domain::status::CheckResult;
 
@@ -259,17 +260,68 @@ impl PrecomputedEvidence {
     /// **about a project state**, and a result that did not name one would be
     /// evidence about a state nobody can point at.
     ///
+    /// # Only the two classes that can stand alone can carry a pass
+    ///
+    /// **A [`StaticObservation::Holds`] whose check claims a class that cannot
+    /// support a pass is reported as `Unknown`, never as a `Pass`.** The set of
+    /// classes is not a decision taken here. `CheckResult::evidence_class`,
+    /// whose field documentation is in `crates/sure-domain/src/status.rs`, says
+    /// what a pass is made of — *"a `pass` from reading a file is
+    /// `DeterministicCheck`, and a `pass` from running the project and watching
+    /// what it did is `ObservedFact`. They are different promises, and the
+    /// truth hierarchy in `docs/architecture/EVIDENCE_MODEL.md` ranks them
+    /// differently."* — and those are the same two classes
+    /// [`EvidenceClass::can_alone_support_must_fix`] names in the other
+    /// direction, which the evidence table of
+    /// `docs/architecture/FROZEN_SEMANTICS.md` marks **no** for the other
+    /// three and `docs/adr/0010-frozen-domain-semantics-in-code.md` item 6
+    /// freezes in code.
+    ///
+    /// **The class is what makes this a rule rather than a formality.** A
+    /// detector that pattern-matched a source file reports
+    /// [`EvidenceClass::Inference`], and
+    /// `tests/finding_severity_rule.rs::severity_was_not_bought_by_promoting_an_inference_to_a_fact`
+    /// requires it to keep reporting that class — *"a pattern guess presented
+    /// as an observation is the false green this product exists to catch"*. So
+    /// a detector that read text and found no counterexample in it reports
+    /// exactly that, and `Unknown` is the honest status for it: SURE has
+    /// evidence, and the evidence supports no verdict. It is not a soft
+    /// failure: `aggregate` treats `Unknown` on a critical check as not checked
+    /// (rule 1 of `FROZEN_SEMANTICS.md`), so nothing here can make a run green.
+    ///
+    /// **The other three observations are not filtered this way, and the
+    /// asymmetry is the repository's own.** A `fail`, a `warning` and an
+    /// `error` are visible states a reader weighs with the evidence class
+    /// printed beside them, and `CLAUDE.md`'s rule is one-directional: a false
+    /// green is more serious than a visible error. A `Contradicted` under
+    /// `Inference` also has an owner of its own — the corpus requires exactly
+    /// that pair for the candidate detectors (`fixtures/adversarial/fake-payment`),
+    /// and it is a [`Finding`](sure_domain::finding::Finding) rather than a
+    /// check result that has to earn its severity from an anchor.
+    ///
     /// A candidate is a [`CheckStatus::Warning`](sure_domain::status::CheckStatus)
     /// and not an `Unknown`, because the detector did observe something and the
     /// difference between "here is a thing worth looking at" and "SURE has no
     /// evidence" is a difference a reader acts on. A detector that could not run
-    /// is an `Error`, which for a critical check is not a pass.
+    /// is an `Error` — [`CheckResult::errored`] fixes its class at
+    /// [`EvidenceClass::Unknown`], so no caller can offer it a stronger weight
+    /// than a check that established nothing has — which for a critical check is
+    /// not a pass.
     #[must_use]
     pub fn to_result(&self, proposal: &CheckProposal, fingerprint: &FingerprintId) -> CheckResult {
         let (id, title) = (proposal.id().clone(), proposal.title().to_owned());
         let (severity, critical) = (proposal.severity(), proposal.critical());
         let class = proposal.evidence_class();
         match self.observation {
+            StaticObservation::Holds if !carries_a_pass(class) => {
+                CheckResult::unknown(id, title, severity, critical, class, fingerprint.clone())
+                    .with_reason(format!(
+                        "{} Nothing contradicted this, and a check established by `{}` \
+                         evidence cannot be reported as passed.",
+                        self.detail,
+                        class.as_str()
+                    ))
+            }
             StaticObservation::Holds => {
                 CheckResult::pass(id, title, severity, critical, class, fingerprint.clone())
                     .with_reason(self.detail.clone())
@@ -292,6 +344,20 @@ impl PrecomputedEvidence {
             ),
         }
     }
+}
+
+/// Whether a `Pass` may be built from an observation of this class.
+///
+/// **The one list, asked rather than copied.** A check result claims either that
+/// the project is wrong or that it is right, and the repository's answer to
+/// *which evidence may carry that claim alone* is
+/// [`EvidenceClass::can_alone_support_must_fix`] — the two classes
+/// `CheckResult::evidence_class` names for a pass, and the two
+/// `docs/architecture/FROZEN_SEMANTICS.md` marks **yes** for a finding that
+/// blocks hand-off. A second list here would be a second place for that rule to
+/// change, and a reader of either one would have to guess which was current.
+fn carries_a_pass(class: EvidenceClass) -> bool {
+    class.can_alone_support_must_fix()
 }
 
 /// One command: a program, its arguments, and the rules it runs under.
@@ -851,6 +917,7 @@ mod tests {
     use sure_domain::evidence::EvidenceClass;
     use sure_domain::ids::CheckId;
     use sure_domain::severity::Severity;
+    use sure_domain::status::CheckStatus;
 
     fn a_proposal() -> CheckProposal {
         CheckProposal::new(
@@ -941,6 +1008,60 @@ mod tests {
             PrecomputedEvidence::contradicted("the lockfile and the manifest disagree")
                 .to_result(&proposal, &fingerprint);
         assert_eq!(contradicted.status, sure_domain::status::CheckStatus::Fail);
+    }
+
+    /// A critical proposal claiming this evidence class, for the sweep below.
+    fn a_critical_proposal_weighted(class: EvidenceClass) -> CheckProposal {
+        CheckProposal::new(
+            CheckId::generate(),
+            "a pattern SURE found in a source file",
+            Severity::MustFix,
+            true,
+            class,
+            CheckReason::ProjectWide,
+            &[sure_domain::execution::ActionKind::ReadFile],
+        )
+    }
+
+    #[test]
+    fn a_pass_is_only_built_from_a_class_that_can_carry_one() {
+        // The split is the domain's own predicate and not a list restated here,
+        // which is the point: a copy of it in this test would pass while the
+        // product's half changed.
+        let fingerprint = a_fingerprint();
+        for &class in EvidenceClass::ALL {
+            let result = PrecomputedEvidence::holds("the pattern this check is about is not there")
+                .to_result(&a_critical_proposal_weighted(class), &fingerprint);
+            assert_eq!(
+                result.evidence_class, class,
+                "{class:?}: the result relabelled the evidence the check claimed"
+            );
+            if class.can_alone_support_must_fix() {
+                assert_eq!(result.status, CheckStatus::Pass, "{class:?}");
+                assert!(
+                    !result.blocks_green(),
+                    "{class:?}: a pass that can carry a verdict must not block green"
+                );
+            } else {
+                assert_eq!(
+                    result.status,
+                    CheckStatus::Unknown,
+                    "{class:?}: a reading that cannot stand behind a finding came \
+                     back as a pass, which is the false green this product exists \
+                     to catch"
+                );
+                assert!(
+                    result.blocks_green(),
+                    "{class:?}: a critical check that supports no verdict must not \
+                     leave a run green"
+                );
+                assert!(
+                    result.reason.contains("cannot be reported as passed"),
+                    "{class:?}: the reason does not say why this is not a pass: {}",
+                    result.reason
+                );
+            }
+        }
     }
 
     #[test]

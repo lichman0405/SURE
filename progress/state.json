@@ -4,9 +4,9 @@
   "expansion": "Software Understanding & Reality Evaluation",
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
-  "status": "complete",
-  "current_phase": "P17",
-  "last_updated": "2026-09-21T06:09:20.473Z",
+  "status": "in_progress",
+  "current_phase": "P18",
+  "last_updated": "2026-09-22T03:48:38.132Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3389,6 +3389,114 @@
         "clause 8 — the seven gates run from PowerShell at the changed tree with the store unchanged, and no file outside the ones this task owns is edited — is MET. `target/tmp/gates-p17t003-t004-final.txt`, taken at `dcc4cb8` over the tree carrying this task and `P17-T003` together, `worktree at start:` identical to `worktree:`: all seven gates exit 0, `red: none`, `result-lines=90 passed=2818 failed=0 ignored=13 not-ok=0`, `parent=2808`, `headers 80`, `bootstrap 18 phases, 204 tasks`, `taskctl state OK: 204 tasks`, store `D1717556…7853` 348160 bytes identical, `halt: exit 0 (clean)`. The `sure-core` test changes this task carries were clippy-checked in the run before it, which emitted `Checking sure-testkit / sure-core / sure-cli` over byte-identical Rust. The commit carries exactly the three `crates/sure-core/tests/` files."
       ],
       "finished_at": "2026-09-21T06:09:04.244Z"
+    },
+    "P18-T001": {
+      "status": "in_progress",
+      "started_at": "2026-09-22T03:48:38.131Z",
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": "new phase P18; contract record first"
+    },
+    "P18-T002": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T003": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T004": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T005": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T006": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T007": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T008": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T009": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T010": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T011": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P18-T012": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
     }
   },
   "blocked_external": [],

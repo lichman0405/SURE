@@ -2673,6 +2673,45 @@ mod tests {
     }
 
     #[test]
+    fn every_installer_has_the_install_line_the_product_plans() {
+        // `install_invocation`'s doc says the tests hold each one, and until
+        // this test that was true of three of the five: pip and uv were held
+        // here and pipenv in `checks::python`, and poetry's and pdm's lines were
+        // asserted nowhere in the crate. The sentence was made true rather than
+        // deleted, because the two that were unheld are the two that differ in
+        // verb.
+        //
+        // An exact list and not a lower bound. `uv sync` against everyone else's
+        // `install` is the whole reason the arms are written out, and a shared
+        // `" sync"` or a shared `"install"` gets one side or the other wrong —
+        // `poetry sync` is not the command that installs a project's
+        // dependencies, and neither is `uv install`. A sixth installer added
+        // without a line here fails the comparison below rather than being
+        // planned with a command nobody has read.
+        let expected = [
+            (Installer::Pip, "python -m pip install -r requirements.txt"),
+            (Installer::Uv, "uv sync"),
+            (Installer::Poetry, "poetry install"),
+            (Installer::Pipenv, "pipenv install"),
+            (Installer::Pdm, "pdm install"),
+        ];
+        assert_eq!(
+            expected.map(|(manager, _)| manager).as_slice(),
+            Installer::ALL,
+            "this test no longer visits every installer SURE recognises"
+        );
+        for (manager, line) in expected {
+            assert_eq!(
+                command_for(Some(manager), CommandRole::Install, &[])
+                    .command
+                    .as_deref(),
+                Some(line),
+                "{manager:?} would be planned with a line that does not install"
+            );
+        }
+    }
+
+    #[test]
     fn a_build_backend_is_not_offered_as_the_command_that_builds() {
         // `setuptools` and `poetry-core` are libraries a frontend calls. Naming
         // one as if it were the command would be a plan that does not run.

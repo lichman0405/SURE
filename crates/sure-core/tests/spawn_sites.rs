@@ -41,13 +41,17 @@
 //! argue for.** `browser_driver/launch.rs` starts a browser, which is a program
 //! that is not part of this repository and is not a project's either — and it is
 //! here because *every* way SURE runs something belongs in one list, not because
-//! starting a browser is safe by nature. What keeps it from moving
-//! `support::CEILING` is that **nothing in the product builds the type that
-//! starts it**: a `browser_driver::Browser` is a driver, and the only one
-//! constructed anywhere is inside `browser_probe.rs`-style test code. That
-//! absence is checked where the claim lives, by
-//! `tests/browser_probe.rs`'s rule five, which was written to fail on the day an
-//! adapter landed and is what had to move when this one did.
+//! starting a browser is safe by nature. **A product path builds the type that
+//! starts it since `P18-T010`**: `sure-cli/src/check.rs` binds a
+//! `browser_driver::Browser` to the runner that carries a browser check out, and
+//! that file is the composition root — the layer allowed to know which
+//! implementations exist. What keeps this from moving `support::CEILING` is now
+//! the paragraph beside the ceiling rather than an absent caller: the ceiling
+//! rests on which platforms SURE has been shown to run project code on, and a
+//! new caller inside the product is not evidence about macOS or Linux. The
+//! measurement that could move it belongs to `P18-T012`, and the census that
+//! made this a deliberate edit rather than a quiet one is
+//! `tests/browser_probe.rs`'s rule five.
 //!
 //! **The count is five since `P15-T020`, and the fifth is the one that is not a
 //! way for the product to run anything.** `sure-testkit/src/source_manifest.rs`
@@ -225,7 +229,8 @@ const THE_SPAWN_SITES: &[(&str, &str)] = &[
     (
         "sure-core/src/browser_driver/launch.rs",
         "a browser this machine has, headless and sandboxed, for the page check — \
-         reachable only from a `browser_driver::Browser`, which no product path builds",
+         reachable only from a `browser_driver::Browser`, which `P18-T010` binds \
+         once, at the composition root `sure-cli/src/check.rs`",
     ),
     (
         "sure-testkit/src/source_manifest.rs",

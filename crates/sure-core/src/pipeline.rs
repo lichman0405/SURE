@@ -797,11 +797,18 @@ impl Pipeline<'_> {
         // command was never planned is a service the enforcement can only stop,
         // which is the honest answer for a program this run was not granted.
         //
-        // A detector's own observation is not a command and neither is a browser
-        // page — a browser check holds a service, and its command is not planned
-        // here because carrying a browser out is `P18-T010`'s work and nothing in
-        // this build consumes that admission yet. When it lands, the rule above is
-        // the one to apply to `CheckOperation::Browser` too.
+        // A browser check holds a service too, and `P18-T010` applied the rule
+        // above to it: the program that starts its service is planned here, so the
+        // browser door can pair an admission with a `BrowserCheckSpec` exactly as
+        // the service door pairs one with a `ServiceCheckSpec`. **The page itself
+        // is not planned and has nothing to plan**: opening it starts no process
+        // and reaches no address SURE did not already reach — see
+        // `planned_check_runner.rs`, where a browser check's admission is the
+        // program that starts its service and nothing else.
+        //
+        // A detector's own observation is the one that is not a command, and it is
+        // not: it happened while the plan was being made and there is nothing left
+        // to admit.
         //
         // `Enforcement` has an answer for a check with no command: it is a check
         // that launches nothing, and nothing is admitted for it.
@@ -817,7 +824,8 @@ impl Pipeline<'_> {
             let command = match scheduled_check.operation() {
                 CheckOperation::Command(spec) => Some(spec),
                 CheckOperation::Service(service) => Some(service.command()),
-                CheckOperation::Browser(_) | CheckOperation::Precomputed(_) => None,
+                CheckOperation::Browser(browser) => Some(browser.service().command()),
+                CheckOperation::Precomputed(_) => None,
             };
             if let Some(spec) = command {
                 permission_plan.add(check.clone(), spec.program(), spec.arguments().to_vec());
@@ -2354,6 +2362,7 @@ mod tests {
     struct Recording {
         asked: RefCell<Vec<String>>,
         services: RefCell<Vec<String>>,
+        browsers: RefCell<Vec<String>>,
         runner: ProcessRunner,
     }
 
@@ -2362,6 +2371,7 @@ mod tests {
             Self {
                 asked: RefCell::new(Vec::new()),
                 services: RefCell::new(Vec::new()),
+                browsers: RefCell::new(Vec::new()),
                 runner: nothing_starts(),
             }
         }
@@ -2374,6 +2384,16 @@ mod tests {
         /// Which checks were handed to it as services, in order.
         fn services(&self) -> Vec<String> {
             self.services.borrow().clone()
+        }
+
+        /// Which checks were handed to it as browser pages, in order.
+        ///
+        /// The third half of the same seam, kept apart from the other two for the
+        /// reason the two above are kept apart: *this check went to the browser
+        /// door* and *this check went to the service door* are different
+        /// measurements, and one list could not tell them apart.
+        fn browsers(&self) -> Vec<String> {
+            self.browsers.borrow().clone()
         }
     }
 
@@ -2410,6 +2430,27 @@ mod tests {
                     .join(" ")
             ));
             self.runner.run_service(work)
+        }
+
+        /// Records the page and hands it to the real runner, which has no browser
+        /// driver and therefore answers with an `Error`.
+        ///
+        /// **The delegation is the point**: this fake decides nothing about a
+        /// browser, so if a planner ever emits one, the answer is
+        /// [`ProcessRunner`]'s own — *SURE was not given a browser driver* — and
+        /// not a status invented in a test. It is also why this arm is recorded
+        /// separately rather than folded into `asked`: the page is not a command,
+        /// and a test that could not tell the two apart could not tell a browser
+        /// check reaching the browser door from one reaching the wrong one.
+        fn run_browser(
+            &self,
+            work: &crate::planned_check_runner::AdmittedBrowser<'_>,
+        ) -> CheckResult {
+            let spec = work.browser();
+            self.browsers
+                .borrow_mut()
+                .push(format!("{} {}", spec.loopback_url(), spec.path()));
+            self.runner.run_browser(work)
         }
     }
 
@@ -2579,17 +2620,30 @@ mod tests {
             "the user granted execution and the runner was never reached, so the run above is \
              satisfied by a runner nothing consults: {dynamic:?}"
         );
-        // The service half of the same seam is **not** reached here, and that is a
-        // fact about this build rather than about the run: no planner in it emits
-        // a `CheckOperation::Service`, so a real project cannot plan one yet. The
-        // wiring that would carry one out is measured in
-        // `planned_check_runner.rs` with a runner that starts nothing, because a
-        // test that made this path live would have to start a real service.
+        // The other two doors of the same seam are **not** reached here, and that
+        // is a fact about this build rather than about the run: no planner in it
+        // emits a `CheckOperation::Service` or a `CheckOperation::Browser`, so a
+        // real project cannot plan either yet. The wiring that would carry one out
+        // is measured in `planned_check_runner.rs` with a runner that starts
+        // nothing, because a test that made this path live would have to start a
+        // real service.
+        //
+        // Asserted for both doors and not just the one: `pipeline.rs` now plans a
+        // browser check's *service* command into the permission plan, so a planner
+        // that emitted one would be admitted rather than stopped, and a run that
+        // carried a page out would reach the runner as a browser check and not as
+        // a service. An assertion about `services()` alone would not see it.
         assert!(
             runner.services().is_empty(),
             "nothing in this build plans a service check, so nothing should have been handed to \
              the runner as one: {:?}",
             runner.services()
+        );
+        assert!(
+            runner.browsers().is_empty(),
+            "nothing in this build plans a browser check, so nothing should have been handed to \
+             the runner as one: {:?}",
+            runner.browsers()
         );
         for result in run.report.results() {
             if dynamic.contains(&result.title) {
@@ -2800,6 +2854,28 @@ mod tests {
                 check.severity(),
                 check.critical(),
                 "nothing in this build plans a service check, so this runner was asked about one \
+                 by something that is not the pipeline",
+                work.fingerprint().clone(),
+            )
+        }
+
+        /// Unreachable through this pipeline for the same reason and for one more:
+        /// no planner in this build emits a `CheckOperation::Browser` either, and
+        /// this runner was given no browser driver even if one did.
+        fn run_browser(
+            &self,
+            work: &crate::planned_check_runner::AdmittedBrowser<'_>,
+        ) -> CheckResult {
+            let check = work.admitted().command().check();
+            self.asked
+                .borrow_mut()
+                .push(format!("browser {}", check.id()));
+            CheckResult::errored(
+                check.id().clone(),
+                check.title().to_owned(),
+                check.severity(),
+                check.critical(),
+                "nothing in this build plans a browser check, so this runner was asked about one \
                  by something that is not the pipeline",
                 work.fingerprint().clone(),
             )

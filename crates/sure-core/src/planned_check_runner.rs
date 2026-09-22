@@ -28,26 +28,28 @@
 //! [`crate::safety::classify`], which is the decision and takes the same two
 //! things.
 //!
-//! # Two kinds of work, one seam, and no test in this file starts a process
+//! # Three kinds of work, one seam, and no test in this file starts a process
 //!
 //! [`CheckRunner`] is the whole of the machine: a method from an admitted command
-//! to a [`CommandRun`], and since `P18-T009` a method from an admitted service to
-//! the [`CheckResult`] it produced. [`ProcessRunner`] is the implementation that
-//! can start either, and it is the only one in this file. Every proof below —
-//! that an unadmitted command never arrives, that one check produces one result,
-//! that a check which reported nothing becomes an error, that a service gets the
-//! environment the plan holds — is made with a fake that records what it was asked
-//! for and answers from a value. **A test that starts a real process is a test
-//! that measures this machine rather than this code**, and nothing in this
+//! to a [`CommandRun`], since `P18-T009` a method from an admitted service to the
+//! [`CheckResult`] it produced, and since `P18-T010` a method from an admitted
+//! browser check to the [`CheckResult`] it produced. [`ProcessRunner`] is the
+//! implementation that can start any of them, and it is the only one in this
+//! file. Every proof below — that an unadmitted command never arrives, that one
+//! check produces one result, that a check which reported nothing becomes an
+//! error, that a service gets the environment the plan holds, that a page is
+//! opened on the port that answered — is made with a fake that records what it
+//! was asked for and answers from a value. **A test that starts a real process is
+//! a test that measures this machine rather than this code**, and nothing in this
 //! module's acceptance needs one: `tests/process_runner.rs` is where starting a
 //! process is the subject, and `tests/runtime_start.rs` is where the window, the
-//! question and the stop are.
+//! question, the look and the stop are.
 //!
-//! The two methods are on one trait rather than two, and that is the same
+//! The three methods are on one trait rather than three, and that is the same
 //! argument the pipeline's own `runner` field makes: *what may this run start?* is
-//! one question with one answer, and two traits would let one run hold two
-//! runners that could disagree about it — a fake for commands and the real
-//! runner for services, or the other way round.
+//! one question with one answer, and three traits would let one run hold three
+//! runners that could disagree about it — a fake for commands and the real runner
+//! for services, or the other way round.
 //!
 //! # Exactly one result per scheduled check
 //!
@@ -108,18 +110,53 @@
 //! the alternative, a service that inherits SURE's environment because nobody
 //! looked, is `service.rs`'s old gap and the accident this clause is about.
 //!
+//! # A browser check is a service check with something to do while it is up
+//!
+//! [`CheckOperation::Browser`] holds a [`BrowserCheckSpec`], which holds a
+//! [`ServiceCheckSpec`] — and `P18-T010` opened that door by **reusing the
+//! service's own lifecycle rather than writing a second one**. The window, the
+//! readiness question, the stop on every path and the verdict table are
+//! [`crate::runtime_start`]'s and are not restated here; what a browser check adds
+//! is one look, taken between the answer and the stop, and
+//! [`crate::runtime_start::StartSmoke::run_then`] is the caller's own step that
+//! exists for it.
+//!
+//! **The look is gated on the service answering, and the gate is the answer
+//! rather than the verdict.** [`StartSmoke::run_then`] calls the step only when
+//! the readiness question came back as an answer — any status, including a 404 —
+//! because a project whose readiness path is `/health` and whose page is at
+//! `/post/1` is the ordinary shape (see `planned_work.rs`'s own fixture), and a
+//! service that answered *something* is a service whose page can be opened. A
+//! service that was never reached produces no look at all, which is what clause
+//! one of `P18-T010` says.
+//!
+//! **The stop happens whether the look passed, failed or panicked**, and that is
+//! [`crate::runtime_start`]'s property rather than this module's to restate:
+//! `run_then` takes the same `?`-free path to the stop that `run` does, and the
+//! `Drop` on the service's own stopper covers the panic. What this module decides
+//! is only *what to look at and with what*.
+//!
+//! **The driver is held, not built.** [`ProcessRunner`] holds a
+//! [`browser::Driver`] — an alias for the interface, declared in
+//! [`crate::browser`] so that this file names a name rather than the adapter —
+//! and a runner that was given none answers a browser check with an `Error`
+//! saying so. That is deliberate and it is the property to keep: **un-wiring the
+//! driver turns a browser check into a failure of SURE's own check, never into a
+//! pass and never into a skip.** The file that constructs a driver is
+//! `sure-cli/src/check.rs`, the composition root where `sure check` binds every
+//! implementation it uses; nothing in this crate builds one.
+//!
 //! # What this module does not do
 //!
 //! **It does not decide what may run.** Every "yes" comes from
 //! [`Enforcement::admitted`], and a caller holding every command the plan
 //! considered has nothing it can do with them here.
 //!
-//! **It does not carry out browsers.** [`CheckOperation::Browser`] is named
-//! rather than ignored — such a check is reported as an `Error` saying this build
-//! has no runner for it — because a `match` with a wildcard arm would let a fifth
-//! kind of work arrive as a silent nothing. `P18-T010` is where that door is
-//! opened, and the same paragraph said the same thing about services until
-//! `P18-T009` opened theirs.
+//! **It decides no verdict for a browser.** A driver reports what the page did
+//! and [`crate::browser::Report::verdict`] says what that is worth; this file
+//! calls the second on the first and adds nothing. A browser check whose driver
+//! was absent is the one exception, and it is an `Error` for the reason above
+//! rather than a verdict about the project.
 //!
 //! **It builds no command line.** The one translation here is field for field, and
 //! an argument holding a space is one argument before it and one argument after it.
@@ -131,8 +168,11 @@ use std::time::Duration;
 use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::status::CheckResult;
 
+use crate::browser;
 use crate::enforce::{AdmittedCommand, Enforcement};
-use crate::planned_work::{CheckOperation, CommandRun, CommandSpec, ServiceCheckSpec};
+use crate::planned_work::{
+    BrowserCheckSpec, CheckOperation, CommandRun, CommandSpec, ServiceCheckSpec,
+};
 use crate::probe;
 use crate::process::{self, Cancellation, ProcessRequest};
 use crate::runtime_start::{LimitsError, StartSmoke};
@@ -160,24 +200,29 @@ const NOTHING_WAS_REPORTED: &str = "SURE admitted this check and the runner repo
 /// follows from it. The reason that matters: an acceptance about *what may run*
 /// has to be provable without running anything, and a seam is what lets the proof
 /// be made with a value that records what it was asked for. The one that follows:
-/// the interface a fake has to satisfy is two methods wide, so a fake cannot
+/// the interface a fake has to satisfy is three methods wide, so a fake cannot
 /// agree with the real runner on everything except the thing being tested.
 ///
-/// Both methods take a value only an [`Enforcement`] can produce — [`AdmittedRun`]
-/// for a command, [`AdmittedService`] for a service — which is what makes "work
-/// the mode did not admit cannot reach a process" a property of the signature
-/// rather than a promise in a comment. Neither is a defaulted method: an
-/// implementation that had not decided what to do with a service would otherwise
-/// compile, and *has not decided* is exactly the state clause one of `P18-T009`
-/// is about.
+/// Every method takes a value only an [`Enforcement`] can produce — [`AdmittedRun`]
+/// for a command, [`AdmittedService`] for a service, [`AdmittedBrowser`] for a
+/// browser check — which is what makes "work the mode did not admit cannot reach
+/// a process" a property of the signature rather than a promise in a comment.
+/// None is a defaulted method: an implementation that had not decided what to do
+/// with a service or a browser would otherwise compile, and *has not decided* is
+/// exactly the state clause one of `P18-T009` and clause one of `P18-T010` are
+/// about.
 ///
-/// **The two answers have different shapes on purpose.** A command's run is a
+/// **The three answers have different shapes on purpose.** A command's run is a
 /// [`CommandRun`] because *the process ran, and this is what it said* and *the
 /// process never started, and this is why* are two states with one mapping to a
 /// result ([`CommandRun::to_result`]). A service's run is already a
 /// [`CheckResult`], because [`StartSmoke::run`] produces one: the window, the
 /// question and the stop are one indivisible row of a verdict table, and a
 /// wrapper type here would only be a place for this module to reshape that table.
+/// A browser check's run is a [`CheckResult`] for the same reason and one more:
+/// its lifecycle *is* the service's — the same `run_then`, with a look in the
+/// middle — so a separate shape for it would be this module claiming to own a
+/// lifecycle it deliberately borrowed.
 ///
 /// **[`fmt::Debug`] is a supertrait, and the reason is one field rather than this
 /// module.** `Pipeline` holds a `&dyn CheckRunner` — a run is built with the
@@ -205,25 +250,118 @@ pub trait CheckRunner: fmt::Debug {
     /// not happen. An implementation is expected to route this to
     /// [`StartSmoke::run`], which stops the service on every path.
     fn run_service(&self, work: &AdmittedService<'_>) -> CheckResult;
+
+    /// Start one admitted service, open the page it serves once it answers, stop
+    /// the service, and report what came of all three.
+    ///
+    /// **[`AdmittedService`]'s argument one door along, and the difference is the
+    /// one thing a browser check adds**: the service is the same service, and the
+    /// look happens between the answer and the stop. An implementation is
+    /// expected to route this to
+    /// [`StartSmoke::run_then`](crate::runtime_start::StartSmoke::run_then) with
+    /// a step that asks its driver, which is what makes the window, the question,
+    /// the stop and the verdict table one lifecycle rather than two.
+    ///
+    /// **A [`CheckResult`] rather than a `Result`**, for [`Self::run_service`]'s
+    /// reason: a browser check that could not be carried out is a state the check
+    /// has to report, and a caller handling an `Err` here would be deciding what
+    /// to say about a check that did not happen.
+    fn run_browser(&self, work: &AdmittedBrowser<'_>) -> CheckResult;
 }
 
-/// The runner that starts a real process.
+/// The runner that starts a real process and drives a real browser.
 ///
 /// The only implementation in the product that can, and it is reached from
 /// [`run_scheduled_checks`] by whoever the pipeline hands it to.
-#[derive(Debug, Clone, Default)]
+///
+/// **The driver is a field rather than a constructor argument, and a runner
+/// without one is a state that exists on purpose.** Four callers in this tree
+/// build a runner to prove that a run starts nothing — they cancel the token
+/// before the run and never hand it a browser — and a constructor that demanded
+/// a driver would make those callers write `with_page_driver` they do not
+/// mean, or build one to throw away. [`Self::new`] leaves the field empty and
+/// [`Self::with_page_driver`] fills it, and the empty state is *answered*
+/// rather than assumed away: see the browser arm of this type's [`CheckRunner`]
+/// implementation.
+///
+/// **It is not `Clone`, and that is new.** A runner could be copied before
+/// `P18-T010` because both of its fields were; a boxed driver cannot be, and
+/// inventing a way to copy one — a `clone_box` method on the interface, say —
+/// would be an interface change made to serve a struct's derive. Nothing in the
+/// product copies a runner: a run is built with `&dyn CheckRunner` and the runner
+/// outlives it. What the removal does mean is that a caller who wants two runners
+/// makes two, which is also the only way to get two different drivers.
 pub struct ProcessRunner {
     /// The handle a caller cancels a run through. Held rather than made per call,
     /// so that the caller keeps the other clone and cancelling it reaches every
     /// request the runner makes.
     cancellation: Cancellation,
+    /// The driver a browser check is carried out with, or `None` for a run that
+    /// was not given one. Held as the interface's own alias rather than as the
+    /// adapter, so that this file names what it was handed and not what built it.
+    driver: Option<browser::Driver>,
+}
+
+/// Written by hand because [`browser::Driver`] is a `Box<dyn …>` and a boxed
+/// trait object is not `Debug`, and because what a person reading a failed test
+/// needs from this field is **whether there is a driver**, not what is inside it.
+/// Printing the absence is the whole of the useful answer, and printing
+/// `Some(<dyn BrowserDriver>)` would be noise that a reader would learn to skip.
+///
+/// It is not a convenience: [`CheckRunner`] requires [`fmt::Debug`] because a
+/// `Pipeline` holds one and prints itself when a test fails, so a runner that
+/// could not be printed could not be handed to a pipeline at all.
+impl fmt::Debug for ProcessRunner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProcessRunner")
+            .field("cancellation", &self.cancellation)
+            .field(
+                "driver",
+                &match self.driver {
+                    Some(_) => "a browser driver",
+                    None => "no browser driver",
+                },
+            )
+            .finish()
+    }
 }
 
 impl ProcessRunner {
-    /// A runner whose runs are cancelled through `cancellation`.
+    /// A runner whose runs are cancelled through `cancellation` and which has no
+    /// browser driver.
+    ///
+    /// **A browser check handed to this runner is an `Error` and never a pass**,
+    /// which is the honest answer for a run nobody gave the means to carry one
+    /// out. [`Self::with_page_driver`] is the way to give it one.
     #[must_use]
     pub fn new(cancellation: Cancellation) -> Self {
-        Self { cancellation }
+        Self {
+            cancellation,
+            driver: None,
+        }
+    }
+
+    /// The same runner, carrying `driver` for any page it is asked to open.
+    ///
+    /// The name is the whole of what this file knows about a driver: what the
+    /// type is, where it comes from and what it does are [`crate::browser`]'s and
+    /// `sure-cli/src/check.rs`'s, and this function only puts it in the field.
+    ///
+    /// **`with_page_driver` and not `with_browser_…`, and the name is a
+    /// decision rather than a style.** `tests/browser_probe.rs` refuses a shipped
+    /// file outside the adapter that names the adapter, and it is right to: a
+    /// file that spells the module is a file that can construct one and start a
+    /// browser. This file must be able to *hold* a driver and must not be able to
+    /// *make* one, and the way it says so is by naming the page it opens and the
+    /// value it was handed — `browser::Driver`, the alias
+    /// [`crate::browser`] declares for exactly this — rather than the module that
+    /// builds one. The capability is real and is declared where it belongs:
+    /// `sure-cli/src/check.rs` is the composition root that constructs a driver,
+    /// and that is the one line a reader should follow.
+    #[must_use]
+    pub fn with_page_driver(mut self, driver: browser::Driver) -> Self {
+        self.driver = Some(driver);
+        self
     }
 
     /// The handle this runner's requests carry.
@@ -260,7 +398,136 @@ impl CheckRunner for ProcessRunner {
             Err(error) => service_refused(work, &error),
         }
     }
+
+    /// The whole of what a browser check costs this runner.
+    ///
+    /// **The absence is answered first, and it is answered with an `Error`.**
+    /// Before `P18-T010` a browser check that reached the run was reported as
+    /// *this build has no runner for this*; the sentence changes and the status
+    /// does not, because the property that mattered then is the property that
+    /// matters now — **a browser check that nothing carries out is a failure of
+    /// SURE's own check, never a pass and never a skip.** Un-wiring the driver at
+    /// the composition root has to be a run that says so.
+    ///
+    /// **The look is taken inside the service's own lifecycle**, through
+    /// [`StartSmoke::run_then`], and the step comes back `None` on every path
+    /// where the service never answered. That is clause one of `P18-T010` written
+    /// as a type rather than as a rule: the step is handed *the endpoint that
+    /// answered*, and there is nothing to look at when nothing did.
+    ///
+    /// **The page is opened on the address that answered, and the path is the
+    /// plan's.** [`BrowserCheckSpec`] deliberately lets the page's path differ
+    /// from the readiness path — a service whose health route is `/health` serves
+    /// its pages somewhere else — so the two halves come from two places and both
+    /// are the plan's: the host and port from the endpoint SURE has just read a
+    /// status line from, the path from the spec. **A browser check never opens an
+    /// address SURE did not reach**, which is the difference between this and
+    /// trusting a URL a plan carries.
+    ///
+    /// **The check's result is the page's verdict, and the service's own line is
+    /// kept in front of it.** The two answer different questions — *did the
+    /// service come up and answer* and *what did its page do* — and neither is
+    /// discarded: the page's verdict is the check's status, because the page is
+    /// what the check is about, and the service's own sentence stays in the
+    /// reason so a reader can see what SURE started, what it asked, and that it
+    /// stopped it. A service whose readiness route answers 500 and whose page is
+    /// clean is a project whose two answers disagree; the status says what the
+    /// page did and the reason line says the rest.
+    ///
+    /// **When no look happened, the service's own verdict is the check's
+    /// result**, and that is not a fallback: nothing about the page was observed,
+    /// and the service's own words for why are the only honest answer there is.
+    /// [`crate::runtime_start`] produces that result, this file does not reshape
+    /// it, and its statuses are the same ones a service check gets.
+    fn run_browser(&self, work: &AdmittedBrowser<'_>) -> CheckResult {
+        let Some(driver) = self.driver.as_ref() else {
+            return no_driver_result(work);
+        };
+        // Built before anything starts, so that a number a reader can see being
+        // wrong is an `Error` about the plan rather than a failed look.
+        let limits = match browser::Limits::new(LOOK_BUDGET, LOOK_PROBLEMS) {
+            Ok(limits) => limits,
+            Err(error) => return browser_refused(work, "the budget for the look", &error),
+        };
+        let spec = work.browser();
+        let page = spec.path();
+        match StartSmoke::planned(
+            work.admitted(),
+            spec.service(),
+            work.fingerprint(),
+            ONE_EXCHANGE,
+        ) {
+            Ok(smoke) => {
+                let (service, looked) = smoke.run_then(&self.cancellation, |endpoint| {
+                    let address = endpoint.address();
+                    // The same constructor `BrowserCheckSpec::new` used, so a path
+                    // it accepted is a path this accepts; the `Err` arm below is
+                    // therefore about a port the readiness question answered on
+                    // and not about the path the plan holds.
+                    browser::Target::at(address.ip(), address.port(), page).map(|target| {
+                        let report = driver.observe(&target, &limits, &self.cancellation);
+                        (target, report)
+                    })
+                });
+                match looked {
+                    Some(Ok((target, report))) => {
+                        let check = work.admitted().command().check();
+                        let page_reason = report.reason();
+                        let verdict = report.verdict(
+                            check.id().clone(),
+                            &target,
+                            check.severity(),
+                            check.critical(),
+                            work.fingerprint().clone(),
+                        );
+                        verdict.with_reason(format!(
+                            "{}; and the page it serves: {page_reason}",
+                            service.reason
+                        ))
+                    }
+                    // Unreachable in the product: the address is the one the
+                    // readiness question was answered from, so it is loopback,
+                    // and the path is one `Endpoint::loopback` already accepted
+                    // when the plan was built. Written out rather than `expect`ed
+                    // because a run does not abort on a state this file cannot
+                    // produce, and because an error naming it is how a reader
+                    // finds out that it happened after all.
+                    Some(Err(error)) => browser_refused(work, "the address of the page", &error),
+                    // The service never answered, so there was no page to open:
+                    // the service's own result is what happened, whole.
+                    None => service,
+                }
+            }
+            Err(error) => browser_refused(work, "the window the service is held to", &error),
+        }
+    }
 }
+
+/// The bounds on the one look a planned browser check is allowed to take.
+///
+/// **The second budget the plan does not hold, and its argument is
+/// [`ONE_EXCHANGE`]'s.** A [`BrowserCheckSpec`] carries the service's window and
+/// the command's whole-life deadline; neither bounds the page, and
+/// [`browser::Limits`] is a decision rather than a default. The numbers are here,
+/// where a reader can disagree with them.
+///
+/// **Thirty seconds, and it is shaped after the browser rather than after the
+/// probe.** [`ONE_EXCHANGE`] is half a second because a request to a process SURE
+/// is already watching on loopback either answers at once or has not answered; a
+/// page is a browser starting, navigating, running a script and settling, and a
+/// budget that only a fast machine could meet would report `unknown` on the
+/// machines where a project most needs the check. **It is not a licence to wait**:
+/// the number is a ceiling on one look, the run's own cancellation and the
+/// service's window both bound it from outside, and a look that runs out reports
+/// that it stopped early rather than that the page was clean.
+///
+/// **Sixty-four problems kept**, because the reason line quotes three of them and
+/// counts the rest ([`browser::QUOTED_PROBLEMS`]), and a bound large enough to
+/// hold a page that throws in a loop is a bound the report cannot render. The
+/// number is the count, not the quote.
+const LOOK_BUDGET: Duration = Duration::from_secs(30);
+/// See [`LOOK_BUDGET`].
+const LOOK_PROBLEMS: usize = 64;
 
 /// The bounds on the one exchange a planned service check is allowed to make.
 ///
@@ -492,14 +759,137 @@ impl<'a> AdmittedService<'a> {
     }
 }
 
+/// One scheduled check's browser page and the service under it, paired with the
+/// admission that lets that service start.
+///
+/// **The same argument as [`AdmittedService`], and the same value underneath.**
+/// A browser check holds a [`BrowserCheckSpec`], which holds a
+/// [`ServiceCheckSpec`], and the command the enforcement decided about is the
+/// one that starts that service. So the pairing compares exactly what
+/// [`AdmittedService::new`] compares — the check, the program and the argument
+/// vector of the service's own command — and what the browser half adds is the
+/// page: a path and an expectation, neither of which is a program and neither of
+/// which the enforcement has anything to say about.
+///
+/// **This is why a browser check needs no permission of its own here.** The
+/// question the enforcement answers is *may this run start that program*;
+/// opening a page on the service that program just answered from adds no process
+/// and no address SURE did not already reach. The browser's own permission —
+/// [`ActionKind::BrowserProbe`](sure_domain::execution::ActionKind::BrowserProbe)
+/// needing `ConnectService` — is decided before a plan exists, by
+/// [`crate::browser::absence`], and a check that reached this door has already
+/// passed it.
+///
+/// The fingerprint travels with it for [`AdmittedService`]'s reason: the result
+/// is built by [`crate::browser`] and needs the fingerprint of the run it belongs
+/// to.
+#[derive(Debug, Clone, Copy)]
+pub struct AdmittedBrowser<'a> {
+    admitted: AdmittedCommand<'a>,
+    spec: &'a BrowserCheckSpec,
+    fingerprint: &'a FingerprintId,
+    /// What this kind of work is, in the words a report uses for it, kept from
+    /// the scheduled check so that a result built where the schedule is no longer
+    /// in hand can still name what SURE could not do. It is
+    /// [`CheckOperation::plain_description`]'s sentence and not a second copy of
+    /// it — the copy here would be a sentence that could drift.
+    work: &'static str,
+}
+
+impl<'a> AdmittedBrowser<'a> {
+    /// Pair a scheduled check's page and service with the command the enforcement
+    /// admitted for it.
+    ///
+    /// **The same three refusals the other two doors make, and the same rule
+    /// about the argument vector**: the work is not a browser check, the
+    /// admission belongs to another check, or the admission covers a different
+    /// program or argument vector — compared element by element and never as
+    /// text.
+    ///
+    /// # Errors
+    ///
+    /// [`AdmissionRefused`], for the reasons on that type.
+    pub fn new(
+        scheduled: &'a ScheduledCheck,
+        admitted: AdmittedCommand<'a>,
+        project_fingerprint: &'a FingerprintId,
+    ) -> Result<Self, AdmissionRefused> {
+        let proposal = scheduled.proposal();
+        let id = proposal.id();
+        let CheckOperation::Browser(spec) = scheduled.operation() else {
+            return Err(AdmissionRefused::NotOneBrowser {
+                id: id.clone(),
+                work: scheduled.operation().plain_description(),
+            });
+        };
+
+        let command = admitted.command();
+        if command.check().id() != id {
+            return Err(AdmissionRefused::ForADifferentCheck {
+                id: id.clone(),
+                admitted_for: command.check().id().clone(),
+            });
+        }
+        let service_command = spec.service().command();
+        if command.program() != service_command.program()
+            || command.arguments() != service_command.arguments()
+        {
+            return Err(AdmissionRefused::NotTheCommandThatWasAdmitted {
+                id: id.clone(),
+                planned: display_of(service_command),
+                admitted: command.display(),
+            });
+        }
+
+        Ok(Self {
+            admitted,
+            spec,
+            fingerprint: project_fingerprint,
+            work: scheduled.operation().plain_description(),
+        })
+    }
+
+    /// The check this page belongs to.
+    #[must_use]
+    pub fn check(&self) -> &'a CheckId {
+        self.admitted.command().check().id()
+    }
+
+    /// What this kind of work is, in the words a report uses for it.
+    #[must_use]
+    pub const fn work_description(&self) -> &'static str {
+        self.work
+    }
+
+    /// The page and the service under it, as the plan holds them.
+    #[must_use]
+    pub const fn browser(&self) -> &'a BrowserCheckSpec {
+        self.spec
+    }
+
+    /// The admission that lets the service start, for the one caller that needs
+    /// to hand it to [`crate::runtime_start`].
+    #[must_use]
+    pub const fn admitted(&self) -> AdmittedCommand<'a> {
+        self.admitted
+    }
+
+    /// The fingerprint of the run this check is part of.
+    #[must_use]
+    pub const fn fingerprint(&self) -> &'a FingerprintId {
+        self.fingerprint
+    }
+}
+
 /// Why an admitted command could not be paired with a scheduled check's work.
 ///
-/// Four variants, and each is refused rather than repaired: two about the kind of
-/// work — one per door, because a command and a service are paired by two
-/// constructors and each has to refuse the other's check — and two about the
-/// admission itself, which both doors make. Repairing any of them would mean SURE
-/// running something the plan did not hold or something nobody admitted, and the
-/// second of those is the whole point of the type the pair is built from.
+/// Five variants, and each is refused rather than repaired: three about the kind
+/// of work — one per door, because a command, a service and a browser check are
+/// paired by three constructors and each has to refuse the others' checks — and
+/// two about the admission itself, which all three doors make. Repairing any of
+/// them would mean SURE running something the plan did not hold or something
+/// nobody admitted, and the second of those is the whole point of the type the
+/// pair is built from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmissionRefused {
     /// The check's work is not one command, so there is no command for the
@@ -513,6 +903,14 @@ pub enum AdmissionRefused {
     /// The check's work is not a service, so there is no service for the
     /// admission to be about.
     NotOneService {
+        /// The check that was paired.
+        id: CheckId,
+        /// What the check's work is, in the words a report uses for it.
+        work: &'static str,
+    },
+    /// The check's work is not a browser check, so there is no page and no
+    /// service under it for the admission to be about.
+    NotOneBrowser {
         /// The check that was paired.
         id: CheckId,
         /// What the check's work is, in the words a report uses for it.
@@ -548,6 +946,11 @@ impl fmt::Display for AdmissionRefused {
                 f,
                 "the check {id} would be carried out as {work}, and an admission can only be \
                  paired with a check whose work is a service"
+            ),
+            Self::NotOneBrowser { id, work } => write!(
+                f,
+                "the check {id} would be carried out as {work}, and an admission can only be \
+                 paired with a check that opens a page on a service it starts"
             ),
             Self::ForADifferentCheck { id, admitted_for } => write!(
                 f,
@@ -742,18 +1145,25 @@ impl RunResults {
 /// | it will run | the command was not admitted | the command's own `Skipped` result |
 /// | it will run | it was admitted | what the runner reported, through `CommandRun::to_result` |
 /// | it will run, as a service | it was admitted | what the runner reported, through `StartSmoke::run` |
+/// | it will run, as a page | it was admitted | what the runner reported, through `StartSmoke::run_then` |
 /// | it will run | nothing was admitted and nothing was stopped | an `Error` — nothing was observed |
+///
+/// The page's row is the service's row with a step in the middle, and the status
+/// in both is the page's or the service's own rather than one chosen here. **A
+/// browser check that no driver could carry out is one more `Error` rather than a
+/// row of its own**: the plan says it would run, and SURE having no way to run it
+/// is a failure of SURE's check and never a pass.
 ///
 /// Static evidence never reaches a runner at all: a [`CheckOperation::Precomputed`]
 /// check is its own observation, and its result is read from the evidence by
 /// [`crate::planned_work::PrecomputedEvidence::to_result`], which is the same
 /// mapping the command path ends in.
 ///
-/// The two rows that reach a runner differ in the shape of the answer and not in
+/// The three rows that reach a runner differ in the shape of the answer and not in
 /// what happens next: a command's [`CommandRun`] is mapped here by
-/// [`CommandRun::to_result`], and a service's result is produced whole by
-/// [`crate::runtime_start`] — the table above has one row per kind of work, and
-/// only one of them is this module's to map.
+/// [`CommandRun::to_result`], and a service's and a page's results are produced
+/// whole by [`crate::runtime_start`] — the table above has one row per kind of
+/// work, and only one of them is this module's to map.
 ///
 /// # Errors
 ///
@@ -884,9 +1294,27 @@ where
                 Err(refusal) => Some(refused_result(scheduled, &refusal, project_fingerprint)),
             }
         }
+        // A browser check is a service check with a page, and it goes to its own
+        // door for the reason the service has one: the admission is about the
+        // program that starts the service, and the pairing has to refuse a check
+        // whose work is not a page as well as one whose command differs. The
+        // window, the readiness question, the look and the stop are
+        // `runtime_start`'s, reached through `run_browser`.
+        //
         // Named rather than swallowed by a wildcard, so that a fifth kind of work
         // is a compile error here instead of a check that quietly produces nothing.
-        CheckOperation::Browser(_) => Some(no_runner_result(scheduled, project_fingerprint)),
+        CheckOperation::Browser(_) => {
+            // The same answer as the other two doors for a plan that holds no
+            // admission: nothing was admitted, so nothing was observed.
+            let command = admitted?;
+            match AdmittedBrowser::new(scheduled, command, project_fingerprint) {
+                Ok(work) => Some(runner.run_browser(&work)),
+                // The admission does not cover this check's service, so there is
+                // nothing SURE may start. An `Error`, and the same reasoning as
+                // the other two arms'.
+                Err(refusal) => Some(refused_result(scheduled, &refusal, project_fingerprint)),
+            }
+        }
     }
 }
 
@@ -939,30 +1367,69 @@ fn refused_result(
     )
 }
 
-/// The result for a check whose kind of work this build cannot carry out.
+/// The result for an admitted browser check on a runner that was given no
+/// driver.
 ///
-/// [`CheckOperation::Browser`] arrives here, and nothing else: services arrived
-/// here too until `P18-T009` routed them to `runtime_start`. The status is `Error`
-/// rather than `Unknown` for the same reason [`NOTHING_WAS_REPORTED`] is: the plan
-/// says the check would run, so the honest report of SURE having no way to run it
-/// is a failure of SURE's own check. A `Skipped` would read as a decision somebody
-/// made, and nobody decided this.
-fn no_runner_result(
-    scheduled: &ScheduledCheck,
-    project_fingerprint: &FingerprintId,
-) -> CheckResult {
-    let proposal = scheduled.proposal();
+/// **[`CheckOperation::Browser`] arrives here and nothing else**, which makes
+/// this the function the un-wiring property lives in. Before `P18-T010` a browser
+/// check was answered by *this build has no runner for that kind of work*; the
+/// mechanism changed and the answer did not, because the thing being protected is
+/// not the sentence. **Deleting the one `.with_page_driver(…)` call at the
+/// composition root must produce a run that fails, not a run that passes and not
+/// a run that quietly skips**, and a `Skipped` here would be exactly the quiet
+/// skip — it reads as a decision somebody made about the project, and nobody
+/// decided this.
+///
+/// The status is `Error` for the same reason [`NOTHING_WAS_REPORTED`] is: the plan
+/// says the check would run, so SURE having no way to run it is a failure of
+/// SURE's own check. The reason names the work as well as the missing driver,
+/// because *what SURE could not do* and *what it could not do it with* are two
+/// things a reader needs and this is the only line that carries them.
+fn no_driver_result(work: &AdmittedBrowser<'_>) -> CheckResult {
+    let check = work.admitted().command().check();
     CheckResult::errored(
-        proposal.id().clone(),
-        proposal.title(),
-        proposal.severity(),
-        proposal.critical(),
+        check.id().clone(),
+        check.title().to_owned(),
+        check.severity(),
+        check.critical(),
         format!(
-            "This build has no runner for work that is {}, so nothing about this check was \
-             observed.",
-            scheduled.operation().plain_description()
+            "SURE was not given a browser driver, so the work this check is — {} — was never \
+             carried out and nothing about this check was observed.",
+            work.work_description()
         ),
-        project_fingerprint.clone(),
+        work.fingerprint().clone(),
+    )
+}
+
+/// The result for a browser check SURE could not set up.
+///
+/// `Error` and never a pass, for [`service_refused`]'s reason: nothing was
+/// started, so nothing was observed, and a check the plan says would run is one
+/// SURE owes an answer to. The identity comes from the admitted command, the same
+/// place [`crate::browser::Report::verdict`]'s caller takes it from, so the two
+/// paths cannot name one check differently.
+///
+/// `component` names the part of the plan that could not be used, because the
+/// three ways to arrive here are three different facts: a budget this file chose
+/// (which would be this file's defect), a window the plan chose, and an address
+/// the plan chose. A reader who cannot tell them apart cannot tell which file to
+/// look in.
+fn browser_refused(
+    work: &AdmittedBrowser<'_>,
+    component: &str,
+    error: &dyn fmt::Display,
+) -> CheckResult {
+    let check = work.admitted().command().check();
+    CheckResult::errored(
+        check.id().clone(),
+        check.title().to_owned(),
+        check.severity(),
+        check.critical(),
+        format!(
+            "SURE could not set this browser check up, so no page was opened and nothing about \
+             this check was observed: {component} could not be used ({error})."
+        ),
+        work.fingerprint().clone(),
     )
 }
 
@@ -1057,6 +1524,26 @@ mod tests {
         endpoint: Option<Endpoint>,
     }
 
+    /// What one call to a fake runner was asked to open in a browser.
+    ///
+    /// The spec's own fields rather than a rendered line, for [`AskedService`]'s
+    /// reason: **the page's path is deliberately not the readiness path**, so the
+    /// two have to be readable apart, and an assertion about a service's endpoint
+    /// could not tell a browser check that opened the page from one that opened
+    /// the health route.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct AskedPage {
+        id: CheckId,
+        program: OsString,
+        arguments: Vec<OsString>,
+        working_directory: PathBuf,
+        environment: crate::process::Environment,
+        window: Duration,
+        readiness: Option<Endpoint>,
+        path: String,
+        expectation: String,
+    }
+
     /// A runner with no process behind it.
     ///
     /// It records what it was asked for before it answers, so a test can assert
@@ -1065,26 +1552,30 @@ mod tests {
     /// these tests are about what may reach the seam, and a real run would answer a
     /// question about this machine instead.
     ///
-    /// One fake for both methods rather than two, so that "the command runner was
-    /// not asked for a service" and "the service runner was not asked for a
+    /// One fake for all three methods rather than three, so that "the command
+    /// runner was not asked for a page" and "the page runner was not asked for a
     /// command" are assertions about the same value a run was handed.
     #[derive(Debug)]
     struct FakeRunner {
         asked: RefCell<Vec<Asked>>,
         answer: CommandRun,
         services: RefCell<Vec<AskedService>>,
+        pages: RefCell<Vec<AskedPage>>,
         verdict: CheckStatus,
+        page_verdict: CheckStatus,
     }
 
     impl FakeRunner {
         /// A runner that reports `answer` for every command and a `Pass` for every
-        /// service.
+        /// service and every page.
         fn reporting(answer: CommandRun) -> Self {
             Self {
                 asked: RefCell::new(Vec::new()),
                 answer,
                 services: RefCell::new(Vec::new()),
+                pages: RefCell::new(Vec::new()),
                 verdict: CheckStatus::Pass,
+                page_verdict: CheckStatus::Pass,
             }
         }
 
@@ -1099,6 +1590,17 @@ mod tests {
             self
         }
 
+        /// The same fake, answering pages with `verdict` instead of a pass.
+        ///
+        /// Separate from [`Self::answering_services_with`] on purpose: a fixture
+        /// that moved both at once could not show that a page's status is the one
+        /// the browser check reports, which is the only thing that distinguishes
+        /// the browser door's wiring from the service door's.
+        fn answering_pages_with(mut self, verdict: CheckStatus) -> Self {
+            self.page_verdict = verdict;
+            self
+        }
+
         /// Everything it was asked to run, in the order it was asked.
         fn asked(&self) -> Vec<Asked> {
             self.asked.borrow().clone()
@@ -1107,6 +1609,11 @@ mod tests {
         /// Every service it was asked to start, in the order it was asked.
         fn services(&self) -> Vec<AskedService> {
             self.services.borrow().clone()
+        }
+
+        /// Every page it was asked to open, in the order it was asked.
+        fn pages(&self) -> Vec<AskedPage> {
+            self.pages.borrow().clone()
         }
 
         /// The result a service run reports, with the identity of the check the
@@ -1118,12 +1625,33 @@ mod tests {
         /// does not hold would be refused by [`RunResults::assemble`] and the
         /// refusal would be about this fixture rather than about the runner.
         fn a_service_result(&self, work: &AdmittedService<'_>) -> CheckResult {
-            let check = work.admitted().command().check();
+            self.a_result(work.admitted(), work.fingerprint(), self.verdict)
+        }
+
+        /// The result a browser check reports, built the same way and for the same
+        /// reason.
+        ///
+        /// **One construction for both doors rather than two**, so that the two
+        /// cannot drift into reporting a check differently — the identity comes
+        /// from the admitted command in both cases, which is where
+        /// `runtime_start` and `browser::Report::verdict` take it from too.
+        fn a_page_result(&self, work: &AdmittedBrowser<'_>) -> CheckResult {
+            self.a_result(work.admitted(), work.fingerprint(), self.page_verdict)
+        }
+
+        /// The result a fake run reports for one check in one status.
+        fn a_result(
+            &self,
+            admitted: AdmittedCommand<'_>,
+            run_fingerprint: &FingerprintId,
+            verdict: CheckStatus,
+        ) -> CheckResult {
+            let check = admitted.command().check();
             let (id, title) = (check.id().clone(), check.title().to_owned());
             let (severity, critical) = (check.severity(), check.critical());
-            let fingerprint = work.fingerprint().clone();
+            let fingerprint = run_fingerprint.clone();
             let class = EvidenceClass::ObservedFact;
-            match self.verdict {
+            match verdict {
                 CheckStatus::Pass => {
                     CheckResult::pass(id, title, severity, critical, class, fingerprint)
                 }
@@ -1183,6 +1711,24 @@ mod tests {
                 endpoint: spec.readiness().endpoint().cloned(),
             });
             self.a_service_result(work)
+        }
+
+        fn run_browser(&self, work: &AdmittedBrowser<'_>) -> CheckResult {
+            let spec = work.browser();
+            let service = spec.service();
+            let command = service.command();
+            self.pages.borrow_mut().push(AskedPage {
+                id: work.check().clone(),
+                program: command.program().to_os_string(),
+                arguments: command.arguments().to_vec(),
+                working_directory: command.working_directory().to_path_buf(),
+                environment: command.environment().clone(),
+                window: service.window(),
+                readiness: service.readiness().endpoint().cloned(),
+                path: spec.path().to_owned(),
+                expectation: spec.expectation().to_owned(),
+            });
+            self.a_page_result(work)
         }
     }
 
@@ -1340,6 +1886,26 @@ mod tests {
         )
     }
 
+    /// The operation for a browser check whose page is **not** its service's
+    /// readiness route.
+    ///
+    /// [`a_browser`] opens `/`, which is what a fixture reaches for first and is
+    /// also the one path that could not tell the page apart from the readiness
+    /// question if a wiring ever confused them. This one opens `/post/1` on a
+    /// service whose readiness is `/health`, which is the shape `planned_work.rs`
+    /// says a browser check is for — *a project whose health route is not where
+    /// its pages are* — and it is the fixture the wiring assertions use for that
+    /// reason.
+    fn a_browser_with_its_own_page() -> CheckOperation {
+        let CheckOperation::Service(service) = a_planned_service() else {
+            panic!("the fixture builds a service");
+        };
+        CheckOperation::Browser(
+            BrowserCheckSpec::new(service, "/post/1", "the post page shows the first post")
+                .expect("the fixture's page is well formed"),
+        )
+    }
+
     /// A schedule built from these checks, in the plan's own order.
     ///
     /// The order that comes back is the plan's, not this function's — the plan
@@ -1353,6 +1919,30 @@ mod tests {
                 .propose(entry)
                 .expect("the fixture's proposals are well formed");
         }
+        builder.build()
+    }
+
+    /// A schedule holding one browser check, built under the one grant a browser
+    /// probe needs.
+    ///
+    /// [`schedule_of`]'s mode grants the right to run the project's code and not
+    /// the right to connect to a service, so a browser check proposed there is
+    /// stopped by the plan and never reaches a door — which would make every test
+    /// below a test about the plan rather than about the seam. This is the same
+    /// builder with `connect_service` added and nothing else changed, which is
+    /// the pair `browser_probe.rs` uses for the same reason.
+    fn browser_schedule(entry: PlannedWork) -> CheckSchedule {
+        let (mode, permissions) = (
+            ExecutionMode::HostConfirmed,
+            ExecutionPermissions {
+                connect_service: true,
+                ..ExecutionPermissions::inspect_only()
+            },
+        );
+        let mut builder = PlanBuilder::new(mode, permissions);
+        builder
+            .propose(entry)
+            .expect("the fixture's proposal is well formed");
         builder.build()
     }
 
@@ -2011,55 +2601,207 @@ mod tests {
     }
 
     #[test]
-    fn a_check_this_build_has_no_runner_for_is_an_error_and_not_a_silence() {
+    fn a_browser_check_whose_service_is_admitted_reaches_the_browser_runner() {
         let fingerprint = FingerprintId::generate();
-        // A browser check, which the plan admits and this build cannot carry out:
-        // driving a browser is `P18-T010`'s work and not this build's. The check
-        // reaches the runner with nothing to hand it to, so the answer has to be
-        // an error rather than a row that quietly went missing — and the fixture
-        // grants the one permission the action needs, because a check the plan
-        // stopped would be a different question with a different answer.
-        let (mode, permissions) = (
-            ExecutionMode::HostConfirmed,
-            ExecutionPermissions {
-                connect_service: true,
-                ..ExecutionPermissions::inspect_only()
-            },
+        // **Every field of this check differs from every other fixture's.** The
+        // page is `/post/1` while the service's readiness is `/health`, the
+        // window is `a_planned_service`'s seven seconds and not `a_service`'s
+        // five, the directory is not the temp directory and the environment is
+        // not SURE's own. So an assertion below can only pass if the value came
+        // from the plan, and the two paths can only pass if the page's path and
+        // the readiness path arrived as two different things.
+        let schedule = browser_schedule(work(
+            "browsed",
+            "the project's first post page",
+            ActionKind::BrowserProbe,
+            a_browser_with_its_own_page(),
+        ));
+        let plan = permission_plan(
+            &fingerprint,
+            &[("browsed", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
         );
-        let mut builder = PlanBuilder::new(mode, permissions);
-        builder
-            .propose(work(
-                "browsed",
-                "a page this build cannot open",
-                ActionKind::BrowserProbe,
-                a_browser(),
-            ))
-            .expect("the proposal is well formed");
-        let schedule = builder.build();
-        assert!(
-            schedule.checks()[0].may_run(),
-            "the plan allowed this check, which is what makes the missing runner a question SURE \
-             owes an answer to"
-        );
-        let enforcement = enforcement_of(&schedule, permission_plan(&fingerprint, &[]));
+        let enforcement = enforcement_of(&schedule, plan);
         let runner = FakeRunner::succeeding();
 
         let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
-            .expect("a kind of work this build cannot carry out is a result");
+            .expect("nothing in this plan is ambiguous");
 
+        let pages = runner.pages();
+        assert_eq!(
+            pages.len(),
+            1,
+            "one page reached the browser runner, found: {pages:?}"
+        );
+        let asked = &pages[0];
+        assert_eq!(asked.id, check_id("browsed"), "and it is this check's page");
+        assert_eq!(
+            asked.path, "/post/1",
+            "the page the plan names is the page that would be opened, and it is not the \
+             readiness route"
+        );
+        assert_eq!(
+            asked.readiness,
+            Some(Endpoint::loopback(5173, "/health").expect("the fixture's endpoint")),
+            "the service is held to the question the plan names, which is a different endpoint \
+             from the page"
+        );
+        assert_eq!(
+            asked.expectation, "the post page shows the first post",
+            "what the observation is for travels with it, because that is what a reader is told \
+             the look was looking for"
+        );
+        assert_eq!(asked.program, OsString::from(ADMITTED_PROGRAM));
+        assert_eq!(
+            asked.arguments,
+            vec![OsString::from("-m"), OsString::from("pytest")],
+            "the service's own program and argument vector are what the enforcement admitted"
+        );
+        assert_eq!(
+            asked.working_directory,
+            std::env::temp_dir().join("sure-fixture-service"),
+            "the directory is the plan's"
+        );
+        assert_eq!(
+            asked.environment,
+            crate::process::Environment::only([
+                (OsString::from("PATH"), OsString::from("/fixture/bin")),
+                (OsString::from("PORT"), OsString::from("5173")),
+            ]),
+            "**the environment a browser check's service is given is the plan's own field too** \
+             — the same rule `P18-T009` holds for a service check, and the browser door is not a \
+             way round it"
+        );
+        assert_eq!(
+            asked.window,
+            Duration::from_secs(7),
+            "the window is the plan's, and it bounds the service rather than the look"
+        );
+        assert!(
+            runner.asked().is_empty(),
+            "a browser check is not carried out by the command runner, whatever its service's \
+             command is"
+        );
+        assert!(
+            runner.services().is_empty(),
+            "**and it is not carried out by the service runner either**: a browser check that \
+             reached the service door would run the service, ask it its readiness question and \
+             stop it, and no page would ever be opened"
+        );
+        assert_eq!(
+            status_of(&results, "browsed"),
+            CheckStatus::Pass,
+            "the result is the one the browser runner reported for this check"
+        );
+    }
+
+    #[test]
+    fn a_browser_the_runner_failed_is_not_reported_as_a_pass_by_the_wiring() {
+        let fingerprint = FingerprintId::generate();
+        // The verdict itself is `browser::Report::status`'s and is measured in
+        // `tests/browser_driver.rs` and `tests/browser_probe.rs`, over the real
+        // adapter. What this measures is the other half — that the browser door
+        // hands back the answer it was given. A wiring that laundered a `Fail`
+        // into a `Pass` would be the false green this repository treats as worse
+        // than an error, and a fixture whose fake answered a pass could not tell
+        // the two apart. The service half is told to pass in the same run, so the
+        // failing status can only have come from the page's own door.
+        let schedule = browser_schedule(work(
+            "browsed",
+            "a page that reported a console error",
+            ActionKind::BrowserProbe,
+            a_browser_with_its_own_page(),
+        ));
+        let plan = permission_plan(
+            &fingerprint,
+            &[("browsed", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let runner = FakeRunner::succeeding()
+            .answering_services_with(CheckStatus::Pass)
+            .answering_pages_with(CheckStatus::Fail);
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("nothing in this plan is ambiguous");
+
+        assert_eq!(
+            status_of(&results, "browsed"),
+            CheckStatus::Fail,
+            "the page's own verdict is the check's verdict, and the wiring did not soften it"
+        );
+        assert!(
+            results
+                .get(&check_id("browsed"))
+                .expect("reported")
+                .blocks_green(),
+            "a failing browser check keeps the run out of green"
+        );
+    }
+
+    // ---- the browser door: the un-wiring property, on the real runner --------
+
+    #[test]
+    fn a_browser_check_with_no_driver_is_an_error_and_opens_nothing() {
+        let fingerprint = FingerprintId::generate();
+        // **The property this file existed to hold before `P18-T010`, held after
+        // it.** A browser check used to be answered with *this build has no
+        // runner for that kind of work*; the mechanism is a driver now, and the
+        // thing being protected is not the sentence. Delete the one
+        // `.with_page_driver(…)` call at the composition root and this is what
+        // a run must say — an `Error`, never a pass and never a quiet skip.
+        //
+        // The runner is the **real** [`ProcessRunner`] rather than a fake, because
+        // this is the one browser test whose subject is what the product's own
+        // implementation does. It starts nothing either way: the token is
+        // cancelled before the run, so even a regression that reached
+        // `StartSmoke` would be refused by the supervisor before spawning, and the
+        // assertion below would catch it because a cancelled run's own sentence is
+        // a different one.
+        let schedule = browser_schedule(work(
+            "browsed",
+            "a page this run was given no driver for",
+            ActionKind::BrowserProbe,
+            a_browser_with_its_own_page(),
+        ));
+        let plan = permission_plan(
+            &fingerprint,
+            &[("browsed", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS)],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let stop = Cancellation::new();
+        stop.cancel();
+        let runner = ProcessRunner::new(stop);
+
+        let results = run_scheduled_checks(&schedule, &enforcement, &fingerprint, &runner)
+            .expect("a kind of work this runner cannot carry out is a result");
+
+        assert_eq!(results.len(), 1, "the check is a row and not an absence");
         let result = results.get(&check_id("browsed")).expect("reported");
         assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.blocks_green());
+        assert!(
+            result.blocks_green(),
+            "a critical browser check that could not be carried out must keep the run out of green"
+        );
+        assert!(
+            result
+                .reason
+                .contains("SURE was not given a browser driver"),
+            "the reason says what was missing: {}",
+            result.reason
+        );
         assert!(
             result
                 .reason
                 .contains("a page served on loopback, read by a browser"),
-            "the reason names the work this build has no runner for: {}",
+            "and it still names the work SURE could not do, which is the half of the sentence a \
+             reader acts on: {}",
             result.reason
         );
         assert!(
-            runner.asked().is_empty() && runner.services().is_empty(),
-            "a browser is carried out by neither half of this seam"
+            !result.reason.contains("cancelled"),
+            "the run was cancelled before it started, and a reason that says so is a reason from \
+             a path this check did not take — which would mean the driver check was not the first \
+             thing this runner did: {}",
+            result.reason
         );
     }
 
@@ -2405,6 +3147,116 @@ mod tests {
         // And the same program with a different argument vector.
         let differs = schedule.get(&check_id("differs")).expect("scheduled");
         match AdmittedService::new(differs, admitted[&check_id("differs")], &fingerprint)
+            .expect_err("the decision was about a different argument vector")
+        {
+            AdmissionRefused::NotTheCommandThatWasAdmitted {
+                id,
+                planned,
+                admitted,
+            } => {
+                assert_eq!(id, check_id("differs"));
+                assert_eq!(planned, "python -m pytest");
+                assert_eq!(admitted, "python -m pytest -x");
+            }
+            other => panic!("the refusal names the wrong reason: {other}"),
+        }
+    }
+
+    #[test]
+    fn the_browser_door_refuses_the_same_three_pairings_the_other_doors_do() {
+        let fingerprint = FingerprintId::generate();
+        let schedule = schedule_of([
+            work(
+                "mine",
+                "a page on my service",
+                ActionKind::BrowserProbe,
+                a_browser(),
+            ),
+            work(
+                "theirs",
+                "a page on another service",
+                ActionKind::BrowserProbe,
+                a_browser(),
+            ),
+            work(
+                "service",
+                "a service with no page",
+                ActionKind::LocalProbe,
+                a_planned_service(),
+            ),
+            work(
+                "differs",
+                "a page whose service's command and admission disagree",
+                ActionKind::BrowserProbe,
+                a_browser(),
+            ),
+        ]);
+        // The last entry is the same program with one more argument: the case a
+        // comparison of rendered command lines would let through, and for a
+        // browser check it is the *service's* command that is compared — the page
+        // is a path and an expectation, and neither is something the enforcement
+        // decided about.
+        let plan = permission_plan(
+            &fingerprint,
+            &[
+                ("mine", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("theirs", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("service", ADMITTED_PROGRAM, &ADMITTED_ARGUMENTS),
+                ("differs", ADMITTED_PROGRAM, &["-m", "pytest", "-x"]),
+            ],
+        );
+        let enforcement = enforcement_of(&schedule, plan);
+        let admitted: BTreeMap<&CheckId, AdmittedCommand<'_>> = enforcement
+            .admitted()
+            .map(|command| (command.command().check().id(), command))
+            .collect();
+
+        // The pairing that really is one browser check.
+        let mine = schedule.get(&check_id("mine")).expect("scheduled");
+        let pair = AdmittedBrowser::new(mine, admitted[&check_id("mine")], &fingerprint)
+            .expect("the plan and the enforcement agree about this service's command");
+        assert_eq!(pair.check(), &check_id("mine"));
+        assert_eq!(
+            pair.browser().path(),
+            "/",
+            "the page travels with the pair, which is the half the enforcement has no opinion \
+             about"
+        );
+        assert_eq!(
+            pair.work_description(),
+            "a page served on loopback, read by a browser"
+        );
+
+        // The same admission, paired with another check's page.
+        let theirs = schedule.get(&check_id("theirs")).expect("scheduled");
+        let refused = AdmittedBrowser::new(theirs, admitted[&check_id("mine")], &fingerprint)
+            .expect_err("an admission is about one check");
+        assert_eq!(
+            refused,
+            AdmissionRefused::ForADifferentCheck {
+                id: check_id("theirs"),
+                admitted_for: check_id("mine"),
+            }
+        );
+
+        // An admission paired with work that opens no page at all — and this is
+        // the refusal a browser check needed its own door for. A service and a
+        // browser check hold the *same kind of command*, so a door that keyed on
+        // the command alone would carry a service out as a page.
+        let service = schedule.get(&check_id("service")).expect("scheduled");
+        let refused = AdmittedBrowser::new(service, admitted[&check_id("service")], &fingerprint)
+            .expect_err("a service is asked one question and no page is opened");
+        assert_eq!(
+            refused,
+            AdmissionRefused::NotOneBrowser {
+                id: check_id("service"),
+                work: "started, asked one question, and stopped",
+            }
+        );
+
+        // And the same program with a different argument vector.
+        let differs = schedule.get(&check_id("differs")).expect("scheduled");
+        match AdmittedBrowser::new(differs, admitted[&check_id("differs")], &fingerprint)
             .expect_err("the decision was about a different argument vector")
         {
             AdmissionRefused::NotTheCommandThatWasAdmitted {

@@ -17,6 +17,7 @@
 //! Enforcement::of      enforce.rs          which of those may run
 //! Supervisor::start    service.rs          the process, and stopping it
 //! StartSmoke::run      here                the window, the question, the stop, the verdict
+//! StartSmoke::run_then here                the same, with the caller's own step before the stop
 //! ```
 //!
 //! [`StartSmoke::of`] takes an [`Enforcement`] and not a command, which is
@@ -516,15 +517,74 @@ impl<'a> StartSmoke<'a> {
     /// failure of this function.
     #[must_use]
     pub fn run(&self, cancellation: &Cancellation) -> CheckResult {
+        // The window, the question and the stop are all this module's, and a
+        // caller with nothing else to do while the service is up is
+        // [`Self::run_then`] with a step that does nothing. **One lifecycle
+        // rather than two spellings of one**: a browser check is the caller
+        // that has somewhere else to look, and the alternative — a second copy
+        // of the start, the window and the stop written beside this one — is
+        // the second answer to *did this service work* that this module exists
+        // to be the only one of.
+        self.run_then(cancellation, |_| ()).0
+    }
+
+    /// Start it, watch it, ask it, hand the answer to `look`, stop it, and say
+    /// what came of all of it.
+    ///
+    /// [`Self::run`] with one step inserted, and the step is the caller's
+    /// because the caller is the one that knows what else there is to do while
+    /// a service is up: a browser check holds a service **and a page**, and the
+    /// page is read between the readiness question and the stop.
+    ///
+    /// # The four things that make this the same rule as `run`
+    ///
+    /// - **`look` is called only when the readiness question was answered.** The
+    ///   condition is the one [`Self::run`] already uses to ask — the window
+    ///   closed with the service still running and there was an endpoint — plus
+    ///   the answer itself: a port that accepted a connection and said nothing
+    ///   is [`ProbeOutcome::NoAnswer`], which is *an open port is not an
+    ///   answer*, so a caller cannot look at a page on a service SURE never
+    ///   reached. **A refusal is not an absence of an answer** — an HTTP status
+    ///   outside the 2xx–3xx window is [`ProbeOutcome::Answered`] and does
+    ///   reach `look`, because the question this gates is *did the service
+    ///   answer at all* and not *was the answer to SURE's liking*.
+    /// - **It is called with the endpoint that answered**, so the address a
+    ///   caller goes on to is the one SURE has just read a status line from
+    ///   rather than one it assumed.
+    /// - **It is called before the stop**, so whatever it observed was observed
+    ///   while the service was up.
+    /// - **The stop happens on every path.** It is not a branch: it is the next
+    ///   statement after the look for every look there is — the one that
+    ///   returned a clean page, the one that reported a page that threw, and
+    ///   the one that never ran because the service never answered. A `look`
+    ///   that panics is the one path this function does not walk, and it is
+    ///   covered rather than excused: dropping a [`Service`] cancels it, which
+    ///   is what [`Service`]'s own documentation says a drop does.
+    ///
+    /// # What comes back
+    ///
+    /// The service's own verdict **and** what `look` produced, or `None` when
+    /// `look` was never called. They answer different questions — *did this
+    /// service come up* and *what did its page do* — and this function does not
+    /// choose between them: a caller that looked reports what it saw, and one
+    /// that did not has the service's own words for why. **Neither half is a
+    /// status this module invented for a page**, which is the whole of why the
+    /// caller's step is a closure rather than a second row in the table above.
+    #[must_use]
+    pub fn run_then<O>(
+        &self,
+        cancellation: &Cancellation,
+        look: impl FnOnce(&Endpoint) -> O,
+    ) -> (CheckResult, Option<O>) {
         let check = self.admitted.command().check();
-        let (status, reason) = self.observe(cancellation);
+        let (status, reason, looked) = self.observe(cancellation, look);
         let id = check.id().clone();
         let title = check.title().to_owned();
         let severity = check.severity();
         let critical = check.critical();
         let fingerprint = self.fingerprint.clone();
         let class = EvidenceClass::ObservedFact;
-        match status {
+        let result = match status {
             CheckStatus::Pass => {
                 CheckResult::pass(id, title, severity, critical, class, fingerprint)
                     .with_reason(reason)
@@ -556,7 +616,8 @@ impl<'a> StartSmoke<'a> {
             CheckStatus::Error | CheckStatus::Skipped => {
                 CheckResult::errored(id, title, severity, critical, reason, fingerprint)
             }
-        }
+        };
+        (result, looked)
     }
 
     /// Run it and return the status and the sentence together.
@@ -566,11 +627,16 @@ impl<'a> StartSmoke<'a> {
     /// `reason()` separately and argue that the two run the same rows in the
     /// same order. Here the rows are the same rows and they are walked once, so
     /// there is no order for the two to disagree about.
-    fn observe(&self, cancellation: &Cancellation) -> (CheckStatus, String) {
+    fn observe<O>(
+        &self,
+        cancellation: &Cancellation,
+        look: impl FnOnce(&Endpoint) -> O,
+    ) -> (CheckStatus, String, Option<O>) {
         if cancellation.is_cancelled() {
             return (
                 CheckStatus::Error,
                 String::from("the check was cancelled before it started"),
+                None,
             );
         }
 
@@ -582,6 +648,7 @@ impl<'a> StartSmoke<'a> {
                 return (
                     CheckStatus::Error,
                     format!("SURE could not start it, so nothing about it was checked: {error}"),
+                    None,
                 );
             }
         };
@@ -591,6 +658,23 @@ impl<'a> StartSmoke<'a> {
             self.ask()
         } else {
             None
+        };
+
+        // The caller's own step, taken **here** and nowhere else: after the
+        // readiness question has come back and before the stop. `Answered` and
+        // not `status() == Pass`, because the question this gates is *did the
+        // service answer* — a `/health` a project never wrote answers 404, and
+        // a browser check whose service 404s its health route is a check that
+        // should still look at the page.
+        let looked = match &asked {
+            Some((endpoint, answer)) => match answer {
+                ProbeOutcome::Answered { .. } => Some(look(endpoint)),
+                ProbeOutcome::Refused { .. }
+                | ProbeOutcome::Unreachable { .. }
+                | ProbeOutcome::NoAnswer { .. }
+                | ProbeOutcome::NotHttp { .. } => None,
+            },
+            None => None,
         };
 
         // The stop is called on every path, including the one where the service
@@ -604,6 +688,7 @@ impl<'a> StartSmoke<'a> {
                 return (
                     CheckStatus::Error,
                     format!("SURE started it and cannot say what it did: {error}"),
+                    looked,
                 );
             }
         };
@@ -660,6 +745,7 @@ impl<'a> StartSmoke<'a> {
                          {:?}",
                         outcome.termination()
                     ),
+                    looked,
                 );
             }
         };
@@ -689,7 +775,7 @@ impl<'a> StartSmoke<'a> {
             }
         }
 
-        (status, clauses.join("; "))
+        (status, clauses.join("; "), looked)
     }
 
     /// Whether the service ended before the window closed.

@@ -299,7 +299,33 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
     // the other end of it yet — `sure check` has no interrupt path — so today it
     // is a value that says *nothing has asked this run to stop*, and the bound on
     // any one check is the deadline its plan carries.
-    let runner = ProcessRunner::new(Cancellation::new());
+    //
+    // **The browser driver is bound here, and this is the only place in the
+    // product that builds one.** `ProcessRunner` holds it as
+    // `Option<sure_core::browser::Driver>` and answers a browser check it was
+    // given no driver for with an `Error` — so a caller that forgot this line
+    // would get failing browser checks and not passing ones, which is the
+    // direction the mistake has to fall in. This function is the composition
+    // root for the same reason it is where `Paths`, the store and the pipeline
+    // are assembled: it is the layer that is allowed to know which
+    // implementations exist, and `sure_core` is not.
+    //
+    // `Browser::system()` is the right binding here and not a placeholder. It
+    // records *look for a browser on this machine* and starts nothing: the search
+    // and any launch happen inside one `observe` call, which only runs when a
+    // browser check the user's settings and permissions allowed actually reaches
+    // the runner. **A machine with no browser is a machine where that call comes
+    // back `NoDriverInstalled`, which is a `Skipped` and never a pass** — the
+    // explicit result clause three of `P18-T010` is about, produced by the driver
+    // rather than by an absence of wiring here.
+    //
+    // Nothing in this build plans a browser check yet (`ProbePlan::add_to` plans
+    // every probe as a precomputed observation), so this line carries no project
+    // to a browser today. It is written now because the door it opens is the one
+    // the runner reads, and a door nothing has ever been able to open is a door
+    // nobody has tested.
+    let runner = ProcessRunner::new(Cancellation::new())
+        .with_page_driver(Box::new(sure_core::browser_driver::Browser::system()));
     let run = Pipeline {
         project,
         purpose,

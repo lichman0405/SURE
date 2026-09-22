@@ -88,16 +88,34 @@
 //! names what was looked at, and a test asserts that string exactly rather than
 //! asserting the absence of words a later edit could reintroduce.
 //!
-//! # What is missing
+//! # What is missing, and what arrived
 //!
-//! **No driver is implemented here, and no browser is started.** Finding one,
-//! launching it and driving it is the adapter, which is
+//! **No driver is implemented here, and this module starts no browser.** Finding
+//! one, launching it and driving it is the adapter, which is
 //! [`crate::browser_driver`]; this module is the interface that adapter
 //! implements and the mapping its answers go through. Nothing here builds a
 //! [`std::process::Command`], so the file this one names in the spawn census is
-//! the adapter's launcher and not this one — and the adapter is reachable from
-//! nothing, which is the rule `tests/browser_probe.rs` holds and the reason
-//! `support::CEILING` has not moved.
+//! the adapter's launcher and not this one.
+//!
+//! **The product builds one since `P18-T010`, and that is the change to read
+//! here.** [`Driver`] is the name the runner holds a driver by, and the file
+//! that *constructs* one is `sure-cli/src/check.rs` — the composition root,
+//! where `sure check` binds every implementation the product uses — which hands
+//! a `browser_driver::Browser` to
+//! [`ProcessRunner`](crate::planned_check_runner::ProcessRunner). A browser
+//! check that reaches the runner now opens a page, so the census rule in
+//! `tests/browser_probe.rs` that reads *a shipped file outside the adapter has
+//! begun naming it* is answered by that file being outside the tree the rule
+//! walks rather than by the absence it used to record.
+//!
+//! **`support::CEILING` did not move with it, and the reason is not this
+//! module's.** The ceiling's reason is the platform argument `P18-T007` wrote
+//! beside it — a Node check whose only program on the machine is `npm.cmd`
+//! comes back `InterpreterRequired` on Windows, and this branch's macOS and
+//! Linux steps have never run — and the measurements that could raise it are
+//! `P18-T012`'s. A new caller is not evidence about which platforms SURE has
+//! been shown to run project code on, and the paragraph beside the ceiling is
+//! where that argument lives.
 //!
 //! **The loopback rule is [`Endpoint`]'s**, and it is reused rather than
 //! restated — see [`Target`]. A browser will navigate to the internet happily,
@@ -802,6 +820,32 @@ pub trait BrowserDriver {
         cancellation: &crate::process::Cancellation,
     ) -> Report;
 }
+
+/// A driver a caller holds, named so that the caller does not have to.
+///
+/// **This is a name, not a mechanism, and it is here for one reason.** The
+/// runner that carries a browser check out
+/// ([`ProcessRunner`](crate::planned_check_runner::ProcessRunner)) has to hold a
+/// driver and hand it a [`Target`], and the file it lives in is one of the
+/// shipped files `tests/browser_probe.rs` walks. If it wrote
+/// `Box<dyn BrowserDriver>` it would be a second file naming the interface,
+/// which that census refuses — not out of tidiness but because *a file that
+/// names the interface is a file with an opinion about how a browser is driven*,
+/// and the point of the rule is that those opinions stay in one place. The alias
+/// lets that file carry what it was handed without deciding what it is.
+///
+/// **It is not a way round the rule and it is not meant to read like one.** The
+/// rule's real subject is a *capability*: since `P18-T010` something in the
+/// product does construct a driver and open a page, which is why
+/// `sure-cli/src/check.rs` — the composition root, where `sure check` binds
+/// every implementation the product uses — is the file that builds a
+/// `browser_driver::Browser` and hands it over. Nothing else in the product
+/// builds one, and this module builds none.
+///
+/// The interface's object safety (see [`BrowserDriver`]) is what makes this a
+/// type rather than a generic parameter, and a caller that has written its own
+/// driver can pass it here exactly as the product's does.
+pub type Driver = Box<dyn BrowserDriver>;
 
 /// The reason a browser check is not run here, or `None` if SURE's own rules
 /// allow it to run.

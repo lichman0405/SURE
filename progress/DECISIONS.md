@@ -5230,3 +5230,83 @@ re-read it, so a green verdict made in inspect-only mode still describes the
 state stage 3 saw. The strengthening above means the run now *says* so rather
 than being silent, which is the honest half. Whether a static pass should also be
 withdrawn is a question about detector design and is not this task's.
+
+## P18-T009 — a service starts with the plan's own environment, and the census fired where it said it would
+
+**The seam is a second door into `runtime_start`, and the argument for it is that
+the alternative was a second answer to one question.** A scheduled
+`CheckOperation::Service` could have been carried out by a service runner written
+inside `planned_check_runner.rs`. It was not, because `runtime_start.rs` is the
+only implementation in this tree of *start it, hold the window, ask the one
+question, stop it on every path, and turn that into a verdict* — and that verdict
+table is already measured against real processes by `tests/runtime_start.rs`. A
+second implementation would be a second answer to *did this service work*, free to
+disagree with the first. So `StartSmoke::planned` was added beside `StartSmoke::of`
+and the runner's part is **pairing and nothing else**: the check's own spec, the
+admission the enforcement produced for that check, and the call. `AdmittedService`
+repeats `AdmittedRun`'s three refusals and compares the argument vector element by
+element rather than as text.
+
+**The environment is the plan's, and the probe door's inheritance is now stated
+rather than accidental — which are two different decisions.** On the planned door
+the environment comes from the spec's own `CommandSpec`, the same rule the command
+path already followed. On the probe door there is no `CommandSpec` to read and the
+answer stays `Environment::inherited()`, for the reason that variant's own doc
+gives: on Windows `CreateProcess` searches `PATH`, so a child started with no
+environment cannot start anything either. What changed there is that the choice is
+now *made* in the constructor rather than discovered in `service.rs`'s default.
+`Supervisor` gained a third knob so that "what does this service start with" has an
+answer a test can read without a process existing.
+
+**What this does not claim, and `service.rs` now says in as many words.** An
+environment is a list of strings a program starts with and **not a boundary around
+it** — a service can still open any file the user can open and reach the network.
+The sentence is written into the module because "the environment is controlled" is
+the kind of phrase a reader turns into "the process is confined", and this build
+claims no containment on the host path.
+
+**The permission hole closed here was a real one and not a tidy-up.** The
+permission-plan loop planned only `CheckOperation::Command`, so a service check's
+own program was never decided about at all: `Enforcement` had nothing to admit for
+it, and the service door would have been unreachable even once a planner emitted
+one. The comment above the loop said a service "is not a command", which was false
+about it. `CheckOperation::Service(service) => Some(service.command())` is the fix.
+A **browser** check's command is deliberately still not planned, with the reason
+written where the next worker reads it: carrying one out is `P18-T010`'s work, and
+nothing in this build consumes that admission yet.
+
+**The census fired exactly where it said it would, and the ceiling did not move.**
+`planned_check_runner.rs` naming `StartSmoke` is the first time anything outside
+`runtime_start.rs` has, so rule four failed with the two lines it was written to
+flag, and the paragraph claiming *"nothing in the product constructs a
+`StartSmoke`"* stopped being true. The list became a slice, mirroring
+`MAY_NAME_A_SUPERVISOR`; the entry carries its reason; the failure message lost its
+now-false clause and gained the instruction not to move the ceiling because a
+caller exists. That last point is the decision this task made about the ceiling:
+**`support::CEILING` is unchanged**, because `spawn_sites.rs` already recorded that
+this runner is on a product path "since `P18-T007`" and that this "neither changes
+`support::CEILING`" — so a caller existing is settled ground and not evidence
+against a claim about which platforms SURE has been shown to run project code on.
+The measurements that could move it are `P18-T012`'s.
+
+**Recorded so it cannot be discovered later as a surprise: the probe door inherits
+SURE's whole environment, and it is one wiring decision away from being a
+disclosure.** `Environment::inherited()` is `Inherited { without: [], with: [] }` —
+everything SURE has, unchanged. That is harmless today only because the probe door
+is test-only: `ProbePlan::add_to` plans every probe as `Precomputed(Candidate)`,
+because nothing has settled it, so no product path reaches `StartSmoke::of`. The
+day a task makes probes actually run, a project-controlled child process inherits
+SURE's own variables — including whatever tokens are in the environment SURE was
+started with. The fix at that moment is a `without` list or an `Only` built from
+the plan, and it is named here rather than left to be found by reading
+`CreateProcess` documentation.
+
+**What this does not decide.** No shipped planner emits `CheckOperation::Service`,
+so the wired path is measured with a runner that starts nothing while the verdict
+table is measured by pre-existing real-process tests — the two halves are quoted
+rather than presented as one end-to-end run, and a pipeline test asserts the
+service half is *empty* so that the day a planner emits one is a failing test
+rather than a silent change. `CheckOperation::Browser` still returns
+`no_runner_result`'s explicit `Error`, which is `P18-T010`'s. `ONE_EXCHANGE`
+(500 ms, 64 KiB) is the one budget the plan does not hold and is a stated judgment
+rather than a measurement, written where a reader can disagree with it.

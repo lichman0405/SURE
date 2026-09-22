@@ -1187,6 +1187,11 @@ impl ProgramPath {
                 if candidate.is_file() {
                     return match kind {
                         Completion::Executable => Resolution::Executable(candidate),
+                        // Gated with the variant it reads. On a platform whose
+                        // completion table cannot hold one of these the arm
+                        // could never be reached, and `Completion` has a single
+                        // variant there.
+                        #[cfg(windows)]
                         Completion::Interpreter => Resolution::InterpreterRequired(candidate),
                     };
                 }
@@ -1201,6 +1206,17 @@ enum Completion {
     /// An image this build starts directly.
     Executable,
     /// A file whose start is an interpreter's.
+    ///
+    /// **Windows-only, and gated rather than allowed to be dead.** Only the
+    /// `PATHEXT` list can hold one of these — `.bat`, `.cmd` and `.ps1` are
+    /// where an interpreter's start comes from — while a platform without
+    /// `PATHEXT` completes a bare name with the name and with nothing else, so
+    /// it has no such completion to describe. On those platforms this variant is
+    /// not unused but unconstructible, and the gate is what makes an
+    /// `Interpreter` entry in the table below a **compile error** rather than a
+    /// silently dead enum arm; `#[allow(dead_code)]` would have silenced the
+    /// same warning and left the entry writable.
+    #[cfg(windows)]
     Interpreter,
 }
 

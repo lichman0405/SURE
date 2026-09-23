@@ -342,14 +342,26 @@ impl Service {
     /// Stop the service and report what came of it.
     ///
     /// The stop asks for the process tree and not the process — a server started
-    /// through a shell, or one that starts workers of its own, is stopped whole,
-    /// and [`crate::process`]'s termination path is what does it. The returned
-    /// [`Outcome`] carries both captured streams and a termination saying which
-    /// stop it was: [`Cancelled`](crate::process::Termination::Cancelled) for
-    /// this one, [`TimedOut`](crate::process::Termination::TimedOut) if the
-    /// budget had already run out, or
+    /// through a shell, or one that starts workers of its own, is stopped whole
+    /// **on Windows, and only there.** That is what `taskkill /T /F` reporting
+    /// success means; every other platform runs [`Child::kill`] on the one
+    /// process SURE holds and reports
+    /// [`Stop::ProcessOnly`](crate::process::Stop::ProcessOnly), so anything the
+    /// service started there may still be running. **How much was reached is
+    /// reported rather than assumed** — it is the `stopped` field on the
+    /// returned [`Outcome`]'s
+    /// [`Terminated`](crate::process::Termination::Cancelled) — and the reason
+    /// the other platforms stop one process is in [`crate::process`]: a process
+    /// group would need `unsafe`, which this workspace forbids. The returned
+    /// [`Outcome`] also carries both captured streams and a termination saying
+    /// which stop it was:
+    /// [`Cancelled`](crate::process::Termination::Cancelled) for this one,
+    /// [`TimedOut`](crate::process::Termination::TimedOut) if the budget had
+    /// already run out, or
     /// [`Exited`](crate::process::Termination::Exited) if the service ended by
     /// itself before the stop arrived.
+    ///
+    /// [`Child::kill`]: std::process::Child::kill
     ///
     /// # Errors
     ///

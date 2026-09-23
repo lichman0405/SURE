@@ -72,12 +72,20 @@
 //! # What a caller has to do, and what happens if it does not
 //!
 //! A [`Service`] **stops itself when it is dropped**, and dropping it does not
-//! wait for the outcome — so the process tree is stopped and the handle that
-//! would have reported what came of it is gone. That is the right default for
-//! something that by definition does not end on its own, and it is the safe
-//! direction: a forgotten service is stopped rather than left running.
-//! [`Service::stop`] is what a caller calls to stop one *and* be told what it
-//! printed.
+//! wait for the outcome — so the handle that would have reported what came of it
+//! is gone, and with it any account of how far the stop reached. **The drop
+//! reaches exactly what [`Service::stop`] reaches on this platform**, since it
+//! is the same stop: the whole tree on Windows and only there, and elsewhere the
+//! one process SURE holds — so on any other platform anything the service
+//! started is still running when the drop returns.
+//!
+//! **Dropping is still the right default for something that by definition does
+//! not end on its own, and it is still the safe direction**: a forgotten service
+//! is stopped rather than left running. What the fragment above changes is only
+//! how much of it is stopped, which is this platform's fact and not a promise
+//! the drop can widen. [`Service::stop`] is what a caller calls to stop one *and*
+//! be told what it printed — and, because it keeps the [`Outcome`], what the stop
+//! reached.
 //!
 //! # Logs arrive when the run ends
 //!

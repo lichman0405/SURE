@@ -958,9 +958,15 @@ fn declared_service(
     // documentation carries the measurement that settled it: not a curated list,
     // because a listed variable would be SURE deciding what a project's service
     // needs, and not nothing either, because one variable turned out to be what
-    // the operating system has to tell a program before it will start. What a
-    // service that needs `PATH` does is still `crate::process`'s business — a
-    // program is found by name for every check SURE runs, this one included.
+    // the operating system has to tell a program before it will start — off
+    // Windows a bare name is resolved out of the block the child is handed, so an
+    // empty one is a service that can never start at all. **The program is found
+    // by the child's own spawn and not in SURE's own process**, which is the
+    // opposite of what this comment used to say: what SURE resolves in its own
+    // process is a *check*'s program, and this is the one place a service is not
+    // like a declared check. [`service_environment`]'s documentation carries the
+    // reading that settled it, and the paragraph above it carries the correction
+    // of the sentence this one repeats.
     let command = CommandSpec::new(NODE, &directory.full, service_environment(), CHECK_LIMITS)
         .with_arguments(vec![entry]);
 

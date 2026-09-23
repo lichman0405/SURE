@@ -1615,6 +1615,35 @@ fn a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named() 
          for: {}",
         result.reason
     );
+    // **The reach is the second fact this row carries, and it is the platform's
+    // rather than SURE's.** A stop is `taskkill /T /F` on Windows — the whole
+    // tree, and that is what its success means — and `Child::kill` on the one
+    // process SURE holds everywhere else, so off Windows whatever the service
+    // started is still running when this run reports it stopped. That is why
+    // this is split rather than written once: a reason that said nothing about
+    // the reach would read the same on both platforms, and the reading it would
+    // leave open is *"stopped" always means the whole tree*.
+    #[cfg(windows)]
+    assert!(
+        result
+            .reason
+            .contains("the stop reached the service and the programs it started"),
+        "the reason does not say that the stop reached the whole service tree, so \
+         a stop that reached everything the service started reads exactly like \
+         one that reached only the process SURE holds: {}",
+        result.reason
+    );
+    #[cfg(not(windows))]
+    assert!(
+        result.reason.contains(
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        ),
+        "the reason does not say that the stop reached only the service, so a \
+         reader would take it for a whole-tree stop while anything the service \
+         started is still running on this machine: {}",
+        result.reason
+    );
     // **What the probe made of the exchange is the platform's story, and the
     // difference was found here rather than assumed.** This is the one row where
     // SURE's own deadline lands in the middle of an open exchange, and the two
@@ -1695,6 +1724,35 @@ fn a_service_that_comes_up_with_nothing_to_ask_is_a_warning_and_never_green() {
     assert!(
         result.reason.contains("still running after 3 seconds"),
         "the reason does not say what was established about the service: {}",
+        result.reason
+    );
+    // The reach, on the arm where the status above is a **warning** — which does
+    // not block a verdict. What the sentence has to carry here is therefore the
+    // one thing the warning cannot: a service that was stopped is not the same
+    // as a service and everything it started being stopped, and the difference
+    // is the platform's. `taskkill /T /F` is the whole tree and its success is
+    // what says so; every other platform kills the one process SURE holds, and
+    // the reading this refuses is *"SURE stopped it" meaning nothing else
+    // survived*.
+    #[cfg(windows)]
+    assert!(
+        result
+            .reason
+            .contains("the stop reached the service and the programs it started"),
+        "the reason does not say that the stop reached the whole service tree, so \
+         a warning about a service that was stopped whole reads exactly like one \
+         about a service whose children were left running: {}",
+        result.reason
+    );
+    #[cfg(not(windows))]
+    assert!(
+        result.reason.contains(
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        ),
+        "the reason does not say that the stop reached only the service, so a \
+         reader of this warning would take the service for stopped whole while \
+         anything it started is still running on this machine: {}",
         result.reason
     );
     // A warning **does not block** — the domain classifies one on a critical

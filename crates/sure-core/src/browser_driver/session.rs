@@ -150,7 +150,12 @@ const SETTLE: Duration = Duration::from_millis(250);
 /// this is the opposite of looking — it is the part where SURE stops. A browser
 /// that has been asked to close is normally gone in well under this, and a
 /// browser that is not gone by the end of it is stopped by
-/// [`super::launch::Launched`]'s drop.
+/// [`super::launch::Launched`]'s drop — which reaches the whole tree on Windows
+/// and, everywhere else, only the launcher process SURE holds, so a browser that
+/// needed this long and had started children of its own leaves them running on
+/// any other platform. Which of the two happened is the `Stop` that
+/// `crate::process::terminate`'s `stop` returns; see that module for why the
+/// platform reaches what it reaches.
 const DEPARTURE: Duration = Duration::from_secs(2);
 
 /// The shortest a step is given, however little budget is left.
@@ -910,7 +915,11 @@ pub(crate) fn open(
     // In this order, and the order is the point: the socket closes first so the
     // browser hears nothing more, then the browser is given its moment to leave,
     // and then whatever is left is taken down. Dropping `browser` stops a tree
-    // that is still running without waiting for another one to answer.
+    // that is still running without waiting for another one to answer — **on
+    // Windows, and only there**: everywhere else the drop is `Child::kill` on
+    // the launcher, so the children that tree was made of may still be running
+    // when this returns. `crate::process::terminate` is where that reach is
+    // reported rather than assumed.
     drop(connection);
     browser.wait_for_exit(DEPARTURE);
     drop(browser);

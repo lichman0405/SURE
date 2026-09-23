@@ -153,7 +153,7 @@ use sure_domain::status::{CheckResult, CheckStatus};
 use crate::enforce::{AdmittedCommand, Enforcement};
 use crate::planned_work::ServiceCheckSpec;
 use crate::probe::{self, Endpoint, Probe, ProbeOutcome};
-use crate::process::{self, Cancellation, Environment, Outcome, Termination};
+use crate::process::{self, Cancellation, Environment, Outcome, Stop, Termination};
 use crate::runtime_probes::{ProbeKind, RuntimeProbe};
 use crate::service::{Service, Supervisor};
 
@@ -713,20 +713,32 @@ impl<'a> StartSmoke<'a> {
                 });
                 CheckStatus::Fail
             }
-            Termination::Cancelled { .. } => {
+            Termination::Cancelled { stopped } => {
                 clauses.push(format!(
                     "the service was still running after {}, so SURE stopped it",
                     spoken(self.limits.window)
                 ));
+                // The reach, as its own clause rather than folded into the
+                // sentence above: a reason that says only "SURE stopped it"
+                // cannot tell a service stopped whole from one whose children
+                // still hold the port, and on this arm the status can be
+                // `Warning`, which does not block a green. The same clause
+                // `planned_work.rs` pushes for a command, for the same reason:
+                // once this function returns, the `Stop` is gone with the
+                // outcome and there is nowhere left to read it.
+                clauses.push(stop_clause(stopped).to_owned());
                 asked
                     .as_ref()
                     .map_or(CheckStatus::Warning, |(_, answer)| answer.status())
             }
-            Termination::TimedOut { .. } => {
+            Termination::TimedOut { stopped } => {
                 clauses.push(format!(
                     "the service ran until its own budget of {} ran out, and SURE stopped it",
                     spoken(self.limits.service.timeout())
                 ));
+                // See the arm above: the reach is a clause of its own on both
+                // stops, and this one's status can be a `Warning` as well.
+                clauses.push(stop_clause(stopped).to_owned());
                 asked
                     .as_ref()
                     .map_or(CheckStatus::Warning, |(_, answer)| answer.status())
@@ -819,6 +831,28 @@ fn ended_with(code: Option<i32>) -> String {
     match code {
         Some(code) => format!("exit code {code}"),
         None => "no exit code, because the operating system ended it".to_owned(),
+    }
+}
+
+/// What a stop reached, in the words a report uses for a service.
+///
+/// The service half of the same rule `planned_work.rs`'s `stop_clause` applies
+/// to a command, and it is stated for the same reason:
+/// [`Stop::WholeTree`] is the operating system's own account of the tree — what
+/// `taskkill /T /F` reporting success means on Windows — and
+/// [`Stop::ProcessOnly`] is a stop that reached the service and nothing below
+/// it, so anything the service started may still be running. **Both are the
+/// answer to a question a person waiting on a check asks** — *is the thing I
+/// started gone, and is everything it started gone with it* — and the `Stop` is
+/// a field of the termination the outcome is carrying, so a sentence that does
+/// not print it here leaves the answer nowhere else to be read.
+fn stop_clause(stopped: Stop) -> &'static str {
+    match stopped {
+        Stop::WholeTree => "the stop reached the service and the programs it started",
+        Stop::ProcessOnly => {
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        }
     }
 }
 

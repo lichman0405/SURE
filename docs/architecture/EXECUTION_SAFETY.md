@@ -144,12 +144,16 @@ optional **directory** relative to the project root, a **`launcher`**, a
 the shape does and does not let a project buy.
 
 **The launcher is a tagged type, and that is the point of the whole block.**
-`launcher: node_entry: { entry: server.js }` means *run this machine's `node`
-with this file as its **one** argument*. There is no field anywhere in a
+`launcher: { kind: node_entry, entry: server.js }` means *run this machine's
+`node` with this file as its **one** argument*. There is no field anywhere in a
 declaration that accepts a command line, no string is split into an argument
 vector at any point on the way, and the program and the argument list are SURE's
 own constants: a project chooses a launcher **kind** and the entry file, and
-nothing else. The distance between that and `command: bash -c "…"` is the
+nothing else. A key the format does not know — a second `kind`, or anything
+written beside `entry` — is a load error and not a setting that quietly did
+nothing, which matters most in exactly this field: the shape a project reaches for
+when it wants to run something general has to say no loudly or it will be read as
+having said yes. The distance between that and `command: bash -c "…"` is the
 difference between a request SURE has an answer to and a general escape hatch,
 which is why the second is not in the format at all — the only launcher kind this
 build has, and the reason there is one, is `config/services.rs`'s own module
@@ -159,7 +163,15 @@ comment.
 empty name; two declarations sharing a name; a directory outside the project or
 not there; an entry that leaves its directory, is not there, or is not a
 `.js`/`.mjs`/`.cjs` file; a port of zero; a `readiness` or `page` path that
-`probe::Endpoint::loopback` refuses. Each is a `ServiceRefusal` variant carrying
+`probe::Endpoint::loopback` refuses. **Outside** is asked twice about every path
+that gets that far — of its text, and of where it actually resolves to. `..` and
+absolute paths are refused before the file system is consulted; what is left is
+canonicalised on both sides and required to be inside the project, so a junction
+or symbolic link leading out of the tree is refused as well. That second question
+is not decoration: `mklink /J` needs no privilege on Windows, the textual rule
+alone plans and starts a service whose working directory is outside the project,
+and `service_plan.rs`'s two link tests fail with *no refusal at all* when the
+resolution check is removed. Each is a `ServiceRefusal` variant carrying
 its own sentence — which declaration, which directory, which entry, which path,
 and what to change — and **none of them is a dropped row**: a
 declaration SURE will not act on appears in the plan's refusals and in the stage-4

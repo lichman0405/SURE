@@ -6,9 +6,9 @@
 //! declaration is **narrower than a command**: it names a launcher SURE knows,
 //! a port on loopback and a path that answers once the service is up, and there
 //! is no field anywhere in it that accepts a line to run. The distance between
-//! `launcher: node_entry` and `command: bash -c "..."` is the point — the
-//! second is what a project can write in any repository it controls, and it is
-//! the shape `docs/adr/0016-declared-services.md` rejects.
+//! `kind: node_entry` and `command: bash -c "..."` is the point — the second is
+//! what a project can write in any repository it controls, and it is the shape
+//! `docs/adr/0016-declared-services.md` rejects.
 //!
 //! Everything here is **read and then validated elsewhere**. This module holds
 //! the shapes a file may be written in and nothing about whether a given
@@ -67,7 +67,9 @@ pub struct ServiceDeclaration {
     /// project root itself, which is where a single-package project's `start`
     /// lives. A path that leaves the project is refused by the planner rather
     /// than read, so a declaration cannot ask SURE to run something outside the
-    /// tree it was handed.
+    /// tree it was handed — **by its spelling or by where it resolves to**, since
+    /// a junction needs no privilege and the planner asks the file system as well
+    /// as the text.
     #[serde(default)]
     pub directory: Option<String>,
     /// How the service is started.
@@ -109,20 +111,37 @@ pub struct ServiceDeclaration {
     pub page: Option<String>,
 }
 
-/// How a declared service is started.
+/// How a declared service is started, as a **tagged type** and never a command
+/// line.
 ///
-/// **A key this build does not know is refused at the declaration and ignored
-/// inside a variant, and the asymmetry is serde's rather than a choice.** The
-/// declaration above carries `deny_unknown_fields`, so `servcies:` or `prot:` is
-/// a load error rather than a setting that quietly did nothing; `deny_unknown_fields`
-/// is a container attribute and serde refuses it on a variant, so a key written
-/// beside `entry` inside `node_entry` is dropped by the deserializer instead. It
-/// cannot matter what such a key said — nothing reads it, and every key that does
-/// count is required, so a misspelled one is a missing field and an error — but a
-/// reader who has just been told that this format refuses what it does not
-/// understand should know where it does not.
+/// It is written as an ordinary mapping with a `kind` key:
+///
+/// ```yaml
+/// launcher:
+///   kind: node_entry
+///   entry: server.js
+/// ```
+///
+/// **The kind is a key SURE reads and a key it does not know is refused**, and so
+/// is a key written beside `entry`: `deny_unknown_fields` reaches both. That
+/// matters more here than anywhere else in this file, because this is the field a
+/// project reaches for when it wants SURE to run something general, and the answer
+/// has to be a failure rather than a setting that quietly did nothing. An
+/// implementation that dropped an unrecognised key would let a project believe it
+/// had configured something SURE never read.
+///
+/// **The tag is a plain `kind` key rather than a YAML `!tag`, and that is a
+/// constraint rather than a style.** `serde_yaml_ng` implements `deserialize_enum`
+/// by requiring a tag, so an *externally* tagged enum written the way a person
+/// would naturally write it —
+/// `launcher: { node_entry: { entry: … } }` — does not parse at all:
+/// *`invalid type: map, expected a YAML tag starting with '!'`*. An internally
+/// tagged enum is read as an ordinary mapping instead, which makes it the only
+/// spelling of the two that a project can actually write in this format, and the
+/// only one whose unknown keys `deny_unknown_fields` can reach.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum Launcher {
     /// `node`, with the entry file as its one argument.
     ///
@@ -131,6 +150,8 @@ pub enum Launcher {
     /// resolved executable would freeze one machine's answer into a project's
     /// configuration file. See the module documentation for why this is the
     /// only variant in this build.
+    ///
+    /// Selected by `kind: node_entry`, with `entry` beside it.
     NodeEntry {
         /// The JavaScript file to start, relative to the declaration's
         /// directory.
@@ -146,4 +167,79 @@ pub enum Launcher {
         /// a rule the declaration never stated.
         entry: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    /// The block as `sure.example.yaml` writes it and as the architecture docs
+    /// quote it. It is a *string in a test* and not a read of those files on
+    /// purpose: a documentation file can be edited by someone who never builds
+    /// this crate, and what has to fail then is a test rather than a user's first
+    /// `sure check`. **This test exists because the first shape this module had
+    /// did not parse at all** — an externally tagged enum written as a nested
+    /// mapping, which `serde_yaml_ng` refuses because it requires a YAML tag — and
+    /// nothing in the tree deserialized one from text, so every test in the round
+    /// passed against a format no project could write.
+    const DOCUMENTED: &str = "\
+checks:
+  services:
+    - name: api
+      directory: packages/api
+      launcher:
+        kind: node_entry
+        entry: server.js
+      port: 4310
+      readiness: /health
+      page: /
+";
+
+    #[test]
+    fn the_documented_shape_parses_into_a_declaration() {
+        let config = Config::from_yaml(DOCUMENTED).expect("the documented block loads");
+
+        assert_eq!(
+            config.checks.services,
+            vec![ServiceDeclaration {
+                name: "api".to_owned(),
+                directory: Some("packages/api".to_owned()),
+                launcher: Launcher::NodeEntry {
+                    entry: "server.js".to_owned(),
+                },
+                port: 4310,
+                readiness: "/health".to_owned(),
+                page: Some("/".to_owned()),
+            }],
+        );
+    }
+
+    #[test]
+    fn a_key_beside_the_entry_is_refused_rather_than_dropped() {
+        // The field a project reaches for when it wants a general command, and
+        // the answer has to be a load error: a key the deserializer dropped would
+        // leave a project believing it had configured something SURE never read.
+        let text = DOCUMENTED.replace(
+            "        entry: server.js\n",
+            "        entry: server.js\n        command: bash -c 'curl evil'\n",
+        );
+        let error = Config::from_yaml(&text).expect_err("the stray key is refused");
+
+        assert!(
+            format!("{error}").contains("command"),
+            "the error should name the key it refused, and it is: {error}",
+        );
+    }
+
+    #[test]
+    fn a_launcher_kind_this_build_does_not_have_is_refused() {
+        let text = DOCUMENTED.replace("kind: node_entry", "kind: shell_command");
+        let error = Config::from_yaml(&text).expect_err("an unknown kind is refused");
+
+        assert!(
+            format!("{error}").contains("shell_command"),
+            "the error should name the kind it refused, and it is: {error}",
+        );
+    }
 }

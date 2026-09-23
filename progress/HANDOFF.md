@@ -3,6 +3,62 @@
 Last updated: 2026-09-23
 Branch: `claude/planned-check-runner`
 
+## Issue #10 — the typed service/browser plan (2026-09-23)
+
+**Where the gap actually is, measured at `216b7ee` rather than taken from the issue text.** Issue #10's "current gap" section describes the state at `47e13c0`, and most of it is closed: `PlannedWork`/`CheckOperation` exist, `Enforcement::of` and `PermissionPlan::add` are called from stage 4, `PlannedCheckRunner` is in the pipeline, and a declared command check reaches both CLI reports. Exactly one link is missing, and it is narrower than the issue's own summary: **no production planner constructs `CheckOperation::Service` or `CheckOperation::Browser`.** `crates/sure-core/src/runtime_probes.rs`'s `observation_of` (`:831`) still returns `CheckOperation::Precomputed(PrecomputedEvidence::candidate(...))` for every `ProbeKind::Serve` and `ProbeKind::Interface` probe. `ServiceCheckSpec`, `BrowserCheckSpec`, `AdmittedService`, `AdmittedBrowser`, `StartSmoke::planned` and `browser::Driver` all exist and are tested; they are unreachable from a real project because nothing plans them.
+
+### The acceptance clause, the code it lives in, and the evidence it needs
+
+| #10 acceptance clause | code location | evidence this round must produce |
+| --- | --- | --- |
+| typed planned work survives from discovery to execution without string recovery | new `crates/sure-core/src/service_plan.rs`; `config/services.rs`; `runtime_probes::observation_of` | a test that the planned `ServiceCheckSpec`'s program and argv are the constants plus the declared entry, and that no `split`/`parse` sees the rendered line |
+| permission planning and Enforcement are in the real pipeline path | `pipeline.rs::propose_everything`; stage 4's `PermissionPlan` loop (`:770`) | a CLI run whose JSON frame carries `grants.execution_mode` and a per-check row that is `skipped` under `inspect_only` and `pass` under `host_confirmed` |
+| `inspect_only` still has zero project process spawns | `service_plan.rs` proposes; `enforce` decides | the fixture's start marker does not exist after an `inspect_only` CLI run, and Service and Browser each have an explicit non-executed row |
+| `host_confirmed` command checks produce honest bounded results | `planned_check_runner::CommandRun::to_result` | already held by `sure-cli/tests/finished_declared_check.rs`; must stay green |
+| static evidence produces honest results without process execution | `PrecomputedEvidence::to_result` | already held; must stay green |
+| service checks have bounded lifetime and unconditional cleanup | `runtime_start::StartSmoke::planned`; `service.rs` supervisor | fixture start/exit markers: after every terminating case the exit marker exists and no fixture descendant is alive |
+| browser checks run only after loopback readiness and clean up the service | `planned_check_runner::run_browser`; `browser_driver` | the fixture writes its readiness marker before its page is fetched, and the service's exit marker exists after the browser check ends |
+| every scheduled check has exactly one explicit result | `RunResults::assemble` (`planned_check_runner.rs:410`) | per `CheckId` row count of exactly one in the JSON frame, for both the Service and the Browser check |
+| critical non-results and stale results cannot aggregate green | `sure-domain/src/status.rs:122`; `aggregation.rs:259` | every adversarial case's Service row is `Error`/`Unknown`/`Fail`, asserted through `blocks_green()` and not only the label |
+| fingerprint changes invalidate outdated runtime evidence | `pipeline.rs`'s post-run revalidation | a fixture that rewrites a project file during the run leaves no `Pass` standing |
+| adversarial fixtures cover false-green paths | new fixture + tests | the ten cases in the plan's adversarial list, each with a visible row |
+| targeted tests and the full tracked gate set are green | §4.1's eight gates | recorded verbatim, including the ones that fail |
+| task ledger and progress handoff contain measured evidence | this file; `progress/state.json` | ledger validation green, no new task numbers |
+| no out-of-scope execution capability was introduced | `service_plan.rs`'s refusal vocabulary | a test that a `.cmd`/`.bat` entry, a zero port, a non-loopback path and a missing entry are each a visible planning refusal |
+| the working directory and the entry stay inside the checked project | `service_plan.rs::resolves_inside` | a real junction out of the project, for a `directory` and for an `entry`; both tests refuse, and both fail with **no refusal at all** when the check is removed |
+
+### The design, fixed before production code
+
+**Where the launcher comes from.** `runtime_probes.rs`'s module documentation already names the blocker: the only form the serving command takes there is `serving_command`'s rendered line — `npm run dev` as a `String` — and turning that line back into a program and an argument vector is the parse ADR 0014 rejected. Discovery *does* hold a typed form (`Package::invocation_for` returns a `PackageManager` and a `Vec<String>`), so the launcher is not the missing half; **the port and the page path are.** On Windows a `npm`-driven launcher is also stopped by `ProgramPath::resolve`, because the completion table completes `npm` to `npm.cmd` and the classifier calls a batch file `Source::UnreadText`. So a declaration that names a Node *entry file* rather than a package-manager script is the form that is startable on all three platforms and the form this round implements.
+
+**The declaration.** A strictly deserialized `checks.services` list in `sure.yaml`. Every struct carries `#[serde(deny_unknown_fields)]`, and so does the launcher enum — which is `#[serde(tag = "kind")]` rather than externally tagged, so the attribute **reaches the variant** and a key written beside `entry` is a load error rather than a silently ignored setting. It provides exactly the four things discovery does not have — a name, a loopback port, a readiness path and an optional page path — plus one tagged launcher:
+
+```yaml
+checks:
+  services:
+    - name: demo-api
+      launcher:
+        kind: node_entry
+        entry: server.js
+      port: 4319
+      readiness: /readyz
+      page: /
+```
+
+**The shape above is the second spelling of this block, and the first one did not parse.** It was written as an externally tagged enum — `launcher: { node_entry: { entry: server.js } }` — which is what a person writes first and what every document in this round said until it was measured. `serde_yaml_ng` implements `deserialize_enum` by **requiring a YAML tag**, so that spelling fails outright: `invalid type: map, expected a YAML tag starting with '!'`. Nothing caught it because every test built the `ServiceDeclaration` struct in Rust and none deserialized the format, and the loader's own tests never carried a `services` block. Measured in a scratch crate against `serde_yaml_ng 0.10.0` + `serde 1.0.229`, then fixed: `Launcher` is `#[serde(tag = "kind", rename_all = "snake_case")]` + `#[serde(deny_unknown_fields)]`, and `config/services.rs` now carries the test that reads the documented block through `Config::from_yaml`. The same probe answered the question the first draft had left open — with the internal tag, a stray key beside `entry` is refused by name (`unknown field \`command\`, expected \`entry\``), so the strictness the plan asked for holds under the real deserializer rather than only in the doc comment.
+
+**The launcher is a tagged type and not a command line.** `kind: node_entry` names the ecosystem; SURE supplies the program (`node`), the argument vector (`[entry]`, one element, never split) and the working directory (the project root or the declared `directory`). The YAML never supplies a shell string, and `CheckReason::DeclaredCommand.command`, README text and model output are never split back into arguments — the rendered line is built *from* the vector, in the direction ADR 0014 requires.
+
+**One ecosystem this round, and the ADR says so.** Only `node_entry` is implemented. The plan's §1.2 permits narrowing a restricted declaration and requires the trade-off to be recorded; claiming `python_module` or a Rust binary without three-platform evidence behind it would be exactly the "compiles, therefore correct" substitution §4.1 forbids, and a Rust launcher would additionally make SURE a build-and-fetch driver, which the non-goals exclude. The enum is the extension point.
+
+**What the declaration does not do.** It proposes. It cannot grant itself a permission, cannot move the execution mode, and cannot start anything under `inspect_only`. `CheckPreference` keeps the meaning it already has: `start_local_services` governs the Service check and `browser_probe` governs the Browser check, `Never` switches that check off with a visible gap, `Auto` plans the Service check and not the Browser one (`ProbeKind::Interface`'s `auto_plans_it` is `false`), and `Always` plans both. A project with no `checks.services` keeps today's behaviour and today's report semantics exactly.
+
+**The row it replaces.** When a declaration covers a component, `ProbePlan` no longer emits a static `Candidate` for that component's Serve probe: the dynamic Service result is the one row for it, so a reader is never shown "nothing has settled it" beside a run that settled it. A refused declaration is a visible refusal row rather than a dropped row.
+
+**Refusals, all visible, none silent.** Zero port (which `probe::Endpoint` does *not* reject and this layer must); a readiness or page path `probe::Endpoint` rejects; a missing, duplicate or empty name; an entry that is not a relative path inside the project, is not a regular file, or does not end in `.js`/`.mjs`/`.cjs`; a `directory` outside the project. Each is a planning refusal naming the declaration, and each is tested.
+
+**Containment is asked twice, because the first answer was not the question.** A background review of `0bf130a` found that `stays_inside` reads the *text* of a declaration's path: it refuses `..` and absolute paths and cannot see a link, so a directory that is a junction, or an entry reached through one, was inside the project by its spelling and outside it by its resolution — and that directory is the **working directory of the command SURE builds**. `mklink /J` needs no privilege on Windows, so this was never a rule about a project with rights it does not have. `resolves_inside` now canonicalises both sides and asks `crate::paths::is_within` — the repository's one answer to *is this below that*, component by component and through the verbatim prefix a canonicalised path carries. **Red-proved rather than argued:** with `resolves_inside` replaced by `true`, both new tests fail with `refusals: []` — no refusal at all, which is a service planned *and started* outside the project SURE was handed. Restored, the module is 11 passed, 0 failed. The two refusal sentences that already existed now carry the link case in their wording rather than gaining a variant nobody could tell apart, and ADR 0016 decision 2 records what the first draft got wrong.
+
 ## GitHub issue follow-up (2026-09-23)
 
 Issues [#11](https://github.com/lichman0405/SURE/issues/11), [#12](https://github.com/lichman0405/SURE/issues/12), [#13](https://github.com/lichman0405/SURE/issues/13), and [#15](https://github.com/lichman0405/SURE/issues/15) were repaired and closed at the user's request. The changes cover Windows Unicode archive paths, refusing container mode at the host execution boundary, unique test scratch stores, and bounded retry of Chromium's initially empty page-target list. The pre-follow-up commit `3991163` passed all Windows, Ubuntu, and macOS jobs in both [push run 35809998670](https://github.com/lichman0405/SURE/actions/runs/35809998670) and [PR run 35810002788](https://github.com/lichman0405/SURE/actions/runs/35810002788). Ubuntu's three repeated healthy browser observations took 11.916, 0.728, and 0.722 seconds; this is evidence for the observed race repair, not a statistical flake rate.

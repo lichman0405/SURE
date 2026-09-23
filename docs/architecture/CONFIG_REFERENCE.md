@@ -209,10 +209,61 @@ An empty `goal` is refused rather than treated as absent.
 | `existing_tests` | boolean | `true` | `true`, `false` |
 | `start_local_services` | enum | `auto` | `auto`, `always`, `never` |
 | `browser_probe` | enum | `auto` | `auto`, `always`, `never` |
+| `services` | list | `[]` | service declarations — see below |
 
 `always` and `never` are requests as well as settings: turning a check off
 reduces what SURE covers, and a reduced scope is reported rather than passed
 over.
+
+#### `checks.services`
+
+The one place a project says how to start itself. It is **not a command line**:
+there is no field anywhere in a declaration that accepts a line to run, and no
+string SURE reads is ever split back into arguments.
+
+```yaml
+checks:
+  services:
+    - name: demo-api
+      launcher:
+        kind: node_entry
+        entry: server.js
+      port: 4319
+      readiness: /readyz
+      page: /
+```
+
+| Key | Type | Default | Accepted values |
+| --- | --- | --- | --- |
+| `name` | string | required | non-empty, and not another declaration's name |
+| `directory` | path | the project root | relative, inside the project — by its spelling **and** by where it resolves to — and a directory that is there |
+| `launcher` | tagged type | required | `kind: node_entry`, with `entry` beside it naming the file to start |
+| `port` | integer | required | 1–65535 — **zero is refused** |
+| `readiness` | path | required | a path `probe::Endpoint` accepts on this port |
+| `page` | path | none | as `readiness`; absent means no browser check |
+
+The launcher's `kind` is a key SURE reads and a key it does not know is a load
+error, as is any key written beside `entry` — the shape refuses what it does not
+understand instead of dropping it. It is spelled as a `kind` key rather than a
+YAML `!tag` because the format's deserializer requires a tag for the other
+spelling, which makes `launcher: { node_entry: { … } }` unparseable rather than
+merely unusual. `sure_core::config::services` carries the argument and the test
+that holds it.
+
+Each declaration plans a **Service** check — start the declared program in the
+declared directory, wait for the readiness path to answer, then stop it — and,
+when `page` is present and `browser_probe` allows, a **Browser** check that
+opens the page inside that same service's lifetime. `start_local_services`
+governs the first and `browser_probe` the second, with the same three
+preferences as everywhere else: `never` plans neither and records why, `auto`
+plans the service and not the page, `always` plans both.
+
+A declaration **proposes**. It cannot grant itself a permission, cannot move the
+execution mode, and starts nothing under `inspect_only` — the mode and the
+permissions come from the user's own file. A declaration SURE will not act on is
+a planning refusal with a sentence attached, never a row that quietly disappears.
+[EXECUTION_SAFETY.md](EXECUTION_SAFETY.md) has the safety argument and
+[ADR 0016](../adr/0016-declared-services.md) the decision record.
 
 > YAML 1.1 read `yes`, `no`, `on` and `off` as booleans. YAML 1.2 — the version
 > this file is parsed as — does not, so `existing_tests: yes` is a string that

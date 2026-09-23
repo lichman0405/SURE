@@ -53,10 +53,25 @@ plans checks from that declaration and nothing else.**
 
 1. **The declaration is data, and the launcher is a tag.** `checks.services` is a
    list of `ServiceDeclaration`: `name`, an optional `directory`, a `launcher`, a
-   `port`, a `readiness` path and an optional `page`. `launcher` is
-   `Launcher::NodeEntry { entry }`, a tagged enum with exactly one variant in this
-   build, and **no field in it accepts a command line**. A project names a kind;
-   SURE supplies the program.
+   `port`, a `readiness` path and an optional `page`. `launcher` is written as a
+   mapping whose `kind` key selects the variant —
+   `launcher: { kind: node_entry, entry: server.js }` — and `Launcher::NodeEntry
+   { entry }` has exactly one variant in this build, with **no field in it that
+   accepts a command line**. A project names a kind; SURE supplies the program.
+
+   **The tag is a `kind` key rather than a YAML `!tag`, and that is a constraint
+   rather than a preference.** `serde_yaml_ng` implements `deserialize_enum` by
+   requiring a tag, so the externally tagged spelling a person writes first —
+   `launcher: { node_entry: { entry: … } }` — **does not parse at all**:
+   `invalid type: map, expected a YAML tag starting with '!'`. An internally
+   tagged enum is read as an ordinary mapping instead, which makes it the only
+   one of the two spellings a project can write in this format and the only one
+   whose unknown keys `deny_unknown_fields` can reach, so a key beside `entry` is
+   a load error and not a setting that quietly did nothing. The first draft of
+   this shape was the other spelling, and it survived a round of unit tests
+   because every one of them built the struct in Rust and none deserialized the
+   format; `config/services.rs` now carries the test that reads the documented
+   block through `Config::from_yaml`.
 
 2. **What SURE supplies is its own constant, for every field a command line would
    have carried.** The program is `node` as a **name** and never a resolved path,
@@ -65,6 +80,18 @@ plans checks from that declaration and nothing else.**
    and never rendered and re-split. The working directory is the scan root joined
    with the declared `directory`, under the root when the declaration omits it and
    refused when it leaves it. The limits are `checks::CHECK_LIMITS`, unwidened.
+
+   **Containment is decided twice, by text and then by resolution**, because the
+   first answer is not the question. `..` and absolute paths are refused before the
+   file system is consulted — that is the refusal with the better sentence — and
+   whatever survives is canonicalised on both sides and required to be inside the
+   project by `crate::paths::is_within`. A junction or a symbolic link leading out
+   of the tree passes every textual test and is what the second lock is for, and
+   `mklink /J` needs no privilege at all: a rule that read only the spelling would
+   have been a rule about a project with rights a project does not need. **The
+   first draft had only the first lock**, and gutting the second makes both of its
+   tests fail with *no refusal at all* — a service planned, and started, outside
+   the project SURE was handed.
 
 3. **A service is not given SURE's own environment.** ADR 0014's decision 11,
    carried out where the plan is made: the command is
@@ -92,6 +119,10 @@ plans checks from that declaration and nothing else.**
    not there, entry outside its directory, entry that is not there, entry that is
    not `.js`/`.mjs`/`.cjs`, port zero, and a readiness or page path the endpoint
    refuses — one `ServiceRefusal` variant each, carried into the stage-4 report.
+   *Outside* covers both answers a path can give: one that leads out of the
+   project by what it says and one that leads out by where it resolves to, which
+   is why the two refusals each carry both cases in their sentence rather than
+   gaining a vocabulary entry nobody could tell apart.
    **Never a dropped row, and never a `debug_assert`**: a declaration SURE will not
    act on is something the project's author has to be told.
 

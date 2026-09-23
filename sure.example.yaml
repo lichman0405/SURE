@@ -63,8 +63,8 @@ checks:
   #   - name: api
   #     directory: packages/api
   #     launcher:
-  #       node_entry:
-  #         entry: server.js
+  #       kind: node_entry
+  #       entry: server.js
   #     port: 4310
   #     readiness: /health
   #     page: /

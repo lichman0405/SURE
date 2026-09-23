@@ -1853,6 +1853,19 @@ fn describe_plan(
     if let Some(refusal) = planned.probe_refusal.as_ref() {
         parts.push(format!("the runtime probes were not planned: {refusal}."));
     }
+    // What part of the plan came from the project's own file rather than from
+    // what discovery found. It is stated beside the refusals rather than folded
+    // into the count above, because a reader has to be able to tell *this project
+    // declared nothing* from *it declared a service and that service is one of
+    // the checks counted*. The second is what a project that took the trouble to
+    // write a declaration is owed, and a count alone would read as the first.
+    if planned.services > 0 {
+        parts.push(format!(
+            "{} of them are services the project declared in {}.",
+            planned.services,
+            crate::config::Config::FILE_NAME,
+        ));
+    }
     // A declaration SURE would not act on is stated the same way a proposal the
     // builder refused is, and for the same reason: the project asked for a check
     // and the answer is *no, and here is why*. A silent drop would leave a report

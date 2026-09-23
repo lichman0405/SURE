@@ -30,8 +30,8 @@
 //! and the argument vector is exactly one element — the entry the declaration
 //! names, which stays one argument however many spaces it contains. A project
 //! that could write `command: bash -c "…"` could ask SURE to run anything it
-//! liked; a project that writes `launcher: node_entry` has asked for one thing
-//! SURE has a sentence for.
+//! liked; a project that writes `kind: node_entry` has asked for one thing SURE
+//! has a sentence for.
 //!
 //! # Every way a declaration can be wrong is a value
 //!
@@ -194,7 +194,7 @@ impl ServicePlan {
                     continue;
                 }
             };
-            let entry = match declared_entry(&directory.full, &declaration.launcher) {
+            let entry = match declared_entry(root, &directory.full, &declaration.launcher) {
                 Ok(entry) => entry,
                 Err(refusal) => {
                     refusals.push(refusal);
@@ -502,14 +502,16 @@ impl ServiceRefusal {
             ),
             Self::DirectoryOutsideTheProject { directory } => format!(
                 "the declared directory {directory} is not inside the project, and SURE \
-                 only starts what it was handed."
+                 only starts what it was handed. A path that leaves the project and a \
+                 link that leads out of it are refused for the same reason."
             ),
             Self::DirectoryIsNotThere { directory } => {
                 format!("the declared directory {directory} is not a directory of this project.")
             }
             Self::EntryIsOutsideTheProject { entry } => format!(
-                "the declared entry {entry} does not stay inside the directory the \
-                 declaration runs in, so SURE will not start it."
+                "the declared entry {entry} does not lead to a file inside the project, \
+                 so SURE will not start it. A path that climbs out and a link that \
+                 points out are refused for the same reason."
             ),
             Self::EntryIsNotAJavaScriptFile { entry } => format!(
                 "the declared entry {entry} is not a JavaScript file. `node_entry` starts \
@@ -652,6 +654,16 @@ fn declared_directory(
             directory: named.to_owned(),
         });
     }
+    // After *is it there*, so that a directory that does not exist gets the
+    // sentence about not existing rather than the one about leading elsewhere.
+    // A link is the case the textual test above cannot see: `escape` is a name
+    // inside the project and a junction to somewhere outside it, and the command
+    // SURE builds runs with this directory as its working directory.
+    if !resolves_inside(root, &full) {
+        return Err(ServiceRefusal::DirectoryOutsideTheProject {
+            directory: named.to_owned(),
+        });
+    }
     Ok(Directory {
         full,
         declared: declared.to_path_buf(),
@@ -665,7 +677,17 @@ fn declared_directory(
 /// relative to is the command's working directory. Rewriting it into an absolute
 /// path would put a machine's layout into the argument vector of a check whose
 /// command is otherwise the same on every machine.
-fn declared_entry(directory: &Path, launcher: &Launcher) -> Result<String, ServiceRefusal> {
+///
+/// What it is handed for that reason is `root` **and** the directory: the one is
+/// what the file has to resolve inside, the other is where it has to be found.
+/// Both are asked of the path that actually exists rather than of the spelling,
+/// so an entry reached through a link out of the project is refused here even
+/// though every component of its name is a plain one.
+fn declared_entry(
+    root: &Path,
+    directory: &Path,
+    launcher: &Launcher,
+) -> Result<String, ServiceRefusal> {
     let entry = match launcher {
         Launcher::NodeEntry { entry } => entry,
     };
@@ -680,8 +702,19 @@ fn declared_entry(directory: &Path, launcher: &Launcher) -> Result<String, Servi
             entry: entry.clone(),
         });
     }
-    if !directory.join(path).is_file() {
+    let full = directory.join(path);
+    if !full.is_file() {
         return Err(ServiceRefusal::EntryIsNotThere {
+            entry: entry.clone(),
+        });
+    }
+    // Against the project root and not against the directory, because that is
+    // the claim the sentence makes and the one the whole module rests on: every
+    // path SURE starts a program with is inside the tree it was handed. The
+    // directory has been resolved by the time this runs, so a file reached
+    // through a link is the only way past the test above.
+    if !resolves_inside(root, &full) {
+        return Err(ServiceRefusal::EntryIsOutsideTheProject {
             entry: entry.clone(),
         });
     }
@@ -697,6 +730,14 @@ fn declared_entry(directory: &Path, launcher: &Launcher) -> Result<String, Servi
 /// rule that can be evaluated wrongly. Only a plain relative path passes —
 /// `Component::Normal` and the leading `.` a person may write.
 ///
+/// **This reads the text of the path and not the file system, so it is one of
+/// two locks rather than the whole door.** It cannot see a link: a directory that
+/// *is* a junction, or an entry reached through one, is inside the project by its
+/// spelling and somewhere else by its resolution. [`resolves_inside`] asks that
+/// second question of everything this one has already agreed to, and a caller
+/// needs both — this one produces the better sentence for `..` and an absolute
+/// path, and that one catches what no sentence can read.
+///
 /// Absolute paths are refused by the same function and for a stronger reason:
 /// `C:\Windows` and `/etc` are not relative to anything, so a declaration naming
 /// one is asking SURE to leave the tree it was handed. On Windows a
@@ -708,6 +749,40 @@ fn stays_inside(path: &Path) -> bool {
         && path
             .components()
             .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+/// Whether a path that is there resolves to a place inside the project.
+///
+/// **The second lock on [`stays_inside`]'s door, and the one that costs a
+/// syscall.** A link inside the project — a junction on Windows, a symbolic link
+/// anywhere — passes every textual test and leads out of the tree, and a
+/// declaration naming one would have SURE start a program outside the project it
+/// was handed while every sentence in this module said otherwise. `mklink /J`
+/// needs no privilege at all, so this is not a rule about a hostile project with
+/// administrator rights; it is a rule about the ordinary working tree.
+///
+/// **Both sides are resolved before they are compared**, so the comparison is
+/// between two answers from the same function. `std::fs::canonicalize` returns a
+/// verbatim `\\?\C:\…` path on Windows and answers `/private/var` for `/var` on
+/// macOS, and a check that resolved one side only would refuse a project whose
+/// root is reached through either — a false refusal, which is the visible
+/// direction but still a project's declaration turned into nothing.
+///
+/// [`crate::paths::is_within`] does the comparing, because it is this
+/// repository's one answer to *is this below that*: component by component rather
+/// than by string prefix, case folded the way the platform folds it, and through
+/// the verbatim prefix a canonicalised path carries. It is the same question the
+/// store asks about its own evidence, asked about a program SURE is about to
+/// start.
+///
+/// **A path that cannot be resolved is not inside**, which is this module's
+/// direction everywhere: a declaration SURE cannot confirm is a refusal with a
+/// sentence attached rather than a check that quietly starts something.
+fn resolves_inside(root: &Path, full: &Path) -> bool {
+    let (Ok(root), Ok(full)) = (std::fs::canonicalize(root), std::fs::canonicalize(full)) else {
+        return false;
+    };
+    crate::paths::is_within(&full, &root)
 }
 
 /// Whether a name is one of the three extensions `node` starts.
@@ -1009,6 +1084,47 @@ mod tests {
         root
     }
 
+    /// A directory link at `link`, leading to `target`.
+    ///
+    /// **A junction on Windows rather than a symbolic link**, because
+    /// `std::os::windows::fs::symlink_dir` needs Developer Mode or administrator
+    /// rights and `mklink /J` needs neither — `discover_node.rs` probed both on
+    /// this host before this test was written, and the answer there is the answer
+    /// here. That is not a weaker mechanism for the purpose: a junction is what a
+    /// link out of a working tree actually is on the platform SURE is developed
+    /// on, and it is created without any privilege, which is the whole reason
+    /// [`resolves_inside`] exists. The arguments are spelled with backslashes
+    /// because `mklink` reads `/` as the start of one of its own switches.
+    #[cfg(windows)]
+    fn link_directory(target: &Path, link: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap_or_else(|error| panic!("cannot run cmd: {error}"));
+        assert!(
+            output.status.success(),
+            "mklink /J {} {} failed: {}{}",
+            link.display(),
+            target.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A directory link at `link`, leading to `target`.
+    #[cfg(unix)]
+    fn link_directory(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap_or_else(|error| {
+            panic!(
+                "cannot link {} to {}: {error}",
+                link.display(),
+                target.display()
+            )
+        });
+    }
+
     fn declaration(name: &str, port: u16) -> ServiceDeclaration {
         ServiceDeclaration {
             name: name.to_owned(),
@@ -1305,6 +1421,76 @@ mod tests {
             "a browser check needs a page, and a declaration that named none has none"
         );
         assert_eq!(planned(&plan).len(), 1);
+    }
+
+    /// A directory outside the project, for the link fixtures to lead to.
+    ///
+    /// **A directory of its own and not a path under the project**, because the
+    /// fixture has to be one the planner should refuse to reach: a link that led
+    /// to somewhere inside the project would be a link this module is right to
+    /// allow, and a test built on one would pass with [`resolves_inside`]
+    /// deleted.
+    fn outside_project(name: &str) -> PathBuf {
+        let outside = scratch(name);
+        write(&outside.join("server.js"), "// somebody else's service\n");
+        outside
+    }
+
+    #[test]
+    fn a_declared_directory_that_is_a_link_out_of_the_project_is_refused() {
+        // The case `stays_inside` cannot see: `escape` is a plain relative path
+        // of one ordinary component, so every textual test in this module accepts
+        // it, and it is the *working directory* of the command SURE would build —
+        // which would be a program started outside the tree SURE was handed.
+        let root = project("linked directory");
+        link_directory(
+            &outside_project("linked directory outside"),
+            &root.join("escape"),
+        );
+
+        let mut declaration = declaration("api", 4310);
+        declaration.directory = Some("escape".to_owned());
+        let plan = ServicePlan::of(&root, &config(vec![declaration]));
+
+        assert_eq!(
+            plan.refusals().to_vec(),
+            vec![ServiceRefusal::DirectoryOutsideTheProject {
+                directory: "escape".to_owned(),
+            }],
+        );
+        assert!(
+            plan.services().is_empty() && planned(&plan).is_empty(),
+            "a directory SURE will not run in is not a service SURE starts"
+        );
+    }
+
+    #[test]
+    fn a_declared_entry_reached_through_a_link_is_refused() {
+        // The same link, one component deeper: the directory is the project root
+        // itself, the entry is a file that is there, and the only thing wrong
+        // with it is where it *is*.
+        let root = project("linked entry");
+        link_directory(
+            &outside_project("linked entry outside"),
+            &root.join("escape"),
+        );
+
+        let mut declaration = declaration("api", 4310);
+        declaration.launcher = Launcher::NodeEntry {
+            entry: "escape/server.js".to_owned(),
+        };
+        let plan = ServicePlan::of(&root, &config(vec![declaration]));
+
+        assert_eq!(
+            plan.refusals().to_vec(),
+            vec![ServiceRefusal::EntryIsOutsideTheProject {
+                entry: "escape/server.js".to_owned(),
+            }],
+        );
+        assert!(
+            plan.services().is_empty() && planned(&plan).is_empty(),
+            "a file SURE will not start is not a service SURE starts"
+        );
     }
 
     #[test]

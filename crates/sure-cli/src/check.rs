@@ -320,11 +320,18 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
     // explicit result clause three of `P18-T010` is about, produced by the driver
     // rather than by an absence of wiring here.
     //
-    // Nothing in this build plans a browser check yet (`ProbePlan::add_to` plans
-    // every probe as a precomputed observation), so this line carries no project
-    // to a browser today. It is written now because the door it opens is the one
-    // the runner reads, and a door nothing has ever been able to open is a door
-    // nobody has tested.
+    // The checks that reach this door are planned in `sure_core::service_plan`,
+    // which is the only planner in this build that emits a
+    // `CheckOperation::Browser` — `ProbePlan::add_to` still plans every probe as
+    // a precomputed observation, and a declared service's page is the one place a
+    // real page is asked for. It gets there only when a project declared a
+    // service *and* named a page for it *and* the `checks.browser_probe`
+    // preference and the user's own permissions both allow it, which is what the
+    // refusals in the report are about when one of the three is missing.
+    // A run that supplies none of them still binds the driver, because a
+    // composition root assembles what the product can do and not only what this
+    // one invocation was authorised to do — and a door that is only opened on the
+    // runs that need it is a door nobody has tested on the runs that do.
     let runner = ProcessRunner::new(Cancellation::new())
         .with_page_driver(Box::new(sure_core::browser_driver::Browser::system()));
     let run = Pipeline {

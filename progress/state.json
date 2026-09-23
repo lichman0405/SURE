@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P19",
-  "last_updated": "2026-09-23T01:57:29.317Z",
+  "last_updated": "2026-09-23T02:04:26.371Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3664,22 +3664,22 @@
       "notes": "Issue #13: both affected test modules use sure-testkit scratch directory; controlled recycled-PID database fixtures are not reopened. cargo test -p sure-core --lib --quiet: 1488 passed; focused recycled_pid: 2 passed."
     },
     "P19-T003": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-23T01:57:29.317Z",
-      "finished_at": null,
+      "finished_at": "2026-09-23T02:04:26.283Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "Investigating Windows PowerShell 5.1 output encoding in issue #11."
+      "notes": "Issue #11: PowerShell fixture stdout explicitly UTF-8 before returning Unicode archive path. New direct stager tests pass under CP936 and UTF-8 for install_flow, quickstart_flow, and winget_manifest (6 runs), both Windows PowerShell 5.1 and PowerShell 7 where applicable. Full quickstart reaches sure check but sandbox denies real user store; full CI remains."
     },
     "P19-T004": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-23T02:04:26.371Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Investigating Ubuntu Chromium startup evidence for issue #15."
     },
     "P19-T005": {
       "status": "queued",

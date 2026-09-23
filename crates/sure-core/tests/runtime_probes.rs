@@ -780,6 +780,50 @@ fn a_component_a_project_declares_a_service_for_is_left_to_the_declaration() {
 }
 
 #[test]
+fn a_declaration_the_settings_switched_off_is_not_reported_as_a_covered_component() {
+    // The other half of the coverage rule, and the one that could put a sentence
+    // where a check should be. `checks.start_local_services: never` is decided
+    // *before* the coverage rule — the Serve kind is switched off for the whole
+    // run, which is the project-wide reduction — so nothing is planned for the
+    // declared component at all. The Interface kind is **not** switched off by
+    // that setting, so it still reaches the coverage rule and still gets a gap;
+    // what it must not say there is that the component's checks are planned.
+    let fixture = Fixture::new("declared-service-disabled");
+    workspace(&fixture).write("server.js", "// the service the declaration names\n");
+
+    let switched_off = fixture.plan(&ChecksConfig {
+        services: vec![declaring(None)],
+        ..preferences(CheckPreference::Never, CheckPreference::Always)
+    });
+
+    assert!(
+        switched_off
+            .reductions()
+            .contains(&ScopeReduction::LocalServicesDisabled),
+        "the setting this run was given is a run-wide reduction: {:?}",
+        switched_off.reductions()
+    );
+    let because = gap(&switched_off, ProbeKind::Interface, "");
+    assert_eq!(
+        because,
+        &NotPlannedBecause::DeclaredAsAService,
+        "the browser kind is not the one that setting switched off"
+    );
+    let sentence = because.plain_description();
+    assert!(
+        !sentence.contains("are planned"),
+        "the report tells a reader this component's checks are planned, and the \
+         settings this run was given planned nothing for it: {sentence}"
+    );
+    assert!(
+        sentence.contains("gap or refusal"),
+        "the sentence has to say where a declaration that planned nothing is reported \
+         instead, or a reader looking for the component's rows finds this and stops: \
+         {sentence}"
+    );
+}
+
+#[test]
 fn a_component_nothing_starts_is_a_gap_and_not_a_missing_row() {
     // `MissingCommand`'s shape one level up, and the same failure it guards
     // against: a report built from the plan would say nothing at all about a

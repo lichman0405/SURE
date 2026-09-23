@@ -551,18 +551,27 @@ pub enum NotPlannedBecause {
     /// is anything to look at. See the module documentation for why this is
     /// reported rather than passed over in silence.
     AutoCannotSeeAnInterface,
-    /// A `checks.services` declaration covers this component, so the rows about
-    /// it are planned by [`crate::service_plan`] instead of here.
+    /// A `checks.services` declaration covers this component, so what SURE would
+    /// start for it is planned by [`crate::service_plan`] and not here.
     ///
-    /// **The rows still exist — they are planned elsewhere, one per
-    /// declaration.** That sentence is the whole of why this is a variant rather
+    /// **This is about where a row comes from, and it is not a claim that one
+    /// exists.** That distinction is the whole of why this is a variant rather
     /// than a silence: *not planned here* is not *no row*, and a reader who took
     /// this component's absence from *this* plan for an absence of any check
-    /// would be reading a project with a declared service as one SURE never
-    /// looks at. A declaration names its own launcher, port and readiness path,
-    /// so it is planned from what the project wrote down rather than from a
-    /// manifest's `start` script — and a project that declares one has said what
-    /// to run more precisely than a script name does.
+    /// would be reading a project with a declared service as one SURE never looks
+    /// at. A declaration names its own launcher, port and readiness path, so it is
+    /// planned from what the project wrote down rather than from a manifest's
+    /// `start` script, and a project that declares one has said what to run more
+    /// precisely than a script name does.
+    ///
+    /// **It is also not a claim that the declaration was acted on**, and the
+    /// sentence below is written so that it cannot be read as one. A declaration
+    /// `checks.start_local_services: never` switched off, or one the planner
+    /// refused, plans nothing — and both of those are reported in the plan's own
+    /// gaps and refusals, one row per declaration. Saying *the checks are planned
+    /// from that declaration* in either case would be a report telling a reader
+    /// that a component is covered when nothing covers it, which is the shape of
+    /// false green this product exists to find.
     DeclaredAsAService,
 }
 
@@ -590,8 +599,11 @@ impl NotPlannedBecause {
                     .to_owned()
             }
             Self::DeclaredAsAService => {
-                "this project declares a `checks.services` entry for it, so the checks \
-                 about it are planned from that declaration rather than from a manifest."
+                "this project declares a `checks.services` entry for it, so what SURE \
+                 would start for it comes from that declaration rather than from a \
+                 manifest. A declaration the settings switched off, or one that could \
+                 not be planned, is reported as its own gap or refusal, one per \
+                 declaration."
                     .to_owned()
             }
         }

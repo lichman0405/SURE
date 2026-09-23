@@ -259,9 +259,10 @@ pub(crate) const CHECK_LIMITS: Limits =
 ///
 /// **The environment is SURE's own**, because of what a check is: `npm` finds
 /// `node`, and `cargo` finds the linker, by name and through `PATH`. ADR 0014's
-/// decision 11 — a *service* is not given SURE's environment — is about programs
-/// SURE starts for a project, where the environment is part of what is being
-/// observed; a declared check is the project's own command run in the user's own
+/// decision 11 — a *service* is not given SURE's environment, and gets the
+/// machine's own minimum instead — is about programs SURE starts for a project,
+/// where the environment is part of what is being observed; a declared check is
+/// the project's own command run in the user's own
 /// shell's environment, and a check that could not find `node` would report a
 /// missing toolchain that is installed.
 #[must_use]

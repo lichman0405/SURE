@@ -94,16 +94,30 @@ plans checks from that declaration and nothing else.**
    the project SURE was handed.
 
 3. **A service is not given SURE's own environment.** ADR 0014's decision 11,
-   carried out where the plan is made: the command is
-   `Environment::only([])`, so the service starts with no variable of SURE's at
-   all. This is the one field where a declared service differs from a declared
-   check, which runs in the user's own environment, and the asymmetry is
-   deliberate: a check is the project's own command for the project's own tooling,
-   and a service is a program SURE starts **in order to watch it**. Two
-   consequences are stated with it in `docs/architecture/EXECUTION_SAFETY.md`: the
-   program `node` is still found, because SURE resolves it in its own process, and
-   a service that starts another program by name may not find it — which is a
-   reported failure rather than something SURE works around.
+   carried out where the plan is made: the command is `Environment::only` over
+   the machine's own minimum, so nothing of the user's and nothing of SURE's
+   settings reaches a service. This is the one field where a declared service
+   differs from a declared check, which runs in the user's own environment, and
+   the asymmetry is deliberate: a check is the project's own command for the
+   project's own tooling, and a service is a program SURE starts **in order to
+   watch it**. Two consequences are stated with it in
+   `docs/architecture/EXECUTION_SAFETY.md`: the program `node` is still found,
+   because SURE resolves it in its own process, and a service that starts another
+   program by name may not find it — which is a reported failure rather than
+   something SURE works around.
+
+   **The minimum is a measurement, and the first draft of this decision took
+   none.** It passed an empty block, and the cost was found on the product path
+   rather than reasoned about: the declared service was planned, admitted and
+   started, and reported as having *ended by itself after 65 milliseconds* with
+   exit code 134, because `node` aborts inside
+   `node::InitializeOncePerProcessInternal` before it reads one line of the
+   declared entry when `SystemRoot` is absent. That one variable is the whole
+   difference. It is not a starting point somebody may extend on speculation:
+   the measurement, and the variables that were tried alone and did not help,
+   live beside the code in `service_plan.rs`, and a platform whose minimum nobody
+   has measured passes nothing — the position
+   `docs/adr/0015-support-ceiling-evidence.md` takes.
 
 4. **Readiness and page are validated through `probe::Endpoint::loopback`.** Not
    through a second copy of its rule: the endpoint constructor is what refuses a

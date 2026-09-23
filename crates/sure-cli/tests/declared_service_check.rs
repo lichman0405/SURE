@@ -1188,17 +1188,29 @@ fn a_project_that_changes_while_the_run_works_withdraws_its_runtime_evidence() {
         "unknown",
         "the service row ran project code and its pass must be withdrawn: {service}"
     );
+    // The sentence is read out of the product rather than typed here, for the
+    // reason the two gap cases read `plain_description`: a reason a report shows
+    // a person is the domain's wording, and a test that retyped it would go on
+    // passing after the product stopped saying it. **The first version of this
+    // assertion looked for `"SupersededByLaterChange"`** — the Rust variant's own
+    // name — which appears in no sentence SURE writes, so it failed against a
+    // reason that was exactly right. That is the same mistake as a documented
+    // `sure.yaml` block no test ever parsed: an assertion about a spelling
+    // nobody read back from the thing that produces it.
     assert!(
-        reason(service).contains("SupersededByLaterChange"),
-        "{service}"
+        reason(service).contains(
+            sure_core::evidence::StalenessReason::SupersededByLaterChange.plain_explanation()
+        ),
+        "the service row is withdrawn for the vocabulary's own reason and not a paraphrase of \
+         it: {service}"
     );
-    // **This assertion states what must happen, and it is expected to be red.**
-    // `invalidate_runtime_passes` withdraws the passes of proposals whose
-    // actions run project code, and the browser row's only action is
-    // `BrowserProbe` — so the page row keeps a pass that was established by
-    // starting the very service the change moved. *A pass about a state that is
-    // no longer there* is what this rule exists to prevent, and the case is here
-    // as a failing measurement rather than as a missing one.
+    // **The row this case was written for.** The first run of it was red here:
+    // `invalidate_runtime_passes` withdrew the passes of proposals whose *actions
+    // run project code*, and the browser row's only action is `BrowserProbe` — so
+    // the page row kept a pass that had been established by starting the very
+    // service the change moved, beside a service row that was correctly
+    // withdrawn. `pipeline.rs` now asks `CheckOperation::starts_a_process`, which
+    // is the question this rule is about, and both rows go the same way.
     assert_eq!(
         status(page),
         "unknown",

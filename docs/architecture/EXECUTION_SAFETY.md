@@ -170,13 +170,14 @@ canonicalised on both sides and required to be inside the project, so a junction
 or symbolic link leading out of the tree is refused as well. That second question
 is not decoration: `mklink /J` needs no privilege on Windows, the textual rule
 alone plans and starts a service whose working directory is outside the project,
-and `service_plan.rs`'s two link tests fail with *no refusal at all* when the
-resolution check is removed. Each is a `ServiceRefusal` variant carrying
-its own sentence — which declaration, which directory, which entry, which path,
-and what to change — and **none of them is a dropped row**: a
-declaration SURE will not act on appears in the plan's refusals and in the stage-4
-report, because a project that asked for a check and did not get one has learned
-something a silent plan would have hidden. A path that is not a path — a URL on
+and the two link tests — `crates/sure-core/tests/service_plan_links.rs`, which is
+where they live because making the fixture needs a process of its own — fail with
+*no refusal at all* when the resolution check is removed. Each is a
+`ServiceRefusal` variant carrying its own sentence — which declaration, which
+directory, which entry, which path, and what to change — and **none of them is a
+dropped row**: a declaration SURE will not act on appears in the plan's refusals
+and in the stage-4 report, because a project that asked for a check and did not
+get one has learned something a silent plan would have hidden. A path that is not a path — a URL on
 another host, an address with userinfo in it, a backslash — cannot be written
 into one of these fields in the first place: the endpoint type they are validated
 through has no host to fill in and no authority to extend.
@@ -200,15 +201,34 @@ reaches over loopback.
 
 **A service is not given SURE's own environment.** ADR 0014's decision 11, and
 the plan states it rather than leaving it to a default: a declared service's
-`CommandSpec` carries `Environment::only([])`, so the child starts with **no
-variables of SURE's at all** — not the user's tokens, not SURE's own settings,
-not a `PATH`. Two consequences belong with it. The program name `node` is still
-found, because SURE resolves it in its own process and the environment is the
-child's; and a service that tries to start *another* program by name may fail to
-find it, which is a reported failure of the check rather than something SURE
-works around. Neither half of that is isolation: an environment is a list of
-strings handed to a program, and `Environment`'s own documentation says plainly
-that it confines nothing.
+`CommandSpec` carries `Environment::only` over the machine's own minimum — on
+Windows that is `SystemRoot` and nothing else — so the child starts with **none
+of SURE's variables and none of the user's**: not their tokens, not SURE's own
+settings, not a `PATH`. Where Windows is installed is the platform's answer and
+not the user's configuration, and the program that needs it needs it to *exist*
+rather than to behave differently; nothing of the user's rides along with it.
+
+**That minimum is a measurement, and the first draft of it was the empty list.**
+What the empty list cost was found on the product path rather than reasoned
+about: the declared service was planned, admitted and started, and reported as
+having *ended by itself after 65 milliseconds* with exit code 134, because `node`
+aborts inside `node::InitializeOncePerProcessInternal` before it reads one line
+of the declared entry when `SystemRoot` is absent. **Every authorised run of a
+declared service would have reported that**, so the failure is a false one that
+SURE causes and the project wears. One variable is the whole difference, and
+`WINDIR`, `SystemDrive`, `TEMP`, `TMP`, `PATH` and `USERPROFILE` each did nothing
+for it — which is why the list is what was measured and must not grow into a
+curated set somebody extends on speculation, and why a platform nobody has
+measured passes nothing. `service_plan.rs` carries the measurement beside the
+list.
+
+Two consequences belong with it. The program name `node` is still found, because
+SURE resolves it in its own process and the environment is the child's; and a
+service that tries to start *another* program by name may fail to find it, which
+is a reported failure of the check rather than something SURE works around.
+Neither half of that is isolation: an environment is a list of strings handed to
+a program, and `Environment`'s own documentation says plainly that it confines
+nothing.
 
 **A service check and a browser check cost two different permissions.** Starting
 the service is `run_project_code`; opening a page on it is `connect_service`,

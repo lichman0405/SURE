@@ -720,6 +720,16 @@ struct Planned {
     /// act on. `PlanRefused` beside it is reported the same way, and the two
     /// readings are meant to be alike.
     service_refusals: Vec<crate::service_plan::ServiceRefusal>,
+    /// The checks a declaration could have had and did not, one value each.
+    ///
+    /// **A different answer from [`Self::service_refusals`]**, and reported
+    /// beside it because a reader comparing the two is asking one question:
+    /// *the file asked for a check and the plan does not hold it — whose
+    /// decision was that?* A refusal is SURE's; a gap is the project's own
+    /// setting, or a field its declaration left empty. Held as the values rather
+    /// than as a count for the reason the refusals are — each sentence names the
+    /// setting that decided, and a count says how many and nothing about which.
+    service_gaps: Vec<crate::service_plan::ServiceGap>,
 }
 
 impl Pipeline<'_> {
@@ -1645,6 +1655,7 @@ fn propose_everything(
     let services = ServicePlan::of(&discovery.root, preferences);
     planned.services = services.services().len();
     planned.service_refusals = services.refusals().to_vec();
+    planned.service_gaps = services.gaps().to_vec();
     services.add_to(builder);
 
     // Stage 7's own proposals are planned too: a candidate SURE can see is a check
@@ -1882,6 +1893,26 @@ fn describe_plan(
                 .join("; ")
         ));
     }
+    // The other answer to the same question, and the one a report has to state
+    // rather than leave to the reader: a service row can be missing because SURE
+    // refused the declaration and because the project's own setting declined it,
+    // and those two send a person to different places. `docs/architecture/
+    // EXECUTION_SAFETY.md` makes the distinction the reason the sentences exist —
+    // *this project switched it off* against *SURE does not open a page on a
+    // guess* — so every sentence below names which setting decided, and the
+    // lead-in claims only what is true of all of them.
+    if !planned.service_gaps.is_empty() {
+        parts.push(format!(
+            "{} declared service(s) were planned with a check left out, and each says why: {}.",
+            planned.service_gaps.len(),
+            planned
+                .service_gaps
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
     parts.join(" ")
 }
 
@@ -2012,10 +2043,27 @@ fn stale_evidence_reason(
 /// clause it implements is phrased about an *earlier pass* and not about an
 /// earlier result.
 ///
-/// **Only a check that runs the project's own code**, which is the predicate
-/// stages 5 and 6 already split the plan by and not a second one written beside
-/// them: a check that only reads files has evidence SURE can re-read, and a check
-/// that *ran* the project has evidence about an execution that no longer exists.
+/// **Only a check whose evidence came from a process**, which is
+/// [`CheckOperation::starts_a_process`]: a check whose operation is
+/// [`CheckOperation::Precomputed`] has evidence SURE can read again, and every
+/// other operation started something whose execution is over by the time this
+/// runs.
+///
+/// **That predicate used to be the consent one, and a browser check is where the
+/// two part.** `requirements().runs_project_code()` answers *would this need the
+/// user's permission to run project code*, and a browser probe does not: it
+/// connects to a service SURE started, under `connect_service`, which is why
+/// `ActionKind::BrowserProbe` is deliberately not one of the actions
+/// `ActionKind::executes_project_code` lists. That is the right answer to the
+/// consent question and the wrong one to this one — a page row's evidence is a
+/// page served by the project's own service, so it is about an execution that has
+/// ended in exactly the way the service row's is. Reading the consent predicate
+/// here **kept a `Pass`** that said a page answered, about a project that had
+/// since moved, while withdrawing the `Pass` beside it about the service that
+/// served that page: a false green, and the failure this repository treats as
+/// worse than a visible error. So this rule asks the question it is about, and
+/// stages 5 and 6 go on asking theirs.
+///
 /// The status is [`CheckStatus::Unknown`] with a reason — not `Warning`, which
 /// maps to `CriticalState::Passed` and so blocks nothing on a critical check, and
 /// not `Skipped`, which would read as a decision somebody made when nobody did.
@@ -2034,7 +2082,7 @@ fn invalidate_runtime_passes(
 ) -> Vec<CheckId> {
     let mut replaced: Vec<CheckId> = Vec::new();
     for scheduled in schedule.checks() {
-        if !scheduled.proposal().requirements().runs_project_code() {
+        if !scheduled.operation().starts_a_process() {
             continue;
         }
         let id = scheduled.proposal().id();
@@ -2801,19 +2849,22 @@ mod tests {
 
     // --- the project, read a second time ----------------------------------
 
-    /// The identities of the checks in a run's plan that would run the project's
-    /// own code, in plan order.
+    /// The identities of the checks in a run's plan whose evidence came from a
+    /// process, in plan order.
     ///
-    /// The same predicate stages 5 and 6 count with — [`CheckRequirements::runs_project_code`]
-    /// — rather than a list of titles, so this test and the pipeline agree on
-    /// what "runtime evidence" is by construction.
-    ///
-    /// [`CheckRequirements::runs_project_code`]: crate::consent::CheckRequirements::runs_project_code
+    /// The predicate [`invalidate_runtime_passes`] itself uses —
+    /// [`CheckOperation::starts_a_process`] and not the consent predicate stages
+    /// 5 and 6 split the plan by — rather than a list of titles, so this test and
+    /// the pipeline agree on what "runtime evidence" is by construction. The two
+    /// predicates part on a browser row, for the reason the production function
+    /// records: a page row's evidence is about an execution and its permission is
+    /// not `run_project_code`, so a helper that asked the consent question here
+    /// would quietly stop covering the row this rule was repaired for.
     fn runtime_check_ids(run: &RunOutcome) -> Vec<CheckId> {
         run.schedule
             .checks()
             .iter()
-            .filter(|scheduled| scheduled.proposal().requirements().runs_project_code())
+            .filter(|scheduled| scheduled.operation().starts_a_process())
             .map(|scheduled| scheduled.proposal().id().clone())
             .collect()
     }

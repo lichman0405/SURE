@@ -64,7 +64,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use sure_core::checks::MissingKind;
 use sure_core::checks::node::NodeChecks;
 use sure_core::components::ComponentGraph;
-use sure_core::config::{CheckPreference, ChecksConfig, ScopeReduction};
+use sure_core::config::{
+    CheckPreference, ChecksConfig, Launcher, ScopeReduction, ServiceDeclaration,
+};
 use sure_core::discover::node::MANIFEST;
 use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, discover};
 use sure_core::planned_work::PlannedWork;
@@ -229,6 +231,24 @@ fn permitted(kind: ProbeKind) -> ExecutionPermissions {
             connect_service: true,
             ..ExecutionPermissions::inspect_only()
         },
+    }
+}
+
+/// A `checks.services` declaration for one directory, as a project writes it.
+///
+/// The entry is written into the fixture rather than left dangling, so that this
+/// file's projects pass the validation `service_plan` applies as well as the
+/// rules this file is about.
+fn declaring(directory: Option<&str>) -> ServiceDeclaration {
+    ServiceDeclaration {
+        name: "api".to_owned(),
+        directory: directory.map(str::to_owned),
+        launcher: Launcher::NodeEntry {
+            entry: "server.js".to_owned(),
+        },
+        port: 4310,
+        readiness: "/healthz".to_owned(),
+        page: None,
     }
 }
 
@@ -681,6 +701,81 @@ fn always_is_the_only_way_to_ask_for_a_browser_and_never_is_not_a_silence() {
             .reductions()
             .contains(&ScopeReduction::ExistingTestsDisabled),
         "this plan reported a setting about the declared checks"
+    );
+}
+
+#[test]
+fn a_component_a_project_declares_a_service_for_is_left_to_the_declaration() {
+    // The coverage rule, and it is about **where the rows come from** rather
+    // than whether they exist: a declaration names a launcher, a port and a
+    // readiness path, so the checks about the component it covers are planned
+    // from that by `service_plan`, and planning them here as well would propose
+    // one service twice. What must not happen is a reader taking this plan's
+    // silence for a project SURE never looks at, which is why the absence is a
+    // sentence.
+    let fixture = Fixture::new("declared-service");
+    workspace(&fixture).write("server.js", "// the service the declaration names\n");
+    let both = preferences(CheckPreference::Always, CheckPreference::Always);
+
+    let root_spoken_for = fixture.plan(&ChecksConfig {
+        services: vec![declaring(None)],
+        ..both.clone()
+    });
+    assert_eq!(
+        root_spoken_for
+            .probes()
+            .iter()
+            .map(|probe| (probe.kind(), probe.target()))
+            .collect::<Vec<_>>(),
+        vec![
+            (ProbeKind::Serve, "packages/web".to_owned()),
+            (ProbeKind::Interface, "packages/web".to_owned()),
+        ],
+        "a declaration for the project itself must take the root out of this plan and \
+         leave the member where it was"
+    );
+    for kind in [ProbeKind::Serve, ProbeKind::Interface] {
+        let because = gap(&root_spoken_for, kind, "");
+        assert_eq!(
+            because,
+            &NotPlannedBecause::DeclaredAsAService,
+            "the root's missing {kind:?} row was recorded as something else"
+        );
+        assert!(
+            because.plain_description().contains("checks.services"),
+            "the gap does not say where the rows went: {}",
+            because.plain_description()
+        );
+    }
+    assert!(
+        root_spoken_for.reductions().is_empty(),
+        "a declaration is not a setting this module reports as a reduction, which is \
+         `Config::scope_reductions`'s to report: {:?}",
+        root_spoken_for.reductions()
+    );
+
+    // And a declaration for a member is a statement about that member. The root
+    // is the project itself, and a member's service says nothing about it.
+    let member_spoken_for = fixture.plan(&ChecksConfig {
+        services: vec![declaring(Some("packages/web"))],
+        ..both
+    });
+    assert_eq!(
+        member_spoken_for
+            .probes()
+            .iter()
+            .map(|probe| (probe.kind(), probe.target()))
+            .collect::<Vec<_>>(),
+        vec![
+            (ProbeKind::Serve, "the project root".to_owned()),
+            (ProbeKind::Interface, "the project root".to_owned()),
+        ],
+        "a declaration for a member must not take the root out of this plan"
+    );
+    assert_eq!(
+        gap(&member_spoken_for, ProbeKind::Serve, "packages/web"),
+        &NotPlannedBecause::DeclaredAsAService,
+        "the member's own rows are the declaration's to plan"
     );
 }
 

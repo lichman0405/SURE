@@ -226,7 +226,15 @@ pub fn check_id(component: &str, tag: &str) -> CheckId {
 /// decision 7 makes materially truncated output an error rather than a pass, so
 /// these two numbers are the point at which a check's result stops being `Pass`
 /// — which is why they are here, in one place, rather than four.
-const CHECK_LIMITS: Limits = Limits::new(Duration::from_secs(15 * 60), 256 * 1024, 256 * 1024);
+///
+/// `pub(crate)` since `P18-T012`'s follow-up, for [`crate::service_plan`]: a
+/// declared service's command is a declared check's command, run on the same
+/// machine under the same mode, so it is planned under this policy rather than
+/// under a second one written beside it. Two numbers that mean *how long a check
+/// may take* and disagree are a check that reports differently depending on
+/// which proposer built it.
+pub(crate) const CHECK_LIMITS: Limits =
+    Limits::new(Duration::from_secs(15 * 60), 256 * 1024, 256 * 1024);
 
 /// A check's command, as typed work.
 ///

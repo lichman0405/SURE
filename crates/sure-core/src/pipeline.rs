@@ -144,6 +144,7 @@ use crate::repair_impact::{seed_rechecks, select_impacted_checks};
 use crate::route_consistency::RouteConsistency;
 use crate::runtime_probes::{PlanRefused, ProbePlan};
 use crate::schedule::{CheckProposal, CheckSchedule, PlanBuilder, ProposalRefused, ScheduledCheck};
+use crate::service_plan::ServicePlan;
 use crate::store::Store;
 use crate::support;
 use crate::ui_action_bridge::UiActionBridge;
@@ -695,9 +696,30 @@ struct Planned {
     /// not plan and must record as not-checked rather than drop.
     missing: Vec<checks::MissingCommand>,
     /// How many runtime probes the project's shape ruled out.
+    ///
+    /// Read by nothing yet, and kept for the same reason
+    /// `ProbePlan::not_planned` is a list rather than a count: the number is the
+    /// half a report can print without a new sentence per reason, and a stage
+    /// that wanted the reasons has them one call away rather than nowhere.
     not_planned: usize,
     /// Why the probe planner refused, when it did.
     probe_refusal: Option<PlanRefused>,
+    /// How many of the project's `checks.services` declarations became checks.
+    ///
+    /// Zero for every project that declares none, which is every project until
+    /// somebody writes one — and **not** the same statement as an empty plan: a
+    /// declaration that was refused is counted by [`Self::service_refusals`]
+    /// instead, and a set that is empty because nothing was declared and a set
+    /// that is empty because everything was refused are two different projects.
+    services: usize,
+    /// The declarations that could not become checks, one value each.
+    ///
+    /// **Held as the refusals and not as their count**, unlike
+    /// [`Self::not_planned`]: a count says how many and nothing about what to
+    /// fix, while the sentence a refusal carries is the whole of what a user can
+    /// act on. `PlanRefused` beside it is reported the same way, and the two
+    /// readings are meant to be alike.
+    service_refusals: Vec<crate::service_plan::ServiceRefusal>,
 }
 
 impl Pipeline<'_> {
@@ -775,7 +797,7 @@ impl Pipeline<'_> {
         stages.push(
             Stage::Plan,
             StageOutcome::Ran {
-                detail: describe_plan(&schedule, &refused, planned.probe_refusal.as_ref()),
+                detail: describe_plan(&schedule, &refused, &planned),
             },
         );
 
@@ -1612,6 +1634,19 @@ fn propose_everything(
         checks.add_to(builder);
     }
 
+    // The project's own declared services, planned **outside** the three blocks
+    // above and not inside any of them. A declaration names its launcher, its
+    // port, its readiness path and its page, and none of that is a fact about an
+    // ecosystem: the `node` block's probes need a discovered Node project, while
+    // a service only needs the project to have said, in its own file, what to
+    // start. A declaration that is refused, a check no preference plans and a
+    // declaration that became nothing are each recorded rather than dropped —
+    // which is what makes this stage's report able to say so.
+    let services = ServicePlan::of(&discovery.root, preferences);
+    planned.services = services.services().len();
+    planned.service_refusals = services.refusals().to_vec();
+    services.add_to(builder);
+
     // Stage 7's own proposals are planned too: a candidate SURE can see is a check
     // SURE would run, and leaving them out of the plan would make the plan a
     // shorter and greener thing than the run.
@@ -1792,7 +1827,7 @@ fn describe_intent(intent: &ProjectIntent) -> String {
 fn describe_plan(
     schedule: &CheckSchedule,
     refused: &[ProposalRefused],
-    probe_refusal: Option<&PlanRefused>,
+    planned: &Planned,
 ) -> String {
     let mut parts = vec![format!(
         // "stopped by the mode" rather than "was stopped": the count is
@@ -1815,8 +1850,24 @@ fn describe_plan(
                 .join("; ")
         ));
     }
-    if let Some(refusal) = probe_refusal {
+    if let Some(refusal) = planned.probe_refusal.as_ref() {
         parts.push(format!("the runtime probes were not planned: {refusal}."));
+    }
+    // A declaration SURE would not act on is stated the same way a proposal the
+    // builder refused is, and for the same reason: the project asked for a check
+    // and the answer is *no, and here is why*. A silent drop would leave a report
+    // whose plan is short by one service and says nothing about the one.
+    if !planned.service_refusals.is_empty() {
+        parts.push(format!(
+            "{} declared service(s) could not become a check: {}.",
+            planned.service_refusals.len(),
+            planned
+                .service_refusals
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
     }
     parts.join(" ")
 }
@@ -2350,12 +2401,13 @@ mod tests {
     /// a question a silenced runner could not answer. The answer it returns is
     /// [`nothing_starts`]'s.
     ///
-    /// `run_service` is unreachable through this pipeline today — nothing in this
-    /// build plans a [`CheckOperation::Service`] — so it records the check's
-    /// identity and delegates to the same cancelled runner rather than pretending
-    /// to answer. It is here rather than defaulted on the trait because a runner
-    /// that *cannot* be asked to start a service is a different claim from one
-    /// that answers nothing to every question.
+    /// `run_service` is unreachable through the runs this file makes — a
+    /// [`CheckOperation::Service`] is planned by [`crate::service_plan`], and every
+    /// run here is configured by `Config::default()`, which declares none — so it
+    /// records the check's identity and delegates to the same cancelled runner
+    /// rather than pretending to answer. It is here rather than defaulted on the
+    /// trait because a runner that *cannot* be asked to start a service is a
+    /// different claim from one that answers nothing to every question.
     ///
     /// [`CheckOperation::Service`]: crate::planned_work::CheckOperation::Service
     #[derive(Debug)]
@@ -2436,7 +2488,7 @@ mod tests {
         /// driver and therefore answers with an `Error`.
         ///
         /// **The delegation is the point**: this fake decides nothing about a
-        /// browser, so if a planner ever emits one, the answer is
+        /// browser, so if a planner emits one, the answer is
         /// [`ProcessRunner`]'s own — *SURE was not given a browser driver* — and
         /// not a status invented in a test. It is also why this arm is recorded
         /// separately rather than folded into `asked`: the page is not a command,
@@ -2679,13 +2731,15 @@ mod tests {
             "the user granted execution and the runner was never reached, so the run above is \
              satisfied by a runner nothing consults: {dynamic:?}"
         );
-        // The other two doors of the same seam are **not** reached here, and that
-        // is a fact about this build rather than about the run: no planner in it
-        // emits a `CheckOperation::Service` or a `CheckOperation::Browser`, so a
-        // real project cannot plan either yet. The wiring that would carry one out
-        // is measured in `planned_check_runner.rs` with a runner that starts
-        // nothing, because a test that made this path live would have to start a
-        // real service.
+        // The other two doors of the same seam are **not** reached here, and since
+        // `P18-T012`'s follow-up that is a fact about this run rather than about the
+        // build: a project that declares a service in `checks.services` gets a
+        // `CheckOperation::Service` from `crate::service_plan`, and a declaration
+        // that names a page gets a `CheckOperation::Browser` beside it. This run is
+        // configured by `Config::default()`, which declares neither. The wiring
+        // that would carry one out is measured in `planned_check_runner.rs` with a
+        // runner that starts nothing, because a test that made this path live would
+        // have to start a real service.
         //
         // Asserted for both doors and not just the one: `pipeline.rs` now plans a
         // browser check's *service* command into the permission plan, so a planner
@@ -2694,14 +2748,14 @@ mod tests {
         // a service. An assertion about `services()` alone would not see it.
         assert!(
             runner.services().is_empty(),
-            "nothing in this build plans a service check, so nothing should have been handed to \
-             the runner as one: {:?}",
+            "this run declares no service, so nothing should have been handed to the runner as \
+             one: {:?}",
             runner.services()
         );
         assert!(
             runner.browsers().is_empty(),
-            "nothing in this build plans a browser check, so nothing should have been handed to \
-             the runner as one: {:?}",
+            "this run declares no page, so nothing should have been handed to the runner as a \
+             browser check: {:?}",
             runner.browsers()
         );
         for result in run.report.results() {
@@ -2890,15 +2944,16 @@ mod tests {
             ))
         }
 
-        /// Unreachable through this pipeline, and answered the way everything
-        /// unreachable in this file is: with an `Error`.
+        /// Unreachable through the runs this file makes, and answered the way
+        /// everything unreachable in this file is: with an `Error`.
         ///
-        /// No planner in this build emits a `CheckOperation::Service`, so a test
-        /// that needed this arm would have to plan one by hand, and a test that
-        /// made it live would have to start a real service. An `Error` rather than
-        /// a pass, so that a future path reaching it without measuring anything
-        /// cannot look like a success — the same rule the rest of this file is
-        /// written under.
+        /// A `CheckOperation::Service` is planned by `crate::service_plan`, and
+        /// every run here is configured by `Config::default()`, which declares no
+        /// service — so a test that needed this arm would have to plan one by hand,
+        /// and a test that made it live would have to start a real service. An
+        /// `Error` rather than a pass, so that a future path reaching it without
+        /// measuring anything cannot look like a success — the same rule the rest
+        /// of this file is written under.
         fn run_service(
             &self,
             work: &crate::planned_check_runner::AdmittedService<'_>,
@@ -2912,15 +2967,16 @@ mod tests {
                 check.title().to_owned(),
                 check.severity(),
                 check.critical(),
-                "nothing in this build plans a service check, so this runner was asked about one \
-                 by something that is not the pipeline",
+                "this run declares no service and this runner starts nothing, so a service check \
+                 reaching it is not a result",
                 work.fingerprint().clone(),
             )
         }
 
-        /// Unreachable through this pipeline for the same reason and for one more:
-        /// no planner in this build emits a `CheckOperation::Browser` either, and
-        /// this runner was given no browser driver even if one did.
+        /// Unreachable through the runs this file makes for the same reason and
+        /// for one more: a `CheckOperation::Browser` needs a declaration that
+        /// names a page, and this runner was given no browser driver even if one
+        /// arrived.
         fn run_browser(
             &self,
             work: &crate::planned_check_runner::AdmittedBrowser<'_>,
@@ -2934,8 +2990,8 @@ mod tests {
                 check.title().to_owned(),
                 check.severity(),
                 check.critical(),
-                "nothing in this build plans a browser check, so this runner was asked about one \
-                 by something that is not the pipeline",
+                "this run declares no page and this runner holds no browser driver, so a browser \
+                 check reaching it is not a result",
                 work.fingerprint().clone(),
             )
         }

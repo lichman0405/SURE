@@ -167,8 +167,9 @@
 //! [`PlanBuilder`]'s, and through it [`decide`](sure_domain::execution::decide)
 //! — nothing here compares a mode to anything.
 //!
-//! **It has no caller in this crate yet.** The seam is public and a later task
-//! wires it; `NodeChecks` was in the same state one phase earlier.
+//! **Its caller is [`crate::pipeline`]**, which plans these probes at stage 4
+//! beside the declared checks; the seam was public and unwired for one phase,
+//! and `NodeChecks` was in the same state one phase earlier.
 //!
 //! **It does not witness that a service is good.** A project whose start script
 //! is `"start": "sleep 600"` gets a serve probe, and a project whose start script
@@ -273,6 +274,30 @@ impl ProbeKind {
             Self::Interface => checks.browser_probe,
         }
     }
+
+    /// The weights this kind's check carries, read out of [`PROBES`].
+    ///
+    /// **A reader of the table and not a second statement of it.**
+    /// [`crate::service_plan`] proposes the same two checks from a project's own
+    /// declarations rather than from a manifest, and it needs exactly this
+    /// knowledge — how bad a serve probe's failure is, whether it is critical,
+    /// what its evidence is worth and whether `auto` plans it. A copy of those
+    /// four judgements written there would be a second answer to *how bad is a
+    /// serve probe*, and the day one of the two was edited a project and a
+    /// manifest would be graded by different rules while reading as one report.
+    ///
+    /// The two arms name the table's own positions, and the test that holds
+    /// them — `the_table_covers_every_kind_exactly_once` — compares the table's
+    /// kinds to [`ProbeKind::ALL`] in order, so an arm naming the wrong row is a
+    /// failing test rather than a severity that drifted. It is a `fn` rather
+    /// than a `const fn` because a slice index is not needed in a constant
+    /// context by the one caller; nothing here is computed.
+    pub(crate) fn row(self) -> ProbeRow {
+        match self {
+            Self::Serve => PROBES[0].1,
+            Self::Interface => PROBES[1].1,
+        }
+    }
 }
 
 /// The weights one kind of probe carries, for every kind of probe there is.
@@ -290,20 +315,25 @@ impl ProbeKind {
 /// missing it. What remains here is the four things that are *judgements* about
 /// a kind rather than readings of one, which is why each has an argument in the
 /// table's documentation below.
+///
+/// **It is read from outside this module through [`ProbeKind::row`] and nowhere
+/// else**, which is `crate::service_plan`'s one dependency on this file: a
+/// project's own service declaration produces the same two checks, so it is
+/// graded by these rows rather than by a copy of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ProbeRow {
+pub(crate) struct ProbeRow {
     /// How bad it is if the probe does not pass.
-    severity: Severity,
+    pub(crate) severity: Severity,
     /// Whether the project cannot be trusted for hand-off when it does not pass.
-    critical: bool,
+    pub(crate) critical: bool,
     /// What the probe's result would be worth.
-    evidence_class: EvidenceClass,
+    pub(crate) evidence_class: EvidenceClass,
     /// Whether `auto` plans this kind for a component that serves.
     ///
     /// **The field that makes `auto` and `always` mean different things**, and
     /// its own documentation is the module's: a manifest can say a project
     /// serves, and no manifest says a project has an interface.
-    auto_plans_it: bool,
+    pub(crate) auto_plans_it: bool,
 }
 
 /// The kinds SURE probes, and what each one's check is.
@@ -521,6 +551,19 @@ pub enum NotPlannedBecause {
     /// is anything to look at. See the module documentation for why this is
     /// reported rather than passed over in silence.
     AutoCannotSeeAnInterface,
+    /// A `checks.services` declaration covers this component, so the rows about
+    /// it are planned by [`crate::service_plan`] instead of here.
+    ///
+    /// **The rows still exist — they are planned elsewhere, one per
+    /// declaration.** That sentence is the whole of why this is a variant rather
+    /// than a silence: *not planned here* is not *no row*, and a reader who took
+    /// this component's absence from *this* plan for an absence of any check
+    /// would be reading a project with a declared service as one SURE never
+    /// looks at. A declaration names its own launcher, port and readiness path,
+    /// so it is planned from what the project wrote down rather than from a
+    /// manifest's `start` script — and a project that declares one has said what
+    /// to run more precisely than a script name does.
+    DeclaredAsAService,
 }
 
 impl NotPlannedBecause {
@@ -544,6 +587,11 @@ impl NotPlannedBecause {
                 "a manifest does not say whether a project has an interface, and SURE \
                  does not start a browser on a guess. `checks.browser_probe: always` \
                  asks for this check."
+                    .to_owned()
+            }
+            Self::DeclaredAsAService => {
+                "this project declares a `checks.services` entry for it, so the checks \
+                 about it are planned from that declaration rather than from a manifest."
                     .to_owned()
             }
         }
@@ -669,6 +717,22 @@ impl ProbePlan {
                     continue;
                 }
 
+                // A component a `checks.services` declaration covers is planned
+                // from that declaration by `crate::service_plan`, and planning it
+                // here as well would propose the same check twice. **This is
+                // after the `disables()` arm and not before it**, so a kind the
+                // project switched off is still reported as the one reduction it
+                // is rather than as a reduction plus a gap on every declared
+                // component.
+                if declared_as_a_service(preferences, &directory) {
+                    plan.not_planned.push(NotPlanned {
+                        component: component.clone(),
+                        kind,
+                        because: NotPlannedBecause::DeclaredAsAService,
+                    });
+                    continue;
+                }
+
                 let command = match &serving {
                     Ok(found) => found.clone(),
                     Err(kind_without_a_command) => {
@@ -790,11 +854,18 @@ impl ProbePlan {
     /// [`serving_command`]'s rendered line — `npm run dev` as a `String` — and
     /// turning that line back into a program and an argument vector is the
     /// parse `docs/adr/0014-planned-check-execution-contract.md` rejected. The
-    /// typed form comes from the discovery that knows the package manager and
-    /// the script as values, which is what [`crate::checks::node`] holds for the
-    /// four declared checks and what a service-shaped probe would need here.
-    /// Until something holds it, this module plans an observation rather than
-    /// promising a run it cannot spell.
+    /// typed form comes from a reading that holds the program and its arguments
+    /// as values, and one now does: a project that declares `checks.services`
+    /// gets a [`CheckOperation::Service`] and, when it names a page, a
+    /// [`CheckOperation::Browser`] from [`crate::service_plan`], built from the
+    /// [`Launcher`](crate::config::Launcher) the declaration carries as a type.
+    ///
+    /// **That is what this paragraph was waiting for, and it does not reach this
+    /// function.** A declaration is what a project wrote down; `start` is a name
+    /// whose command only the package manager can render, and rendering is where
+    /// the typed form is lost. So a component the declarations do not cover
+    /// plans an observation here — and one they do cover is not planned here at
+    /// all, with [`NotPlannedBecause::DeclaredAsAService`] saying which and why.
     ///
     /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
@@ -850,6 +921,31 @@ fn directory_of(manifest: &str) -> PathBuf {
         // would mean — the root — rather than panicking on a shipped path.
         None => PathBuf::new(),
     }
+}
+
+/// Whether the project's own `checks.services` covers this component.
+///
+/// **The component path is the one [`directory_of`] produced**, and the
+/// declaration's `directory` is compared against it rather than against the
+/// manifest's text: `packages/web/package.json` is the component `packages/web`,
+/// and a declaration names `packages/web`. A declaration that names no directory
+/// covers the root, which is the component whose path is empty — the same
+/// spelling [`RuntimeProbe::component`] uses for the project itself.
+///
+/// A directory that is not a component of this project matches nothing, and that
+/// is not a second refusal: the declaration is [`crate::service_plan`]'s to
+/// judge, and a directory that leaves the project or is not there is refused
+/// there with a sentence a user can act on. This predicate only answers *is this
+/// component spoken for*, so a declaration that names a directory nobody has is
+/// simply not a cover for anything here.
+fn declared_as_a_service(preferences: &ChecksConfig, component: &Path) -> bool {
+    preferences
+        .services
+        .iter()
+        .any(|declaration| match declaration.directory.as_deref() {
+            None => component.as_os_str().is_empty(),
+            Some(directory) => *Path::new(directory) == *component,
+        })
 }
 
 /// A component path as a report spells it, with the root named rather than

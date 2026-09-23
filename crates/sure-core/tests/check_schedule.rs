@@ -433,6 +433,21 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          would be a proposer arriving in the runner, and this entry is not cover for \
          it**",
     ),
+    (
+        "src/service_plan.rs",
+        "`P18-T012`'s follow-up, and the first entry here whose project writes its \
+         declaration in `sure.yaml` rather than in a manifest: it turns a \
+         `checks.services` entry into the two checks a declared service can be — \
+         start it, and look at a page on it — so it is a proposer for the reason \
+         `runtime_probes.rs` above is one, and not a consumer for the reason \
+         `planned_work.rs` is one. **What it is not is another way to run \
+         something**: the launcher a declaration names is a tagged enum \
+         (`config/services.rs`) instead of a command line, the program it plans is \
+         the constant `node`, and the argument vector is built as one element, so \
+         there is no string anywhere in this file that is split back into \
+         arguments. It proposes and stops: no admission, no admitted command, no \
+         process — the same seam every entry above stands on",
+    ),
 ];
 
 /// Read a file the rules are stated against, refusing to check a file that could

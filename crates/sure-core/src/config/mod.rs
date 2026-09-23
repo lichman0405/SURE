@@ -24,9 +24,11 @@ mod values;
 
 pub mod authority;
 pub mod error;
+pub mod services;
 
 pub use authority::{Authority, ExecutionSettings, Layer, Privilege, Resolved};
 pub use error::{ConfigError, ErrorKind, Location};
+pub use services::{Launcher, ServiceDeclaration};
 pub use values::{
     AnalysisProvider, CheckPreference, PrivacyMode, ProjectRequest, ProtectionMode,
     RedactionConfig, ReportFormat, ScopeReduction,
@@ -213,6 +215,20 @@ pub struct ChecksConfig {
     pub start_local_services: CheckPreference,
     /// Whether the interface may be checked in a real browser.
     pub browser_probe: CheckPreference,
+    /// The local services this project declares, each one a launcher SURE knows
+    /// rather than a command line.
+    ///
+    /// **A list of declarations and not of commands**, which is the whole of
+    /// what [`services`] is about. Each entry becomes at most two checks — start
+    /// it, and look at a page on it — and the two `checks.*` preferences above
+    /// govern whether either is planned. What a project declares here is a
+    /// request; the execution mode and the permissions come from the user's own
+    /// settings, exactly as they do for every other check in the plan.
+    ///
+    /// Empty by default, and this is a **setting a project may only add to**:
+    /// it can ask for a check that would not otherwise be planned, and it cannot
+    /// move the mode under which that check would run.
+    pub services: Vec<ServiceDeclaration>,
 }
 
 impl Default for ChecksConfig {
@@ -221,6 +237,7 @@ impl Default for ChecksConfig {
             existing_tests: true,
             start_local_services: CheckPreference::default(),
             browser_probe: CheckPreference::default(),
+            services: Vec::new(),
         }
     }
 }

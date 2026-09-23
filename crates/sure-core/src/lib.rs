@@ -74,6 +74,7 @@ pub mod scan;
 pub mod schedule;
 pub mod semantic_contract;
 pub mod service;
+pub mod service_plan;
 pub mod session_event_store;
 pub mod setup;
 pub mod store;

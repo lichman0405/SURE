@@ -133,6 +133,80 @@ what SURE does.** A granted run carries the project's checks out and reports one
 result per check; a run that was not granted is recorded check by check as not
 checked. An unknown check is not a pass in either case.
 
+## Services a project declares
+
+A project may ask SURE to start one of its own services and look at a page on it,
+and the whole of how it may ask is `checks.services` in its `sure.yaml`. The
+shape is `sure_core::config::services::ServiceDeclaration`: a **name**, an
+optional **directory** relative to the project root, a **`launcher`**, a
+**port**, a **`readiness`** path and an optional **`page`**. The decision is
+`docs/adr/0016-declared-services.md`; what a reader of this file needs is what
+the shape does and does not let a project buy.
+
+**The launcher is a tagged type, and that is the point of the whole block.**
+`launcher: node_entry: { entry: server.js }` means *run this machine's `node`
+with this file as its **one** argument*. There is no field anywhere in a
+declaration that accepts a command line, no string is split into an argument
+vector at any point on the way, and the program and the argument list are SURE's
+own constants: a project chooses a launcher **kind** and the entry file, and
+nothing else. The distance between that and `command: bash -c "…"` is the
+difference between a request SURE has an answer to and a general escape hatch,
+which is why the second is not in the format at all — the only launcher kind this
+build has, and the reason there is one, is `config/services.rs`'s own module
+comment.
+
+**Every way a declaration can be wrong is a value with a sentence on it.** An
+empty name; two declarations sharing a name; a directory outside the project or
+not there; an entry that leaves its directory, is not there, or is not a
+`.js`/`.mjs`/`.cjs` file; a port of zero; a `readiness` or `page` path that
+`probe::Endpoint::loopback` refuses. Each is a `ServiceRefusal` variant carrying
+its own sentence — which declaration, which directory, which entry, which path,
+and what to change — and **none of them is a dropped row**: a
+declaration SURE will not act on appears in the plan's refusals and in the stage-4
+report, because a project that asked for a check and did not get one has learned
+something a silent plan would have hidden. A path that is not a path — a URL on
+another host, an address with userinfo in it, a backslash — cannot be written
+into one of these fields in the first place: the endpoint type they are validated
+through has no host to fill in and no authority to extend.
+
+**The two settings decide, and what they leave unplanned is said out loud.**
+`checks.start_local_services: never` plans neither row and records which
+declaration it applied to (that setting is a run-wide `ScopeReduction` as well,
+and this is the per-declaration part it cannot state); `auto` plans the service
+row — a declaration *is* a project saying it serves — and no browser row;
+`always` plans both when a page was declared, and says so rather than inventing a
+page when none was. A page is planned only for a service this run would start,
+because a browser check on a service nobody starts would start it.
+
+**`host_confirmed` is consent, not a sandbox, and a service is where that is
+easiest to misread.** A granted run starts the declared service **on this
+machine**, as the user, and the started process can open whatever the user can
+open and reach the network. The mode admitted it; it does not confine it. What
+the declaration buys a project is narrower than what a shell would: one launcher
+kind, one program name, a directory inside the project, and a port SURE itself
+reaches over loopback.
+
+**A service is not given SURE's own environment.** ADR 0014's decision 11, and
+the plan states it rather than leaving it to a default: a declared service's
+`CommandSpec` carries `Environment::only([])`, so the child starts with **no
+variables of SURE's at all** — not the user's tokens, not SURE's own settings,
+not a `PATH`. Two consequences belong with it. The program name `node` is still
+found, because SURE resolves it in its own process and the environment is the
+child's; and a service that tries to start *another* program by name may fail to
+find it, which is a reported failure of the check rather than something SURE
+works around. Neither half of that is isolation: an environment is a list of
+strings handed to a program, and `Environment`'s own documentation says plainly
+that it confines nothing.
+
+**A service check and a browser check cost two different permissions.** Starting
+the service is `run_project_code`; opening a page on it is `connect_service`,
+asked for separately by `browser::absence` — a service a run permitted does not
+imply a page a run may look at, and a run granted the first and not the second
+gets a serve row and a stated absence rather than a look. Both are requests a
+project's own file can make and cannot grant; the mode and the permissions come
+from the user's own configuration, on the same authority order as everything else
+in this file.
+
 ## How a mode is enforced
 
 A mode is not a setting that a check consults. It is applied to a plan, once,

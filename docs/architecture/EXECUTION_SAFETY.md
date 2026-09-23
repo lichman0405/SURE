@@ -65,10 +65,9 @@ work out the command line that would execute a supported check in a container,
 according to an explicit plan. Working it out is the whole of what this mode
 *does* in this build: `sure_core::container`'s own module comment is "**Nothing
 here runs anything, and nothing here builds a `Command`**", and every mention of
-a `ContainerPlan` outside the file that defines the type is in a test. **What
-this build does under the mode is a different thing from what this mode
-promises, and the difference is a defect recorded below rather than a
-description left implicit.**
+a `ContainerPlan` outside the file that defines the type is in a test. This
+build therefore **does not execute a project check requested in container
+mode**. It reports `container_execution_unavailable` for the skipped check.
 
 That is **limited isolation, not a perfect security boundary**, and the plan is
 what makes the sentence checkable rather than aspirational: the image, the
@@ -83,28 +82,18 @@ absence of both is the state of most machines, and
 `sure_core::container::Availability` has no error variant for that reason: a
 machine without Docker is a machine without Docker, not a broken one. **What it
 does not mean is that the checks run on the host instead.** Absence changes
-*inside what* a command would run and not *whether* it may — the
-`container` bullet under [How a mode is enforced](#how-a-mode-is-enforced) says
-the same thing from the other side — so the answer with no runtime is the answer
-with one: what a check does, and what a settings file decides.
+*inside what* a future container executor could run and not whether this build
+has such an executor. This build has none, so the answer with no runtime is the
+same as the answer with one: the check remains skipped.
 
-**And one thing this build does not make true, recorded here rather than
-repaired here: a run whose mode is `container` reaches no container.** The mode,
-the `ContainerPlan` and the runtime probe are all values; there is no executor
-between them and the runner, and no file on the run path asks whether the mode
-is `container` — `sure_core::pipeline` hands the admitted commands to the same
-host runner whatever the mode says. So a user whose own settings file names
-`execution.mode: container` and grants `run_project_code` is promised, by
-`ExecutionMode::Container`'s own consent sentence, that *"SURE will run supported
-checks in a container on this computer"* — and the command is admitted and
-handed to the runner that starts processes here. That contradicts the mode's own
-promise and `docs/adr/0014-planned-check-execution-contract.md`'s exclusion of
-*"container execution or a container fallback for host work"*. It is **not**
-repaired in `P18-T007` because the repair is a decision about what `container`
-mode should do in a build with no container executor: refusing the run outright
-would need a sentence true of a user who *did* allow the command, and
-`NotCheckedReason` has no variant for it. `sure_core::container`'s module comment
-carries the same paragraph from the mode's side.
+**The no-host-fallback rule is enforced twice.** The schedule denies actions
+that execute project code in `container` mode, and the command permission plan
+refuses them before an admitted value can reach the host runner. The result says
+SURE lacks the requested container executor, even when the user's own settings
+grant `run_project_code`. The product-path regression test
+`a_user_requesting_a_container_never_reaches_the_host_runner` records an empty
+runner request list and the explicit skipped results. A project file still
+cannot grant itself this mode or the permission.
 
 ## What runs in this build
 
@@ -114,9 +103,9 @@ about what *may* run, and since `P18-T007` a check walks the road:
 permissions the run was handed, asks `sure_core::enforce` about every scheduled
 check, and hands the admitted commands to `sure_core::planned_check_runner` —
 the one file that turns a planned command into a request for
-`sure_core::process`'s runner. A granted run therefore runs the project's checks
-**here, on the user's machine**: there is no container in this build, and no
-sandbox.
+`sure_core::process`'s runner. A granted `host_confirmed` run therefore runs the
+project's admitted checks **here, on the user's machine**. A `container` run
+starts no project check in this build.
 
 **A run that was not granted still reaches no process.** `inspect_only` is the
 mode a run starts in and the mode a project's own file cannot move in either
@@ -161,16 +150,14 @@ before anything runs, and what comes out is a value:
 - A check is one unit. If any of its commands will not run, the check does not
   run — including the commands in it that would have been allowed. A verdict for
   half a check is a verdict for a check that did not happen.
-- `sure_core::container` says what the command line around an admitted command
+- `sure_core::container` says what the command line around a command
   would look like in `container` mode — the image, the mount and its access, the
   network mode and the working directory — as a value, without starting anything.
   It is listed last because it is meant to be downstream of the other two:
-  enforcement decides *whether* a command may run, and this decides *inside
-  what*. **Nothing in this build stands between them today** — there is no
-  executor that reads a `ContainerPlan` — so what the mode says and what a run
-  does are apart, which is the defect the section above records rather than a
-  description of how the two compose. A runtime that is not installed changes
-  the second and not the first, which is why its absence is not an error.
+  enforcement decides *whether* a command may run, and this plan describes
+  *inside what* a future executor would run it. **Nothing in this build executes
+  a `ContainerPlan`**, so enforcement refuses container-mode project commands
+  with an explicit reason. A runtime being installed does not change that.
 
 **The commands that may run are the ones `Enforcement::admitted()` yields, and
 that iterator is the only door.** Anything that launches a project process takes

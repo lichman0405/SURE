@@ -26,11 +26,9 @@
 //! [`Availability`] has no `Error` variant because a machine without Docker or
 //! Podman is not a failure: it is a machine with no runtime on its search path,
 //! which is a fact about the computer rather than a defect in it. **It is also
-//! not a machine where something different happens.** Absence changes *inside
-//! what* a command would run and not *whether* anything runs — the mode and the
-//! permissions `P3-T005`, `P3-T006` and `P3-T007` built do not consult what is
-//! installed — and since `P18-T007` this build does run a project's checks: on
-//! **this computer**, through [`crate::pipeline`] into
+//! not a machine where something different happens.** A runtime's presence does
+//! not create an executor in this build. Since `P18-T007` this build does run
+//! checks granted under `host_confirmed`: on **this computer**, through [`crate::pipeline`] into
 //! [`crate::enforce`](crate::enforce::Enforcement::admitted) and
 //! [`crate::planned_check_runner`], when the **user's own** settings file grants
 //! it ([`crate::config::Authority::execution_mode`]). **This build runs no check
@@ -47,21 +45,13 @@
 //! have made a normal machine a broken one**, and the failure mode of that is a
 //! user told their setup is wrong when it is not.
 //!
-//! **And one thing this module does not make true: a run whose mode is
-//! `container` reaches no container.** The mode's promise is a check inside one,
-//! `ContainerPlan` is plan-only, and there is no executor between them — so what
-//! such a run does is decided by [`crate::enforce`] and [`crate::pipeline`],
-//! neither of which refuses the mode, and `P18-T007`'s wiring is what made the
-//! question reachable. **Measured rather than reasoned about**: driving
-//! `crate::pipeline` over a small Rust project with `execution.mode: container`
-//! in the user's own settings file, and a runner that records every command and
-//! starts nothing, the run reports mode `Container` with `run_project_code` true
-//! and the runner is asked for `cargo test` and `cargo check --all-targets` —
-//! the same host commands `host_confirmed` would run, with nothing between them
-//! and this computer. It is recorded here rather than repaired here: this file
-//! describes an argument vector and starts nothing, the admission rule is
-//! `sure_domain::execution::decide`'s, and a repair is a decision about what
-//! `container` mode should *do* in a build with no container executor.
+//! **Container mode now fails closed.** The domain schedule and the command
+//! permission plan both refuse project-running work when the user requests
+//! `container`, and a stopped check carries
+//! `NotCheckedReason::ContainerExecutionUnavailable`. The product-path test
+//! `a_user_requesting_a_container_never_reaches_the_host_runner` uses a user
+//! grant and a small Rust project; it observes that checks were planned but the
+//! host runner was never asked. A container executor is still future work.
 //!
 //! # Where "limited isolation" is, and why it is not marketing
 //!

@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn even_a_mode_that_runs_nothing_admits_only_commands_that_run_no_project_code() {
+    fn a_mode_without_an_executor_admits_no_project_code() {
         // The strongest form, and it is not the same claim as the one above: the
         // checks that survive an inspect-only mode with everything granted are the
         // ones `decide` itself says are allowed there — a read and a fetch — and
@@ -590,14 +590,15 @@ mod tests {
                 for admitted in enforcement.admitted() {
                     let command = admitted.command();
                     assert!(
-                        !consent::runs_project_code(command.effects()) || mode.runs_project_code(),
+                        !consent::runs_project_code(command.effects())
+                            || mode.has_project_executor(),
                         "{} / {name}: {} was admitted and runs the project's code",
                         mode.as_str(),
                         command.display()
                     );
                     ever_ran_code |= consent::runs_project_code(command.effects());
                 }
-                if !mode.runs_project_code() {
+                if !mode.has_project_executor() {
                     assert!(
                         enforcement.check_plan().dynamic_checks.is_empty(),
                         "{} / {name}",

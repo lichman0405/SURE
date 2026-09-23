@@ -207,5 +207,16 @@
       "No known false-green regression is introduced.",
       "Documentation matches implemented behavior."
     ]
+  },
+  {
+    "id": "P19",
+    "title": "Open issue repair and pipeline verification",
+    "objective": "Repair the execution consent boundary and unreliable test readings, investigate the Ubuntu browser failure, and measure a completed product-path check before closing the planned-check issue.",
+    "exit_criteria": [
+      "Container mode cannot execute project code on the host without a container executor.",
+      "Windows test readings survive non-UTF-8 consoles and recycled process identifiers.",
+      "Ubuntu browser startup failures are diagnosed and verified by CI without silent skips.",
+      "A safe declared check completes through the product path and the full gates pass."
+    ]
   }
 ]

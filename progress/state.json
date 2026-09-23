@@ -5,8 +5,8 @@
   "repository": "https://github.com/lichman0405/SURE.git",
   "mode": "bootstrap",
   "status": "in_progress",
-  "current_phase": "P18",
-  "last_updated": "2026-09-22",
+  "current_phase": "P19",
+  "last_updated": "2026-09-23T01:53:14.768Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3644,6 +3644,51 @@
         "**What is NOT measured, and it bounds every claim above.** (1) **No project's own declared check runs to completion through the product path, on any platform.** Every product-path test that reaches the real runner hands it a `Cancellation` cancelled before the run began — `declared_commands.rs`, `adversarial_fixture_detection.rs:2185`'s `fn nothing_starts()`, `runtime_results_reach_the_reports.rs:127`'s `fn a_runner_that_starts_nothing()` — so what is measured is the seam and not a check finishing and passing. `acceptance_report_runner.rs:1552` does run a declared `node` script to completion, but **by hand through `sure_core::process::run` and not through the product path**, and that distinction is the whole of the claim. The honest statement is the narrower one, and the ADR states it as the missing reading rather than a refused one. (2) **`sure-core` and `sure-cli` are NOT CHECKED for the Unix targets by the local gate** — `check-non-windows.mjs` exits 0 while naming both as unchecked for `x86_64-unknown-linux-gnu` and `x86_64-apple-darwin`, because they need a C compiler for those targets and none is installed here; nothing was skipped to work around it, the whole-workspace attempt is made first, and **the only Unix coverage for this branch's code is the CI matrix**. (3) The `session_event_store` flake (Issue #13) did **not** occur on this run, so this reading says nothing about it either way. (4) The `&[]` residual risk at `aggregate_run`'s other call sites is recorded and not guarded, for the reason in the paragraph above."
       ],
       "notes": "Three things a reader of this record should not have to reconstruct. **The task's own brief was corrected three times by measurement**, and the corrections are kept rather than quietly applied: the corpus holds 25 directories and not 27; `is_startable` is `planned_work.rs:1055` and not `checks/node.rs:2361` (the brief's line is a test asserting `!is_startable()` for `npm.cmd`); and an unadmitted check's result is `Skipped` + `NotCheckedReason::ExecutionNotAuthorized` rather than `Error` — `Error` comes only from `refused_result`, which is a different arm, an admission that exists but does not *cover* the command, and both arms now have a test. **The `&[]` question was answered by enumerating call sites rather than by assuming**: exactly one product caller passes a real list (`pipeline.rs:983`), and the rest are tests and the fixture-corpus harness. **Issue #13 is carried, not fixed**: it flaked a gate reading during T010 and again during T011, its `capability_report` half is a pid-recycled scratch store that `create_dir_all` never clears, and its `session_event_store` half is marked unexplained in the Issue because that half uses a helper that does clear — a correlation, not a mechanism. T012's gate run was clean, which is a fact about this run and not a fix."
+    },
+    "P19-T001": {
+      "status": "accepted",
+      "started_at": "2026-09-23T01:44:15.942Z",
+      "finished_at": "2026-09-23T01:53:14.693Z",
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": "Issue #12: container mode now denies project-running commands before host runner admission; a dedicated skipped reason is emitted. Measured with cargo test -p sure-domain -p sure-core --lib --quiet (1486+144 pass), sure-core container_isolation_claim and check_schedule, and sure-domain wire_contract. Full gates and CI remain for P19-T005."
+    },
+    "P19-T002": {
+      "status": "in_progress",
+      "started_at": "2026-09-23T01:53:14.767Z",
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": "Investigating issue #13 scratch database collisions."
+    },
+    "P19-T003": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P19-T004": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
+    },
+    "P19-T005": {
+      "status": "queued",
+      "started_at": null,
+      "finished_at": null,
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": ""
     }
   },
   "blocked_external": [],

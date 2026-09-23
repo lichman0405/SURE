@@ -2556,6 +2556,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_user_requesting_a_container_never_reaches_the_host_runner() {
+        let project = a_rust_project("pipeline-container-refused");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: container\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let runner = Recording::new();
+        let config = Config::default();
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::Container);
+        assert!(
+            run.permissions.run_project_code,
+            "the user's grant must be real"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(!dynamic.is_empty(), "the fixture must plan project code");
+        assert!(runner.asked().is_empty(), "the host runner was reached");
+        assert!(runner.services().is_empty(), "a host service was reached");
+        assert!(
+            runner.browsers().is_empty(),
+            "a host browser check was reached"
+        );
+        for result in run.report.results() {
+            if dynamic.contains(&result.title) {
+                assert_eq!(result.status, sure_domain::status::CheckStatus::Skipped);
+                assert_eq!(
+                    result.not_checked_reason,
+                    Some(NotCheckedReason::ContainerExecutionUnavailable),
+                    "{}: {}",
+                    result.title,
+                    result.reason
+                );
+                if result.critical {
+                    assert!(result.blocks_green());
+                }
+            }
+        }
+    }
+
     /// The control for the measurement above, and the proof the seam is live.
     ///
     /// The same project and the same runner, with the user's own configuration

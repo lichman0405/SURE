@@ -266,6 +266,7 @@ frozen!(CriticalState, test: critical_state_wire_names_are_frozen, {
 
 frozen!(NotCheckedReason, test: not_checked_reason_wire_names_are_frozen, {
     ExecutionNotAuthorized => "execution_not_authorized",
+    ContainerExecutionUnavailable => "container_execution_unavailable",
     UserDeclined => "user_declined",
     DependencyInstallNotPermitted => "dependency_install_not_permitted",
     NetworkNotPermitted => "network_not_permitted",

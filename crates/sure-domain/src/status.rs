@@ -143,6 +143,8 @@ impl CriticalState {
 pub enum NotCheckedReason {
     /// The user's execution mode did not allow running project code.
     ExecutionNotAuthorized,
+    /// Container mode was requested, but this build cannot execute in one.
+    ContainerExecutionUnavailable,
     /// The user declined a specific approval prompt.
     UserDeclined,
     /// Dependency installation was not permitted, so the check could not run.
@@ -167,6 +169,7 @@ pub enum NotCheckedReason {
 
 variants!(NotCheckedReason {
     ExecutionNotAuthorized,
+    ContainerExecutionUnavailable,
     UserDeclined,
     DependencyInstallNotPermitted,
     NetworkNotPermitted,
@@ -206,6 +209,9 @@ impl NotCheckedReason {
         match self {
             Self::ExecutionNotAuthorized => {
                 "Checking this would have meant running your project's code, and you have not allowed that."
+            }
+            Self::ContainerExecutionUnavailable => {
+                "You allowed a container check, but this version of SURE cannot run checks in a container. Your project's code was not run on this computer."
             }
             Self::UserDeclined => "You said no when SURE asked to run this check.",
             Self::DependencyInstallNotPermitted => {

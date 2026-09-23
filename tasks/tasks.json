@@ -3462,5 +3462,72 @@
       "progress/HANDOFF.md"
     ],
     "notes": ""
+  },
+  {
+    "id": "P19-T001",
+    "phase": "P19",
+    "title": "Refuse container requests that would execute on the host (#12)",
+    "required": true,
+    "depends_on": ["P18-T012"],
+    "acceptance": [
+      "A user-granted container request starts no project process when this build has no container executor.",
+      "The report says the requested execution mechanism is unavailable rather than blaming missing user permission.",
+      "Host-confirmed execution and inspect-only refusal retain their intended behavior."
+    ],
+    "outputs": ["crates/sure-core/src/", "crates/sure-domain/src/", "docs/architecture/EXECUTION_SAFETY.md"],
+    "notes": "https://github.com/lichman0405/SURE/issues/12"
+  },
+  {
+    "id": "P19-T002",
+    "phase": "P19",
+    "title": "Make scratch databases independent of recycled process IDs (#13)",
+    "required": true,
+    "depends_on": ["P19-T001"],
+    "acceptance": [
+      "Capability and session-event tests cannot reopen data left by an earlier run.",
+      "A controlled stale database reproduces the old failure and the repaired tests reject it."
+    ],
+    "outputs": ["crates/sure-core/src/capability_report.rs", "crates/sure-core/src/session_event_store.rs"],
+    "notes": "https://github.com/lichman0405/SURE/issues/13"
+  },
+  {
+    "id": "P19-T003",
+    "phase": "P19",
+    "title": "Read PowerShell output correctly on non-UTF-8 Windows consoles (#11)",
+    "required": true,
+    "depends_on": ["P19-T002"],
+    "acceptance": [
+      "Unicode path tests pass under CP936 and UTF-8 consoles without removing Unicode coverage.",
+      "The child output encoding and the test decoder agree across the three affected targets."
+    ],
+    "outputs": ["crates/sure-cli/tests/"],
+    "notes": "https://github.com/lichman0405/SURE/issues/11"
+  },
+  {
+    "id": "P19-T004",
+    "phase": "P19",
+    "title": "Diagnose and repair the Ubuntu browser startup flake (#15)",
+    "required": true,
+    "depends_on": ["P19-T003"],
+    "acceptance": [
+      "Repeated Ubuntu observations distinguish browser startup delay from environmental failure.",
+      "The selected repair keeps a found but unusable browser visibly red and is verified in Ubuntu CI."
+    ],
+    "outputs": ["crates/sure-core/src/browser_driver/", ".github/workflows/ci.yml"],
+    "notes": "https://github.com/lichman0405/SURE/issues/15"
+  },
+  {
+    "id": "P19-T005",
+    "phase": "P19",
+    "title": "Verify a declared check completes through the product path (#10)",
+    "required": true,
+    "depends_on": ["P19-T001", "P19-T002", "P19-T003", "P19-T004"],
+    "acceptance": [
+      "A safe repository-owned fixture reaches the admitted command runner and finishes with an explicit result in the CLI report.",
+      "The full local gate set and Windows, macOS and Ubuntu CI are read at the final commit.",
+      "The remaining service and browser planner scope is decided explicitly before issue closure."
+    ],
+    "outputs": ["crates/sure-cli/tests/", "progress/HANDOFF.md"],
+    "notes": "https://github.com/lichman0405/SURE/issues/10"
   }
 ]

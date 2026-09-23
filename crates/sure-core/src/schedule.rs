@@ -693,6 +693,7 @@ impl CheckProposal {
 pub struct ScheduledCheck {
     work: PlannedWork,
     position: usize,
+    mode: ExecutionMode,
     decision: ExecutionDecision,
     blocked_by: Option<Permission>,
 }
@@ -759,12 +760,20 @@ impl ScheduledCheck {
             return None;
         }
         let proposal = self.proposal();
+        let reason = if self.mode == ExecutionMode::Container
+            && self.blocked_by.is_none()
+            && proposal.requirements().runs_project_code()
+        {
+            NotCheckedReason::ContainerExecutionUnavailable
+        } else {
+            NotCheckedReason::ExecutionNotAuthorized
+        };
         Some(CheckResult::not_run(
             proposal.id.clone(),
             proposal.title.clone(),
             proposal.severity,
             proposal.critical,
-            NotCheckedReason::ExecutionNotAuthorized,
+            reason,
             project_fingerprint.clone(),
         ))
     }
@@ -1088,6 +1097,7 @@ impl PlanBuilder {
             };
             checks.push(ScheduledCheck {
                 position: checks.len(),
+                mode: self.mode,
                 decision,
                 blocked_by,
                 work: entry,
@@ -1688,6 +1698,7 @@ mod tests {
                 )),
             ),
             position: 0,
+            mode: ExecutionMode::InspectOnly,
             decision: ExecutionDecision::Denied,
             blocked_by: Some(Permission::RunProjectCode),
         };

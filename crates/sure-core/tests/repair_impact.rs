@@ -9,6 +9,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_domain::evidence::{AnchorSubject, Evidence, EvidenceAnchor, EvidenceClass};
@@ -55,9 +56,28 @@ fn schedule_with(checks: &[CheckProposal]) -> CheckSchedule {
         },
     );
     for proposal in checks {
-        builder.propose(proposal.clone()).unwrap();
+        builder.propose(work(proposal.clone())).unwrap();
     }
     builder.build()
+}
+
+/// The plan entry for a proposal, since `P18-T003` a proposal plus its operation.
+///
+/// **A candidate observation, because that is the whole of what these fixtures
+/// establish.** Every check this file builds is built by hand and nothing here
+/// starts a process: the value is *nothing has settled this check*, which maps to a
+/// warning and never to a pass — the one answer that claims nothing. This file is
+/// about which checks a repair has to re-run, not about how any of them is carried
+/// out, so what it supplies beside the proposal is the most conservative thing it
+/// can honestly say; `P18-T004` replaces the placeholders on the product's own
+/// paths.
+fn work(proposal: CheckProposal) -> PlannedWork {
+    PlannedWork::new(
+        proposal,
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
+    )
 }
 
 fn proposal(

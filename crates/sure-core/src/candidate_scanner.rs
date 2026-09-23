@@ -32,6 +32,7 @@ use crate::candidate_context::{CandidateContext, classify_path};
 use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::redact::escape_control_characters;
 use crate::references::is_source_candidate;
 use crate::scan::display_path;
@@ -256,9 +257,22 @@ impl CandidateScanner {
     }
 
     /// Hands every proposal to a plan builder.
+    ///
+    /// **Each proposal is paired with the observation this scanner actually
+    /// made**, which is a [`StaticObservation::Candidate`] naming the file and
+    /// line the pattern stands on: the reading happened while the plan was being
+    /// made, nothing was started, and a pattern in a file is not by itself a
+    /// defect — which is this module's own acceptance sentence and the reason
+    /// the corpus requires one `TODO` to be `must_fix` and another
+    /// `should_fix_first`. It is not a `Holds` (nothing about the code's
+    /// behaviour was observed) and not a `CouldNotRun` (every check here comes
+    /// from a file that was read).
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in &self.proposals {
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            let work = PlannedWork::new(proposal.clone(), observation_of(proposal));
+            if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"
@@ -289,6 +303,22 @@ impl CandidateScanner {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this module's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today. It
+/// is built from the proposal rather than from the detection because the
+/// operation is built where the work is handed to the plan, and the proposal is
+/// what travels there.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: the pattern is what was read, and what the code \
+         does with it has not been seen.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Scan source files for candidate patterns.

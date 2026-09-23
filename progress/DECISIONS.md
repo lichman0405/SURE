@@ -5012,3 +5012,530 @@ already records (exit 1 is not Claude Code's blocking status, which is 2), and
 neither is a green. The two families simply disagree about which non-zero code to
 use, and nothing reads the difference. Written down because a reader comparing
 the two launchers' exit codes on this path will meet it.
+
+## P18 — the console code page, and seventeen red tests that were not the tree
+
+The first `P18` reading was taken to establish a baseline before any of the
+phase's code existed, and it came back red: `test=101`, `result-lines=90
+passed=2801 failed=17 ignored=13`, with `red: tests\install_flow.rs` (9),
+`red: tests\quickstart_flow.rs` (2) and `red: tests\winget_manifest.rs` (6). At
+`47e13c0`, a commit that had just passed the same seven gates. The reading is
+`target/tmp/gates-baseline-before-planned-check-runner.txt`.
+
+**The same command, at the same commit, from a UTF-8 console, is green.**
+`chcp.com 65001` first, then the identical `pwsh -NoProfile -File
+scripts/gates.ps1` invocation: `test=0`, `result-lines=90 passed=2818 failed=0
+ignored=13`, `red: none`, `halt: exit 0 (clean)`, and `store identical: True`.
+That reading is `target/tmp/gates-baseline2-utf8-console.txt`. The only
+difference between the two runs that the logs record is
+`[Console]::OutputEncoding` — `gb2312` (CP936) against `utf-8`.
+
+**The mechanism, and the measurement that rules the tree out.** `quickstart_flow.rs`'s
+`a_release_archive` does `let archive = PathBuf::from(run.stdout.trim());`, and the
+staging fixture deliberately puts the archive under `target/tmp/sure install flow
+é中文 and spaces/`. Windows PowerShell 5.1 writes a redirected child's stdout in the
+**console's code page**, and `Run::of` decodes those bytes as UTF-8, so a path
+holding `é` and `中文` does not survive the round trip. What settles it is that the
+archive and its `.sha256` sidecar are on disk at exactly the path the failing test
+calls empty — `target/tmp/sure install flow é中文 and spaces/run-28692/launcher-3/`.
+A test that cannot see a file which is there is a defect in the reading, not in
+the tree, and the fixture only reaches it because it put non-ASCII in the path on
+purpose.
+
+**What was ruled out, because the obvious suspect is wrong.** It is not the
+execution policy, and the gate log says so itself: line 5 records
+`Process=Bypass`, and line 8 records that the shell the tests start
+(`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`) loaded a local
+`.ps1` with exit 0 — the gate measures this precisely because the six
+`.ps1`-spawning targets need it. The related trap is real and is a different
+one: Windows PowerShell 5.1 and `pwsh` 7 read different registry keys, so 5.1
+can be `Undefined` (and therefore `Restricted`) on a machine where 7 reads
+`RemoteSigned`. That is what `-ExecutionPolicy Bypass` sets a *process-scoped*
+preference for, inherited through `PSExecutionPolicyPreference`.
+
+**Not repaired here.** It is out of `P18`'s scope, it is not in the pipeline
+this phase builds, and it is a defect in three `sure-cli` test targets rather
+than in the engine. It is written down for two reasons: so that a red reading of
+those three targets on a non-UTF-8 console is not mistaken for a regression, and
+so that `P18`'s own readings are comparable with the ones this repository took
+before it — which is why every `P18` gate reading below is taken from a UTF-8
+console, and says so. The honest repair is either `Run::of` decoding in the
+child's actual console encoding or the fixture not putting non-ASCII in a path
+it then reads back out of a child's stdout; neither is done here, and this entry
+does not claim the class is fixed by a console setting.
+
+## P18 — a browser check's path is an `Endpoint`, because a URL cannot be assembled from a `String`
+
+`P18-T002`'s `Readiness::Answers` held `port: u16, path: String`, and both it and
+`BrowserCheckSpec` built their URL with `format!("http://127.0.0.1:{port}{path}")`.
+That is not a safe way to make a URL, and the reason is one sentence long.
+
+**The mechanism.** A URL's authority ends at the first `/`, so a path that does
+not begin with one does not extend the path — it extends the **host**:
+
+```
+http://127.0.0.1:8080@evil.example/
+  authority  127.0.0.1:8080@evil.example   <- reads as loopback
+  host       evil.example                  <- where the request goes
+```
+
+Everything before the `@` is userinfo. A value that looked like a loopback
+address was in fact a username, and the check would have gone to `evil.example`.
+The repository's "no silent external network validation" invariant would have
+rested on every caller passing a well-formed path rather than on the type.
+
+**The decision.** Both types now hold a `probe::Endpoint`, the type the local
+probe already uses for exactly this question. Its fields are private, and both
+its constructors refuse a non-loopback address and a path that is not
+`path_is_safe`, which requires the leading `/` — the character that terminates
+the authority. The URL above is unrepresentable rather than unreviewed.
+**The deciding argument was reuse and not just validation**: this is the same
+type `browser::Target` wraps, for the reason that type records in its own doc —
+two copies of a refusal rule are two rules the day one of them is changed — and
+writing a third copy here would have made this module that day.
+
+`BrowserCheckSpec::new` becomes fallible and returns a new `WorkRefusal` value:
+`ServiceNamesNoPort` where a browser check was built on a service that says only
+that it stays up — previously a silent `None` that every caller would have had
+to remember to handle — and `Endpoint(EndpointError)` where the path was
+refused. `loopback_url` is no longer an `Option`, because a browser check with no
+URL cannot be built.
+
+**Honest about how it was found.** No shipped path was affected: nothing outside
+`planned_work.rs` called any of it, and the first caller would have been
+`P18-T010`'s browser check. It was found by reading the module, not by a failing
+test.
+
+**What the regression test records that its first version did not.** The test
+carries the counterfactual string and asserts on its **host**, not its
+authority. The first version of the helper stopped at the authority and failed
+with `left: "127.0.0.1:8080@evil.example"` — a string that reads as loopback.
+That failure is kept in the helper's doc, because it is the measurement showing
+that the authority is not the part that decides where a request goes, and
+because it is the reason the assertion is written where it is. The control test
+asserts the same host for six ordinary paths, so that refusing everything cannot
+pass as a fix.
+
+## P18-T007 — the runner is a field and not a default, and the ceiling's old reason is dead
+
+`pipeline.rs` now builds a `PermissionPlan` from the mode and the permissions the
+run was **handed**, asks `Enforcement::of` about every check the schedule holds,
+and gives the admitted ones to `run_scheduled_checks`. Three decisions came with
+that, and the third is the one a reader should not miss.
+
+**A `runner` field rather than a default.** `Pipeline` gained
+`pub runner: &'a dyn CommandRunner`, so every caller names the value that carries
+out an admitted command. The rejected alternative is a default, and the cost of it
+is the whole argument: `ProcessRunner` is the only runner in the product that
+starts a process, so a default would put the one implementation that can start
+something one omitted field away from every construction site in the crate. A
+field makes the choice a sentence in each caller instead — and the callers now
+read as a list of who may run what: `sure check` hands a live `ProcessRunner`,
+and every fixture, corpus and privacy path hands one that is pre-cancelled or
+that records being called and starts nothing.
+
+**The support ceiling stays `SupportLevel::InspectOnly`, and its reason is
+replaced rather than restated.** The sentence `support.rs` rested on — *this build
+runs no project code* — is false as of this commit and is now written nowhere in
+`crates/` or `docs/`. What replaces it is a claim about **platforms**, not about
+capability: level B is "run approved generic checks" *wherever SURE runs*, a Node
+check whose only program on the machine is `npm.cmd` comes back
+`InterpreterRequired` from `planned_work.rs` rather than a command, and this
+branch's macOS and Linux legs are unmeasured here. A ceiling left alone with a
+true reason beats a ceiling raised to match a sentence, and the tripwire
+`the_ceiling_todays_build_claims_is_never_above_inspect_only` is untouched — two
+`assert_ne!`s, only their failure messages rewritten. **What that leaves owed: the
+measurements that could earn level B are `P18-T012`'s, and they do not exist.**
+
+**`container` mode admits host commands in a build with no container executor,
+and this commit is what made that reachable.** The admission rule at
+`consent.rs:504` cannot fire for `Container` because
+`ExecutionMode::Container.runs_project_code()` is `true` (`execution.rs:332`),
+while the build's own `container.rs` says a run under that mode reaches no
+container. Dormant until now because no product path reached a runner. **It is
+recorded in the tree in three places and filed as [#12] rather than repaired
+here**, because the repair is a decision about what `container` mode should *do*
+in a build that cannot carry it out — it changes `sure-domain`'s mode semantics
+and needs a reason the frozen `NotCheckedReason` vocabulary does not have.
+
+**The part of that worth carrying past this task: the guard that looks like it
+covers the case cannot.** `enforce.rs`'s
+`even_a_mode_that_runs_nothing_admits_only_commands_that_run_no_project_code`
+loops `ExecutionMode::ALL` over `permission_sets()`, `everything()` included, and
+asserts `!runs_project_code(effects) || mode.runs_project_code()`. For `Container`
+the second operand is `true`, so the disjunction holds whatever was admitted —
+**the guard reads the same predicate the admission rule reads, and agrees with the
+defect by construction.** That is a worse thing than a missing test and it is why
+[#12] carries the line number: a test written from inside the rule it is testing
+is green for the wrong reason, which is the class this repository treats as
+serious.
+
+[#12]: https://github.com/lichman0405/SURE/issues/12
+
+## P18-T008 — the project is read a second time, and the movement is reported even when nothing is replaced
+
+**The second read is inside stage 10 rather than a stage of its own.** It is the
+last reading that can still change anything, and it is about the results that
+stage is adding up. Nothing is discovered, planned, run or reported by it — it
+is a fact about whether this run's evidence is still current — so it belongs in
+the stage that has to act on the answer. A thirteenth stage would be a phase of
+checking nobody asked for, and a reader who wants to know what the verdict is
+about reads stage 10's line.
+
+**The comparison is `kind` and `digest`, never the `id`.** A `ProjectFingerprint`
+id is generated per computation, so comparing ids would answer *moved* for two
+reads of one unchanged project: every run would report every runtime check as
+stale, and a word that is always true is a word a reader stops reading.
+
+**A project SURE could not read again is not a project that stayed still.** The
+error arm answers `Some` rather than `None`. Of the two ways to be wrong about a
+project that could not be re-read, invalidating evidence SURE could not confirm
+costs a repeated check; the other costs a green about a project nobody looked at
+twice.
+
+**What is replaced is a `Pass` from a check that runs the project's own code,
+and nothing else.** A failing check is a finding the run actually made, and
+replacing it would buy no safety because `Fail` is not green either. A check that
+only reads files has evidence SURE can re-read. The replacement is
+`Unknown` with a reason and never `Warning`, which `CriticalState::from_status`
+maps to `Passed` and which therefore blocks nothing on the checks where it
+matters most. Each result keeps **its own** fingerprint: binding it to the newer
+state would make `aggregate_run` refuse the whole set and leave the run with no
+verdict at all, and binding it to the older one is simply true.
+
+**The decision the supervisor made rather than accepted: the movement is
+reported even when nothing was replaced.** The worker scoped the rule to runtime
+checks and reported the consequence it did not change, which was the right
+instinct. But the stage line spoke only when the withdrawal list was non-empty,
+so a run whose project moved and which had no pass to withdraw computed the
+movement and then dropped it — and that case is not a corner. It is **every run
+without a granted execution**, which is the default mode, and every run whose
+runtime checks all failed. It also contradicted the error arm one line above,
+which answers `Some` precisely so the movement is not silently dropped. `moved`
+and `stale` are two different facts — *the project is not where stage 3 found
+it*, and *this run withdrew these passes* — and the line now speaks for the first
+whether or not the second is empty.
+
+**The red-proof is what makes that decision evidence rather than preference.**
+With the arm mutated back to silence, the new test fails and the aggregate line
+reads only `"… 2 check(s) produced a result, 0 did not run."`, while the
+**pre-existing** test still passes. The older assertions could not have caught
+this path, because they only ever exercised the withdrawal arm.
+
+**What this does not decide, named so it is not read as settled.** A static
+detector's `Pass` is still not withdrawn when the project moves. That follows the
+task's title and the phase invariant, which are about *runtime* evidence, and a
+check that only reads files has evidence SURE can re-read — but the run does not
+re-read it, so a green verdict made in inspect-only mode still describes the
+state stage 3 saw. The strengthening above means the run now *says* so rather
+than being silent, which is the honest half. Whether a static pass should also be
+withdrawn is a question about detector design and is not this task's.
+
+## P18-T009 — a service starts with the plan's own environment, and the census fired where it said it would
+
+**The seam is a second door into `runtime_start`, and the argument for it is that
+the alternative was a second answer to one question.** A scheduled
+`CheckOperation::Service` could have been carried out by a service runner written
+inside `planned_check_runner.rs`. It was not, because `runtime_start.rs` is the
+only implementation in this tree of *start it, hold the window, ask the one
+question, stop it on every path, and turn that into a verdict* — and that verdict
+table is already measured against real processes by `tests/runtime_start.rs`. A
+second implementation would be a second answer to *did this service work*, free to
+disagree with the first. So `StartSmoke::planned` was added beside `StartSmoke::of`
+and the runner's part is **pairing and nothing else**: the check's own spec, the
+admission the enforcement produced for that check, and the call. `AdmittedService`
+repeats `AdmittedRun`'s three refusals and compares the argument vector element by
+element rather than as text.
+
+**The environment is the plan's, and the probe door's inheritance is now stated
+rather than accidental — which are two different decisions.** On the planned door
+the environment comes from the spec's own `CommandSpec`, the same rule the command
+path already followed. On the probe door there is no `CommandSpec` to read and the
+answer stays `Environment::inherited()`, for the reason that variant's own doc
+gives: on Windows `CreateProcess` searches `PATH`, so a child started with no
+environment cannot start anything either. What changed there is that the choice is
+now *made* in the constructor rather than discovered in `service.rs`'s default.
+`Supervisor` gained a third knob so that "what does this service start with" has an
+answer a test can read without a process existing.
+
+**What this does not claim, and `service.rs` now says in as many words.** An
+environment is a list of strings a program starts with and **not a boundary around
+it** — a service can still open any file the user can open and reach the network.
+The sentence is written into the module because "the environment is controlled" is
+the kind of phrase a reader turns into "the process is confined", and this build
+claims no containment on the host path.
+
+**The permission hole closed here was a real one and not a tidy-up.** The
+permission-plan loop planned only `CheckOperation::Command`, so a service check's
+own program was never decided about at all: `Enforcement` had nothing to admit for
+it, and the service door would have been unreachable even once a planner emitted
+one. The comment above the loop said a service "is not a command", which was false
+about it. `CheckOperation::Service(service) => Some(service.command())` is the fix.
+A **browser** check's command is deliberately still not planned, with the reason
+written where the next worker reads it: carrying one out is `P18-T010`'s work, and
+nothing in this build consumes that admission yet.
+
+**The census fired exactly where it said it would, and the ceiling did not move.**
+`planned_check_runner.rs` naming `StartSmoke` is the first time anything outside
+`runtime_start.rs` has, so rule four failed with the two lines it was written to
+flag, and the paragraph claiming *"nothing in the product constructs a
+`StartSmoke`"* stopped being true. The list became a slice, mirroring
+`MAY_NAME_A_SUPERVISOR`; the entry carries its reason; the failure message lost its
+now-false clause and gained the instruction not to move the ceiling because a
+caller exists. That last point is the decision this task made about the ceiling:
+**`support::CEILING` is unchanged**, because `spawn_sites.rs` already recorded that
+this runner is on a product path "since `P18-T007`" and that this "neither changes
+`support::CEILING`" — so a caller existing is settled ground and not evidence
+against a claim about which platforms SURE has been shown to run project code on.
+The measurements that could move it are `P18-T012`'s.
+
+**Recorded so it cannot be discovered later as a surprise: the probe door inherits
+SURE's whole environment, and it is one wiring decision away from being a
+disclosure.** `Environment::inherited()` is `Inherited { without: [], with: [] }` —
+everything SURE has, unchanged. That is harmless today only because the probe door
+is test-only: `ProbePlan::add_to` plans every probe as `Precomputed(Candidate)`,
+because nothing has settled it, so no product path reaches `StartSmoke::of`. The
+day a task makes probes actually run, a project-controlled child process inherits
+SURE's own variables — including whatever tokens are in the environment SURE was
+started with. The fix at that moment is a `without` list or an `Only` built from
+the plan, and it is named here rather than left to be found by reading
+`CreateProcess` documentation.
+
+**What this does not decide.** No shipped planner emits `CheckOperation::Service`,
+so the wired path is measured with a runner that starts nothing while the verdict
+table is measured by pre-existing real-process tests — the two halves are quoted
+rather than presented as one end-to-end run, and a pipeline test asserts the
+service half is *empty* so that the day a planner emits one is a failing test
+rather than a silent change. `CheckOperation::Browser` still returns
+`no_runner_result`'s explicit `Error`, which is `P18-T010`'s. `ONE_EXCHANGE`
+(500 ms, 64 KiB) is the one budget the plan does not hold and is a stated judgment
+rather than a measurement, written where a reader can disagree with it.
+
+## P18-T010 — a page is read after the service answers, and a driver is held rather than made
+
+**This supersedes the last sentence of the section above.** `P18-T009`'s entry ends
+by saying `CheckOperation::Browser` *still* returns `no_runner_result`'s explicit
+`Error`; `P18-T010` is the task that replaced it, and `no_runner_result` no longer
+exists.
+
+- **A step was inserted into the one lifecycle, not written beside it.**
+  `StartSmoke::run` was `start → wait_out → ask → stop` in one indivisible body with
+  `supervisor()` and `observe()` private, so "look at a page while the service is up"
+  had two shapes. The rejected one — writing those five steps again in
+  `planned_check_runner.rs` — is a second answer to *did this service work* in a file
+  the verdict table's real-process tests do not cover, and `P18-T009` refused exactly
+  that shape. `run` is now `run_then(cancellation, |_| ()).0` and the caller's step is
+  taken inside `observe`, between the readiness answer and the stop.
+
+- **The gate is `ProbeOutcome::Answered`, not `status() == Pass`.** A readiness route
+  that answers 404 is still answered, so the page is looked at; `Refused`,
+  `Unreachable`, `NoAnswer`, `NotHttp` and the never-asked case are not. Gating on a
+  *passing* readiness check would have made the page's fate depend on the readiness
+  question's grade, which is a different question.
+
+- **The driver is held and cannot be made, and the census is what enforces it.** The
+  runner holds `Option<browser::Driver>` — an alias `browser.rs` declares — and the
+  setter is `with_page_driver`, because the file "must be able to *hold* a driver and
+  must not be able to *make* one". The one construction in the product is at
+  `sure-cli/src/check.rs`, the composition root: the layer that already assembles
+  `Paths`, the store and the pipeline, and so the layer allowed to know which
+  implementations exist. Naming it there rather than in `browser.rs` is forced, not
+  preferred — the census exempts the adapter and `lib.rs` and nothing else.
+
+- **Two censuses gave opposite instructions and the ceiling won.** `browser_probe.rs`
+  says a shipped file that names the adapter must "move that ceiling in the same
+  commit, or take the name back out"; `support.rs` and ADR 0014 say the ceiling moves
+  only on `P18-T012`'s measurements and that its default outcome is that it does not.
+  The second option was taken. `support.rs` and `browser_probe.rs` have zero diff.
+
+- **What that costs is recorded as a defect, not as a footnote.** Rule five's walk
+  starts at `crates/sure-core`, so it cannot see the composition root, and its name is
+  now false while it passes — a check that passes by not looking. Likewise
+  `nothing_in_the_product_can_drive_a_browser_today` is false as a name though every
+  assertion in it holds. Both are `P18-T012`'s, and neither was papered over by
+  renaming a file or widening a list.
+
+- **What this does not decide.** The ceiling, and anything about macOS or Linux. The
+  body of `run_browser` past the driver lookup is untested and the reason is
+  structural: holding a live driver in a test means naming it, which the census
+  forbids inside the scanned tree — including in the test module. There is still no
+  shipped planner that emits `CheckOperation::Browser`, so the door has no producer
+  and there is no end-to-end browser check; the wiring is measured with a fake and the
+  driver's verdict table separately, and the two are never presented as one run.
+
+## P18-T011 — a declaration no runner can carry is a row of the run, and the total counts it
+
+- **The false green was a value whose own test passed while the product threw it
+  away.** `MissingCommand::not_checked` built a `CheckResult` for a declared check no
+  runner accepts, and `pipeline.rs` pushed that row into `results` itself.
+  `aggregate_run` walks `schedule.checks()`, so an id the plan never proposed was left
+  over in `RunReport::unscheduled` — a field documented as "reported and not
+  aggregated" that **no renderer and no product path reads**. `checks/mod.rs` asserted
+  `result.blocks_green()` about it: true of the value, false of the system. A critical
+  `"test": ["jest"]` was a green run. The value's test was never wrong; nothing was
+  giving the value a chance to matter.
+
+- **The declarations are an argument now, and the typing is the safety rather than a
+  rule the function has to get right.** `aggregate_run` takes `missing:
+  &[MissingCommand]` beside the schedule and pushes one `not_checked` row per
+  declaration. A `MissingCommand` can only produce a `Skipped` result against the state
+  being aggregated, so no caller can declare a check into a pass. Three
+  `TwoAnswersForOneCheck` refusals keep declaration, result and schedule from answering
+  for one id twice. Exactly one product call site passes it — `pipeline.rs` with
+  `&planned.missing` — and that was established by enumerating every call site rather
+  than by assuming the argument had been threaded.
+
+- **The same hole was open a second time, in the sentence a person reads first.**
+  `coverage_summary::summarize` counted the schedule alone, so a report holding a row
+  no count accounted for answered *"SURE checked all 5 checks."* Both halves of the
+  walk now share one `Tally`, because they are one rule applied to two halves of one
+  set. The `None => continue` for a scheduled check with no row was measured to be
+  **unreachable** rather than assumed so: `aggregate_run`'s `(None, None)` arm pushes a
+  row for every scheduled check by construction. That row is `Unknown` and never
+  `Pass` — the runner layer's "missing output becomes Error" and this layer's "no row
+  at all becomes Unknown" are different layers and both hold.
+
+- **Three `dead_code` suppressions came off with nothing deleted underneath them.**
+  `human_report.rs`, `json_report.rs` and `portable_report.rs` each carried
+  `#![allow(dead_code, reason = "…awaits the check engine…")]`; the diff is five removed
+  lines each and no function removed. Clippy stays clean at `-D warnings` afterwards,
+  which is the proof the modules are reachable rather than a claim that they are. The
+  repository's answer to a warning is to make the claim true, not to quiet it.
+
+- **The red proof was re-taken, and the restore is why it means anything.** Replacing
+  the declaration loop with `let _ = &declared;` exits 101 and reports *"the run holds
+  no row for Test, so it says nothing about that role: [("build the project",
+  Skipped)]"* — the four-row run telling a reader about one. Restored byte-identical
+  (`git hash-object` back to `c8b16eaba8bf65ec76b2cbcec8f31b7cc426e5a6`) **and
+  touched**, because a `Copy-Item` restore keeps the old `LastWriteTime` and cargo
+  would have reused the mutated binary; the recompile line in the green re-run is what
+  confirms the touch took.
+
+- **The adversarial fixture moved against green, and its verdicts did not move at
+  all.** `dynamic-not-authorized`'s `not_checked_count` goes 1 → 4 because three
+  undeclared roles are now rows of the run. All three are `Skipped` with
+  `NotApplicable` and `blocks_green` false, so `blocking` and `critical_not_checked`
+  are untouched, the aggregate is still `not_enough_checked`, and the control's
+  negative assertion is still what decides it. The fixture declares `moved.keys` and
+  the harness compares it against actual movement, so "unchanged rather than widened"
+  is measured rather than asserted.
+
+- **What this does not decide.** No runtime check's result is measured here — the
+  fixture is `inspect_only`, so every claim is about what a run *reports*, not about
+  anything SURE ran. `&[]` remains a silent way to re-open this hole at a future
+  product call site, and nothing structural prevents it; the guard is behavioural
+  (`declared_commands.rs` drives the real pipeline, so a regression at the one real
+  call site goes red), and the risk is recorded rather than filed, because filing an
+  Issue against a hypothetical caller would be turning an inference into a fact. The
+  stale ceiling sentence at `tests/acceptance_report_runner.rs:25-26` — *"`sure_core::support`'s
+  ceiling of level C rests on no product path running project code"* — was verified
+  still present and still false, and is `P18-T012`'s.
+## P18-T012 — the walk that was one crate short, and the ceiling whose reason was a recollection
+
+- **The ceiling does not move, and its reason is replaced rather than repaired.**
+  Three measurements were taken and they disagree. On this workstation `npm` resolves
+  to `npm.cmd` → `InterpreterRequired` with `is_startable()` false — and the
+  extensionless `npm` shell script is on `PATH` beside it and is never the answer,
+  because the Windows completion table probes `com`/`exe`/`bat`/`cmd`/`ps1` and the
+  bare name not at all. `cargo` and `git` resolve `Executable`, and the runner is
+  reached under a user's grant. The `ci` legs on `f8db077` are green on macOS and
+  Linux, where the non-Windows table answers `Executable` for a bare name. Level B is
+  **one** sentence and those three cases do not agree, so the ceiling takes the weaker
+  one. Moving it to `Generic` would put one word over a set the evidence separates,
+  which is the same defect one level up as reporting a check as passed because nothing
+  went wrong. ADR 0014's rule — a ceiling moves when measurements earn it — is followed
+  and is not quoted as evidence for itself; on these measurements it is not earned, and
+  the default outcome ADR 0014 predicted is the one that holds, **for a reason this
+  task measured rather than for the reason that ADR wrote down.**
+
+- **The false sentence was a recollection, and the correction is the third of its
+  kind in this phase.** `support.rs` said the macOS and Linux legs *"have never run at
+  all"*. They had, and they are green. What replaced it is not a tidier version of the
+  same argument — the old reason's shape was *"the other platforms have not been
+  tried"*, and the measurement says the interesting failure is on the platform that
+  **has** been tried. A reason that survives its own contradicted premise by keeping
+  the premise's shape is the thing this record exists to avoid. The sibling instance
+  was `acceptance_report_runner.rs:25-26`, which stated in the present tense that the
+  ceiling "rests on no product path running project code" — false since `P18-T007`,
+  while the conclusion it supported is still true, which is the defect shape that keeps
+  reading as correct after its support has gone.
+
+- **The census passed by not looking, and that is worse than a visible error.**
+  Rule five of `tests/browser_probe.rs` walked `crates/sure-core` alone, so it could
+  not see `sure-cli/src/check.rs:328`, where `P18-T010` put the product's one
+  `.with_page_driver(...)`. The rule forbade a name it never read while the thing it
+  forbids was shipping one crate away. The walk now covers every shipped crate,
+  matching `tests/spawn_sites.rs`, and the composition root is exempted **by name**
+  with the hole stated in the comment above the constant. The guard against a silently
+  narrowed walk is two-part rather than a count: a floor, and a per-crate assertion
+  that both `sure-cli/src/` and `sure-core/src/` are reached.
+
+- **Two red proofs, and they establish different halves.** Removing
+  `THE_COMPOSITION_ROOT` from the exemption list fails the rule and prints
+  `sure-cli/src/check.rs:328: .with_page_driver(Box::new(sure_core::browser_driver::Browser::system()));`
+  — a line the parent commit's walk could not have produced, which is the proof that
+  the widening is real and not cosmetic. Narrowing the walk instead trips the per-crate
+  vacuity assertion. Taking `refused_result`'s `Error` back to `CheckResult::pass`
+  fails the new test at `:2479` with `left: Pass, right: Error`. **Neither proof
+  establishes that a guard is complete**: the exemption still exempts a file by name,
+  and the new test reaches the runner directly because `pipeline.rs` cannot produce the
+  state it covers.
+
+- **An arm that existed and nothing drove is now driven, and the honest reason it was
+  dead is written beside it.** `refused_result` covers an admission that exists but
+  does not *cover* the check's command. `pipeline.rs` cannot produce that state — it
+  builds the schedule and the permission plan from the same walk, so the two agree by
+  construction. That is a fact about one caller, not about the function, which takes
+  the schedule and the enforcement as two values. The test says so in its own comment
+  rather than implying the state is reachable in production.
+
+- **Two more live false sentences were found by auditing for the shape, and two
+  occurrences of the same words were left alone deliberately.**
+  `fixtures/adversarial/check-crash/scenario.json` said in the present tense that
+  *"this build plans checks and runs none of them"*, in the `why` of an acceptance
+  entry and in its `notes`. The same directory had already corrected that premise twice
+  (`why_not_the_pipeline`, its `README.md`), so these were the last places still
+  asserting it as current. The manifest's objection to touching a fixture is not a real
+  one — it is regenerated by one command and must move for `progress/*` anyway — so the
+  sentences were corrected and `SHA256SUMS.txt` regenerated with them, as one step,
+  because the writer refuses to run while a listed path is not in the index. Left
+  alone: `docs/development/DOGFOOD.md:187`, which is inside a `text` transcript where
+  the repair is a **re-run** rather than an edit of the record, and `FINAL_REPORT.md:174`,
+  which is under an explicit instruction not to touch it.
+
+- **What this does not decide.** No test in this repository runs a project's own
+  declared check to completion through the product path, on any platform: every
+  product-path test that reaches the real runner hands it a `Cancellation` cancelled
+  before the run began, so what is measured is the seam and not a check finishing and
+  passing. Closing that distance means starting a real project command inside the
+  suite, which is a decision about the gate rather than a measurement this task could
+  take. `aggregate_run`'s `&[]` argument also stays a recorded risk rather than a
+  guard, because the type cannot tell *no declarations* from *declarations I forgot*
+  and a guard that fired only for a hypothetical second caller would be a test with no
+  product behind it.
+
+- **A correction to this entry, added after it was written: "they are green" is a
+  reading of one run and not a property of the leg.** The two bullets above rest the
+  ceiling's third measurement on the CI legs being green. They were green on `f8db077`
+  — `gh run view 35720783926`, `rust (macos-latest)` and `rust (ubuntu-latest)` both
+  success — and that reading stands unchanged. What was measured afterwards, and was
+  not known when this entry was written, is that `rust (ubuntu-latest)` is
+  **intermittent**. `07e244d` produced **two runs of the identical tree**:
+  `35725157896` (`push`) is green on all five jobs, and `35725236889`
+  (`pull_request`) is red on that leg — with the same three
+  `crates/sure-core/tests/browser_driver.rs` real-browser tests reading `... ok` in
+  the one and `... FAILED` in the other, the failing detail being
+  `Absence { reason: DriverWouldNotStart, … }` after `/usr/bin/chromium` ran the full
+  `30.018 seconds` budget without writing `DevToolsActivePort`. It is a **false red
+  and not a false green** — the product reported an explicit absence carrying its
+  reason rather than a page it never saw — and it is **deliberate**, because `opened()`
+  at `browser_driver.rs:426` panics by design when a browser is found and cannot be
+  driven. Filed as Issue #15; no rate is claimed, since three observations with one
+  failure are not a rate and the failure was not reproduced deliberately.
+  **The ceiling decision does not move on this.** Its third measurement is that the
+  non-Windows completion table answers `Executable` for a bare name, which is a
+  reading of the code and not of a CI leg, and the browser driver is not the
+  name-completion path — so the two disagreeing cases and the one agreeing case are
+  exactly as ADR 0015 records them. What the correction changes is how much weight the
+  green legs carry when they are cited: **"the legs execute and their tests pass when
+  they run"**, which is the narrower claim this entry should have made.

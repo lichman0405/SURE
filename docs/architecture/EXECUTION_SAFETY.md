@@ -62,10 +62,12 @@ SURE must show what it intends to run when approval is required.
 ### container
 When Docker/Podman or another supported container runtime is present, SURE may
 work out the command line that would execute a supported check in a container,
-according to an explicit plan. Working it out is the whole of it in this build:
-`sure_core::container`'s own module comment is "**Nothing here runs anything, and
-nothing here builds a `Command`**", and every mention of a `ContainerPlan`
-outside the file that defines the type is in a test.
+according to an explicit plan. Working it out is the whole of what this mode
+*does* in this build: `sure_core::container`'s own module comment is "**Nothing
+here runs anything, and nothing here builds a `Command`**", and every mention of
+a `ContainerPlan` outside the file that defines the type is in a test. This
+build therefore **does not execute a project check requested in container
+mode**. It reports `container_execution_unavailable` for the skipped check.
 
 That is **limited isolation, not a perfect security boundary**, and the plan is
 what makes the sentence checkable rather than aspirational: the image, the
@@ -80,35 +82,178 @@ absence of both is the state of most machines, and
 `sure_core::container::Availability` has no error variant for that reason: a
 machine without Docker is a machine without Docker, not a broken one. **What it
 does not mean is that the checks run on the host instead.** Absence changes
-*inside what* a command would run and not *whether* it may — the
-`container` bullet under [How a mode is enforced](#how-a-mode-is-enforced) says
-the same thing from the other side — so the answer with no runtime is the answer
-with one: the checks this build admits and never runs. That was measured rather
-than reasoned about. With `execution.mode: container` granted by the user's own
-settings file and neither `docker` nor `podman` on `PATH`, the plan stage reports
-the checks admitted under `container`, and the stage after it reports that *"none
-of them ran and each is recorded as unknown rather than passed."* A reader who
-took absence to mean "it ran on this machine anyway" would believe a check of
-their project had happened when nothing did.
+*inside what* a future container executor could run and not whether this build
+has such an executor. This build has none, so the answer with no runtime is the
+same as the answer with one: the check remains skipped.
+
+**The no-host-fallback rule is enforced twice.** The schedule denies actions
+that execute project code in `container` mode, and the command permission plan
+refuses them before an admitted value can reach the host runner. The result says
+SURE lacks the requested container executor, even when the user's own settings
+grant `run_project_code`. The product-path regression test
+`a_user_requesting_a_container_never_reaches_the_host_runner` records an empty
+runner request list and the explicit skipped results. A project file still
+cannot grant itself this mode or the permission.
 
 ## What runs in this build
 
-**Nothing does.** The three modes above are decisions about what *may* run, and
-in this build no planned check gets as far as running: `sure_core::enforce` says
-that `Enforcement::admitted()` is the only door a launched project process may
-take its command line from and that **no check drives on that road yet**, and
-`sure_core::support::CEILING` is `InspectOnly` for the same reason — level A and
-level B both require running something, and this build runs no project code. A
-run says so rather than leaving it to be inferred: the dynamic stage's sentence
-is that the checks *"would run your project's code and the mode allows it"* and
-that *"none of them ran and each is recorded as unknown rather than passed."*
+**What a mode admits, on this computer.** The three modes above are decisions
+about what *may* run, and since `P18-T007` a check walks the road:
+`sure_core::pipeline` builds the `PermissionPlan` from the mode and the
+permissions the run was handed, asks `sure_core::enforce` about every scheduled
+check, and hands the admitted commands to `sure_core::planned_check_runner` —
+the one file that turns a planned command into a request for
+`sure_core::process`'s runner. A granted `host_confirmed` run therefore runs the
+project's admitted checks **here, on the user's machine**. A `container` run
+starts no project check in this build.
 
-The consequence is the one a reader deciding whether to grant a mode needs:
-**a permission changes what SURE may do and not what SURE does.** Putting
-`run_project_code` in reach through the user's own settings file moves the mode
-in effect and moves nothing else, so every dynamic check is still recorded as
-unknown — and an unknown check is not a pass. `host_confirmed` and `container`
-are what SURE is built to answer with; neither is being answered with yet.
+**A run that was not granted still reaches no process.** `inspect_only` is the
+mode a run starts in and the mode a project's own file cannot move in either
+direction, and under it `sure_core::consent` refuses every project-running
+command before a runner sees it. That is a measurement rather than a reading:
+`pipeline.rs`'s `a_run_a_user_did_not_grant_starts_nothing` drives the real
+pipeline with a runner that records being called and asserts the record is
+empty. Stage 6 reports which of the two happened instead of leaving it to be
+inferred — *"N check(s) would run your project's code and the execution mode
+stopped every one of them"*, or *"…and the execution mode allowed them. Each one
+has a result"* — and a check the runner produced nothing for is an error rather
+than a pass.
+
+**And the level SURE reports about a project has not moved.**
+`sure_core::support::CEILING` is `InspectOnly`, for the reason
+`docs/adr/0014-planned-check-execution-contract.md` states as its own
+consequence: level A and level B both require running something, and level B is
+a claim about every platform SURE runs on — a claim one platform has not earned
+for both. So the ceiling is no longer "this build runs no project code" (it
+does) but "this build runs approved checks on one platform and not on another."
+
+The consequence a reader deciding whether to grant a mode needs, and it has two
+halves since `P18-T007`: **a permission decides what SURE may do, and now also
+what SURE does.** A granted run carries the project's checks out and reports one
+result per check; a run that was not granted is recorded check by check as not
+checked. An unknown check is not a pass in either case.
+
+## Services a project declares
+
+A project may ask SURE to start one of its own services and look at a page on it,
+and the whole of how it may ask is `checks.services` in its `sure.yaml`. The
+shape is `sure_core::config::services::ServiceDeclaration`: a **name**, an
+optional **directory** relative to the project root, a **`launcher`**, a
+**port**, a **`readiness`** path and an optional **`page`**. The decision is
+`docs/adr/0016-declared-services.md`; what a reader of this file needs is what
+the shape does and does not let a project buy.
+
+**The launcher is a tagged type, and that is the point of the whole block.**
+`launcher: { kind: node_entry, entry: server.js }` means *run this machine's
+`node` with this file as its **one** argument*. There is no field anywhere in a
+declaration that accepts a command line, no string is split into an argument
+vector at any point on the way, and the program and the argument list are SURE's
+own constants: a project chooses a launcher **kind** and the entry file, and
+nothing else. A key the format does not know — a second `kind`, or anything
+written beside `entry` — is a load error and not a setting that quietly did
+nothing, which matters most in exactly this field: the shape a project reaches for
+when it wants to run something general has to say no loudly or it will be read as
+having said yes. The distance between that and `command: bash -c "…"` is the
+difference between a request SURE has an answer to and a general escape hatch,
+which is why the second is not in the format at all — the only launcher kind this
+build has, and the reason there is one, is `config/services.rs`'s own module
+comment.
+
+**Every way a declaration can be wrong is a value with a sentence on it.** An
+empty name; two declarations sharing a name; a directory outside the project or
+not there; an entry that leaves its directory, is not there, or is not a
+`.js`/`.mjs`/`.cjs` file; a port of zero; a `readiness` or `page` path that
+`probe::Endpoint::loopback` refuses. **Outside** is asked twice about every path
+that gets that far — of its text, and of where it actually resolves to. `..` and
+absolute paths are refused before the file system is consulted; what is left is
+canonicalised on both sides and required to be inside the project, so a junction
+or symbolic link leading out of the tree is refused as well. That second question
+is not decoration: `mklink /J` needs no privilege on Windows, the textual rule
+alone plans and starts a service whose working directory is outside the project,
+and the two link tests — `crates/sure-core/tests/service_plan_links.rs`, which is
+where they live because making the fixture needs a process of its own — fail with
+*no refusal at all* when the resolution check is removed. Each is a
+`ServiceRefusal` variant carrying its own sentence — which declaration, which
+directory, which entry, which path, and what to change — and **none of them is a
+dropped row**: a declaration SURE will not act on appears in the plan's refusals
+and in the stage-4 report, because a project that asked for a check and did not
+get one has learned something a silent plan would have hidden. A path that is not a path — a URL on
+another host, an address with userinfo in it, a backslash — cannot be written
+into one of these fields in the first place: the endpoint type they are validated
+through has no host to fill in and no authority to extend.
+
+**The two settings decide, and what they leave unplanned is said out loud.**
+`checks.start_local_services: never` plans neither row and records which
+declaration it applied to (that setting is a run-wide `ScopeReduction` as well,
+and this is the per-declaration part it cannot state); `auto` plans the service
+row — a declaration *is* a project saying it serves — and no browser row;
+`always` plans both when a page was declared, and says so rather than inventing a
+page when none was. A page is planned only for a service this run would start,
+because a browser check on a service nobody starts would start it.
+
+**`host_confirmed` is consent, not a sandbox, and a service is where that is
+easiest to misread.** A granted run starts the declared service **on this
+machine**, as the user, and the started process can open whatever the user can
+open and reach the network. The mode admitted it; it does not confine it. What
+the declaration buys a project is narrower than what a shell would: one launcher
+kind, one program name, a directory inside the project, and a port SURE itself
+reaches over loopback.
+
+**A service is not given SURE's own environment.** ADR 0014's decision 11, and
+the plan states it rather than leaving it to a default: a declared service's
+`CommandSpec` carries `Environment::only` over the machine's own minimum, which
+is one variable per platform and each one measured — `SystemRoot` on Windows, the
+search path everywhere else — so the child starts with **none of the user's own
+settings and nothing of SURE's beyond that minimum**: not their tokens, not
+SURE's configuration. Where Windows is installed is the platform's answer and not
+the user's configuration, and the program that needs it needs it to *exist*
+rather than to behave differently; nothing of the user's rides along with it.
+**`PATH` is on that list and it was not always**: it is the variable a service's
+own program name is resolved through, and a version of this minimum that left it
+out could not start a declared service on macOS or Linux at all (the second
+measurement below).
+
+**That minimum is a measurement, and the first draft of it was the empty list.**
+What the empty list cost was found on the product path rather than reasoned
+about: the declared service was planned, admitted and started, and reported as
+having *ended by itself after 65 milliseconds* with exit code 134, because `node`
+aborts inside `node::InitializeOncePerProcessInternal` before it reads one line
+of the declared entry when `SystemRoot` is absent. **Every authorised run of a
+declared service would have reported that**, so the failure is a false one that
+SURE causes and the project wears. One variable is the whole difference, and
+`WINDIR`, `SystemDrive`, `TEMP`, `TMP`, `PATH` and `USERPROFILE` each did nothing
+for it — which is why the list is what was measured and must not grow into a
+curated set somebody extends on speculation. `service_plan.rs` carries the
+measurement beside the list.
+
+**The second measurement is the same paragraph one platform over, and it
+corrected a sentence that used to be here.** That sentence said the program name
+`node` is still found because SURE resolves it in its own process and the
+environment is the child's. The first CI run in which the declared-service cases
+compiled on macOS and Linux falsified it: off Windows a bare name is resolved by
+the operating system out of the environment the child is **handed**, so an empty
+block finds no program at all and every declared service was reported as *SURE
+could not start "node"* with `No such file or directory (os error 2)` — measured
+at `dfbd94f`, runs `35834410398` and `35834415130`, eleven of eighteen cases
+failing on both platforms, on machines where the same jobs had just run `node`
+by that name. What SURE resolves in its own process is a **check**'s program; a
+service's is resolved by the child's own spawn. So the Unix minimum is the search
+path, the Windows minimum is not, and neither branch is evidence for the other.
+
+One consequence belongs with the minimum: a service that tries to start
+*another* program by name may fail to find it, which is a reported failure of the
+check rather than something SURE works around. None of this is isolation: an
+environment is a list of strings handed to a program, and `Environment`'s own
+documentation says plainly that it confines nothing.
+
+**A service check and a browser check cost two different permissions.** Starting
+the service is `run_project_code`; opening a page on it is `connect_service`,
+asked for separately by `browser::absence` — a service a run permitted does not
+imply a page a run may look at, and a run granted the first and not the second
+gets a serve row and a stated absence rather than a look. Both are requests a
+project's own file can make and cannot grant; the mode and the permissions come
+from the user's own configuration, on the same authority order as everything else
+in this file.
 
 ## How a mode is enforced
 
@@ -127,19 +272,22 @@ before anything runs, and what comes out is a value:
 - A check is one unit. If any of its commands will not run, the check does not
   run — including the commands in it that would have been allowed. A verdict for
   half a check is a verdict for a check that did not happen.
-- `sure_core::container` says what the command line around an admitted command
+- `sure_core::container` says what the command line around a command
   would look like in `container` mode — the image, the mount and its access, the
   network mode and the working directory — as a value, without starting anything.
-  It is listed last because it is downstream of the other two: enforcement
-  decides *whether* a command may run, and this decides *inside what*. A runtime
-  that is not installed changes the second and not the first, which is why its
-  absence is not an error.
+  It is listed last because it is meant to be downstream of the other two:
+  enforcement decides *whether* a command may run, and this plan describes
+  *inside what* a future executor would run it. **Nothing in this build executes
+  a `ContainerPlan`**, so enforcement refuses container-mode project commands
+  with an explicit reason. A runtime being installed does not change that.
 
 **The commands that may run are the ones `Enforcement::admitted()` yields, and
 that iterator is the only door.** Anything that launches a project process takes
-its command line from there. That is a rule about the caller, not something the
-type system can hold on its own, so it is stated here and will be tested where
-the runner's spawn sites are enumerated.
+its command line from there, and since `P18-T007` something does:
+`sure_core::pipeline` is that caller. That is a rule about the caller rather
+than something the type system can hold on its own, so it is also checked where
+the runner's spawn sites are enumerated — `crates/sure-core/tests/spawn_sites.rs`
+holds which files may name the types on the route.
 
 Two limits belong with it, because a reader who takes the mechanism for more than
 it is will be wrong in the direction that matters:

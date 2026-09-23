@@ -150,7 +150,12 @@ const SETTLE: Duration = Duration::from_millis(250);
 /// this is the opposite of looking — it is the part where SURE stops. A browser
 /// that has been asked to close is normally gone in well under this, and a
 /// browser that is not gone by the end of it is stopped by
-/// [`super::launch::Launched`]'s drop.
+/// [`super::launch::Launched`]'s drop — which reaches the whole tree on Windows
+/// and, everywhere else, only the launcher process SURE holds, so a browser that
+/// needed this long and had started children of its own leaves them running on
+/// any other platform. Which of the two happened is the `Stop` that
+/// `crate::process::terminate`'s `stop` returns; see that module for why the
+/// platform reaches what it reaches.
 const DEPARTURE: Duration = Duration::from_secs(2);
 
 /// The shortest a step is given, however little budget is left.
@@ -160,6 +165,10 @@ const DEPARTURE: Duration = Duration::from_secs(2);
 /// fail with an option error rather than by timing out, and the report would
 /// blame the browser for the clock.
 const NO_LESS_THAN: Duration = Duration::from_millis(50);
+/// A just-opened debugging endpoint can answer before its first page exists.
+/// Re-read its target list within the same look budget instead of treating that
+/// transient empty list as a permanently unusable browser.
+const TARGET_POLL: Duration = Duration::from_millis(25);
 
 /// How many requests are remembered so that a failure can name its address.
 ///
@@ -598,6 +607,7 @@ impl Connection {
             return Err(Trouble::Link(WsError::Cancelled));
         }
 
+        let deadline = Instant::now() + timeout;
         let mut socket = WebSocket::connect(browser.address(), browser.browser_path(), timeout)?;
         socket.set_read_timeout(timeout)?;
         let mut connection = Self {
@@ -608,16 +618,10 @@ impl Connection {
             patience: timeout,
         };
 
-        let targets = connection.call("Target.getTargets", json!({}))?;
-        let page = targets
-            .get("targetInfos")
-            .and_then(Value::as_array)
-            .and_then(|infos| infos.iter().find(|info| text(info, "type") == Some("page")))
-            .and_then(|info| text(info, "targetId"))
-            .ok_or_else(|| Trouble::Refused {
-                method: String::from("Target.getTargets"),
-                said: String::from("the browser reported no page to attach to"),
-            })?;
+        let page = await_page(deadline, cancellation, |patience| {
+            connection.patience = patience;
+            connection.call("Target.getTargets", json!({}))
+        })?;
 
         // `flatten` is what makes the whole session run over this one socket:
         // every later message carries the session id this returns, and without
@@ -807,6 +811,43 @@ impl Connection {
     }
 }
 
+/// Waits for the first page within the remaining look budget. Chromium may
+/// publish its debugging endpoint before it creates the initial `about:blank`
+/// target; issue #15 caught that exact empty reply on Ubuntu. Only an empty
+/// successful reply is retried. A protocol or socket error remains an error.
+fn await_page(
+    deadline: Instant,
+    cancellation: &Cancellation,
+    mut targets: impl FnMut(Duration) -> Result<Value, Trouble>,
+) -> Result<String, Trouble> {
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(Trouble::Link(WsError::Cancelled));
+        }
+        let patience = deadline
+            .saturating_duration_since(Instant::now())
+            .max(NO_LESS_THAN);
+        let reply = targets(patience)?;
+        let page = reply
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .and_then(|infos| infos.iter().find(|info| text(info, "type") == Some("page")))
+            .and_then(|info| text(info, "targetId"));
+        if let Some(page) = page {
+            return Ok(page.to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(Trouble::Refused {
+                method: String::from("Target.getTargets"),
+                said: String::from(
+                    "the browser reported no page to attach to before the look budget ended",
+                ),
+            });
+        }
+        std::thread::sleep(TARGET_POLL);
+    }
+}
+
 /// Opens `target` in a browser and reports what the page did.
 ///
 /// `program` is the browser to drive, or `None` to look for one. A caller that
@@ -837,20 +878,24 @@ pub(crate) fn open(
 
     // What is left of the budget rather than a fresh one, so that one look
     // cannot take longer than the caller allowed however the time is spent.
-    let left = limits
+    let launch_left = limits
         .timeout()
         .saturating_sub(started.elapsed())
         .max(NO_LESS_THAN);
 
-    let mut browser = match launch::start(&program, left, cancellation) {
+    let mut browser = match launch::start(&program, launch_left, cancellation) {
         Ok(browser) => browser,
         Err(error) => {
             return Report::absent(AbsenceReason::DriverWouldNotStart, error.to_string());
         }
     };
 
+    let attach_left = limits
+        .timeout()
+        .saturating_sub(started.elapsed())
+        .max(NO_LESS_THAN);
     let mut connection =
-        match Connection::attach(&browser, left, limits.problems_kept(), cancellation) {
+        match Connection::attach(&browser, attach_left, limits.problems_kept(), cancellation) {
             Ok(connection) => connection,
             Err(trouble) => {
                 return Report::absent(
@@ -870,7 +915,11 @@ pub(crate) fn open(
     // In this order, and the order is the point: the socket closes first so the
     // browser hears nothing more, then the browser is given its moment to leave,
     // and then whatever is left is taken down. Dropping `browser` stops a tree
-    // that is still running without waiting for another one to answer.
+    // that is still running without waiting for another one to answer — **on
+    // Windows, and only there**: everywhere else the drop is `Child::kill` on
+    // the launcher, so the children that tree was made of may still be running
+    // when this returns. `crate::process::terminate` is where that reach is
+    // reported rather than assumed.
     drop(connection);
     browser.wait_for_exit(DEPARTURE);
     drop(browser);
@@ -950,6 +999,38 @@ mod tests {
     use super::*;
 
     const OURS: &str = "a-session";
+
+    #[test]
+    fn an_empty_target_list_can_precede_the_page_the_browser_then_creates() {
+        let mut replies = vec![
+            json!({ "targetInfos": [] }),
+            json!({ "targetInfos": [{ "type": "page", "targetId": "INITIAL" }] }),
+        ]
+        .into_iter();
+        let page = await_page(
+            Instant::now() + Duration::from_secs(1),
+            &Cancellation::new(),
+            |_| Ok(replies.next().expect("only two target polls")),
+        )
+        .expect("the second reply contains the initial page");
+        assert_eq!(page, "INITIAL");
+        assert!(
+            replies.next().is_none(),
+            "the page took two polls to appear"
+        );
+    }
+
+    #[test]
+    fn a_browser_that_never_creates_a_page_still_fails_visibly() {
+        let error = await_page(Instant::now(), &Cancellation::new(), |_| {
+            Ok(json!({ "targetInfos": [] }))
+        })
+        .expect_err("an empty target list cannot be treated as a page");
+        assert!(
+            matches!(error, Trouble::Refused { .. }),
+            "no page remains a browser error: {error}"
+        );
+    }
 
     /// One message, shaped the way the browser sends them.
     fn event(method: &str, params: Value) -> Value {

@@ -80,6 +80,17 @@ jobs:
       - name: Let a sandboxed browser start on Linux
         if: matrix.os == 'ubuntu-latest'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The browser failures in issue #15 kept Chromium alive for the whole
+      # budget without a DevToolsActivePort file and printed malformed D-Bus
+      # address errors. Give this job a real, private session bus. This is an
+      # environment repair, not a claim that the old stderr proves causality:
+      # the repeated launch step below measures whether it actually helps.
+      - name: Start an Ubuntu session bus for Chromium
+        if: matrix.os == 'ubuntu-latest'
+        run: address="$(dbus-daemon --session --fork --print-address=1)" && test -n "$address" && printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "$address" >> "$GITHUB_ENV"
+      - name: Repeat Ubuntu browser startup
+        if: matrix.os == 'ubuntu-latest'
+        run: for attempt in 1 2 3; do cargo test -p sure-core --test browser_driver a_healthy_local_page_is_opened_and_comes_back_green -- --nocapture || exit $?; done
       # `--no-fail-fast` because the first failing target otherwise aborts the
       # rest, and the targets are where the platform-specific tests live: a
       # failure in `sure-core --lib` would hide every integration target after

@@ -133,8 +133,13 @@ fn a_project_of_our_own() -> PathBuf {
 /// file's rule — every project these tests run against is one they made under
 /// `target/tmp`.
 ///
-/// The declared scripts are never run: this build runs no project code from a
-/// product path, so what they do is irrelevant and their names are what matter.
+/// The declared scripts are never run **as this test runs it**: a run starts in
+/// `inspect_only`, which admits no command that starts a process, so what the
+/// scripts do is irrelevant here and their names are what matter. Since
+/// `P18-T007` wired the runner, that is a fact about the mode a run starts in
+/// rather than about the build — see the module comment above
+/// `a_run_a_user_did_not_grant_starts_nothing` in `sure-core/src/pipeline.rs`
+/// for the measured form of it.
 fn a_project_with_a_declared_command_that_never_runs() -> PathBuf {
     let project = a_directory_of_our_own("node-project");
     // The shape the node proposer reads: a root manifest that names a package
@@ -2656,8 +2661,8 @@ fn a_check_of_a_real_project_answers_with_a_verdict_and_never_with_status_three(
         stages
             .iter()
             .any(|stage| stage["outcome"] == serde_json::json!("not_run")),
-        "this build runs no project code, so a run over a real crate must record a stage \
-         that did not run: {frame}"
+        "a run over a real crate must record a stage that did not run — a run in which every \
+         stage claims to have done its work has not told the reader what it left undone: {frame}"
     );
     assert!(
         stages.iter().all(|stage| stage["detail"]

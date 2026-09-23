@@ -789,6 +789,15 @@ stage in the order `CHECK_PIPELINE.md` lists them, each with its outcome
 (`ran`, `not_run`, `not_part_of_work`, `unfinished`) and, when it did not run,
 the vocabulary's own reason plus the sentence a person reads:
 
+`details.check_results` carries the run's explicit `CheckResult` rows, including
+passes that the verdict's `findings` and `not_checked` lists do not contain.
+Each row names the check, its status, evidence class and project fingerprint.
+The human form lists only the passing rows, under **Checks that passed**: a
+failing or warning check is already a finding above, and one that did not run is
+already under **Could not check**, so listing them here would print one result
+twice. A passing project-owned test means that test passed; it does not validate
+external payment, email, authentication or other live services.
+
 ```json
 {"command":"check","details":{"checked_count":0,"green":false,"has_critical_gaps":true,"mode":"inspect_only","not_checked_count":18,"project":"…","purpose":"check","recorded_goal":null,"report":{…},"stages":[{"detail":"…","number":1,"outcome":"ran","reason":null,"stage":"discover","title":"Find the project's parts"},…,{"detail":"…","number":6,"outcome":"not_run","reason":"execution_not_authorized","reason_explained":"Checking this would have meant running your project's code, and you have not allowed that.","stage":"dynamic-checks","title":"Run the project's own checks"},…],"state":"finished","stopped_at":null,"support":{"letter":"C","level":"inspect_only","reason":"…"}},"exit_code":1,"outcome":"not_green","protocol_version":1,"sure_version":"0.1.2"}
 ```
@@ -961,20 +970,26 @@ that reads it therefore cannot describe it differently.
 | 4 | SURE declined, and can say why in the user's terms | reserved; configuration authority and path rules |
 | 5 | the command tried and did not finish | `check`, `recheck` and `repair` when the project, the store or the goal could not be read or written — including when the user's own settings file is there and will not parse; `mcp serve` when its stream could not be read or written; `history show` for an id that is not in the store, and any history command when the store is there and cannot be read; `hook allow-once` when it declines to write the grant — a window it does not record, or a project and tool whose settings leave no request naming that tool an allowance could be spent on; `config set` when it will not write what was asked — a setting that cannot take effect, a value this release refuses, or a file inside the project it would be writing the authority from; anything, including a result that could not be written out |
 
-**A check reaches 0 only through the pipeline's own answer**, and in this build
-no run does: a project SURE can plan for has stage 5 recorded as `unknown`
-(there is no runner for a planned check yet) and stage 8 recorded as
-`analysis_provider_disabled` (no model provider is configured), and a project
-with no parts at all still has stage 8 unconfigured. A stage that did not run is
+**A check reaches 0 only through the pipeline's own answer**, and the way to it
+is the same under either authority. Under the mode a run starts in, a project
+SURE can plan for has its project-running checks refused before a runner sees
+them (`inspect_only`) and stage 8 recorded as `analysis_provider_disabled` (no
+model provider is configured); a project with no parts at all still has stage 8
+unconfigured. With `run_project_code` granted by the user's own settings file —
+since `P18-T007` wires the pipeline to the runner — those checks are carried out
+and each reports one result, and the answer is what the runner reported: a check
+it produced nothing for is an `Error`, never a pass, and an unreported critical
+check aggregates to `not_enough_checked`. Either way a stage that did not run is
 recorded as such, and a run with one of those is never reported as clean — which
-is what the false-green rule asks for, and it means `sure check` returns 1 for
-every project it can read and 5 for one it cannot. `sure repair` and `sure
-recheck` return the same statuses for the same reasons. Stages 11 and 12 do
-their work now, on a project that has findings, and that changes no status
-either: a repair contract checks nothing — it says what would have to pass — so
-a command that wrote one and reached 0 would be the false green this table
-exists to prevent. Nothing in this file has to change the day a runner lands:
-the status comes from the verdict, and the verdict is what will change.
+is what the false-green rule asks for. Under the settings this build starts
+with, `sure check` returns 1 for a project it can read and 5 for one it cannot;
+`sure repair` and `sure recheck` return the same statuses for the same reasons.
+Stages 11 and 12 do their work now, on a project that has findings, and that
+changes no status either: a repair contract checks nothing — it says what would
+have to pass — so a command that wrote one and reached 0 would be the false
+green this table exists to prevent. **The day the runner landed, nothing in this
+table moved, which was the point of writing it this way**: the status comes from
+the verdict, and what moved was the verdict.
 
 The whole table is in `crates/sure-cli/src/report.rs` as `report::exit`, and it
 is the only place a status is chosen. `main` handles clap's parse error itself

@@ -4,11 +4,6 @@
 //! file, emailed, or viewed in a browser. No external resources or scripts are
 //! required.
 
-#![allow(
-    dead_code,
-    reason = "this module is ready but awaits the check engine to produce a verdict"
-)]
-
 use sure_core::plain_language_finding::{PlainLanguageFinding, render_findings};
 use sure_core::project_verdict::render_summary;
 use sure_core::redact::escape_control_characters;

@@ -63,15 +63,20 @@
 //!
 //! **It cannot stop code that does not ask it.** A caller that reaches the runner
 //! by some other route is not constrained by anything here. What is constrained
-//! is the route the product uses: [`crate::service`] runs services, and the only
-//! argument it accepts is an [`AdmittedCommand`], which only
-//! [`Enforcement::admitted`] can build — so the first check to run project code
-//! cannot start something this module did not admit, and that is a fact about a
-//! type rather than a rule for a reader to remember. The census in
-//! `tests/spawn_sites.rs` holds the other half: the files that may name a
-//! `ProcessRequest` are named there, and nothing outside `crate::service` may
-//! name a `Supervisor`. **No *check* drives on that road yet** — that is the
-//! pipeline, and `support::CEILING` is justified by its absence.
+//! is the route the product uses, and since `P18-T007` there are two of them:
+//! [`crate::service`] starts a service from an [`AdmittedCommand`], and
+//! [`crate::planned_check_runner`] carries a project's checks from an
+//! [`AdmittedRun`](crate::planned_check_runner::AdmittedRun), which is built out
+//! of one — so the first check to run project code cannot start something this
+//! module did not admit, and that is a fact about a type rather than a rule for a
+//! reader to remember. The census in `tests/spawn_sites.rs` holds the other half:
+//! the files that may name a `ProcessRequest` are named there, and nothing outside
+//! `crate::service` may name a `Supervisor`. **`crate::pipeline` is where a check
+//! drives on that road** — it builds the plan, calls [`Enforcement::of`] and hands
+//! the admitted commands to the runner — so the road is in use, and
+//! `support::CEILING` did not move with it: level B is a claim about every
+//! platform SURE runs on, and `support`'s module comment says why that reading has
+//! not been taken (ADR 0014; the measurements are `P18-T012`'s).
 //!
 //! **It says nothing about what a command does when it runs.** The classification
 //! is `safety::classify`'s, and its own caveat — SURE reads command lines, not
@@ -571,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn even_a_mode_that_runs_nothing_admits_only_commands_that_run_no_project_code() {
+    fn a_mode_without_an_executor_admits_no_project_code() {
         // The strongest form, and it is not the same claim as the one above: the
         // checks that survive an inspect-only mode with everything granted are the
         // ones `decide` itself says are allowed there — a read and a fetch — and
@@ -585,14 +590,15 @@ mod tests {
                 for admitted in enforcement.admitted() {
                     let command = admitted.command();
                     assert!(
-                        !consent::runs_project_code(command.effects()) || mode.runs_project_code(),
+                        !consent::runs_project_code(command.effects())
+                            || mode.has_project_executor(),
                         "{} / {name}: {} was admitted and runs the project's code",
                         mode.as_str(),
                         command.display()
                     );
                     ever_ran_code |= consent::runs_project_code(command.effects());
                 }
-                if !mode.runs_project_code() {
+                if !mode.has_project_executor() {
                     assert!(
                         enforcement.check_plan().dynamic_checks.is_empty(),
                         "{} / {name}",

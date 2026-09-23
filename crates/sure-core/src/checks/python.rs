@@ -84,6 +84,39 @@
 //! **It is not the plan.** No check here has been ordered, deduplicated or
 //! gated by a mode; that is [`crate::schedule`]'s work and
 //! `tests/python_checks.rs` is where the two are put together.
+//!
+//! # A check is planned as work, and not only as a line
+//!
+//! Since `P18-T003` every check here is a proposal **and the operation that
+//! would carry it out** ([`PlannedWork`](crate::planned_work::PlannedWork)): the
+//! program is the installer's own name or `python`, the arguments are `run` and
+//! the tool from [`TOOLS`](crate::discover::python::TOOLS), and the directory is
+//! the project root.
+//!
+//! **The rendered line stays a rendering.**
+//! [`CheckReason::DeclaredCommand`] still carries `uv run pytest`, because that
+//! is what a report prints and what a person is being asked to allow — and
+//! nothing reads it back into a program. The line and the vector are one value
+//! seen twice: they both come from the discovery's
+//! [`invocation_for`](crate::discover::python::invocation_for), which is also
+//! what [`command_for`](crate::discover::python::command_for) renders, so a check
+//! cannot be shown one command and started with another.
+//!
+//! **The installer's name is not rewritten for the platform**, and neither is
+//! `python`. On Windows a bare `uv` is a name Windows completes with `.exe` and
+//! nothing else, so a project whose only installer is installed as `uv.exe` is
+//! planned as a command this build will not start; whether a name is startable is
+//! [`ProgramPath`](crate::planned_work::ProgramPath)'s answer and the runner's to
+//! act on. Appending `.exe` — or wrapping the name in `cmd.exe /c` — would be
+//! constructing the interpreter ADR 0014 says SURE must not build.
+//!
+//! **`python` is the one program SURE names that the project did not.** It is
+//! already how [`command_for`] has always spelled the no-installer case, and the
+//! reasons [`Runner`] gives for that are the reasons it is spelled here too: a
+//! bare tool name would depend on which interpreter is first on the path, which
+//! is the fact SURE cannot see and does not claim.
+
+use std::path::Path;
 
 use sure_domain::evidence::EvidenceClass;
 use sure_domain::execution::ActionKind;
@@ -93,12 +126,13 @@ use sure_domain::status::CheckResult;
 
 use crate::discover::Source;
 use crate::discover::python::{
-    CommandRole, Installer, Managers, PIPFILE, PythonProject, ToolRole, command_for,
+    CommandRole, Installer, Managers, PIPFILE, PythonProject, ToolRole, command_for, invocation_for,
 };
+use crate::planned_work::PlannedWork;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
 
-use super::{MissingCommand, MissingKind, check_id};
+use super::{MissingCommand, MissingKind, check_id, command_operation};
 
 /// What SURE proposes for one role.
 ///
@@ -380,7 +414,7 @@ impl InstallStep {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PythonChecks {
     component: Option<String>,
-    proposed: Vec<CheckProposal>,
+    proposed: Vec<PlannedWork>,
     missing: Vec<MissingCommand>,
     install: Option<InstallStep>,
 }
@@ -403,8 +437,18 @@ impl PythonChecks {
     /// manifest that could not be read: four "you declare nothing" rows for a
     /// file SURE never opened would be four false statements about the project,
     /// and the unread manifest is already a value in the discovery result.
+    ///
+    /// **`root` is the project root, and it is a parameter rather than a field of
+    /// the discovery result** because every check here is planned as typed work
+    /// and [`CommandSpec`](crate::planned_work::CommandSpec) requires an absolute
+    /// working directory, while a discovery result carries paths relative to
+    /// whatever it was read from. The scan refuses a root that is not absolute
+    /// (`scan::open_root`), so the directory handed to a
+    /// [`CommandSpec`](crate::planned_work::CommandSpec) is absolute whenever the
+    /// discovery is a value at all — which is what makes it a value a runner
+    /// could be given rather than a path that happens to look right.
     #[must_use]
-    pub fn of(project: &PythonProject) -> Self {
+    pub fn of(project: &PythonProject, root: &Path) -> Self {
         let mut checks = Self {
             component: component(project),
             proposed: Vec::new(),
@@ -423,14 +467,18 @@ impl PythonChecks {
         for &(role, check) in CHECKS {
             let id = check_id(&component, &format!("python{}", role.as_str()));
             let title = titled(role);
-            let command = command_for(installer, role, &project.tooling).command;
+            // **The plan, asked for once**, and both the line the reason carries
+            // and the operation beside it are derived from it: `invocation_for`
+            // is what `command_for` renders, so the row a report prints and the
+            // program a runner would start cannot come from two decisions.
+            let invocation = invocation_for(installer, role, &project.tooling);
 
             // The order is Node's and the reason is the same: *is the tool
             // declared* is asked before *can SURE tell where it lives*, because
             // a project with neither a linter nor a coherent installer has one
             // problem a person acts on and one they do not, and the sentence
             // should be about the first.
-            match (command, runner) {
+            match (invocation, runner) {
                 (None, _) => checks.missing.push(MissingCommand::new(
                     id,
                     title,
@@ -447,21 +495,38 @@ impl PythonChecks {
                     check.critical,
                     MissingKind::NoRunner { why },
                 )),
-                (Some(command), _) => checks.proposed.push(CheckProposal::new(
-                    id,
-                    title,
-                    check.severity,
-                    check.critical,
-                    // The same answer node's proposer gives, and for the same
-                    // reason: a declared command watched for what it does is
-                    // deterministic, and the same project state gives the same
-                    // answer.
-                    EvidenceClass::DeterministicCheck,
-                    CheckReason::DeclaredCommand {
-                        declared_in: component.clone(),
-                        command,
-                    },
-                    &[check.action],
+                (Some(invocation), _) => checks.proposed.push(PlannedWork::new(
+                    CheckProposal::new(
+                        id,
+                        title,
+                        check.severity,
+                        check.critical,
+                        // The same answer node's proposer gives, and for the same
+                        // reason: a declared command watched for what it does is
+                        // deterministic, and the same project state gives the same
+                        // answer.
+                        EvidenceClass::DeterministicCheck,
+                        CheckReason::DeclaredCommand {
+                            declared_in: component.clone(),
+                            // The rendered line, and only the rendered line: it is
+                            // what a report prints, and the program that would run
+                            // is the `CommandSpec` beside it. Nothing reads this
+                            // string back into a program -- ADR 0014 rejected
+                            // exactly that, and the pairing is what makes it
+                            // unnecessary.
+                            command: invocation.rendered(),
+                        },
+                        &[check.action],
+                    ),
+                    command_operation(
+                        invocation.program(),
+                        root,
+                        &invocation
+                            .arguments()
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                    ),
                 )),
             }
         }
@@ -499,8 +564,13 @@ impl PythonChecks {
     /// **No particular order is the honest description**: [`PlanBuilder`] sorts
     /// them, and a caller that read an order out of this list would be depending
     /// on the order of [`CHECKS`], which is not a fact about the project.
+    ///
+    /// Each value is a proposal **with the work that would carry it out** — the
+    /// program, its arguments and the directory, as typed fields. A caller that
+    /// wants a proposal alone asks a value in this list for one; there is no
+    /// second list, because a pair kept in two places can be put together wrong.
     #[must_use]
-    pub fn proposed(&self) -> &[CheckProposal] {
+    pub fn planned(&self) -> &[PlannedWork] {
         &self.proposed
     }
 
@@ -564,12 +634,16 @@ impl PythonChecks {
     /// place: every proposal has a title, a reason naming a file, and exactly
     /// one action, and `nothing_this_module_builds_is_refused` holds that rather
     /// than this sentence.
+    /// **The work is handed over with the proposal, not beside it.** A check
+    /// enters the plan as one value carrying both, so a schedule cannot hold a
+    /// proposal whose operation stayed behind in this module — see
+    /// [`PlanBuilder::propose`].
     pub fn add_to(&self, builder: &mut PlanBuilder) {
-        for proposal in &self.proposed {
+        for work in &self.proposed {
             // The `Err` is the refusal, and it is not dropped: `propose` has
             // already pushed it onto the builder's own list by the time this
             // returns it, which is the contract that function documents.
-            if let Err(refusal) = builder.propose(proposal.clone()) {
+            if let Err(refusal) = builder.propose(work.clone()) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"
@@ -683,9 +757,55 @@ mod tests {
         InstallerEvidence, InstallerFinding, ManifestState, PyProject, Requirement,
         RequirementsFile, Tooling,
     };
+    use crate::planned_work::CheckOperation;
     use serde_json::json;
+    use std::ffi::{OsStr, OsString};
+    use std::path::PathBuf;
     use sure_domain::ids::CheckId;
     use sure_domain::status::CheckStatus;
+
+    /// The root these fixtures are read from.
+    ///
+    /// **A directory and not a manifest path**, because that is what a check's
+    /// working directory is: the project root, for a project whose manifest is at
+    /// the top of it. Written with a space so that a path assembled by pasting
+    /// strings together has somewhere to go wrong — the Windows discipline this
+    /// repository holds to — and absolute, because
+    /// [`CommandSpec`](crate::planned_work::CommandSpec) refuses anything else.
+    ///
+    /// **Absolute on the platform this is compiled for, which is why the spelling
+    /// forks.** The sentence above was true on Windows and false on the other two
+    /// platforms this crate is built for: `C:\projects\my fixture` has no root that
+    /// Unix recognises, so off Windows the fixture root was a relative path while
+    /// the comment said otherwise. Nothing here asserts absoluteness yet, which is
+    /// why only `checks::node`'s copy of this fixture was red — the assertion there
+    /// is the one that noticed, and all three are the same decision made once.
+    fn root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(r"C:\projects\my fixture")
+        } else {
+            PathBuf::from("/projects/my fixture")
+        }
+    }
+
+    /// The checks SURE would plan for this project, read from [`root`].
+    fn checks_of(project: &PythonProject) -> PythonChecks {
+        PythonChecks::of(project, &root())
+    }
+
+    /// The proposals alone, for the assertions that are about a proposal.
+    fn proposals(checks: &PythonChecks) -> Vec<&CheckProposal> {
+        checks.planned().iter().map(PlannedWork::proposal).collect()
+    }
+
+    /// The work behind one role's check, by the title a person reads.
+    fn work_for(checks: &PythonChecks, role: CommandRole) -> &PlannedWork {
+        checks
+            .planned()
+            .iter()
+            .find(|work| work.proposal().title() == role.plain_description())
+            .unwrap_or_else(|| panic!("{role:?} was not proposed: {:?}", checks.missing()))
+    }
 
     /// A project whose `pyproject.toml` is this document and whose recognised
     /// tools are these.
@@ -986,11 +1106,11 @@ mod tests {
             ("a project SURE read no manifest of", unreadable_project()),
         ];
 
-        let mut proposals = 0;
+        let mut proposed = 0;
         for (what, project) in &fixtures {
-            let checks = PythonChecks::of(project);
-            for proposal in checks.proposed() {
-                proposals += 1;
+            let checks = checks_of(project);
+            for proposal in proposals(&checks) {
+                proposed += 1;
                 assert!(
                     !proposal
                         .requirements()
@@ -1016,8 +1136,7 @@ mod tests {
                      domain's own definition"
                 );
                 assert!(
-                    !checks
-                        .proposed()
+                    !proposals(&checks)
                         .iter()
                         .any(|proposal| proposal.reason().names_something()
                             && matches!(
@@ -1029,7 +1148,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(proposals, 5, "the sweep did not visit the shapes it claims");
+        assert_eq!(proposed, 5, "the sweep did not visit the shapes it claims");
     }
 
     #[test]
@@ -1038,8 +1157,8 @@ mod tests {
         // installer gets no checks at all and one install step — and a caller
         // that rendered the step as the plan would be showing a report with
         // nothing in it about tests.
-        let checks = PythonChecks::of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
-        assert!(checks.proposed().is_empty());
+        let checks = checks_of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
+        assert!(checks.planned().is_empty());
         assert_eq!(checks.missing().len(), 4);
         assert!(!checks.is_empty());
 
@@ -1064,13 +1183,13 @@ mod tests {
         // every anchor as a lockfile would be telling a person their `Pipfile`
         // is a lockfile, and the sentence is the only part of the step a reader
         // sees.
-        let locked = PythonChecks::of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
+        let locked = checks_of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
         let step = locked.install().expect("the lockfile names an installer");
         assert_eq!(step.declared_in(), "uv.lock");
         assert_eq!(step.says(), "is a lockfile for this installer");
         assert_eq!(step.command(), "uv sync");
 
-        let configured = PythonChecks::of(&pipenv_project());
+        let configured = checks_of(&pipenv_project());
         assert_eq!(configured.component(), Some(PIPFILE));
         let step = configured
             .install()
@@ -1086,9 +1205,9 @@ mod tests {
         // a package manager has no command at all; Python without an installer
         // has `python -m pytest`, which is a complete command and the only
         // interpreter SURE can name.
-        let checks = PythonChecks::of(&pytest_project());
+        let checks = checks_of(&pytest_project());
         assert!(checks.install().is_none(), "{:?}", checks.install());
-        assert_eq!(checks.proposed().len(), 1);
+        assert_eq!(checks.planned().len(), 1);
         assert_eq!(
             command_of(&checks, CommandRole::Test),
             "python -m pytest",
@@ -1134,11 +1253,11 @@ mod tests {
         let planned = command_for(None, CommandRole::Test, &split.tooling).command;
         assert_eq!(planned.as_deref(), Some("python -m pytest"));
 
-        let checks = PythonChecks::of(&split);
+        let checks = checks_of(&split);
         assert!(
-            checks.proposed().is_empty(),
+            checks.planned().is_empty(),
             "a command for the wrong interpreter is not a check: {:?}",
-            checks.proposed()
+            checks.planned()
         );
         match gap_for(&checks, CommandRole::Test) {
             MissingKind::NoRunner { why } => {
@@ -1172,7 +1291,7 @@ mod tests {
         // will not guess. `mypy` is declared; it is not in the tooling list; and
         // a report built from that list alone would say "you declare no type
         // checker" about a manifest with `mypy` written in it.
-        let checks = PythonChecks::of(&poetry_project(json!({
+        let checks = checks_of(&poetry_project(json!({
             "mypy": { "version": "^1.8", "extras": ["types-requests"] },
         })));
 
@@ -1233,7 +1352,7 @@ mod tests {
         // manifest, and so does a project with three of them unreadable. Four
         // gaps here would say "your project declares nothing" about a file SURE
         // never read.
-        let checks = PythonChecks::of(&unreadable_project());
+        let checks = checks_of(&unreadable_project());
         assert!(checks.is_empty(), "{checks:?}");
         assert!(checks.component().is_none());
         assert!(checks.install().is_none());
@@ -1252,10 +1371,10 @@ mod tests {
             found.pipfile = ManifestState::Read(Box::new(pipfile()));
             found
         };
-        let checks = PythonChecks::of(&both);
+        let checks = checks_of(&both);
         assert_eq!(checks.component(), Some("pyproject.toml"));
         assert_eq!(
-            checks.proposed().len() + checks.missing().len(),
+            checks.planned().len() + checks.missing().len(),
             4,
             "two manifests describing one project are four roles, not eight"
         );
@@ -1266,7 +1385,7 @@ mod tests {
             found
         };
         assert_eq!(
-            PythonChecks::of(&pipfile_only).component(),
+            checks_of(&pipfile_only).component(),
             Some("Pipfile"),
             "a project with no pyproject.toml must not be given one's name"
         );
@@ -1279,7 +1398,7 @@ mod tests {
             found
         };
         assert_eq!(
-            PythonChecks::of(&requirements_only).component(),
+            checks_of(&requirements_only).component(),
             Some("requirements-dev.txt")
         );
     }
@@ -1323,12 +1442,12 @@ mod tests {
             Installer::Uv,
         );
 
-        let checks = PythonChecks::of(&found);
-        assert_eq!(checks.proposed().len(), 2, "{:?}", checks.missing());
+        let checks = checks_of(&found);
+        assert_eq!(checks.planned().len(), 2, "{:?}", checks.missing());
         assert_eq!(command_of(&checks, CommandRole::Test), "uv run pytest");
         assert_eq!(command_of(&checks, CommandRole::Lint), "uv run ruff");
 
-        for proposal in checks.proposed() {
+        for proposal in proposals(&checks) {
             assert_eq!(
                 proposal.evidence_class(),
                 EvidenceClass::DeterministicCheck,
@@ -1352,13 +1471,15 @@ mod tests {
         // as each other — the tag is what tells the two checks apart, and a tag
         // built from the role's *title* rather than its wire name would still
         // pass that and would fail the day two roles shared a first word.
-        let again = PythonChecks::of(&found);
-        let ids: Vec<&CheckId> = checks.proposed().iter().map(CheckProposal::id).collect();
+        let again = checks_of(&found);
+        let ids: Vec<&CheckId> = proposals(&checks)
+            .into_iter()
+            .map(CheckProposal::id)
+            .collect();
         assert_eq!(
             ids,
-            again
-                .proposed()
-                .iter()
+            proposals(&again)
+                .into_iter()
                 .map(CheckProposal::id)
                 .collect::<Vec<_>>()
         );
@@ -1374,12 +1495,86 @@ mod tests {
     }
 
     #[test]
+    fn the_work_behind_a_check_is_the_typed_form_of_the_line_a_report_prints() {
+        // **The pairing, held rather than asserted about.** A report prints
+        // `uv run pytest` and a runner is handed a program and an argument
+        // vector; the two are one value seen twice, so rendering the vector has
+        // to give back the line a person was shown — over every role, including
+        // the one whose command is not the tool at all (`Build`'s frontend).
+        let checks = checks_of(&a_complete_project());
+        let expected: &[(CommandRole, &str, &[&str])] = &[
+            (CommandRole::Test, "uv", &["run", "pytest"]),
+            (CommandRole::Lint, "uv", &["run", "ruff"]),
+            (CommandRole::TypeCheck, "uv", &["run", "mypy"]),
+            // `setuptools` is a library rather than a command, so the plan is
+            // the frontend's own subcommand.
+            (CommandRole::Build, "uv", &["build"]),
+        ];
+        assert_eq!(
+            checks.planned().len(),
+            expected.len(),
+            "{:?}",
+            checks.missing()
+        );
+
+        for (role, program, arguments) in expected {
+            let work = work_for(&checks, *role);
+            let CheckReason::DeclaredCommand { command, .. } = work.proposal().reason() else {
+                panic!("{role:?} is not a declared command");
+            };
+            let CheckOperation::Command(spec) = work.operation() else {
+                panic!(
+                    "{role:?} is not a command operation: {:?}",
+                    work.operation()
+                );
+            };
+
+            assert_eq!(spec.program(), OsStr::new(*program), "{role:?}");
+            // **A name, and not one this module completed.** On Windows a name
+            // Windows cannot complete is not a program, and appending `.cmd` or
+            // `.exe` to make it one would be SURE inventing a program — see the
+            // module documentation.
+            assert!(
+                !spec.program().to_string_lossy().contains('.'),
+                "{role:?} names a program with an extension: {:?}",
+                spec.program()
+            );
+            let planned: Vec<OsString> = arguments.iter().map(OsString::from).collect();
+            assert_eq!(spec.arguments(), planned.as_slice(), "{role:?}");
+            assert_eq!(spec.working_directory(), root(), "{role:?}");
+
+            // The line and the vector cannot describe different commands: the
+            // line *is* this vector rendered, character for character.
+            let rendered = std::iter::once(spec.program().to_owned())
+                .chain(spec.arguments().iter().cloned())
+                .map(|word| word.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(&rendered, command, "{role:?}");
+        }
+
+        // And the other spelling of a plan: no installer at all is
+        // `python -m <tool>`, which is the only interpreter SURE can name and is
+        // not a guess at which one is first on the path.
+        let without = checks_of(&pytest_project());
+        let work = work_for(&without, CommandRole::Test);
+        let CheckOperation::Command(spec) = work.operation() else {
+            panic!("the test check is not a command operation");
+        };
+        assert_eq!(spec.program(), OsStr::new("python"));
+        assert_eq!(
+            spec.arguments(),
+            [OsString::from("-m"), OsString::from("pytest")].as_slice()
+        );
+    }
+
+    #[test]
     fn nothing_this_module_builds_is_refused_and_the_plan_holds_everything() {
         // `add_to` ignores a refusal because the builder records it, which is
         // only an acceptable design while nothing is ever refused. This is the
         // test that would fail first if a proposal here lost its title, its
         // reason or its action.
-        let checks = PythonChecks::of(&a_complete_project());
+        let checks = checks_of(&a_complete_project());
         let mut builder = PlanBuilder::new(
             sure_domain::execution::ExecutionMode::HostConfirmed,
             sure_domain::execution::ExecutionPermissions {
@@ -1391,14 +1586,14 @@ mod tests {
 
         assert!(builder.refused().is_empty(), "{:?}", builder.refused());
         let schedule = builder.build();
-        assert_eq!(schedule.len(), checks.proposed().len());
+        assert_eq!(schedule.len(), checks.planned().len());
         assert!(
             schedule.duplicates().is_empty(),
             "{:?}",
             schedule.duplicates()
         );
         assert_eq!(schedule.may_run().count(), schedule.len());
-        assert!(schedule.get(checks.proposed()[0].id()).is_some());
+        assert!(schedule.get(proposals(&checks)[0].id()).is_some());
 
         // And the install is not in the schedule, which is the whole reason it is
         // a separate type: a schedule entry can come back as a result, and an
@@ -1445,7 +1640,7 @@ mod tests {
                 poetry_project(json!({ "mypy": { "version": "^1.8" } })),
             ),
         ] {
-            let checks = PythonChecks::of(&project);
+            let checks = checks_of(&project);
             let results = checks.not_checked(&fingerprint);
             assert_eq!(results.len(), checks.missing().len(), "{what}");
             assert_eq!(results.len(), 4, "{what}");
@@ -1473,8 +1668,7 @@ mod tests {
         // nothing is out of scope for all four; a project whose manifest SURE
         // could not read a declaration out of is a project with something to fix,
         // and the one critical role among its gaps must block.
-        let declares_nothing =
-            PythonChecks::of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
+        let declares_nothing = checks_of(&with_lockfile(empty_project(), "uv.lock", Installer::Uv));
         let results = declares_nothing.not_checked(&fingerprint);
         assert!(
             results.iter().all(|result| !result.blocks_green()),
@@ -1487,7 +1681,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let unreadable = PythonChecks::of(&poetry_project(json!({
+        let unreadable = checks_of(&poetry_project(json!({
             "pytest": { "version": "^8", "extras": ["dev"] },
         })));
         let results = unreadable.not_checked(&fingerprint);
@@ -1521,9 +1715,8 @@ mod tests {
 
     /// The command a role's proposal carries, or a panic naming the gap.
     fn command_of(checks: &PythonChecks, role: CommandRole) -> String {
-        checks
-            .proposed()
-            .iter()
+        proposals(checks)
+            .into_iter()
             .find(|proposal| proposal.title() == role.plain_description())
             .map_or_else(
                 || panic!("{role:?} has no command: {:?}", checks.missing()),

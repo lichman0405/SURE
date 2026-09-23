@@ -104,8 +104,9 @@ fn a_project_sure_can_only_read_is_classified_inspect_only_and_says_why() {
     assert_eq!(
         reason,
         "SURE read one stack here, rust, and graded it generic (B). That reading alone would be \
-         level B (generic), but this build runs no project code: level A needs meaningful \
-         deterministic checks and level B needs approved generic checks. So the project is at \
+         level B (generic), but SURE has not run this project's checks: it runs none unless you \
+         grant it, and it has only been shown to work on one platform. Level A needs meaningful \
+         deterministic checks and level B needs approved generic checks, so the project is at \
          level C (inspect_only). SURE can look at this project's files, but cannot safely run it."
     );
 }
@@ -174,10 +175,11 @@ fn a_project_whose_stacks_agree_is_described_as_having_graded_all_of_them() {
     assert_eq!(
         reason,
         "SURE read 2 stacks here — node and rust — and graded all of them generic (B). That \
-         reading alone would be level B (generic), but this build runs no project code: level A \
-         needs meaningful deterministic checks and level B needs approved generic checks. So the \
-         project is at level C (inspect_only). SURE can look at this project's files, but cannot \
-         safely run it."
+         reading alone would be level B (generic), but SURE has not run this project's checks: it \
+         runs none unless you grant it, and it has only been shown to work on one platform. Level \
+         A needs meaningful deterministic checks and level B needs approved generic checks, so \
+         the project is at level C (inspect_only). SURE can look at this project's files, but \
+         cannot safely run it."
     );
 }
 

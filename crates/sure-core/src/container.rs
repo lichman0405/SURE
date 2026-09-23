@@ -26,16 +26,17 @@
 //! [`Availability`] has no `Error` variant because a machine without Docker or
 //! Podman is not a failure: it is a machine with no runtime on its search path,
 //! which is a fact about the computer rather than a defect in it. **It is also
-//! not a machine where something different happens.** Absence changes *inside
-//! what* a command would run and not *whether* anything runs — the mode and the
-//! permissions `P3-T005`, `P3-T006` and `P3-T007` built do not consult what is
-//! installed — and in this build nothing runs at all: no check drives on
-//! [`Enforcement::admitted`](crate::enforce::Enforcement::admitted)'s road yet,
-//! so the checks are admitted and none of them is run, with a runtime or without
-//! one, and each is recorded as unknown rather than passed. `crate::support`'s
-//! `CEILING` is `InspectOnly` for the same reason. **A sentence that says the
-//! checks run on this computer instead is therefore false of this build**, and
-//! so is one that says they run in a container: [`claims_local_execution`] and
+//! not a machine where something different happens.** A runtime's presence does
+//! not create an executor in this build. Since `P18-T007` this build does run
+//! checks granted under `host_confirmed`: on **this computer**, through [`crate::pipeline`] into
+//! [`crate::enforce`](crate::enforce::Enforcement::admitted) and
+//! [`crate::planned_check_runner`], when the **user's own** settings file grants
+//! it ([`crate::config::Authority::execution_mode`]). **This build runs no check
+//! in a container**, with a runtime or without one: [`ContainerPlan`] is a value
+//! nothing starts, and no executor for it exists here. **A sentence that says
+//! the checks run in a container is therefore false of this build**, and so is
+//! one that says a check runs here *because* a runtime was missing — a grant is
+//! what decides that, never what is installed. [`claims_local_execution`] and
 //! [`claims_container_execution`] are the two rules that keep one out of the
 //! sentences below, and the answer *with* a runtime is held to the second for
 //! the reason `docs/architecture/EXECUTION_SAFETY.md` gives — the answer with no
@@ -43,6 +44,14 @@
 //! because the only way to get a [`Runtime`] out is to match. **An error would
 //! have made a normal machine a broken one**, and the failure mode of that is a
 //! user told their setup is wrong when it is not.
+//!
+//! **Container mode now fails closed.** The domain schedule and the command
+//! permission plan both refuse project-running work when the user requests
+//! `container`, and a stopped check carries
+//! `NotCheckedReason::ContainerExecutionUnavailable`. The product-path test
+//! `a_user_requesting_a_container_never_reaches_the_host_runner` uses a user
+//! grant and a small Rust project; it observes that checks were planned but the
+//! host runner was never asked. A container executor is still future work.
 //!
 //! # Where "limited isolation" is, and why it is not marketing
 //!
@@ -162,11 +171,13 @@ pub enum Availability {
     /// Not a failure and not an empty success: it is the answer that says there
     /// is no runtime here, which is a fact about the machine and not a decision
     /// about the checks. **It does not mean the checks run on this computer
-    /// instead.** In this build nothing runs either way — the checks are
-    /// admitted and none of them is run — so the sentence
-    /// [`Availability::explain`] produces says so rather than implying a
-    /// fallback, and [`claims_local_execution`] is the rule that holds it to
-    /// that.
+    /// instead.** A missing runtime is not a fallback — what decides whether a
+    /// check runs here is the user's own settings file and nothing else
+    /// ([`crate::config::Authority::execution_mode`]) — and this build runs no
+    /// check in a container with a runtime or without one, so the sentence
+    /// [`Availability::explain`] produces says what happens instead rather than
+    /// implying a fallback, and [`claims_local_execution`] is the rule that
+    /// holds it to that.
     Absent,
 }
 
@@ -223,10 +234,14 @@ impl Availability {
     ///
     /// **Both arms are held to both rules** — [`claims_local_execution`] and
     /// [`claims_container_execution`] — because neither may say that a check
-    /// runs, on this computer or inside a container, and in this build none does
-    /// either way. Each arm was false once, one in each direction, and each was
-    /// false for the same reason: the sentence answered a question about the
-    /// machine as though it were a question about the checks.
+    /// runs in a container, and neither may say that a check runs here *because*
+    /// a runtime is missing. Since `P18-T007` the second of those is the sharper
+    /// one: a check can run on this computer, and only the user's own settings
+    /// file can allow it, so a sentence that read a missing runtime as the cause
+    /// would be pointing a reader at the wrong fact. Each arm was false once,
+    /// one in each direction, and each was false for the same reason: the
+    /// sentence answered a question about the machine as though it were a
+    /// question about the checks.
     ///
     /// - The absence arm said *"No container runtime was found, so checks run on
     ///   this computer instead."*
@@ -236,15 +251,17 @@ impl Availability {
     /// The two sentences below are therefore the same sentence with one clause
     /// moved, which is what
     /// `docs/architecture/EXECUTION_SAFETY.md` means by *the answer with no
-    /// runtime is the answer with one*. What a runtime changes is where a check
-    /// **would** run; it does not change whether one runs.
+    /// runtime is the answer with one*. What a runtime would change is *inside
+    /// what* a check runs, and this build has no runner that would take a check
+    /// there; it does not change whether one runs, and it does not decide where
+    /// one runs.
     #[must_use]
     pub fn explain(&self) -> String {
         match self {
             Self::Found { runtime, program } => format!(
-                "{} was found at {}, and that changes nothing: this build runs no check, in a \
-                 container or on this computer, and each check is recorded as unknown rather \
-                 than passed.",
+                "{} was found at {}, and that changes nothing: this build runs no check in a \
+                 container, and no check runs on this computer unless your own settings allow \
+                 it.",
                 runtime.as_str(),
                 program.display()
             ),
@@ -252,8 +269,8 @@ impl Availability {
                 let names: Vec<&str> = Runtime::ALL.iter().map(|it| it.as_str()).collect();
                 format!(
                     "No container runtime was found, and that changes nothing: this build \
-                     runs no check, in a container or on this computer, and each check is \
-                     recorded as unknown rather than passed. SURE looked for {} on PATH.",
+                     runs no check in a container, and no check runs on this computer unless \
+                     your own settings allow it. SURE looked for {} on PATH.",
                     names.join(" or ")
                 )
             }
@@ -745,13 +762,19 @@ const NOT_RUNNING_WORDS: &[&str] = &[
 ///
 /// # The claim
 ///
-/// This build admits the checks and runs none of them — in a container and on
-/// this computer alike — so a sentence that tells a reader a check ran here is
-/// false whichever words it uses. It is the claim the first acceptance sentence
-/// is about: [`Availability`] has no error because an absent runtime is not a
-/// failure, and **the absence does not mean the check happened somewhere else**.
-/// A reader who takes it that way believes a check of their project was
-/// performed when nothing was, which is the expensive kind of wrong.
+/// Since `P18-T007` a check **can** run on this computer: the user's own
+/// settings file may allow it, and the pipeline then runs the project's own
+/// checks here. What no sentence may say without denying it in the same clause
+/// is that a check runs here *because a runtime was missing* — the claim the
+/// first acceptance sentence is about — and this rule reads a running word
+/// beside a place on this computer as that claim unless a clause denies it.
+/// That is why the sentences this file produces carry the denial inside the
+/// clause (*"no check runs on this computer unless your own settings allow it"*)
+/// rather than beside it, and why the truthful sentence with no denial in it is
+/// read as a claim by this rule: it reads words, not subjects, which is one of
+/// the limits below. **The absence does not mean the check happened somewhere
+/// else**, and a reader who takes it that way believes a check of their project
+/// was performed when nothing was, which is the expensive kind of wrong.
 ///
 /// # Why a rule about a claim rather than about a phrase
 ///
@@ -806,13 +829,13 @@ pub fn claims_local_execution(sentence: &str) -> bool {
 ///
 /// # The claim
 ///
-/// This build admits the checks and runs none of them — in a container as much
-/// as on this computer. [`ContainerPlan`] is a value nothing shipped builds, the
-/// stage after a container mode reports that *"none of them ran and each is
-/// recorded as unknown rather than passed"*, and `crate::support`'s `CEILING` is
-/// `InspectOnly` for the same reason. So an answer to the question *is there a
+/// **This build runs no check in a container**, before `P18-T007` and after it:
+/// [`ContainerPlan`] is a value nothing shipped builds and no executor starts
+/// one, so a run whose mode is `container` is not a run inside a container
+/// whatever that mode's own description promises — the question the module
+/// documentation records rather than answers. So an answer to *is there a
 /// container runtime here* that says a check runs in one tells a reader their
-/// project was checked when nothing was.
+/// project was checked inside a container when no container was ever started.
 ///
 /// # Why this exists when [`claims_local_execution`] already asks the same shape
 ///
@@ -834,10 +857,13 @@ pub fn claims_local_execution(sentence: &str) -> bool {
 ///
 /// - **It is a rule about this build, and its subject is the check, not the
 ///   container.** A container is not a thing a check may not run in; it is a
-///   thing no check runs in *yet*. The tests that call this are written to fail
-///   on the day the container mode is wired in, rather than to accommodate it,
-///   because on that day this sentence becomes true for a run whose mode grants
-///   it and the rule has to be re-decided rather than quietly satisfied.
+///   thing no check runs in *yet*. This bullet used to say the tests that call
+///   this rule were written to fail on the day the container mode is wired in.
+///   **That day has not come, and `P18-T007` is why the wording changed**: it
+///   wired the *host* runner into the pipeline, so a check now runs on this
+///   computer under a grant and still runs in no container, and this rule stayed
+///   true of every sentence it guards. The clause that did have to move is the
+///   one about *this computer*, and it moved in [`Availability::explain`].
 /// - **A heading is read as a claim.** *"Running a check in a container"* is one
 ///   clause with a running word and a container place and no denial, so this
 ///   reads it as a claim, and `sure doctor` prints exactly that as a section
@@ -1213,15 +1239,18 @@ mod tests {
         // **The claim, and not the phrase that used to stand in for it.** This
         // assertion was `sentence.contains("run on this computer instead")` with
         // the message *"absence must say what happens instead, not only what is
-        // missing"* — and the sentence that satisfied it was false: nothing runs
-        // on this computer or anywhere else in this build, so the guard was
-        // asking for the defect. What is asserted now is the claim. A sentence
-        // that says a check runs here fails whichever words it says it in, and
-        // the sentence has to say what does happen: nothing does.
+        // missing"* — and the sentence that satisfied it was false: at the time
+        // nothing ran on this computer or anywhere else, so the guard was asking
+        // for the defect. What is asserted now is the claim. A sentence that
+        // reads a missing runtime as the reason a check runs here fails whichever
+        // words it says it in, and the sentence has to say what does happen —
+        // which, since `P18-T007` wired the runner, is two things: no container
+        // runs one, and this computer runs one only if the user's own settings
+        // allow it.
         assert!(
             !claims_local_execution(&sentence),
-            "an absence must not claim that a check runs on this computer, because none does \
-             — not here and not in a container: {sentence}"
+            "an absence must not claim that a check runs on this computer because a runtime is \
+             missing — nothing about this computer decides that: {sentence}"
         );
         assert!(
             !claims_container_execution(&sentence),
@@ -1230,8 +1259,8 @@ mod tests {
         );
         assert!(
             denies_that_anything_runs(&sentence),
-            "absence must say what happens instead, not only what is missing, and what happens \
-             is that nothing runs: {sentence}"
+            "absence must say what happens instead, not only what is missing, and what happens is \
+             that no container runs one and nothing runs here unasked: {sentence}"
         );
     }
 
@@ -1337,12 +1366,13 @@ mod tests {
             }
             // The other claims this module may not make, checked over the same
             // three sentences because they are the same kind of rule: an
-            // overclaim, a claim that a check ran on this computer and a claim
-            // that one ran in a container are all sentences that tell a user
-            // something this build does not do.
+            // overclaim, a sentence that reads a missing runtime as the reason a
+            // check runs here, and a claim that one ran in a container are all
+            // sentences that tell a user something this build does not do.
             assert!(
                 !claims_local_execution(sentence),
-                "this sentence claims a check runs on this computer, and none does: {sentence}"
+                "this sentence reads a runtime as the reason a check runs on this computer: \
+                 {sentence}"
             );
             assert!(
                 !claims_container_execution(sentence),
@@ -1380,9 +1410,11 @@ mod tests {
             );
         }
         for denial in [
-            "This build runs no check, in a container or on this computer.",
+            "This build runs no check in a container, and no check runs on this computer unless \
+             your own settings allow it.",
             "No check runs here, with a runtime or without one.",
-            "Nothing runs on this computer, and nothing runs in a container.",
+            "Nothing runs on this computer unless your settings say so, and nothing runs in a \
+             container.",
             "An absent runtime does not mean the checks run locally.",
             "SURE will never run your project's commands on this computer.",
             // `here` is inside `there`, `where` and `whether`, and this is the
@@ -1402,9 +1434,9 @@ mod tests {
         // And the other half, so that a rule which excused every sentence would
         // fail here: silence about running is not an answer.
         for answer in [
-            "No container runtime was found, and this build runs no check either way.",
-            "This build admits the checks and runs none of them.",
-            "Nothing in this build executes a check.",
+            "No container runtime was found, and no check runs in a container either way.",
+            "No check runs here unless the user's own settings allow it.",
+            "Nothing in this build executes a check inside a container.",
         ] {
             assert!(
                 denies_that_anything_runs(answer),
@@ -1470,7 +1502,8 @@ mod tests {
             );
         }
         for denial in [
-            "This build runs no check, in a container or on this computer.",
+            "This build runs no check in a container, and no check runs on this computer unless \
+             your own settings allow it.",
             "Nothing runs in a container, with a runtime or without one.",
             "No check runs inside a container.",
             "An absent runtime does not mean the checks run in a container.",

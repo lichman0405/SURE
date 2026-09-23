@@ -332,6 +332,16 @@ impl ExecutionMode {
         matches!(self, Self::HostConfirmed | Self::Container)
     }
 
+    /// Whether this build can honor the mode's execution promise.
+    ///
+    /// Container is a supported configuration value and a plan vocabulary, but
+    /// this build has no container executor. It must not fall through to the
+    /// host runner merely because the user granted running project code.
+    #[must_use]
+    pub const fn has_project_executor(self) -> bool {
+        matches!(self, Self::HostConfirmed)
+    }
+
     /// Plain-language description for the consent prompt.
     #[must_use]
     pub const fn plain_description(self) -> &'static str {
@@ -349,8 +359,9 @@ impl ExecutionMode {
             // this computer's kernel — and it says that in eight words instead of
             // requiring the reader to know what a kernel is.
             Self::Container => {
-                "SURE will run supported checks in a container on this computer. That is limited \
-                 isolation: it narrows what a check can reach, and it is not a separate computer."
+                "SURE will run project checks only in a container on this computer. If this build \
+                 cannot run them in a container, it will leave them unchecked. A container provides \
+                 limited isolation, not a separate computer."
             }
         }
     }
@@ -511,8 +522,13 @@ pub fn decide(
     if action == ActionKind::ArbitraryCommand {
         return ExecutionDecision::NeedsConsent;
     }
-    if action.executes_project_code() && !mode.runs_project_code() {
-        return ExecutionDecision::NeedsConsent;
+    if action.executes_project_code() {
+        if mode == ExecutionMode::Container && !mode.has_project_executor() {
+            return ExecutionDecision::Denied;
+        }
+        if !mode.runs_project_code() {
+            return ExecutionDecision::NeedsConsent;
+        }
     }
     ExecutionDecision::Allowed
 }

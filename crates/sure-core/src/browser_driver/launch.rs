@@ -596,9 +596,15 @@ impl Launched {
 impl Drop for Launched {
     fn drop(&mut self) {
         if !self.reaped {
-            // The tree, not the process: a browser has children, and the
-            // operating system's own tree stop is what reaches them. The result
-            // is deliberately not unwrapped — a drop cannot report — and the
+            // As much of it as this platform reaches, and not "the tree" by
+            // default: a browser has children, and `terminate::stop` reaches them
+            // whole on Windows — what `taskkill /T /F` reporting success means —
+            // while everywhere else it is `Child::kill` on the launcher alone, so
+            // a browser's own children may still be running when this returns.
+            // Which of the two happened is the `Stop` that call returns rather
+            // than an assumption made here; `crate::process::terminate` is where
+            // that value and its two cases are written out. The call's result is
+            // deliberately not unwrapped — a drop cannot report — and the
             // fallback below runs whether or not it worked.
             let _ = crate::process::terminate::stop(&mut self.child);
             let _ = self.child.wait();

@@ -44,6 +44,30 @@ checks:
   existing_tests: true
   start_local_services: auto
   browser_probe: auto
+  # Local services this project declares. Empty by default, and the block below
+  # is the shape rather than a setting: uncomment it and edit it to declare one.
+  #
+  # A declaration names a launcher SURE knows instead of a command line. SURE
+  # runs this machine's `node` with the entry file as its **one** argument, in
+  # `directory` (relative to the project root; leave it out for the root
+  # itself), and the `readiness` path must answer once the service is up. `page`
+  # is a path to open in a browser afterwards, and a declaration that names none
+  # gets no browser check.
+  #
+  # A declaration only ever *proposes* checks. Whether one may run is decided by
+  # the user's own settings file outside this project — `execution.mode`, the
+  # `run_project_code` permission a service check needs, and the
+  # `connect_service` permission a browser check needs — and a project's own
+  # file cannot grant any of them.
+  # services:
+  #   - name: api
+  #     directory: packages/api
+  #     launcher:
+  #       kind: node_entry
+  #       entry: server.js
+  #     port: 4310
+  #     readiness: /health
+  #     page: /
 
 report:
   format: human

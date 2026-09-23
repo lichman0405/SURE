@@ -45,13 +45,18 @@
 //! # The second claim, and the rules that read it
 //!
 //! `P16-T010` found a sentence this file's own subject had left alone: the
-//! absent-runtime answer said *"checks run on this computer instead"*, and no
-//! check runs on this computer — or anywhere else — in this build. The assertion
-//! that pinned it asked whether the sentence **contained a phrase**, and it was
-//! green. [`claims_local_execution`] is the rule that reads the claim instead, so
-//! that a sentence saying a check runs here fails in any wording, and
-//! [`denies_that_anything_runs`] is the other half: an absence must say that
-//! nothing runs, not only that something is missing.
+//! absent-runtime answer said *"checks run on this computer instead"*, which was
+//! false twice over — of the machine, because a missing runtime is not a
+//! fallback, and of the build, because at the time nothing ran at all. The
+//! assertion that pinned it asked whether the sentence **contained a phrase**,
+//! and it was green. [`claims_local_execution`] is the rule that reads the claim
+//! instead, so that a sentence saying a check runs here *because a runtime is
+//! missing* fails in any wording, and [`denies_that_anything_runs`] is the other
+//! half: an absence must say what happens, not only what is missing. **The
+//! `P18-T007` wiring changed the build half of that sentence and not the machine
+//! half**, and the two clauses of the answer below say both: a check does run on
+//! this computer when the user's own settings allow it, and a missing runtime
+//! changes nothing about that.
 //!
 //! **`P16-T012` found the same claim in the other direction.** The arm of
 //! `Availability::explain` that has a runtime said *"Checks can run in a
@@ -283,11 +288,13 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
     // the phrase was a lie.** It was
     // `sentence.contains("run on this computer instead")`, under the message
     // *"absence must say what happens instead, not only what is missing"* — and
-    // nothing runs on this computer in this build, so the guard required the
-    // defect it was written to prevent. It was green. What is asserted now is
-    // the *claim*: a sentence that says a check runs here fails, in whatever
-    // words it says it, and the sentence has to say what does happen instead —
-    // which is that no check runs, here or in a container.
+    // it asked for a fallback that this build has never had, so the guard
+    // required the defect it was written to prevent. It was green. What is
+    // asserted now is the *claim*: a sentence that reads a missing runtime as
+    // the reason a check runs here fails, in whatever words it says it, and the
+    // sentence has to say what does happen instead — which is that no container
+    // runs one, and that a check runs here only if the user's own settings allow
+    // it.
     let absent = Availability::in_path(std::ffi::OsStr::new(""));
     assert_eq!(absent, Availability::Absent);
     assert!(!absent.is_found());
@@ -295,7 +302,8 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
     let sentence = absent.explain();
     assert!(
         !claims_local_execution(&sentence),
-        "the absence claims that a check runs on this computer, and none does: {sentence}"
+        "the absence claims that a check runs on this computer because a runtime is missing, and \
+         that is not what decides it: {sentence}"
     );
     assert!(
         !claims_container_execution(&sentence),
@@ -303,8 +311,8 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
     );
     assert!(
         denies_that_anything_runs(&sentence),
-        "an absence has to say what happens instead of only what is missing, and what happens \
-         is that nothing runs: {sentence}"
+        "an absence has to say what happens instead of only what is missing, and what happens is \
+         that no container runs one and nothing runs here unasked: {sentence}"
     );
     assert!(
         sentence.contains("docker") && sentence.contains("podman"),
@@ -321,28 +329,36 @@ fn a_machine_with_no_container_runtime_is_a_value_and_not_a_failure() {
 /// The clause both arms of the answer carry, word for word.
 ///
 /// The second acceptance sentence's other half, and the reason this test asserts
-/// a *shared* clause rather than two sentences: the fact that no check runs is
-/// the one fact about a check that neither machine state changes, so an arm that
-/// dropped it would be saying something different about the project rather than
-/// something different about the computer. It is one constant because it is one
-/// claim in two sentences.
-const NOTHING_RUNS: &str = "this build runs no check, in a container or on this computer, and each \
-                            check is recorded as unknown rather than passed";
+/// a *shared* clause rather than two sentences: **what a check does not do is
+/// the one fact about a check that neither machine state changes** — no check
+/// runs in a container either way, and neither way does a runtime decide whether
+/// one runs here. It is one constant because it is one claim in two sentences.
+///
+/// **Renamed and rewritten by `P18-T007`, and neither assertion moved.** It was
+/// `NOTHING_RUNS` and read *"this build runs no check, in a container or on this
+/// computer, and each check is recorded as unknown rather than passed"* — which
+/// the wiring made false in both halves: a check now runs on this computer under
+/// a grant, and stage 5's own results are no longer all unknown. What survives
+/// is the container half and the reason the runtime does not decide, which is
+/// what the two arms were ever supposed to agree about.
+const THE_SHARED_CLAUSE: &str = "this build runs no check in a container, and no check runs on this \
+                                 computer unless your own settings allow it";
 
 #[test]
 fn the_answer_with_a_runtime_says_the_same_thing_as_the_answer_without_one() {
     // `docs/architecture/EXECUTION_SAFETY.md`: *"the answer with no runtime is
-    // the answer with one: the checks this build admits and never runs."* That
-    // sentence is about the product, and this is it as a measurement.
+    // the answer with one: what a check does, and what a settings file decides."*
+    // That sentence is about the product, and this is it as a measurement.
     //
     // **The arm with a runtime was the one that did not say it.** It said
     // *"Checks can run in a container: docker was found at …"*, which is a claim
-    // that a check runs, in a build where none does — and it was read by no rule
-    // at all until `P16-T012`, because the rule that exists for this kind of
-    // sentence requires a place on this computer and *"in a container"* is not
-    // one. Nothing about the machine changed between the two arms: what changed
-    // is whether a program named `docker` or `podman` is on the search path, and
-    // that is not a fact about whether the project was checked.
+    // that a check runs inside a container, in a build that has never started
+    // one — and it was read by no rule at all until `P16-T012`, because the rule
+    // that exists for this kind of sentence requires a place on this computer and
+    // *"in a container"* is not one. Nothing about the machine changed between
+    // the two arms: what changed is whether a program named `docker` or `podman`
+    // is on the search path, and that is not a fact about whether the project was
+    // checked.
     let found = Availability::Found {
         runtime: Runtime::Docker,
         program: std::path::PathBuf::from("/usr/local/bin/docker"),
@@ -354,8 +370,8 @@ fn the_answer_with_a_runtime_says_the_same_thing_as_the_answer_without_one() {
     );
     assert!(
         !claims_local_execution(&sentence),
-        "an answer with a runtime claims that a check runs on this computer, and none does: \
-         {sentence}"
+        "an answer with a runtime claims that a check runs on this computer because a runtime is \
+         present, and that is not what decides it: {sentence}"
     );
     assert!(
         !claims_container_execution(&sentence),
@@ -365,7 +381,7 @@ fn the_answer_with_a_runtime_says_the_same_thing_as_the_answer_without_one() {
     assert!(
         denies_that_anything_runs(&sentence),
         "the answer has to say what happens instead of only what was found, and what happens is \
-         that nothing runs: {sentence}"
+         that no container runs one and nothing runs here unasked: {sentence}"
     );
     for phrase in OVERCLAIMS {
         assert!(
@@ -377,12 +393,12 @@ fn the_answer_with_a_runtime_says_the_same_thing_as_the_answer_without_one() {
     // And the two arms together: one claim, in both sentences, whichever way the
     // machine answered. This is the assertion a rewording of either arm has to
     // keep — a sentence that answered the question about the computer and
-    // dropped the one about the checks fails here rather than in a reader's
-    // belief that their project was checked.
+    // dropped the one about what a check does fails here rather than in a
+    // reader's belief that their project was checked.
     let absent = Availability::Absent.explain();
     for (which, text) in [("with a runtime", &sentence), ("without one", &absent)] {
         assert!(
-            text.contains(NOTHING_RUNS),
+            text.contains(THE_SHARED_CLAUSE),
             "the answer {which} does not carry the one clause neither arm may drop: {text}"
         );
     }

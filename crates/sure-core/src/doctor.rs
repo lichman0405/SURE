@@ -520,12 +520,14 @@ pub struct DoctorReport {
     ///
     /// [`Availability::Absent`] is an answer rather than a failure: it says this
     /// machine has no runtime on the search path it was given, and it is **not a
-    /// fallback** — no check runs on this computer either, with a runtime or
-    /// without one, because `crate::support`'s `CEILING` is `InspectOnly` and no
-    /// check drives on the road to
-    /// [`Enforcement::admitted`](crate::enforce::Enforcement::admitted). **Nothing
-    /// is run and no container is started** — this is the same filesystem search
-    /// as [`DoctorReport::tools`], and planning or running a container is
+    /// fallback** — what decides whether a check runs on this computer is the
+    /// execution mode the user's own settings file names, which decides more
+    /// since `P18-T007` wired a runner into
+    /// [`crate::pipeline`](crate::pipeline::Pipeline) — and **no check runs in a
+    /// container**, with a runtime or without one, because this build has no
+    /// executor that would start one. **Nothing is run and no container is
+    /// started** — this is the same filesystem search as
+    /// [`DoctorReport::tools`], and planning or running a container is
     /// elsewhere, deliberately.
     pub container: Availability,
     /// The analysis providers this build offers, and what each needs from here.

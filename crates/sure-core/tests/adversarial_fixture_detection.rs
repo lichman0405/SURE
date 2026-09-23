@@ -178,6 +178,9 @@ use sure_core::intent_implementation::{IntentMatchAnchor, compare_intent_to_proj
 use sure_core::noop_heuristics::NoOpHeuristics;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome};
+use sure_core::planned_check_runner::ProcessRunner;
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
+use sure_core::process::Cancellation;
 use sure_core::project_intent::explicit_goal;
 use sure_core::project_verdict::render_summary;
 use sure_core::recording_projection::{BuildTestKind, StandardProjection, project};
@@ -2171,18 +2174,38 @@ fn pipelined(root: &Path, goal: Option<&str>) -> PipelineOutcome {
     pipelined_with(root, goal, ExecutionSettings::inspect_only())
 }
 
+/// A runner that cannot start anything, for a run over a fixture.
+///
+/// The directories under `fixtures/adversarial/` are written to make SURE
+/// misbehave, and a grading harness must not carry out what they ask for. The
+/// stop is asked for **before** the run reaches the runner, and `process::run`
+/// reads that stop before it starts anything, so "this harness starts no process
+/// from a fixture" is true for a reason a reader can point at rather than
+/// because no fixture happens to propose a command this build admits.
+fn nothing_starts() -> ProcessRunner {
+    let stop = Cancellation::new();
+    stop.cancel();
+    ProcessRunner::new(stop)
+}
+
 /// The same run, with what the user has allowed the one argument that changes.
 ///
 /// `ExecutionSettings` is the pair `sure check` hands the pipeline, and the
 /// settings here come from `Authority::execution()` rather than from a literal:
 /// a fixture whose control moved the mode by writing a different literal would
 /// be measuring this file's idea of the rule rather than the rule.
+///
+/// The runner is the one above, not a fake: a fixture whose control moved the
+/// mode to `host_confirmed` reaches the real runner and gets the real product's
+/// answer for a process that did not start, which is an error rather than a
+/// pass. What a control grants is a permission, never an execution.
 fn pipelined_with(
     root: &Path,
     goal: Option<&str>,
     execution: ExecutionSettings,
 ) -> PipelineOutcome {
     let config = Config::default();
+    let runner = nothing_starts();
     Pipeline {
         project: root,
         purpose: Purpose::Check,
@@ -2190,6 +2213,7 @@ fn pipelined_with(
         execution,
         store: None,
         goal,
+        runner: &runner,
     }
     .run()
 }
@@ -3066,46 +3090,68 @@ fn an_explicit_intent_mismatch_reaches_one_note_and_no_further_and_the_control_f
     );
 
     // The flip, in both directions and by equality.
+    //
+    // What this block asserted until `P18-T007` was that the control's summary was
+    // the fixture's with exactly one line fewer, the missing line being the count
+    // of checks that could not run. That statement described a build in which the
+    // one check this fixture is about produced no result at all: it was not
+    // checked, it was counted, and the control — where nothing is planned — simply
+    // had one sentence less. `P18-T007` wired `crates/sure-core/src/pipeline.rs` to
+    // `planned_check_runner`, the candidate's check now produces a result, and the
+    // fixture's summary lost that line instead of keeping it, so the old equality
+    // became false. It is re-made rather than dropped, and what replaces it is
+    // narrower: the two summaries are asserted to be the same length and to differ
+    // in exactly two positions, named.
+    //
+    // The two positions are the lines that carry the state of that one check: the
+    // headline — `NeedsAttention` for a run that warned once, `NotEnoughChecked` for
+    // the control, which checked nothing at all, a difference that comes from
+    // `sure_domain::status::aggregate`'s ordering rather than from the finding
+    // producer — and the findings line, `Open findings: 1 Note.` against `No open
+    // findings.`. The two lines that are neither are asserted equal, so a control
+    // that moved one of them is red here rather than left to a reader.
     let fixture_lines = rendered_summary(&outcome);
     let control_lines = rendered_summary(&control_outcome);
+    let differing: Vec<usize> = (0..fixture_lines.len().max(control_lines.len()))
+        .filter(|index| fixture_lines.get(*index) != control_lines.get(*index))
+        .collect();
     assert_eq!(
-        fixture_lines.len(),
-        control_lines.len() + 1,
-        "{id}: the control's summary is not the fixture's with one line fewer: {} against {}",
-        control_lines.len(),
-        fixture_lines.len()
+        differing,
+        vec![0, 3],
+        "{id}: the two summaries differ in {differing:?} rather than in the headline and the \
+         findings line: {control_lines:?} against {fixture_lines:?}"
     );
-    // The flip, in both directions and by equality: every line before the findings
-    // line is the same in both runs, the fixture's extra line is the sentence that
-    // counts the check that could not run, and the control — whose project answers
-    // the request, so nothing is planned and nothing is left unrun — has no open
-    // finding at all. The two lines that differ are both about that one check, and
-    // they are the only two: the finding `findings_from_checks` raises for a check
-    // that reported nothing, and the count of checks that could not run.
     //
-    // **This is the assertion the finding producer is measured by**, in the
+    // **This is still the assertion the finding producer is measured by**, in the
     // direction that matters here: a mutation that made
     // `crate::findings_from_checks` raise nothing would take `fixture_lines[3]` back
-    // to `No open findings.` — which reddens the declared summary above rather than
-    // this comparison, because the declaration pins the line's text and this pins
-    // only which lines moved. A mutation that made the *control* raise a finding
+    // to `No open findings.` — which reddens the declared summary above, and reddens
+    // `differing` here as well, because the two summaries would then differ at the
+    // headline alone. A mutation that made the *control* raise a finding
     // (for instance one that stopped the added file from matching the requirement)
     // reddens `control_lines[3]` here.
     assert_eq!(
-        &fixture_lines[..3],
-        &control_lines[..3],
-        "{id}: the control changed a line of the summary other than the ones about the check that \
-         could not run: {control_lines:?}"
+        &fixture_lines[1..3],
+        &control_lines[1..3],
+        "{id}: the control changed a line of the summary other than the headline and the findings \
+         line: {control_lines:?}"
     );
     assert_eq!(
         control_lines[3], "No open findings.",
         "{id}: the control's project answers the request and plans nothing, so it has nothing to \
          leave open"
     );
+    // The line this fixture used to end with, and which `P18-T007` took away: the
+    // count of checks that could not run. Asserted *absent* rather than merely not
+    // asserted, because "this run no longer counts that check as a gap" is the
+    // change the wiring made, and an assertion that only stopped looking would not
+    // measure it.
     assert!(
-        fixture_lines[4].starts_with("1 check(s) could not run or were skipped."),
-        "{id}: the fixture's last line is not the count of checks that could not run: {:?}",
-        fixture_lines[4]
+        !fixture_lines
+            .iter()
+            .any(|line| line.starts_with("1 check(s) could not run or were skipped.")),
+        "{id}: a run whose one check produced a warning still counts a check that could not run: \
+         {fixture_lines:?}"
     );
 }
 
@@ -4588,8 +4634,16 @@ fn declared_mode(id: &str, name: &str, declared: &Value) -> (ExecutionMode, Exec
     (mode, granted)
 }
 
-/// One declared check, as the proposal the plan builder is handed.
-fn declared_proposal(id: &str, check: &Value) -> CheckProposal {
+/// One declared check, as the plan entry the plan builder is handed: since
+/// `P18-T003` a proposal **and** the operation beside it.
+///
+/// **A candidate observation, and the most this file can honestly supply.** The
+/// fixture declares checks as data and nothing here starts a process, so the only
+/// true thing to say about each of them at plan time is *nothing has settled this
+/// check* — a warning if a run ever reached it, never a pass. What is graded below
+/// is the plan's shape and the mode it ran under, not how a check is carried out;
+/// `P18-T004` replaces the placeholders on the product's own paths.
+fn declared_proposal(id: &str, check: &Value) -> PlannedWork {
     let declared_id = check["id"]
         .as_str()
         .unwrap_or_else(|| panic!("{id}: a declared check has no id"));
@@ -4617,18 +4671,23 @@ fn declared_proposal(id: &str, check: &Value) -> CheckProposal {
         .iter()
         .map(|action| from_wire(id, "an action", action))
         .collect();
-    CheckProposal::new(
-        check_id,
-        check["title"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{id}: a declared check has no title")),
-        severity,
-        check["critical"].as_bool().unwrap_or_else(|| {
-            panic!("{id}: a declared check does not say whether it is critical")
-        }),
-        evidence,
-        reason,
-        &actions,
+    PlannedWork::new(
+        CheckProposal::new(
+            check_id,
+            check["title"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: a declared check has no title")),
+            severity,
+            check["critical"].as_bool().unwrap_or_else(|| {
+                panic!("{id}: a declared check does not say whether it is critical")
+            }),
+            evidence,
+            reason,
+            &actions,
+        ),
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
     )
 }
 
@@ -5009,9 +5068,12 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
     for (kind, run) in &runs {
         let schedule = declared_schedule(id, &block, run, kind);
         let results = declared_results(id, run, &schedule, &fingerprint, kind);
-        let report = aggregate_run(&schedule, &results, &fingerprint).unwrap_or_else(|refused| {
-            panic!("{id}: aggregating the `{kind}` run was refused rather than answered: {refused}")
-        });
+        let report =
+            aggregate_run(&schedule, &results, &[], &fingerprint).unwrap_or_else(|refused| {
+                panic!(
+                    "{id}: aggregating the `{kind}` run was refused rather than answered: {refused}"
+                )
+            });
         let planned = sorted_ids(
             schedule
                 .checks()
@@ -5246,7 +5308,7 @@ fn a_checker_failure_is_a_row_and_never_a_pass_and_the_control_reaches_green() {
         ExecutionPermissions::inspect_only(),
     )
     .build();
-    let nothing = aggregate_run(&empty, &[], &fingerprint).expect("an empty plan aggregates");
+    let nothing = aggregate_run(&empty, &[], &[], &fingerprint).expect("an empty plan aggregates");
     assert!(
         nothing.results().is_empty() && nothing.unreported().is_empty(),
         "{id}: an empty plan produced rows, so the fixture's row assertions would not distinguish \
@@ -6304,7 +6366,11 @@ fn severities_the_detector_produced(id: &str, row: &Value) -> Vec<Severity> {
             id,
             surface,
             row,
-            RustChecks::of(&rust_project_of(id)).proposed(),
+            &RustChecks::of(&rust_project_of(id), &fixture(id))
+                .planned()
+                .iter()
+                .map(|work| work.proposal().clone())
+                .collect::<Vec<_>>(),
         ),
         "external_service" => {
             let checks = ExternalServiceChecks::of(&discovery(id));

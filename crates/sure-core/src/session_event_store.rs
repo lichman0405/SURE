@@ -1202,18 +1202,45 @@ mod tests {
     use std::thread;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        crate::store::scratch_root().join(format!("{name}-{}", std::process::id()))
+        sure_testkit::scratch::directory("session-event-store", name)
     }
 
     fn store_in(name: &str) -> Store {
         let dir = scratch(name);
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => panic!("cannot clear {}: {e}", dir.display()),
-        }
-        std::fs::create_dir_all(&dir).expect("a scratch directory");
         Store::open_at(&dir.join("sure.db")).expect("the store opens")
+    }
+
+    #[test]
+    fn a_recycled_pid_cannot_reopen_an_earlier_runs_session_database() {
+        let name = "session-recycled-control";
+        let old_directory =
+            crate::store::scratch_root().join(format!("{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&old_directory).expect("the earlier run's directory");
+        let old_store = Store::open_at(&old_directory.join("sure.db"))
+            .expect("the earlier run's database opens");
+        let ingested = IngestedEvent {
+            envelope: valid_envelope("tool.completed"),
+            protocol_version: PROTOCOL_VERSION,
+            document_kind: DocumentKind::Event,
+        };
+        SessionEventStore::new(&old_store)
+            .persist(
+                &ingested,
+                "C:\\work\\my project",
+                &FingerprintId::generate(),
+                &EventId::generate(),
+            )
+            .expect("the old event is stored");
+        drop(old_store);
+
+        let fresh = store_in(name);
+        let sessions = SessionEventStore::new(&fresh)
+            .sessions_past_retention(i64::MAX)
+            .expect("the fresh database can be read");
+        assert!(
+            sessions.is_empty(),
+            "the earlier run's rows leaked into this run"
+        );
     }
 
     fn valid_envelope(event_type: &str) -> EventEnvelope {

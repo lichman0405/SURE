@@ -87,6 +87,15 @@
 //! **Nothing about what the service does.** One request, one answer, no body is
 //! read. Route checks are `P5-T003` and the browser check is `P5-T004`.
 //!
+//! **Nothing about a browser.** `P18-T010` added [`StartSmoke::run_then`] — the
+//! same lifecycle with the caller's own step inserted between the readiness
+//! question and the stop — and the four tests about it below are about *when that
+//! step is taken and what happens to the service around it*. The step they pass
+//! is a closure this file writes, and a closure is not a browser: what a browser
+//! check makes of a page is `browser.rs`'s verdict table, measured by
+//! `crates/sure-core/tests/browser_driver.rs`. **The two halves are two
+//! measurements and are not one end-to-end run.**
+//!
 //! **Nothing about several services at once.** One probe, one question, one
 //! service; the handover row's second process is part of that row's instrument
 //! and not a second service, and `P5-T007` is where a run with more than one
@@ -105,7 +114,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use sure_core::components::ComponentGraph;
@@ -312,6 +321,16 @@ const ANSWERED_WITH: &[u8] = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\
 
 /// The request every test makes.
 const HEALTH: &str = "/health";
+
+/// The path of the page the two tests about [`StartSmoke::run_then`] read.
+///
+/// **Not [`HEALTH`], and that is what makes those tests about a page.** A browser
+/// check holds a service *and a page*, and `planned_work.rs` plans them as
+/// different paths on one port: the port comes from the service's readiness and
+/// the path is the caller's. `/post/1` on a service whose readiness is `/health`
+/// is that shape, so a step handed the readiness path a second time would be a
+/// step these tests could not tell apart from the one they are about.
+const PAGE: &str = "/post/1";
 
 /// A directory name that is ordinary on both platforms and mangles easily.
 const AWKWARD: &str = "a smoke directory with \u{00e9}\u{4e2d}\u{6587}";
@@ -732,6 +751,24 @@ fn endpoint(port: u16) -> Endpoint {
     Endpoint::loopback(port, HEALTH).expect("a loopback endpoint")
 }
 
+/// What one exchange with `endpoint` found, under this file's own bounds.
+///
+/// The product's own reader rather than a hand-written one, and that is what
+/// makes the readings below comparable with each other: the two tests about
+/// [`StartSmoke::run_then`] read a page with the instrument the readiness
+/// question is asked with, and the two readings that matter — one taken during
+/// the run and one taken after it — are the same measurement of the same port at
+/// two moments.
+///
+/// **A bare connect would not be enough**, which is why this is a probe and not
+/// a `TcpStream`: a port with nothing behind it can connect to *itself* on this
+/// platform, so "something accepted a connection" is not a reading about the
+/// project. `probe.rs` maps that case to a refusal, which is the honest record
+/// of it and the one these assertions are written against.
+fn glance(endpoint: &Endpoint) -> probe::ProbeOutcome {
+    probe::Probe::new(probe::Limits::new(REQUEST, ROOM)).get(endpoint)
+}
+
 // ---------------------------------------------------------------------------
 // The child
 // ---------------------------------------------------------------------------
@@ -1143,6 +1180,321 @@ fn a_service_that_comes_up_and_answers_is_a_pass_that_quotes_the_exchange() {
 }
 
 #[test]
+fn a_page_is_read_only_after_the_service_answers_and_at_the_address_that_answered() {
+    // `P18-T010`'s first clause, and it is a claim about **order and address**
+    // rather than about a browser: the step a browser check takes while its
+    // service is up is taken after the readiness question came back with an
+    // answer, and it is handed *the endpoint that answered* rather than one the
+    // caller assumed. Both halves are read from outside, because the step is a
+    // closure this file writes: it says which endpoint it was given, and it
+    // makes its own exchange, so *the service was up when this ran* is bytes
+    // rather than two clocks agreeing.
+    let fixture = Fixture::new("page-after-readiness");
+    workspace(&fixture);
+    let plan = fixture.plan(&preferences(
+        CheckPreference::Always,
+        CheckPreference::Never,
+    ));
+    let probe = serve_probe(&plan, "");
+    let port = free_port();
+    let report = fixture.report("answer");
+    let python = fixture.python();
+    let enforcement = admits(
+        probe,
+        &python,
+        &child_arguments(ANSWER, &report, port),
+        ExecutionMode::HostConfirmed,
+    );
+    let smoke = smoke(
+        &fixture.project,
+        probe,
+        &enforcement,
+        WINDOW,
+        Some(endpoint(port)),
+    );
+
+    let (result, looked) = smoke.run_then(&process::Cancellation::default(), |answered| {
+        // The port is the readiness answer's and the path is this caller's —
+        // see [`PAGE`]. The address is read off the endpoint SURE handed over
+        // rather than rebuilt from `port`, so a module that passed some other
+        // endpoint would fail the assertions below instead of silently being
+        // given a second copy of the number this test knows.
+        let page =
+            Endpoint::loopback(answered.address().port(), PAGE).expect("a loopback page endpoint");
+        let answer = glance(&page);
+        (page, answer)
+    });
+
+    let (page, answer) = looked.unwrap_or_else(|| {
+        panic!(
+            "the service answered the readiness question, so the caller's own \
+             step should have been taken, and it was not: {}",
+            result.reason
+        )
+    });
+    assert_eq!(
+        page.address().port(),
+        port,
+        "the step was handed an address the readiness question was not asked at"
+    );
+    assert_eq!(
+        page.path(),
+        PAGE,
+        "the step was handed the readiness path instead of the page's"
+    );
+    assert_eq!(
+        answer.status(),
+        CheckStatus::Pass,
+        "the page was not read from the service while it was up, so nothing here \
+         shows the step ran with a live service behind it: {}",
+        answer.reason()
+    );
+
+    // The service's own verdict is still the service's: what the step found
+    // comes back **beside** the result and not inside it, so a caller that
+    // looked is the one that reports what it saw.
+    assert_eq!(
+        result.status,
+        CheckStatus::Pass,
+        "the caller's step changed the service's own verdict: {}",
+        result.reason
+    );
+    assert!(
+        result.reason.contains("SURE asked it GET /health HTTP/1.1"),
+        "the reason is no longer the service's own, so a reader cannot tell what \
+         SURE established about the service: {}",
+        result.reason
+    );
+
+    // The second clause, on the path where the observation succeeded. The port
+    // answered a request **before** the run returned — which is the exchange
+    // above — and does not answer one after it.
+    let after = glance(&endpoint(port));
+    assert!(
+        !after.is_an_answer(),
+        "something was still answering on the service's port after the run \
+         returned, so the service was not stopped: {}",
+        after.reason()
+    );
+    assert!(
+        !abandoned_path(&report).exists(),
+        "the child gave up rather than being stopped, so nothing was listening \
+         when the page was read and the exchange above came from somewhere else"
+    );
+}
+
+#[test]
+fn a_page_read_that_failed_still_leaves_the_service_stopped() {
+    // The second clause on the path where the caller's step **failed**. A look
+    // that could not read its page is not a reason to leave a service running,
+    // and the stop is not a branch: it is the next statement after the step for
+    // every step there is. The failure is expressed in the shape the real caller
+    // has — `run_browser` hands its own `Result` back — so this is the
+    // *`browser_refused`* path of `planned_check_runner.rs` and not a status this
+    // module invented for a page.
+    let fixture = Fixture::new("page-read-failed");
+    workspace(&fixture);
+    let plan = fixture.plan(&preferences(
+        CheckPreference::Always,
+        CheckPreference::Never,
+    ));
+    let probe = serve_probe(&plan, "");
+    let port = free_port();
+    let report = fixture.report("answer");
+    let python = fixture.python();
+    let enforcement = admits(
+        probe,
+        &python,
+        &child_arguments(ANSWER, &report, port),
+        ExecutionMode::HostConfirmed,
+    );
+    let smoke = smoke(
+        &fixture.project,
+        probe,
+        &enforcement,
+        WINDOW,
+        Some(endpoint(port)),
+    );
+
+    let (result, looked) = smoke.run_then(&process::Cancellation::default(), |_| {
+        Err::<(), String>("the page could not be read: no browser answered".to_owned())
+    });
+
+    let failed = looked.expect(
+        "the service answered the readiness question, so the caller's own step \
+         should have been taken, and it was not",
+    );
+    assert_eq!(
+        failed.expect_err("a step that failed came back as a success"),
+        "the page could not be read: no browser answered",
+        "the caller's own failure did not survive the lifecycle"
+    );
+    assert_eq!(
+        result.status,
+        CheckStatus::Pass,
+        "a step that failed changed the service's own verdict: {}",
+        result.reason
+    );
+
+    let after = glance(&endpoint(port));
+    assert!(
+        !after.is_an_answer(),
+        "the service was left running by a step that failed, so the stop is a \
+         branch rather than the next statement: {}",
+        after.reason()
+    );
+}
+
+#[test]
+fn a_page_is_not_read_when_the_service_never_came_up_and_nothing_is_left_running() {
+    // The first clause's other side: a service that never came up is not a
+    // service whose page may be looked at. **The reading is two-fold on purpose**
+    // — the step's body did not run, and no value came back — because the two are
+    // different defects: a caller's step that was called and discarded looks
+    // exactly like one that was never called from the result alone.
+    let fixture = Fixture::new("page-never-came-up");
+    workspace(&fixture);
+    let plan = fixture.plan(&preferences(
+        CheckPreference::Always,
+        CheckPreference::Never,
+    ));
+    let probe = serve_probe(&plan, "");
+    let port = free_port();
+    let report = fixture.report("die");
+    let python = fixture.python();
+    let enforcement = admits(
+        probe,
+        &python,
+        &child_arguments(DIE, &report, port),
+        ExecutionMode::HostConfirmed,
+    );
+    let smoke = smoke(
+        &fixture.project,
+        probe,
+        &enforcement,
+        WINDOW,
+        Some(endpoint(port)),
+    );
+
+    let read = AtomicBool::new(false);
+    let (result, looked) = smoke.run_then(&process::Cancellation::default(), |answered| {
+        read.store(true, Ordering::Relaxed);
+        answered.path().to_owned()
+    });
+
+    assert!(
+        !read.load(Ordering::Relaxed),
+        "the caller's step ran on a service that never came up"
+    );
+    assert!(
+        looked.is_none(),
+        "the caller's step was taken on a service that never came up, and what \
+         it found was handed back as though the service had answered"
+    );
+    assert_eq!(
+        result.status,
+        CheckStatus::Fail,
+        "a service that never came up is not a failure: {}",
+        result.reason
+    );
+    assert!(
+        result.reason.contains("before SURE could ask it anything"),
+        "the reason describes this run as one where the service outlived the \
+         window: {}",
+        result.reason
+    );
+
+    // And the port is not left answering either — not because SURE stopped a
+    // service that was still there, but because the one thing a page must never
+    // be read from is a port that is still open after a check that failed.
+    let after = glance(&endpoint(port));
+    assert!(
+        !after.is_an_answer(),
+        "something answered on the service's port after a start that failed: {}",
+        after.reason()
+    );
+}
+
+#[test]
+fn a_page_is_not_read_when_the_service_answers_nothing_and_it_is_still_stopped() {
+    // The one case where the distinction the first clause rests on is visible:
+    // the readiness probe **reached a live port** and got nothing back. An open
+    // port is not an answer, so the page is not read — and the service, which was
+    // alive at that moment, is still stopped. This is the row that a module
+    // gating its step on `status() == Pass` would pass while getting the reason
+    // wrong, and it is the same row `P3-T010`'s probe exists for.
+    let fixture = Fixture::new("page-service-silent");
+    workspace(&fixture);
+    let plan = fixture.plan(&preferences(
+        CheckPreference::Always,
+        CheckPreference::Never,
+    ));
+    let probe = serve_probe(&plan, "");
+    let port = free_port();
+    let report = fixture.report("silent");
+    let python = fixture.python();
+    let enforcement = admits(
+        probe,
+        &python,
+        &child_arguments(SILENT, &report, port),
+        ExecutionMode::HostConfirmed,
+    );
+    let smoke = smoke(
+        &fixture.project,
+        probe,
+        &enforcement,
+        WINDOW,
+        Some(endpoint(port)),
+    );
+
+    let read = AtomicBool::new(false);
+    let (result, looked) = smoke.run_then(&process::Cancellation::default(), |answered| {
+        read.store(true, Ordering::Relaxed);
+        answered.path().to_owned()
+    });
+
+    assert!(
+        bound_path(&report).exists(),
+        "the child never bound its port, so the readiness question was put to a \
+         closed port and this is not the case the test is about"
+    );
+    assert!(
+        !read.load(Ordering::Relaxed),
+        "the caller's step ran on a service that answered nothing"
+    );
+    assert!(
+        looked.is_none(),
+        "the caller's step was taken on a service that said nothing, and what it \
+         found was handed back as though an answer had been read"
+    );
+    assert_eq!(
+        result.status,
+        CheckStatus::Unknown,
+        "a port that said nothing was reported as something SURE knows: {}",
+        result.reason
+    );
+    assert!(
+        result.reason.contains("an open port is not an answer"),
+        "the reason does not say what was and was not established: {}",
+        result.reason
+    );
+    assert!(
+        result.reason.contains("still running after"),
+        "the service did not outlive the window, so SURE never asked it anything \
+         and this is not the case the test is about: {}",
+        result.reason
+    );
+
+    let after = glance(&endpoint(port));
+    assert!(
+        !after.is_an_answer(),
+        "the service was still answering after a run whose page was never read, \
+         so nothing about it was stopped: {}",
+        after.reason()
+    );
+}
+
+#[test]
 fn a_service_that_comes_up_and_answers_nothing_is_not_a_pass() {
     // The same service again, and the one line that separates the two rows: it
     // accepts the connection and says nothing. `P3-T010`'s own distinction,
@@ -1263,6 +1615,35 @@ fn a_service_that_runs_past_its_own_budget_is_stopped_and_the_budget_is_named() 
          for: {}",
         result.reason
     );
+    // **The reach is the second fact this row carries, and it is the platform's
+    // rather than SURE's.** A stop is `taskkill /T /F` on Windows — the whole
+    // tree, and that is what its success means — and `Child::kill` on the one
+    // process SURE holds everywhere else, so off Windows whatever the service
+    // started is still running when this run reports it stopped. That is why
+    // this is split rather than written once: a reason that said nothing about
+    // the reach would read the same on both platforms, and the reading it would
+    // leave open is *"stopped" always means the whole tree*.
+    #[cfg(windows)]
+    assert!(
+        result
+            .reason
+            .contains("the stop reached the service and the programs it started"),
+        "the reason does not say that the stop reached the whole service tree, so \
+         a stop that reached everything the service started reads exactly like \
+         one that reached only the process SURE holds: {}",
+        result.reason
+    );
+    #[cfg(not(windows))]
+    assert!(
+        result.reason.contains(
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        ),
+        "the reason does not say that the stop reached only the service, so a \
+         reader would take it for a whole-tree stop while anything the service \
+         started is still running on this machine: {}",
+        result.reason
+    );
     // **What the probe made of the exchange is the platform's story, and the
     // difference was found here rather than assumed.** This is the one row where
     // SURE's own deadline lands in the middle of an open exchange, and the two
@@ -1343,6 +1724,35 @@ fn a_service_that_comes_up_with_nothing_to_ask_is_a_warning_and_never_green() {
     assert!(
         result.reason.contains("still running after 3 seconds"),
         "the reason does not say what was established about the service: {}",
+        result.reason
+    );
+    // The reach, on the arm where the status above is a **warning** — which does
+    // not block a verdict. What the sentence has to carry here is therefore the
+    // one thing the warning cannot: a service that was stopped is not the same
+    // as a service and everything it started being stopped, and the difference
+    // is the platform's. `taskkill /T /F` is the whole tree and its success is
+    // what says so; every other platform kills the one process SURE holds, and
+    // the reading this refuses is *"SURE stopped it" meaning nothing else
+    // survived*.
+    #[cfg(windows)]
+    assert!(
+        result
+            .reason
+            .contains("the stop reached the service and the programs it started"),
+        "the reason does not say that the stop reached the whole service tree, so \
+         a warning about a service that was stopped whole reads exactly like one \
+         about a service whose children were left running: {}",
+        result.reason
+    );
+    #[cfg(not(windows))]
+    assert!(
+        result.reason.contains(
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        ),
+        "the reason does not say that the stop reached only the service, so a \
+         reader of this warning would take the service for stopped whole while \
+         anything it started is still running on this machine: {}",
         result.reason
     );
     // A warning **does not block** — the domain classifies one on a critical

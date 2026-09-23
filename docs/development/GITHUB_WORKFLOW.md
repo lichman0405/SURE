@@ -117,6 +117,28 @@ causes exactly, and that is what fixed them. The rule is not "think about CI
 after pushing"; it is that **the log is the diagnosis and reasoning about it is
 not a substitute**.
 
+**The class recurred a fifth time, on the branch that closed #10, and it is
+written here rather than as a new table row because the table above is a reading
+of one commit.** `crates/sure-cli/tests/declared_service_check.rs` bound
+`let helper_beat = read(&helper);` while its only reader — the `assert_eq!`
+comparing the descendant's counter before and after the stop — sits under
+`#[cfg(windows)]`, because that is the one platform whose stop reaches the whole
+tree (`crates/sure-core/src/process/terminate.rs`: `taskkill /T /F` here against
+`Child::kill` and `Stop::ProcessOnly` everywhere else). On this machine the
+binding is *used*, so `-D warnings` has nothing to say about it; on
+`ubuntu-latest` and `macos-latest` it is dead code, and
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` ended
+**both** jobs with `unused variable: helper_beat`, exit 101 —
+`rust (ubuntu-latest)` **44 s** after it started and `rust (macos-latest)`
+**85 s**, against `rust (windows-latest)` running **13 m 22 s** and passing.
+Neither Unix job reached a single test, which is the same reading the
+`#[cfg(unix)]` row above gives, and it is why the repair is `#[cfg(windows)]` on
+the binding rather than an `allow(unused_variables)`: the attribute would have
+silenced the warning around a binding nothing compares, which is the defect with
+its evidence removed. **Running the CI commands locally does not help** — the
+opening of this section — because they compile this platform, where the binding
+is live.
+
 **Each platform runs a different set of tests, and a green job is not a green
 job.** At `9f13f0d` the Windows run had 628 tests and the Linux run 629, and
 neither number is a subset of the other: 8 test names exist only on Windows (the

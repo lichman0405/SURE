@@ -70,6 +70,9 @@ use crate::intent_implementation::compare_intent_to_project;
 use crate::noop_heuristics::NoOpHeuristics;
 use crate::paths::Paths;
 use crate::pipeline::Pipeline;
+use crate::planned_check_runner::ProcessRunner;
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
+use crate::process::Cancellation;
 use crate::project_verdict::render_summary;
 use crate::route_consistency::RouteConsistency;
 use crate::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
@@ -675,12 +678,16 @@ fn limitations() -> Vec<String> {
              SURE reports, not about a repair SURE completed.",
         ),
         String::from(
-            "No project's code is run from a product path. Every pipeline drive in this report runs \
-             under `ExecutionSettings::inspect_only()`, so the checks that would run project code are \
-             planned and denied rather than executed, and `crates/sure-core/src/support.rs`'s ceiling \
-             of level C is justified by exactly that. The one case whose checks really run — \
-             `repair-regression` — has them run from `crates/sure-core/tests/acceptance_report_runner.rs` \
-             through `sure_core::process`, and its row names that file as the surface.",
+            "No project's code is run from a product path by this report. Every pipeline drive here \
+             runs under `ExecutionSettings::inspect_only()`, and under that mode \
+             `sure_core::enforce` admits no command that runs project code, so the checks that would \
+             run one are planned and left unrun rather than executed. That is a fact about these \
+             drives, and since `P18-T007` it is no longer a fact about the build: the pipeline reaches \
+             the runner, and `crates/sure-core/src/support.rs`'s ceiling of level C rests on level B \
+             being a claim about every platform SURE runs on rather than on a route nobody takes. The \
+             one case whose checks really run — `repair-regression` — has them run from \
+             `crates/sure-core/tests/acceptance_report_runner.rs` through `sure_core::process`, and its \
+             row names that file as the surface.",
         ),
         String::from(
             "Nothing here read or wrote a SURE store. Every observation ran with `store: None`, and no \
@@ -1392,10 +1399,32 @@ fn claim_recording(
     })
 }
 
+/// A runner that cannot start anything, for a corpus that must not be executed.
+///
+/// **The corpus is a set of projects SURE does not trust** — `fixtures/` and
+/// `fixtures/adversarial/` are deliberately broken or hostile applications, and a
+/// report that produced its rows by running them would be the exact thing this
+/// product exists to prevent. The stop is asked for *before* the run, and
+/// `process::run` checks for it *before* it spawns anything, so what this returns
+/// is a value saying "nothing starts" rather than the absence of a runner saying
+/// it: the sentence in this module's documentation — *it starts no process* — is
+/// true of this file for a reason a reader can point at.
+///
+/// It is [`ProcessRunner`] rather than a fake, so every result these rows carry
+/// about a check that could have run is the product's own answer
+/// (`CancelledBeforeStart`, which is an `Error`) rather than a value invented
+/// here.
+fn nothing_starts() -> ProcessRunner {
+    let stop = Cancellation::new();
+    stop.cancel();
+    ProcessRunner::new(stop)
+}
+
 /// The fixture project, through the pipeline, with no goal at all.
 fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
     let root = fixtures_root.join(id);
     let config = Config::default();
+    let runner = nothing_starts();
     let outcome = Pipeline {
         project: &root,
         purpose: crate::pipeline::Purpose::Check,
@@ -1403,6 +1432,7 @@ fn intent(fixtures_root: &Path, id: &str) -> Result<Measurement, CorpusError> {
         execution: ExecutionSettings::inspect_only(),
         store: None,
         goal: None,
+        runner: &runner,
     }
     .run();
     let Some(record) = outcome.run.as_ref() else {
@@ -1640,6 +1670,10 @@ fn execution_refusal(
         .map_err(|error| unreadable(&root, error.to_string()))?;
 
     let config = Config::default();
+    // The same runner as `intent`'s, and for the same reason: the authority here
+    // is the fixture's own, and a fixture that asked for its code to be run must
+    // still not be run by a report about it.
+    let runner = nothing_starts();
     let outcome = Pipeline {
         project: &root,
         purpose: crate::pipeline::Purpose::Check,
@@ -1647,6 +1681,7 @@ fn execution_refusal(
         execution: authority.execution(),
         store: None,
         goal: None,
+        runner: &runner,
     }
     .run();
     let Some(record) = outcome.run.as_ref() else {
@@ -1798,7 +1833,7 @@ fn checker_failure(fixtures_root: &Path, id: &str) -> Result<Measurement, Corpus
         };
         let schedule = declared_schedule(id, block, declared_checks, run, kind)?;
         let results = declared_results(id, run, &schedule, &fingerprint, kind)?;
-        let report = aggregate_run(&schedule, &results, &fingerprint).map_err(|refused| {
+        let report = aggregate_run(&schedule, &results, &[], &fingerprint).map_err(|refused| {
             CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
                 message: format!("the `{kind}` run cannot be aggregated honestly: {refused}"),
@@ -2060,11 +2095,12 @@ fn needs_a_process_runner() -> Measurement {
         missing: String::from(
             "observing this case means starting the fixture's two node checks through \
              `sure_core::process`, and this report is produced by `crates/sure-core/src/acceptance_report.rs`. \
+             That file is not on the route the product runs checks on — `sure_core::pipeline` into \
+             `sure_core::planned_check_runner`, which runs the work a check's schedule holds — and \
              `crates/sure-core/tests/spawn_sites.rs`'s rule two forbids any file under `crates/**/src/**` \
-             outside the list that file holds from naming the type the runner is handed, and \
-             `sure_core::support`'s ceiling of level C rests on no product path running project code. Both \
-             would have to be edited to put that observation here — and editing them to make a report green \
-             is the change they exist to make visible.",
+             outside the list that file holds from naming the type the runner is handed. Putting that \
+             observation here would mean editing that list — and editing it to make a report green is the \
+             change it exists to make visible.",
         ),
         would_require: String::from(
             "the caller supplies the measurement through `sure_core::acceptance_report::acceptance_report_with`. \
@@ -2363,8 +2399,24 @@ fn declared_schedule(
                     "the `{what}` run schedules `{name}` and no such check is declared"
                 ),
             })?;
+        // **The observation is the one a corpus check can honestly make, which is
+        // that nothing here observed anything.** A fixture's `scenario.json`
+        // declares the check and declares the result it must produce, and the
+        // reader of this file establishes only that the two agree — so the value
+        // is a candidate that claims neither a pass nor a defect and starts no
+        // process, and the sentence says which declaration it came from. It is
+        // not a `CouldNotRun`: the file that was needed is the one being read.
+        let observation = PrecomputedEvidence::candidate(format!(
+            "Nothing has settled it: the `{what}` run's schedule in {id}'s \
+             scenario.json declares this check, and no part of the project was \
+             read for it."
+        ));
+        let work = PlannedWork::new(
+            declared_proposal(id, check)?,
+            CheckOperation::Precomputed(observation),
+        );
         builder
-            .propose(declared_proposal(id, check)?)
+            .propose(work)
             .map_err(|refused| CorpusError::Malformed {
                 path: format!("{FIXTURES_PATH}/{id}/scenario.json"),
                 message: format!(

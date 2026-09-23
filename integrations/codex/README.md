@@ -137,9 +137,15 @@ the rows below are the ones that still hold; the `sure recheck` row is the one
 whose wording changed, and it changed because the store it ran against was
 empty.
 
+The `sure check` row below was **re-measured on 2026-09-22**, because
+`P18-T007` wired `pipeline.rs` to the check runner and changed what that command
+answers. The same procedure was repeated (absolute path, empty store,
+`inspect_only` named in a settings file outside the project) and the row now
+carries the new reading, with the old one kept beside it.
+
 | Command | What this build answers |
 | --- | --- |
-| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." 0 of 18 planned checks produced a result: the 14 static checks "read your project's files and run nothing" and this build has no runner for them, so each is recorded as unknown rather than passed, and the 4 dynamic ones were stopped by `inspect_only`. The report's capability line is "capability tier 0, snapshot", which is what a run whose `--store-dir` holds no store yet reports; with a store in place the same line says what it counted (see "What a recorded session changes" below). |
+| `sure check <abs>` | Runs the whole twelve-stage pipeline and stops at `not_green`, exit 1: "Not enough could be checked to say whether this is ready." Over this repository: 18 checks planned, **14 produced a result** and the 4 dynamic ones were stopped by `inspect_only` — stage 5 says "14 of the planned checks read your project's files and run nothing. Each of them has a result", stage 6 lists the four it stopped, and stage 10 counts "14 check(s) produced a result, 4 did not run". **Before `P18-T007` this row read "0 of 18 planned checks produced a result", which is what the same command answered on 2026-09-19**: the 14 static checks were planned and none reported, because no path carried them to a runner, and the 4 dynamic ones were stopped by `inspect_only` then too. The report's capability line is "capability tier 0, snapshot", which is what a run whose `--store-dir` holds no store yet reports; with a store in place the same line says what it counted (see "What a recorded session changes" below). |
 | `sure repair <abs>` | Exit 1, `not_green`. Stage 11 ran and answered "no check produced a finding, so there is nothing to write instructions for." No repair contract was produced. |
 | `sure recheck <abs>` | Exit 1, `not_green`. Stage 12 ran and answered "SURE has no recorded history for this machine, so there is no earlier run to compare this one with." — which is what an empty store produces; with history in the store the sentence names what the earlier run left open. |
 | `sure mcp serve` | Runs and answers, and says nothing on stdout until it is asked something. With stdin closed at once: **0 bytes on stdout**, the session summary on stderr — one `{"command":"mcp",…,"answered":0,…}` frame under `--format json`, the same summary in words under the default format — and exit 0. |

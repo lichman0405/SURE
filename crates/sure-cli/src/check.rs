@@ -84,9 +84,12 @@ use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
 use sure_core::intent::IntentSource;
 use sure_core::paths::Paths;
 use sure_core::pipeline::{Pipeline, PipelineOutcome, Purpose, RunOutcome, Stage, StageOutcome};
+use sure_core::planned_check_runner::ProcessRunner;
 use sure_core::privacy::{ModelUse, PrivacyStatement};
+use sure_core::process::Cancellation;
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
 use sure_core::recheck_lifecycle::store_run;
+use sure_core::redact::escape_control_characters;
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::status::NotCheckedReason;
 use sure_core::store::{Store, StoreError};
@@ -286,6 +289,51 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         .as_ref()
         .map_or(goal, |recorded| Some(recorded.goal.as_str()));
 
+    // What carries out the commands the plan holds, and **this is the product
+    // path**: `sure check` on a project whose user has granted `run_project_code`
+    // runs that project's own checks through this value. A user who has granted
+    // nothing is untouched by it, because `Enforcement` admits nothing that runs
+    // project code under `inspect_only` — the default, and the mode a project
+    // file cannot move in either direction (`Authority::execution_mode`).
+    //
+    // The cancellation is the handle a stop would be asked through. Nothing holds
+    // the other end of it yet — `sure check` has no interrupt path — so today it
+    // is a value that says *nothing has asked this run to stop*, and the bound on
+    // any one check is the deadline its plan carries.
+    //
+    // **The browser driver is bound here, and this is the only place in the
+    // product that builds one.** `ProcessRunner` holds it as
+    // `Option<sure_core::browser::Driver>` and answers a browser check it was
+    // given no driver for with an `Error` — so a caller that forgot this line
+    // would get failing browser checks and not passing ones, which is the
+    // direction the mistake has to fall in. This function is the composition
+    // root for the same reason it is where `Paths`, the store and the pipeline
+    // are assembled: it is the layer that is allowed to know which
+    // implementations exist, and `sure_core` is not.
+    //
+    // `Browser::system()` is the right binding here and not a placeholder. It
+    // records *look for a browser on this machine* and starts nothing: the search
+    // and any launch happen inside one `observe` call, which only runs when a
+    // browser check the user's settings and permissions allowed actually reaches
+    // the runner. **A machine with no browser is a machine where that call comes
+    // back `NoDriverInstalled`, which is a `Skipped` and never a pass** — the
+    // explicit result clause three of `P18-T010` is about, produced by the driver
+    // rather than by an absence of wiring here.
+    //
+    // The checks that reach this door are planned in `sure_core::service_plan`,
+    // which is the only planner in this build that emits a
+    // `CheckOperation::Browser` — `ProbePlan::add_to` still plans every probe as
+    // a precomputed observation, and a declared service's page is the one place a
+    // real page is asked for. It gets there only when a project declared a
+    // service *and* named a page for it *and* the `checks.browser_probe`
+    // preference and the user's own permissions both allow it, which is what the
+    // refusals in the report are about when one of the three is missing.
+    // A run that supplies none of them still binds the driver, because a
+    // composition root assembles what the product can do and not only what this
+    // one invocation was authorised to do — and a door that is only opened on the
+    // runs that need it is a door nobody has tested on the runs that do.
+    let runner = ProcessRunner::new(Cancellation::new())
+        .with_page_driver(Box::new(sure_core::browser_driver::Browser::system()));
     let run = Pipeline {
         project,
         purpose,
@@ -293,6 +341,7 @@ pub fn run_with(purpose: Purpose, paths: &Paths, project: &Path, goal: Option<&s
         execution: authority.execution(),
         store: store.as_ref(),
         goal: goal_as_recorded,
+        runner: &runner,
     }
     .run();
 
@@ -583,6 +632,7 @@ fn finished(
         out,
     )?;
     writeln!(out)?;
+    checks_that_passed(run, out)?;
 
     repairs(run, out)?;
     lifecycle(run, out)?;
@@ -621,6 +671,48 @@ fn finished(
     };
     status?;
     not_clean_note(report, outcome, out)
+}
+
+/// The checks that ran and passed, which nothing else in the report names.
+///
+/// This section exists for one gap and is written to exactly that gap. A check
+/// that failed or warned reaches the reader as a finding above, and one that
+/// did not run reaches them under "Could not check"; a check that **passed** is
+/// a finding by no rule, so before this section a completed pass appeared
+/// nowhere in the run at all. Listing every produced result instead would print
+/// the title of every failing and warning check a second time — and
+/// `is_a_finding` is `false` only for `Pass`, so every one of them is already
+/// above, with the reason the plain-language renderer chose for it rather than
+/// the raw one.
+///
+/// It is also where a reader can see that a project's own tests actually ran.
+/// The distinction it draws is between a command that completed and a plan that
+/// merely allowed one to run. A green here says the command completed; it is
+/// not a statement about payment, email, authentication or any other live
+/// service the project may talk to.
+fn checks_that_passed(run: &RunOutcome, out: &mut impl Write) -> io::Result<()> {
+    let passed: Vec<_> = run
+        .report
+        .results()
+        .iter()
+        .filter(|result| result.status.is_green())
+        .collect();
+    if passed.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "Checks that passed")?;
+    for result in passed {
+        writeln!(
+            out,
+            "  {}: {}",
+            result.status.as_str(),
+            escape_control_characters(&result.title)
+        )?;
+        if !result.reason.is_empty() {
+            writeln!(out, "    {}", escape_control_characters(&result.reason))?;
+        }
+    }
+    writeln!(out)
 }
 
 /// The repair contracts this run wrote, one block each.
@@ -952,6 +1044,10 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = json!(run.mode.as_str());
             details["support"] = support_machine(run);
             details["report"] = verdict_machine(&run.verdict);
+            // Keep every row, including passes, in the pipeline-specific part
+            // of the frame. The verdict's versioned schema summarizes findings
+            // and gaps; it deliberately has no slot for a passing check.
+            details["check_results"] = json!(run.report.results());
             // The two things only a run of *this* pipeline produces, and which
             // no earlier form carried: what stage 11 wrote, and what stage 12
             // compared. They sit here rather than under `report` because
@@ -971,6 +1067,7 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = Value::Null;
             details["support"] = Value::Null;
             details["report"] = Value::Null;
+            details["check_results"] = Value::Null;
             details["repairs"] = Value::Null;
             details["lifecycle"] = Value::Null;
         }
@@ -1182,8 +1279,11 @@ mod tests {
     ///
     /// * planned checks that were refused by the mode, recorded as skipped with
     ///   [`ExecutionNotAuthorized`](sure_core::status::NotCheckedReason::ExecutionNotAuthorized);
-    /// * planned checks the mode allows that nothing can run, recorded as
-    ///   unknown rather than passed;
+    /// * checks the mode has nothing to refuse, whose result comes from the
+    ///   evidence the check itself carries rather than from a process — a
+    ///   detector's observation is not a command, and since `P18-T007` the
+    ///   pipeline carries one to a result instead of leaving it unknown because no
+    ///   runner existed;
     /// * two stages that could not do their work and must be recorded as gaps.
     ///
     /// A Python file with no manifest plans nothing at all, and every stage then
@@ -1318,9 +1418,10 @@ mod tests {
 
     #[test]
     fn no_check_this_build_can_run_is_ever_reported_as_clean() {
-        // The false green, over a real project. This build plans checks and runs
-        // none of them, so every stage that had work and did not do it must show
-        // up as a gap, and a run with a gap must never be reported as clean.
+        // The false green, over a real project. Under the default mode the checks
+        // this project declares are refused and none of them runs, so every stage
+        // that had work and did not do it must show up as a gap, and a run with a
+        // gap must never be reported as clean.
         let fixture = Fixture::new("never-green");
         a_rust_project(&fixture);
         let report = run_with(Purpose::Check, &fixture.paths(), &fixture.project(), None);
@@ -1328,7 +1429,8 @@ mod tests {
         let check = checked(&report);
         assert!(
             !check.is_green(),
-            "a build with no runner reported a project as clean: {:?}",
+            "a run that carried out none of the project's own checks reported a project as clean: \
+             {:?}",
             check.run
         );
         assert_eq!(
@@ -1342,8 +1444,8 @@ mod tests {
         // And the reason is visible rather than implied: the stages that had
         // work and could not do it are recorded as gaps, and the run says so in
         // the report a person reads. The two that always have work and never
-        // finish in this build are the project's own checks and the model
-        // assessment — with no runner and no provider respectively.
+        // finish here are the project's own checks — refused by the mode this run
+        // is under — and the model assessment, which has no provider.
         for stage in [Stage::DynamicChecks, Stage::ModelAssessment] {
             assert!(
                 check.run.stage(stage).outcome.is_a_gap(),
@@ -1447,12 +1549,86 @@ mod tests {
         let not_checked = machine["report"]["not_checked"]
             .as_array()
             .expect("the verdict lists what was not checked");
-        assert_eq!(
-            not_checked.len(),
-            refused.len(),
-            "the verdict does not list every check the mode refused: {machine}"
+        let listed: Vec<&str> = not_checked
+            .iter()
+            .map(|entry| entry["id"].as_str().expect("every entry names its check"))
+            .collect();
+        for result in &refused {
+            assert!(
+                listed.contains(&result.id.as_str()),
+                "the verdict does not list the check the mode refused: {machine}"
+            );
+        }
+
+        // The run also holds a row for every role SURE proposes that this
+        // project never declared, and `P18-T011` is why they are in the account
+        // rather than only in the report's own list: those rows were built by
+        // `MissingCommand::not_checked` and then dropped into
+        // `RunReport::unscheduled`, a field no renderer reads, so a run over
+        // this fixture was made of four rows and told a reader about two. The
+        // report is where that silence would have been read as an absence of a
+        // problem, so the row's existence is asserted here and not only in
+        // `crates/sure-core/tests/declared_commands.rs`, which is where the
+        // critical kind and the aggregate are.
+        let undeclared: Vec<&sure_core::status::CheckResult> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| {
+                result.not_checked_reason
+                    == Some(sure_core::status::NotCheckedReason::NotApplicable)
+            })
+            .collect();
+        assert!(
+            !undeclared.is_empty(),
+            "the run holds no row for a role this project never declared, so its account of what \
+             it did not run is the mode's refusals alone: {:?}",
+            run.report.results()
         );
+
+        // And the rendered list is exactly the run's own rows that did not run —
+        // no more and no fewer, each carrying its own row's sentence. This pins
+        // the renderer rather than the run: a build that filtered a row out of
+        // the machine report, or printed a sentence the row does not carry,
+        // fails here.
+        let mut expected: Vec<&str> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| result.is_not_checked())
+            .map(|result| result.id.as_str())
+            .collect();
+        expected.sort_unstable();
+        let mut found = listed.clone();
+        found.sort_unstable();
+        assert_eq!(
+            found, expected,
+            "the verdict's list of checks that did not run is not the run's own rows for them: \
+             {machine}"
+        );
+
+        // Each entry says why, and says what the run's own row says about it —
+        // the refusal sentence for the checks the mode stopped, and the
+        // vocabulary's own sentence for a role the project never declared.
         for entry in not_checked {
+            let id = entry["id"].as_str().expect("every entry names its check");
+            let row = run
+                .report
+                .results()
+                .iter()
+                .find(|result| result.id.as_str() == id)
+                .expect("the list is a subset of the run's own rows");
+            assert_eq!(
+                entry["reason"],
+                json!(row.reason),
+                "a check that did not run does not carry its own sentence: {entry}"
+            );
+        }
+        for result in &refused {
+            let entry = not_checked
+                .iter()
+                .find(|entry| entry["id"].as_str() == Some(result.id.as_str()))
+                .expect("the refused check is in the list");
             assert!(
                 entry["reason"]
                     .as_str()
@@ -1777,11 +1953,11 @@ privacy:
         // run's own account of what it decided under, so this is a statement
         // about the plan and not about the settings file.
         //
-        // What it cannot be is an assertion about a *run*: this build has no
-        // runner for a planned check (`pipeline.rs`), so a check the mode allows
-        // is recorded as one nothing carried out. What the mode changes here is
-        // which checks are refused, and that is observable — so the second half
-        // below reads the refusal this mode produced.
+        // What it cannot be is an assertion about a *run*: under the mode this
+        // fixture lands on, `inspect_only`, no command that starts a process is
+        // admitted, so what the mode changes here is which checks are refused
+        // rather than what any check did — and that is observable, so the second
+        // half below reads the refusal this mode produced.
         let fixture = Fixture::new("pipeline-project-mode");
         a_rust_project(&fixture);
         fixture.write("sure.yaml", A_PROJECT_ASKING_FOR_EVERYTHING);
@@ -1856,8 +2032,26 @@ privacy:
         // The plan moved with it: under the default mode this project's own
         // checks are refused as unauthorised, and under the mode the user granted
         // there is nothing to refuse them for. Asserted as an absence of that one
-        // reason rather than as a count, because a check that is not refused is
-        // still not a check that ran — nothing in this build carries one out.
+        // reason rather than as a count, because what the assertion is about is
+        // the refusal and not the outcome — and since `P18-T007` a check that is
+        // *not* refused is handed to the runner this test passes the pipeline.
+        //
+        // What the checks are stopped by instead is a different permission, and it
+        // is worth being exact because the runner here is live. This project's two
+        // commands are `cargo test` and `cargo check --all-targets`, and
+        // `sure_core::safety` classifies both as `[DynamicHost, Network]`; the
+        // user's file granted `run_project_code` and installation but not
+        // `allow_network`, so both come back `Skipped` with `NetworkNotPermitted`
+        // and nothing reaches the runner. Measured rather than assumed, with a
+        // runner that records instead of spawning over a scratch crate with these
+        // same two commands: `pipeline.rs`'s test module with
+        // `execution:\n  mode: host_confirmed\n  allow_dependency_install: true\n`
+        // and a `Recording` runner reports `mode=HostConfirmed
+        // run_project_code=true install=true network=false`, an empty recording,
+        // and for both checks `Skipped | reason=Some(NetworkNotPermitted)`,
+        // "Checking this needs internet access, and you have not allowed it."
+        // That is also the reason a test that additionally granted `allow_network`
+        // is not written: it would start `cargo` on whatever machine ran it.
         assert!(
             !run.report
                 .results()

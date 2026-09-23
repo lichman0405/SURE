@@ -42,7 +42,7 @@ Not enough could be checked to say whether this is ready.
 This project is not ready to hand off.
 ...
 Open findings: 1 Must fix.
-1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)
+4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)
 ```
 
 The last two lines are the check staying visible, and since `P7-T012` they are
@@ -51,6 +51,21 @@ open `cannot_confirm` finding raised for that same check. Drop both and the
 report reads as a project with nothing outstanding. It is not. Nothing was
 checked at all: `coverage_checked` is zero, and the one thing SURE would have
 had to run to say anything is the thing it was not allowed to run.
+
+**The count is four and not one since `P18-T011`**, and the closing line is
+where that is visible rather than only in `scenario.json`. The run holds a row
+for every role the acceptance names: `package.json` declares `test` and nothing
+else, so `build the project`, `check the code for style and likely mistakes` and
+`check the types without building` are rows too — `Skipped` with
+`NotApplicable`, `blocks_green` false, and the critical one of them in
+`critical_out_of_scope` rather than in `critical_not_checked`. Before that task
+the declarations a manifest cannot make were handed to the aggregate and dropped
+into a field no renderer reads, so the report counted one of the four rows the
+run was made of. The three extra rows are why the line says *2 of them are
+critical*: the refused check and the critical undeclared role. They change no
+verdict — `blocking` still holds the refused check alone, the aggregate is still
+`not_enough_checked`, and the finding is still the one `cannot_confirm` anchored
+to the check nobody authorised, because a scope limit is not a finding.
 
 So the check is asserted in five separate places, because a field on a struct is
 not a report a person reads: in the verdict's list of checks that did not run, in

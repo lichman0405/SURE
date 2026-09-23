@@ -45,13 +45,13 @@
       "check_critical": true,
       "check_severity": "must_fix",
       "refusals": 1,
-      "not_checked_count": 1,
+      "not_checked_count": 4,
       "coverage_checked": 0,
-      "coverage_skipped": 1,
+      "coverage_skipped": 4,
       "coverage_could_not_run": 0,
       "aggregate_severity": "not_enough_checked",
       "aggregate_headline": "Not enough could be checked to say whether this is ready.",
-      "aggregate_skipped": 1,
+      "aggregate_skipped": 4,
       "aggregate_unknown": 0,
       "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
@@ -67,7 +67,7 @@
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
         "Open findings: 1 Must fix.",
-        "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
+        "4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)"
       ]
     },
     "control": {
@@ -82,7 +82,6 @@
         },
         "keys": [
           "aggregate_skipped",
-          "aggregate_unknown",
           "check_blocked_by",
           "check_decision",
           "check_may_run",
@@ -91,6 +90,7 @@
           "check_status",
           "coverage_could_not_run",
           "coverage_skipped",
+          "critical_not_checked",
           "mode",
           "project_ask_asked_by",
           "project_ask_granted",
@@ -100,8 +100,8 @@
         ],
         "keys_are": "the two answer blocks compared key by key, sorted. The test reads the difference off the declarations and compares it with this list, so a control that stopped moving something, or started moving something else, is a red test rather than a change nobody noticed."
       },
-      "why": "The same project, the same `package.json`, the same planned check and the same pipeline run, with the user's own file the only thing that appeared. Standard `sure check` reads execution authority from that file alone, so this is not a test-only route: it is the route. A reporter hard-wired to deny — the failure this fixture exists to catch — would satisfy every positive assertion above and fails here, because the refusal must be gone when the user has granted it.",
-      "unchanged": "The project's own `sure.yaml` still asks for `host_confirmed` in both runs and is still only a request in both: what moves is the user's file. The keys the two declarations share that say what did *not* move are the summary lines (the same six, line for line), the check's identity and weight, the count of checks that could not run, the finding the run raises for that check — one `must_fix` `cannot_confirm` finding anchored to it on both sides, because consent decides what SURE may do and not what SURE knows — and the aggregate's headline and severity, which are `not_enough_checked` either way, because nothing in this build carries a check out. Consent changes what SURE is allowed to do; it does not make anything checked, and since `P7-T012` it does not change what SURE says about the project either.",
+      "why": "The same project, the same `package.json`, the same planned check and the same pipeline run, with the user's own file the only thing that appeared. Standard `sure check` reads execution authority from that file alone, so this is not a test-only route: it is the route — with one boundary this declaration has to state rather than gloss, and which `P18-T007` is what put there. The runner this test hands the pipeline is `ProcessRunner::new` over a `Cancellation` the harness cancels before the run begins. That is the product's own runner and a real cancellation, and `crate::process::run` checks it before it spawns, so this half can carry an authorised check all the way to the runner without starting `node` on the machine that grades it. What a real `sure check` on a real machine would then do with this check is therefore **not measured here at all**: what is measured is that the check is no longer refused, that it reaches the runner, and what the product says when the runner answers. A reporter hard-wired to deny — the failure this fixture exists to catch — would satisfy every positive assertion above and fails here, because the refusal must be gone when the user has granted it.",
+      "unchanged": "The project's own `sure.yaml` still asks for `host_confirmed` in both runs and is still only a request in both: what moves is the user's file. The keys the two declarations share that say what did *not* move are the summary lines (the same six, line for line), the check's identity and weight, the count of checks that could not run, the finding the run raises for that check — one `must_fix` `cannot_confirm` finding anchored to it on both sides, because consent decides what SURE may do and not what SURE knows — and the aggregate's headline and severity, which are `not_enough_checked` either way, because the check is unanswered in both runs: refused in one, errored before it started in the other, and neither is a check that was carried out. Consent changes what SURE is allowed to do; it does not make anything checked, and since `P7-T012` it does not change what SURE says about the project either. The one key that moved when `P18-T007` wired the pipeline to the runner, beyond the ones this control was written for, is `critical_not_checked`: a refused check is a critical check that was not checked, and a check that errored before it started is a critical check that errored, so the aggregate routes it into `critical_errored` instead. Both are `not_enough_checked`; the route is what moved, and it is named in `moved.keys` rather than left to be discovered. **`P18-T011` added a third kind of row to both sides and changed not one entry of `moved.keys`.** The same three roles `package.json` does not declare are rows of both runs, so `not_checked_count` is four on both sides and the summary lines are still the same six, line for line, closing with the same sentence; the addendum to the outcome above about the aggregate's counts holds here word for word. The two keys this control already declared as moving — `coverage_skipped` and `aggregate_skipped` — now move from four to three rather than from one to zero, because the refused check becomes the errored one while the three declarations stay skipped; `coverage_could_not_run` still moves from zero to one and `critical_not_checked` still empties, exactly as declared. A key that was not moving before is not moving now, which is why the list this control's `moved.keys` holds is unchanged rather than widened.",
       "expect": {
         "mode": "host_confirmed",
         "run_project_code": true,
@@ -116,22 +116,22 @@
         "check_may_run": true,
         "check_decision": "allowed",
         "check_blocked_by": null,
-        "check_status": "unknown",
+        "check_status": "error",
         "check_not_checked_reason": null,
-        "check_reason": "Nothing was reported for this check, so SURE has no basis for a verdict on it.",
+        "check_reason": "the run was cancelled before the command was started, so nothing ran",
         "check_evidence_class": "unknown",
         "check_critical": true,
         "check_severity": "must_fix",
         "refusals": 0,
-        "not_checked_count": 1,
+        "not_checked_count": 4,
         "coverage_checked": 0,
-        "coverage_skipped": 0,
+        "coverage_skipped": 3,
         "coverage_could_not_run": 1,
         "aggregate_severity": "not_enough_checked",
         "aggregate_headline": "Not enough could be checked to say whether this is ready.",
-        "aggregate_skipped": 0,
-        "aggregate_unknown": 1,
-        "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
+        "aggregate_skipped": 3,
+        "aggregate_unknown": 0,
+        "critical_not_checked": [],
         "blocking": ["chk_nodetestd6032c00e4d44f94"],
         "is_ready_for_hand_off": false,
         "findings": 1,
@@ -145,7 +145,7 @@
           "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
           "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
           "Open findings: 1 Must fix.",
-          "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
+          "4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)"
         ]
       }
     }
@@ -180,13 +180,13 @@
       "check_critical": true,
       "check_severity": "must_fix",
       "refusals": 1,
-      "not_checked_count": 1,
+      "not_checked_count": 4,
       "coverage_checked": 0,
-      "coverage_skipped": 1,
+      "coverage_skipped": 4,
       "coverage_could_not_run": 0,
       "aggregate_severity": "not_enough_checked",
       "aggregate_headline": "Not enough could be checked to say whether this is ready.",
-      "aggregate_skipped": 1,
+      "aggregate_skipped": 4,
       "aggregate_unknown": 0,
       "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
@@ -202,9 +202,9 @@
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
         "Open findings: 1 Must fix.",
-        "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
+        "4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)"
       ],
-      "why": "The acceptance sentence is *dynamic-not-authorized stays visible*, and every word of it is asserted by equality against SURE's own answer rather than paraphrased. `check_status` is `skipped` and `check_not_checked_reason` is `execution_not_authorized` — the frozen vocabulary has no \"not authorized\" status at all, so a build that invented one would fail here. `check_reason` is the whole sentence `crates/sure-domain/src/status.rs` fixes for that reason, quoted rather than searched for. Visibility is asserted in five places rather than one, because a struct field is not a report: the result is in `ProjectVerdict::not_checked`, it is in `Aggregate::coverage.critical_not_checked`, it is an entry in `CoverageNotCheckedSummary::not_checked`, the run raises one `cannot_confirm` finding for it into `ProjectVerdict::findings` (added by `P7-T012`, and the five keys at the end of this entry pin its weight, its status and the check it is anchored to), and the last two lines of the rendered summary name it and count it. `coverage_checked` is zero, which is the honest half a reader could otherwise miss: nothing was checked at all, and the check is neither a pass nor a failure. The project's own `sure.yaml` asking for `host_confirmed` is asserted beside it — `project_ask_refused_escalation` is true, `project_ask_granted` is false — because a build that took execution authority from the project would have made this answer a green light on a stranger's advice."
+      "why": "The acceptance sentence is *dynamic-not-authorized stays visible*, and every word of it is asserted by equality against SURE's own answer rather than paraphrased. `check_status` is `skipped` and `check_not_checked_reason` is `execution_not_authorized` — the frozen vocabulary has no \"not authorized\" status at all, so a build that invented one would fail here. `check_reason` is the whole sentence `crates/sure-domain/src/status.rs` fixes for that reason, quoted rather than searched for. Visibility is asserted in five places rather than one, because a struct field is not a report: the result is in `ProjectVerdict::not_checked`, it is in `Aggregate::coverage.critical_not_checked`, it is an entry in `CoverageNotCheckedSummary::not_checked`, the run raises one `cannot_confirm` finding for it into `ProjectVerdict::findings` (added by `P7-T012`, and the five keys at the end of this entry pin its weight, its status and the check it is anchored to), and the last two lines of the rendered summary name it and count it. `coverage_checked` is zero, which is the honest half a reader could otherwise miss: nothing was checked at all, and the check is neither a pass nor a failure. The project's own `sure.yaml` asking for `host_confirmed` is asserted beside it — `project_ask_refused_escalation` is true, `project_ask_granted` is false — because a build that took execution authority from the project would have made this answer a green light on a stranger's advice. **`P18-T011` moved four of the numbers in this block and left every verdict in it alone, and the movement is recorded rather than left to be discovered.** The declarations a manifest cannot make used to be handed to the aggregate as results and land in its `unscheduled` field, which no renderer reads — the row existed and the report did not hold it. They are now handed to `aggregate_run` as rows of the run, so the three roles `package.json` does not declare — `build the project`, `check the code for style and likely mistakes`, `check the types without building` — are counted beside the check that was refused: `not_checked_count`, `coverage_skipped` and `aggregate_skipped` are four rather than one, and the last summary line is *4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)*. What the fixture exists to assert did not move: all three are `Skipped` with `NotApplicable` and `blocks_green` false, so the critical build row is in `critical_out_of_scope` rather than in `critical_not_checked`, `blocking` still holds the refused check alone, the aggregate is still `not_enough_checked`, the run still raises exactly the one `cannot_confirm` finding anchored to the refused check, and `is_ready_for_hand_off` is still false. The count of checks that could not run is now the count of rows the run holds, which for a project with one script and three undeclared roles is four."
     },
     {
       "kind": "control",
@@ -228,22 +228,22 @@
       "check_may_run": true,
       "check_decision": "allowed",
       "check_blocked_by": null,
-      "check_status": "unknown",
+      "check_status": "error",
       "check_not_checked_reason": null,
-      "check_reason": "Nothing was reported for this check, so SURE has no basis for a verdict on it.",
+      "check_reason": "the run was cancelled before the command was started, so nothing ran",
       "check_evidence_class": "unknown",
       "check_critical": true,
       "check_severity": "must_fix",
       "refusals": 0,
-      "not_checked_count": 1,
+      "not_checked_count": 4,
       "coverage_checked": 0,
-      "coverage_skipped": 0,
+      "coverage_skipped": 3,
       "coverage_could_not_run": 1,
       "aggregate_severity": "not_enough_checked",
       "aggregate_headline": "Not enough could be checked to say whether this is ready.",
-      "aggregate_skipped": 0,
-      "aggregate_unknown": 1,
-      "critical_not_checked": ["chk_nodetestd6032c00e4d44f94"],
+      "aggregate_skipped": 3,
+      "aggregate_unknown": 0,
+      "critical_not_checked": [],
       "blocking": ["chk_nodetestd6032c00e4d44f94"],
       "is_ready_for_hand_off": false,
       "findings": 1,
@@ -257,9 +257,9 @@
         "I can check whether the current project runs and whether anything obviously looks incomplete. I cannot confirm that it matches your original request because that request was not provided to SURE.",
         "SURE can look at the project as it is now. It cannot see what the AI did while it worked. (capability tier 0, snapshot)",
         "Open findings: 1 Must fix.",
-        "1 check(s) could not run or were skipped. 1 of them are critical. (run the tests)"
+        "4 check(s) could not run or were skipped. 2 of them are critical. (run the tests, build the project)"
       ],
-      "why": "The fixture is worth nothing without this half, and the assertion that makes it a measurement is the negative one: with the user's own file granting execution, **no result carries `ExecutionNotAuthorized`** — asserted by that predicate, not by a count of passes and not by a greener aggregate. `refusals` is declared as zero and the test computes it as `results().iter().filter(|result| result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized)).count()`, so a reporter that refused everything fails here and a reporter that refused nothing fails the outcome above. What the check becomes is stated rather than dressed up: `check_status` is `unknown` with `check_reason` *Nothing was reported for this check*, because this build has no runner for a planned check — a check that is no longer refused is still not a check that ran. `coverage_checked` stays zero for that reason, and the aggregate stays `not_enough_checked`, so the honest reading of this half is \"the reason changed\", not \"the project got greener\". If a later build learns to carry the check out, this declaration is what has to be re-made, and this sentence is where that decision is written down."
+      "why": "The fixture is worth nothing without this half, and the assertion that makes it a measurement is the negative one: with the user's own file granting execution, **no result carries `ExecutionNotAuthorized`** — asserted by that predicate, not by a count of passes and not by a greener aggregate. `refusals` is declared as zero and the test computes it as `results().iter().filter(|result| result.not_checked_reason == Some(NotCheckedReason::ExecutionNotAuthorized)).count()`, so a reporter that refused everything fails here and a reporter that refused nothing fails the outcome above. What the check becomes is stated rather than dressed up, and `P18-T007` is the task that re-made this half: `crates/sure-core/src/pipeline.rs` is wired to `planned_check_runner`, so a check the user's file allows is handed to the runner the harness gives the pipeline and the answer here is that runner's — `check_status` is `error` with `check_reason` *the run was cancelled before the command was started, so nothing ran*. That runner is `ProcessRunner::new` over a `Cancellation` the harness cancels before the run begins, so the check is carried to the real runner and the runner provably starts nothing; without that, grading this fixture would start `node`. What a real `sure check` would do with this check is therefore not measured here, and that is a boundary rather than a result. `coverage_checked` stays zero — an error is not a check that ran — and the aggregate stays `not_enough_checked`, now through `critical_errored` rather than `critical_not_checked`, which is why `critical_not_checked` is one of the keys this control declares as moving. The honest reading of this half is still \"the reason changed\", not \"the project got greener\", and the sentence that used to say *if a later build learns to carry the check out, this declaration is what has to be re-made* is this re-making: the build did, and this is what changed. **`P18-T011` moved this block's counts the way the outcome above records, and for the same reason:** `not_checked_count` is four and `coverage_skipped` and `aggregate_skipped` are three, because the three roles this manifest does not declare are rows of the run on both halves rather than rows only the refused half held. The negative assertion this half is measured by — that no result carries `ExecutionNotAuthorized` — is untouched by that, and it is still the assertion that decides the control."
     }
   ],
   "forbidden_outcomes": [

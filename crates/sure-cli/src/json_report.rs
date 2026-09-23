@@ -4,11 +4,6 @@
 //! tools (CI parsers, IDEs, review dashboards). No ANSI escape codes or
 //! terminal formatting are included.
 
-#![allow(
-    dead_code,
-    reason = "this module is ready but awaits the check engine to produce a verdict"
-)]
-
 use serde::{Deserialize, Serialize};
 use sure_core::plain_language_finding::render_finding;
 use sure_core::vocabulary::ProjectVerdict;

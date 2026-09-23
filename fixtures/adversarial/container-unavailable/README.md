@@ -33,23 +33,36 @@ looked for, in one sentence:
 
 ```
 No container runtime was found, and that changes nothing: this build runs no
-check, in a container or on this computer, and each check is recorded as unknown
-rather than passed. SURE looked for docker or podman on PATH.
+check in a container, and no check runs on this computer unless your own
+settings allow it. SURE looked for docker or podman on PATH.
 ```
 
 The test compares that sentence whole rather than searching it for a word, and
-it has to do three things at once — say what was not found, say that **nothing
-runs**, with a runtime and without one, and name what was looked for — or a
-person reading it cannot act on it.
+it has to do three things at once — say what was not found, say that **no check
+runs in a container and none runs on this computer unless the user's own
+settings allow it**, and name what was looked for — or a person reading it
+cannot act on it.
 
 Ask a path that holds a file named `docker` and SURE answers the other way, in a
 sentence built the same way:
 
 ```
 docker was found at <the file that was found>, and that changes nothing: this
-build runs no check, in a container or on this computer, and each check is
-recorded as unknown rather than passed.
+build runs no check in a container, and no check runs on this computer unless
+your own settings allow it.
 ```
+
+**`P18-T007` moved this sentence and the move is deliberate rather than
+cosmetic.** It read *"this build runs no check, in a container or on this
+computer, and each check is recorded as unknown rather than passed"*, which was
+true of a build whose pipeline admitted every check and ran none. That is no
+longer this build: a run the user's own settings file grants now reaches the
+runner through `sure_core::pipeline`, so the old middle clause names a state
+that stopped existing and the new one states the rule that replaced it — no
+check in a container, ever, in this build; on this computer only on a grant.
+The declaration was re-made at the same time as the sentence, and the
+`module_call_sites` count beside it was held to the scanner rather than
+adjusted.
 
 **The two answers are one sentence with one clause moved, and since `P16-T012`
 that is asserted rather than intended.**
@@ -60,7 +73,7 @@ wording it uses. The arm with a runtime is the one that was wrong: it read
 module read it** — `sure_core::container::claims_local_execution` is about the
 fallback claim and needs a place on this computer, and *"in a container"* is not
 one. So a machine with a runtime on it was told its check could run, in a build
-that runs nothing. `sure_core::container::claims_container_execution` is the
+whose pipeline ran nothing. `sure_core::container::claims_container_execution` is the
 twin rule written for it; the two share one implementation and differ in the list
 of places they read, which is why the sentence could be wrong on one side of the
 question without the other side noticing.
@@ -69,14 +82,19 @@ question without the other side noticing.
 run on this computer instead."*, and this README used to explain the requirement
 in the same false way.** The guard was green because it asked the sentence for a phrase
 rather than for a true claim, and the phrase it asked for — a fallback onto this
-computer — was false of a build in which no check runs anywhere: `sure_core::enforce`
-says no check drives on the road to `Enforcement::admitted()`, and
-`sure_core::support`'s `CEILING` is `InspectOnly` for the same reason. It is
+computer — was false of the build it was written in, where no check ran
+anywhere: `sure_core::enforce` says no plan was driven down the road to
+`Enforcement::admitted()`, and `sure_core::support`'s `CEILING` is `InspectOnly`
+for the same reason. It is
 written down here so that nobody restores it. An absent runtime changes *inside
 what* a command would run and not *whether* anything runs, so a sentence that
 names a fallback is wrong in any wording, not only in the old one —
 `sure_core::container::claims_local_execution` is the rule that reads the claim
-rather than the phrase, and it is what fails if one comes back.
+rather than the phrase, and it is what fails if one comes back. **`P18-T007`
+sharpened that argument rather than retiring it**: what decides whether a check
+runs on this computer is now a grant in the user's own settings file, and a
+missing runtime still decides nothing, so a sentence that named a fallback would
+be wrong for a second reason as well as the first.
 
 ## The machine is never the measurement
 

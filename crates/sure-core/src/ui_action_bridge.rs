@@ -29,6 +29,7 @@ use crate::candidate_context::classify_path;
 use crate::checks::check_id;
 use crate::discover::Discovery;
 use crate::finding_gravity::{GapKind, Reach, gravity_of};
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::redact::escape_control_characters;
 use crate::scan::display_path;
 use crate::schedule::{CheckProposal, CheckReason, PlanBuilder};
@@ -212,9 +213,25 @@ impl UiActionBridge {
     }
 
     /// Hands every proposal to a plan builder.
+    ///
+    /// **Each proposal is paired with the observation this bridge actually
+    /// made, which is a [`StaticObservation::Candidate`] in both of its two
+    /// shapes.** The static shape
+    /// read a binding in a frontend file and never watched the handler; the
+    /// runtime shape had a browser observe an element that matches the declared
+    /// action, and still never watched what the action does — no click is
+    /// performed here, and the module comment above says this bridge does not
+    /// read a handler body. So neither is a `Holds`: a pass would say the action
+    /// works, and the element being on the page is not that. The difference
+    /// between the two shapes is the *class* on the proposal, which is
+    /// `ObservedFact` when a browser saw the element and `Inference` when it did
+    /// not, and that is where P6-T006's acceptance lives — not in the status.
+    ///
+    /// [`StaticObservation::Candidate`]: crate::planned_work::StaticObservation::Candidate
     pub fn add_to(&self, builder: &mut PlanBuilder) {
         for proposal in self.proposals() {
-            if let Err(refusal) = builder.propose(proposal) {
+            let work = PlannedWork::new(proposal.clone(), observation_of(&proposal));
+            if let Err(refusal) = builder.propose(work) {
                 debug_assert!(
                     builder.refused().contains(&refusal),
                     "the builder returned a refusal it did not record"
@@ -245,6 +262,26 @@ impl UiActionBridge {
             })
             .collect()
     }
+}
+
+/// The work beside one proposal: the reading that produced it, and no more.
+///
+/// **The class decides which of the two sentences is true, and nothing else
+/// changes.** Both are the reason's own rendering — the same sentences a report
+/// prints — with what was *not* seen after it, because that is the half a
+/// candidate claims.
+fn observation_of(proposal: &CheckProposal) -> CheckOperation {
+    let unsettled = if proposal.evidence_class() == EvidenceClass::ObservedFact {
+        "a browser saw a matching element on the page; what the action does when \
+         somebody uses it was not watched"
+    } else {
+        "the binding was read in the source; the handler was never watched, and \
+         nothing here says what it does"
+    };
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: {unsettled}.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Whether an observed element matches a declared UI action.
@@ -663,6 +700,83 @@ mod tests {
         let schedule = builder.build();
         assert_eq!(schedule.len(), 1);
         assert!(schedule.duplicates().is_empty());
+    }
+
+    /// The two sentences a planned bridge check can carry, and which one the
+    /// class picks.
+    ///
+    /// `P18-T004` made the observation class-dependent, and a class-dependent
+    /// sentence with one of its branches never run is a sentence nobody has
+    /// read: the unobserved shape is the one `UiActionBridge::of` produces, the
+    /// observed one needs evidence a browser would supply, and the two must not
+    /// claim the same thing about the handler.
+    #[test]
+    fn the_two_shapes_of_a_bridge_check_say_what_was_seen_and_what_was_not() {
+        let temp = std::env::temp_dir().join(format!(
+            "sure-ui-observation-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        std::fs::write(
+            temp.join("App.tsx"),
+            "<button onClick={handleSave}>Save</button>\n",
+        )
+        .unwrap();
+
+        let discovery =
+            crate::discover::discover(&temp, &crate::discover::DiscoverOptions::default()).unwrap();
+
+        let observed = UiActionBridge::of(&discovery).with_evidence(UiRuntimeEvidence {
+            elements: vec![ObservedElement {
+                kind: ObservedElementKind::Button,
+                label: "Save".to_owned(),
+            }],
+        });
+        let detail = planned_detail(&observed);
+        assert!(
+            detail.contains("a browser saw a matching element on the page"),
+            "an observed element is what the browser added, and the sentence has to \
+             say it: {detail}"
+        );
+        assert!(
+            detail.contains("what the action does when somebody uses it was not watched"),
+            "seeing the element is not seeing the action work: {detail}"
+        );
+
+        let read = UiActionBridge::of(&discovery);
+        let detail = planned_detail(&read);
+        assert!(
+            detail.contains("the binding was read in the source"),
+            "nothing was observed about this one: {detail}"
+        );
+        assert!(
+            !detail.contains("a browser saw"),
+            "no browser ran for the static shape, so nothing may claim one did: {detail}"
+        );
+        assert!(
+            detail.contains(&read.proposals()[0].reason().plain_description()),
+            "the detail must name the place the proposal's own reason names: {detail}"
+        );
+    }
+
+    /// The sentence the plan holds for a bridge's single check.
+    fn planned_detail(bridge: &UiActionBridge) -> String {
+        let mut builder = PlanBuilder::new(
+            sure_domain::execution::ExecutionMode::HostConfirmed,
+            sure_domain::execution::ExecutionPermissions::inspect_only(),
+        );
+        bridge.add_to(&mut builder);
+        let schedule = builder.build();
+        let CheckOperation::Precomputed(evidence) = schedule.checks()[0].operation() else {
+            panic!("a bridge check that starts a process is not what this module plans");
+        };
+        evidence.detail().to_owned()
     }
 
     #[test]

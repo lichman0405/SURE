@@ -59,13 +59,46 @@
 //! produce any other status for one. `P4-T001` wrote that function for exactly
 //! this caller. This is the caller.
 //!
+//! # The checks the plan cannot hold travel with it
+//!
+//! A plan cannot hold every check a project declares. `"test": ["jest"]` names
+//! something SURE cannot run, so the node checks produce a
+//! [`MissingCommand`] instead of a proposal and the runner is never handed it.
+//! **That is not a check with no answer.** It has one, and the declaration is
+//! the only thing that can produce it: no runner will ever report on a check it
+//! was not given, so a run that reads only its schedule is silent about it, and
+//! *silence* is precisely the outcome
+//! [`MissingCommand`]'s own documentation says the type exists to prevent.
+//!
+//! So the declarations arrive as their own argument and become rows of the run.
+//! **The argument is typed, which is the whole of why this is safe**: a
+//! [`MissingCommand`] can only produce [`MissingCommand::not_checked`], a
+//! `Skipped` result against the state being aggregated, so there is no way for a
+//! caller to declare a check and have it counted as a pass — the property holds
+//! by construction rather than by a rule this function has to get right.
+//!
+//! **And it is what lets the declaration's own reason decide the verdict.** The
+//! kind of a declaration is the whole of whether a critical one holds a run out
+//! of green — [`MissingKind::NotDeclared`](crate::checks::MissingKind::NotDeclared)
+//! is a scope limit and
+//! [`MissingKind::NotACommand`](crate::checks::MissingKind::NotACommand) is a
+//! defect the project can fix — and that question is asked by
+//! [`blocks_green`](CheckResult::blocks_green), inside the frozen function, over
+//! the rows it is handed. A row kept out of `complete` is a check whose answer
+//! was computed and then dropped, and the sentence that decided it was
+//! *"a critical test check that cannot run because of a broken manifest should
+//! keep the run out of green"*: a promise no reader of the verdict could then
+//! find in it.
+//!
 //! Two rules follow, and they are the whole of what this module decides:
 //!
-//! 1. **The aggregate is over the plan's checks and nothing else.** One entry
-//!    per scheduled check, in plan order. A result for a check the plan never
-//!    proposed is reported by [`RunReport::unscheduled`] and is not aggregated:
-//!    it can neither help nor hurt the verdict, because the verdict is about the
-//!    run and the run is what the plan said it would be. This is
+//! 1. **The aggregate is over the checks the run was made of, and nothing
+//!    else.** One entry per check: the plan's checks in plan order, then the
+//!    declared checks the plan could not hold, in the order of their ids. A
+//!    result for a check that neither of those names is reported by
+//!    [`RunReport::unscheduled`] and is not aggregated: it can neither help nor
+//!    hurt the verdict, because the verdict is about the run and the run is what
+//!    the plan and its declarations said it would be. This is
 //!    [`Enforcement`](crate::enforce::Enforcement)'s own rule one level up — a
 //!    command for a check that is not in the plan is reported by
 //!    [`unscheduled`](crate::enforce::Enforcement::unscheduled) and is not
@@ -118,6 +151,7 @@ use sure_domain::evidence::EvidenceClass;
 use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::status::{Aggregate, CheckResult, CriticalState, NotCheckedReason, aggregate};
 
+use crate::checks::MissingCommand;
 use crate::schedule::CheckSchedule;
 
 /// The detail shown for a check the plan allowed that reported nothing at all.
@@ -151,18 +185,44 @@ pub const NOTHING_CAME_BACK: &str = "Nothing was reported for this check, so SUR
 /// from.
 ///
 /// `schedule` is what the run intended to check and `results` is what came back
-/// for it; `project_fingerprint` is the state this verdict is about, and it is
-/// required because a check the plan stopped has no result of its own and one
-/// has to be made for it.
+/// for it; `missing` is the checks the project declared that no plan entry could
+/// be built for, and they are rows of the run exactly as the scheduled checks
+/// are — see the module comment above. `project_fingerprint` is the state this
+/// verdict is about, and it is required because a check the plan stopped has no
+/// result of its own and one has to be made for it; a declared check has no
+/// result of its own for the same reason and is made one the same way.
+///
+/// # `missing` is the one argument a caller can pass empty and be wrong about
+///
+/// **A recorded risk, left standing deliberately** (`P18-T012` measured it and
+/// decided against a guard). One product caller passes a non-empty slice —
+/// `pipeline.rs`, which passes the declarations the same walk produced — and
+/// every other caller in the tree passes `&[]`. An empty slice makes this
+/// function's second loop a no-op, so a caller that *had* declarations and passed
+/// `&[]` would produce a report that is silent about checks the project declared,
+/// which is the false green the module comment above is about.
+///
+/// What is not done about it, and why: the type cannot tell the two cases apart —
+/// `&[]` means *no declarations* and *declarations I forgot* with one value — and
+/// a guard would need a second parameter that only a real second caller could
+/// justify. **No such caller exists, and inventing one to hang a test on would be
+/// a test with no product behind it.** What holds the property instead is the
+/// measurement rather than the type: `crates/sure-core/tests/declared_commands.rs`
+/// drives the real `sure check` pipeline over a project with a broken manifest and
+/// asserts the declaration's row is a `Skipped` that blocks green and is counted —
+/// and `P18-T012` proved that test red by deleting this function's second loop,
+/// which is the mutation a guard would have had to catch.
 ///
 /// # Errors
-/// Returns [`RunRefused`] when the results cannot be aggregated honestly: two
-/// answers for one check, or an answer established against a different project
-/// state. Both are described on [`RunRefused`], and neither is repaired.
+/// Returns [`RunRefused`] when the rows cannot be aggregated honestly: two
+/// answers for one check — two results, or a result and a declaration, or two
+/// declarations — or an answer established against a different project state.
+/// Both are described on [`RunRefused`], and neither is repaired.
 #[must_use = "a run's verdict is the whole point of aggregating it"]
 pub fn aggregate_run(
     schedule: &CheckSchedule,
     results: &[CheckResult],
+    missing: &[MissingCommand],
     project_fingerprint: &FingerprintId,
 ) -> Result<RunReport, RunRefused> {
     let mut reported: BTreeMap<CheckId, &CheckResult> = BTreeMap::new();
@@ -182,7 +242,19 @@ pub fn aggregate_run(
         }
     }
 
-    let mut complete: Vec<CheckResult> = Vec::with_capacity(schedule.len());
+    // A declaration is an answer to the same question a result is, so it is
+    // refused on the same terms: a check answered twice has no one answer to
+    // aggregate, whichever two of the three lists the two answers came from.
+    let mut declared: BTreeMap<CheckId, &MissingCommand> = BTreeMap::new();
+    for declaration in missing {
+        let id = declaration.id().clone();
+        if declared.insert(id.clone(), declaration).is_some() || reported.contains_key(&id) {
+            return Err(RunRefused::TwoAnswersForOneCheck { id });
+        }
+    }
+
+    let mut complete: Vec<CheckResult> =
+        Vec::with_capacity(schedule.len().saturating_add(declared.len()));
     let mut unreported: Vec<CheckId> = Vec::new();
     let mut overruled: Vec<CheckId> = Vec::new();
 
@@ -192,6 +264,12 @@ pub fn aggregate_run(
     // cannot do for itself.
     for scheduled in schedule.checks() {
         let id = scheduled.proposal().id().clone();
+        // A check cannot have been both proposed and declared missing, and a
+        // caller that says both has supplied two answers for one check rather
+        // than a plan this function could read.
+        if declared.contains_key(&id) {
+            return Err(RunRefused::TwoAnswersForOneCheck { id });
+        }
         let theirs = reported.remove(&id);
         let stopped = scheduled.not_run(project_fingerprint);
 
@@ -221,6 +299,14 @@ pub fn aggregate_run(
             }
         };
         complete.push(result);
+    }
+
+    // And then the checks no plan entry could be built for. The order is the
+    // declarations' ids and not the caller's order, for the reason the
+    // `unscheduled` list's is: the report is a function of the set, not of the
+    // sequence somebody happened to collect it in.
+    for declaration in declared.values() {
+        complete.push(declaration.not_checked(project_fingerprint));
     }
 
     // Whatever is left in `reported` names a check the plan never proposed. It
@@ -303,7 +389,9 @@ pub struct RunReport {
     unreported: Vec<CheckId>,
     overruled: Vec<CheckId>,
     unscheduled: Vec<CheckId>,
-    /// Every scheduled check and what became of it, in plan order.
+    /// Every check the run was made of and what became of it: the plan's checks
+    /// in plan order, then the declared checks no plan entry could be built for,
+    /// in the order of their ids.
     ///
     /// Stored so that downstream summaries can join each scheduled check back to
     /// its result without recomputing the plan's decisions.
@@ -398,11 +486,18 @@ impl RunReport {
         &self.overruled
     }
 
-    /// Results for checks the plan never proposed.
+    /// Results for checks the plan never proposed and no declaration accounts
+    /// for.
     ///
     /// **Reported and not aggregated**, in both directions: a stray pass cannot
     /// make a run green and a stray failure cannot make it red. The run is what
     /// the plan said it would be.
+    ///
+    /// A check the project *declared* and no plan entry could be built for is
+    /// not stray: its declaration is handed to [`aggregate_run`] and it is a row
+    /// of [`Self::results`], so it is neither aggregated as a result nor listed
+    /// here. What is listed here is a caller's answer about a check nobody asked
+    /// about.
     #[must_use]
     pub fn unscheduled(&self) -> &[CheckId] {
         &self.unscheduled
@@ -417,10 +512,13 @@ impl RunReport {
             .collect()
     }
 
-    /// Every scheduled check and what became of it, in plan order.
+    /// Every check the run was made of and what became of it.
     ///
     /// This is the same set the aggregate was computed over, so a caller can join
-    /// each scheduled check back to its result without trusting a second list.
+    /// each check back to its result without trusting a second list — and the
+    /// declared checks that no plan entry could be built for are in it, because
+    /// they are rows the verdict was computed over too. A caller that walks the
+    /// schedule alone will not find them: their ids were never proposed.
     #[must_use]
     pub fn results(&self) -> &[CheckResult] {
         &self.results
@@ -516,7 +614,7 @@ const fn state_label(state: CriticalState) -> &'static str {
 
 /// A refusal to aggregate a run.
 ///
-/// Two ways to hand in a set of results that no verdict can honestly be built
+/// Two ways to hand in a set of rows that no verdict can honestly be built
 /// from, each refused rather than repaired. **Repairing either would be the
 /// false green the rest of this module exists to prevent**: choosing between two
 /// answers to one question makes the verdict depend on a rule nobody wrote down,
@@ -524,7 +622,12 @@ const fn state_label(state: CriticalState) -> &'static str {
 /// tree as a pass about this one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunRefused {
-    /// Two or more results carry the same check's identity.
+    /// Two or more rows carry the same check's identity.
+    ///
+    /// A "row" is a result or a declared check, so this is refused for any pair
+    /// of them rather than for two results alone: the question is *how many
+    /// answers are there to this check*, and two answers have no one answer to
+    /// aggregate whatever shape they arrived in.
     TwoAnswersForOneCheck {
         /// The check that was answered more than once.
         id: CheckId,

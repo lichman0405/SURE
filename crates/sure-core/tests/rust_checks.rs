@@ -49,6 +49,7 @@ use sure_core::checks::rust::RustChecks;
 use sure_core::discover::rust::{CommandRole, MANIFEST};
 use sure_core::discover::{DiscoverOptions, Discovery, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, project_fingerprint};
+use sure_core::planned_work::PlannedWork;
 use sure_core::schedule::{CheckProposal, CheckReason, CheckSchedule, PlanBuilder};
 use sure_domain::evidence::{Freshness, StalenessReason, freshness};
 use sure_domain::execution::{
@@ -131,7 +132,7 @@ impl Fixture {
     }
 
     fn checks(&self) -> RustChecks {
-        RustChecks::of(&self.rust())
+        RustChecks::of(&self.rust(), &self.project)
     }
 
     /// The project's fingerprint, chosen the way the product chooses it.
@@ -197,9 +198,10 @@ fn id_for(role: CommandRole) -> sure_domain::ids::CheckId {
 /// The role and command of every proposed check.
 fn commands(checks: &RustChecks) -> Vec<(CommandRole, String)> {
     checks
-        .proposed()
+        .planned()
         .iter()
-        .map(|proposal| {
+        .map(|work| {
+            let proposal = work.proposal();
             let role = role_of(proposal.id());
             let command = match proposal.reason() {
                 CheckReason::DeclaredCommand { command, .. } => command.clone(),
@@ -342,8 +344,9 @@ fn the_format_check_sure_would_run_reads_the_tree_and_does_not_write_it() {
     let checks = fixture.checks();
 
     let format = checks
-        .proposed()
+        .planned()
         .iter()
+        .map(PlannedWork::proposal)
         .find(|proposal| *proposal.id() == id_for(CommandRole::Format))
         .expect("a project with a rustfmt config gets a format check");
     match format.reason() {
@@ -584,7 +587,8 @@ fn the_evidence_of_the_four_checks_is_fresh_for_the_state_it_ran_against() {
     let state = fixture.fingerprint();
 
     let mut examined = 0;
-    for proposal in checks.proposed() {
+    for work in checks.planned() {
+        let proposal = work.proposal();
         examined += 1;
         let result = result_of(proposal, &state);
 
@@ -641,8 +645,9 @@ fn the_same_evidence_is_stale_once_the_project_moves_on() {
     let checks = fixture.checks();
     let before = fixture.fingerprint();
     let proposal = checks
-        .proposed()
+        .planned()
         .iter()
+        .map(PlannedWork::proposal)
         .find(|proposal| *proposal.id() == id_for(CommandRole::Test))
         .expect("a project with a readable manifest gets a test check");
     let evidence = sure_core::checks::evidence_of(
@@ -745,7 +750,8 @@ fn nothing_the_plan_holds_needs_a_permission_beyond_running_project_code() {
     let checks = fixture.checks();
 
     let mut seen = 0;
-    for proposal in checks.proposed() {
+    for work in checks.planned() {
+        let proposal = work.proposal();
         seen += 1;
         for action in proposal.requirements().actions() {
             assert_ne!(
@@ -824,9 +830,9 @@ fn two_independent_readings_of_one_project_give_the_same_identifiers() {
 
     let ids = |checks: &RustChecks| -> Vec<String> {
         checks
-            .proposed()
+            .planned()
             .iter()
-            .map(|proposal| proposal.id().as_str().to_owned())
+            .map(|work| work.proposal().id().as_str().to_owned())
             .collect()
     };
     assert_eq!(ids(&first), ids(&second));
@@ -844,7 +850,8 @@ fn two_independent_readings_of_one_project_give_the_same_identifiers() {
     // And they are not the identifiers of the same roles in another ecosystem,
     // which is the half the component in the digest buys: `package.json`'s test
     // check and `Cargo.toml`'s must not be one check.
-    for proposal in first.proposed() {
+    for work in first.planned() {
+        let proposal = work.proposal();
         assert!(
             proposal.id().as_str().contains("rust"),
             "{} is not identifiable as a Rust check: {}",
@@ -869,7 +876,8 @@ fn the_command_a_check_names_is_the_line_sure_would_run() {
     let checks = fixture.checks();
     let planned = fixture.rust().conventional_commands();
 
-    for proposal in checks.proposed() {
+    for work in checks.planned() {
+        let proposal = work.proposal();
         match proposal.reason() {
             CheckReason::DeclaredCommand {
                 declared_in,

@@ -355,17 +355,22 @@ fn row(out: &mut impl Write, label: &str, value: &str) -> io::Result<()> {
 ///
 /// **Both arms have to be true of this build, and the absent one is the one
 /// that was not.** It used to read *"none found, so checks run on this
-/// computer"* — and nothing runs on this computer, or anywhere else, in this
-/// build: `sure_core::enforce` has no check driving on the road to an admitted
-/// command and `support::CEILING` is `InspectOnly` for the same reason. A
-/// missing runtime is a fact about the machine and not a fallback, so the value
-/// says which machine this is and what that does and does not change.
+/// computer"* — and nothing runs on this computer because a runtime is missing:
+/// `Authority::execution_mode` answers `inspect_only` unless the **user's own**
+/// settings file grants project code, and since `P18-T007` a granted run does
+/// reach the runner, so the absent arm may not say that a check runs here at all
+/// without saying what decides it. Nor may it say one runs in a container: this
+/// build has no executor that would start one. A missing runtime is a fact about
+/// the machine and not a fallback, so the value says which machine this is and
+/// what that does and does not change.
 fn container_in_words(availability: &Availability) -> String {
     match availability {
         Availability::Found { runtime, program } => {
             format!("{} at {}", runtime.as_str(), program.display())
         }
-        Availability::Absent => "none found, and this build runs no check either way".to_owned(),
+        Availability::Absent => {
+            "none found, and no check runs in a container in this build".to_owned()
+        }
     }
 }
 
@@ -1065,12 +1070,13 @@ mod tests {
         // **The regression this exists for.** `sure doctor` used to print, on a
         // machine with no runtime, `none found, so checks run on this computer`
         // and *"No container runtime was found, so checks run on this computer
-        // instead."* — and neither is true of this build: `sure_core::enforce`
-        // says no check drives on the road to an admitted command, and
-        // `sure_core::support::CEILING` is `InspectOnly` for the same reason,
-        // so nothing runs here or in a container. The guard over the module's
-        // sentence asked whether it contained a phrase, so it stayed green
-        // while the sentence was false.
+        // instead."* — and neither is true of this build: a missing runtime is
+        // not a fallback, and since `P18-T007` what decides whether a check runs
+        // here is `Authority::execution_mode`, which answers the **user's own**
+        // settings file (`support::CEILING` is `InspectOnly` for a different
+        // reason — a level B claim is about every platform SURE runs on). The
+        // guard over the module's sentence asked whether it contained a phrase,
+        // so it stayed green while the sentence was false.
         //
         // `P16-T012` found the other half of it in the other arm: with a runtime
         // found, the report said *"Checks can run in a container: docker was
@@ -1144,7 +1150,8 @@ mod tests {
             assert!(
                 sure_core::container::denies_that_anything_runs(sentence),
                 "{which}: the sentence has to say what happens instead of only what was found \
-                 or not found, and what happens is that nothing runs: {sentence}"
+                 or not found, and what happens is that no container runs one and nothing runs \
+                 here unasked: {sentence}"
             );
             // What the answer is about: what was looked for, or what was found
             // and where. An answer that said neither would pass every rule above

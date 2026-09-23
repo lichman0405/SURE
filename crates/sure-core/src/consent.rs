@@ -258,7 +258,13 @@ impl PlannedCommand {
         let classification = safety::classify(program.clone(), arguments.clone());
         let needs = needs_of(classification.effects());
         let decision = decide_for(classification.effects(), mode, permissions);
-        let reason = refusal_reason(decision, &needs, permissions);
+        let reason = refusal_reason(
+            decision,
+            &needs,
+            permissions,
+            mode,
+            classification.effects(),
+        );
         Self {
             check,
             program,
@@ -501,8 +507,12 @@ fn decide_for(
     }
     // 3. The mode, last. A mode that is too cautious is a question to ask; a
     //    missing permission is not.
-    if runs_project_code(effects) && !mode.runs_project_code() {
-        return ExecutionDecision::NeedsConsent;
+    if runs_project_code(effects) && !mode.has_project_executor() {
+        return if mode == ExecutionMode::Container {
+            ExecutionDecision::Denied
+        } else {
+            ExecutionDecision::NeedsConsent
+        };
     }
     ExecutionDecision::Allowed
 }
@@ -538,18 +548,28 @@ fn refusal_reason(
     decision: ExecutionDecision,
     needs: &[Requirement],
     permissions: &ExecutionPermissions,
+    mode: ExecutionMode,
+    effects: &CommandEffects,
 ) -> Option<NotCheckedReason> {
     if decision.is_allowed() {
         return None;
     }
-    Some(
-        needs
+    if let Some(need) = needs
+        .iter()
+        .find(|need| !permissions.allows(need.permission))
+    {
+        return Some(reason_for(need.permission));
+    }
+    if mode == ExecutionMode::Container
+        && runs_project_code(effects)
+        && effects
+            .classes()
             .iter()
-            .find(|need| !permissions.allows(need.permission))
-            .map_or(NotCheckedReason::ExecutionNotAuthorized, |need| {
-                reason_for(need.permission)
-            }),
-    )
+            .all(|class| class.required_permission().is_some())
+    {
+        return Some(NotCheckedReason::ContainerExecutionUnavailable);
+    }
+    Some(NotCheckedReason::ExecutionNotAuthorized)
 }
 
 /// The reason a permission the user has not granted is reported under.
@@ -802,6 +822,31 @@ mod tests {
         );
         assert_eq!(command.reason(), None);
         assert!(command.refusal(&fingerprint()).is_none());
+    }
+
+    #[test]
+    fn container_mode_does_not_turn_a_user_grant_into_host_execution() {
+        let command = ordered("cargo", &["test"], ExecutionMode::Container, &everything());
+        assert_eq!(command.decision(), ExecutionDecision::Denied);
+        assert_eq!(
+            command.reason(),
+            Some(NotCheckedReason::ContainerExecutionUnavailable)
+        );
+        let result = command.refusal(&fingerprint()).expect("a stopped result");
+        assert_eq!(result.status, CheckStatus::Skipped);
+        assert!(result.blocks_green());
+        assert!(result.reason.contains("cannot run checks in a container"));
+
+        let on_host = ordered(
+            "cargo",
+            &["test"],
+            ExecutionMode::HostConfirmed,
+            &everything(),
+        );
+        assert!(
+            on_host.is_allowed(),
+            "the host mode remains available by consent"
+        );
     }
 
     #[test]

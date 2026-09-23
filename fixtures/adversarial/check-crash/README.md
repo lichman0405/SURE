@@ -105,10 +105,14 @@ is, and the `Error` bullet below names where.
     check's own `severity` and `critical` through.
 
   **What is a limit is narrower than "the product cannot produce one".** This
-  directory ships no project, and this build has no runner for a planned check
+  directory ships no project and no assertion here runs the pipeline over one
   (`scenario.json`, `checker_failure.why_not_the_pipeline`), so the test cannot
   provoke any of those routes: it builds the declared result with
-  `CheckResult::errored` and hands it to `aggregate_run`. And the **detail
+  `CheckResult::errored` and hands it to `aggregate_run`. **That reason used to
+  be a different one** — "this build has no runner for a planned check" — and
+  `P18-T007` made it false by wiring the pipeline to the runner; the fixture's
+  own reach is what it always was, and every value this file builds is still
+  built for the same reason. And the **detail
   sentence** is a copy agreeing with itself — the product has no sentence for a
   checker error, because the text is whatever the checker said, so the test
   supplies this fixture's string and reads it back. Those two are the limits, and
@@ -123,9 +127,12 @@ is, and the `Error` bullet below names where.
   `ExecutionNotAuthorized`.
 
 The control's `pass` is a hand-built result for the same reason, from the other
-end: this build **plans every check and runs none of them**, so a check that
-carries a pass out of the pipeline does not exist yet. The day one does, this
-entry is what changes deliberately.
+end: **no run in this fixture reaches the pipeline**, so the check that has to
+come back green is declared here rather than produced. That was once the same
+statement as "this build plans every check and runs none of them" — and the day
+the second half stopped being true is `P18-T007`, the day a pass became
+reachable from a granted run. This entry deliberately did not change with it:
+what it is about is the aggregation, and the fixture's reach is unchanged.
 
 ## The ordering that was measured rather than read
 

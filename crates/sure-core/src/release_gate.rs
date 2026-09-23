@@ -857,8 +857,10 @@ fn repair_regression_caught(report: &AcceptanceReport) -> Metric {
             "**A report the runner did not supply this measurement to has no denominator here, and \
              this metric then reads `unmeasured` rather than `0%`.** Observing this case means \
              starting the fixture's two node checks, `crates/sure-core/tests/spawn_sites.rs`'s rule \
-             two forbids a `src` module from naming the type that starts one, and \
-             `sure_core::support`'s level-C ceiling rests on no product path running project code. \
+             two forbids a `src` module outside the list it holds from naming the type the runner is \
+             handed, and the route this product does use for a project's checks — \
+             `sure_core::pipeline` into `sure_core::planned_check_runner` — runs the work a check's \
+             schedule holds. \
              `crates/sure-core/tests/acceptance_report_runner.rs` is the caller that supplies it. A \
              release decision taken from a module-only report therefore cannot claim this metric — and \
              because the case is release-blocking, that report blocks the release instead, which is \

@@ -37,19 +37,64 @@
 //! because it had nothing checkable to record a gap against, would be invisible
 //! to the aggregate and visible here. A reviewer can see both.
 //!
-//! # What runs, and what cannot
+//! # What runs
 //!
-//! This build plans every check the discovery supports and **runs none of them**.
-//! There is no runner for a planned check: the only one in the tree is
-//! [`crate::runtime_start::StartSmoke`], and reaching it from a product path is
-//! what `tests/spawn_sites.rs`'s census forbids until `sure_core::support`'s
-//! ceiling moves, which is a different task's decision. So a check the execution
-//! mode refuses is recorded as the plan's own
-//! [`ScheduledCheck::not_run`](crate::schedule::ScheduledCheck::not_run), and a
-//! check the mode permits is recorded by [`crate::aggregation::aggregate_run`] as
-//! `unknown` — a check the plan said would run and that reported nothing. Neither
-//! is a pass, and [`StageOutcome::NotRun`] on stages 5 and 6 says so in the run's
-//! own words.
+//! Stage 4 builds three things and not one: the schedule, the [`PermissionPlan`]
+//! holding every command the schedule names, and the [`Enforcement`] that applies
+//! the execution mode to both. It then hands the schedule and the enforcement to
+//! [`run_scheduled_checks`](crate::planned_check_runner::run_scheduled_checks),
+//! which is the plan carried out — and that one call is the whole of what stages 5
+//! and 6 describe.
+//!
+//! Its contract is one result per scheduled check, in the plan's order, so that
+//! **no check that produced nothing can become green**. A check the plan stopped
+//! keeps the plan's own
+//! [`not_run`](crate::schedule::ScheduledCheck::not_run); a check the mode
+//! admitted whose runner reported nothing is an `Error`; two results for one check
+//! is a refusal that stops the run rather than a rule for choosing. Static detector
+//! checks carry their own observation and reach no process at all — they are
+//! [`CheckOperation::Precomputed`](crate::planned_work::CheckOperation::Precomputed),
+//! and the runner reads their result out of the evidence.
+//!
+//! # The project is read twice, and the second read is the one that matters
+//!
+//! Stage 3 takes **one** fingerprint, and every result in the run names it. That
+//! is a binding on the *value* — [`CheckResult::project_fingerprint`]'s own
+//! documentation says a result that names its state exists so that it cannot be
+//! read against a later one — and it is not a statement about the world. Every
+//! result in a run carries the same fingerprint, so nothing inside the run can
+//! ever notice that the project moved; `aggregate_run`'s refusal is a
+//! within-run consistency check and would refuse a *correct* answer as readily as
+//! a wrong one. **The world is what the second read compares against**, and stage
+//! 10 takes it, immediately before the results are added up. A result from a
+//! check that ran the project's own code, taken before the project moved, is
+//! replaced by one that is not a pass and that says why.
+//!
+//! **A build's own caches are not a change, and this is measured rather than
+//! argued.** The fingerprint covers exactly what a check can read
+//! ([`crate::fingerprint`]), so `target/` ([`crate::scan`] ignores it as build
+//! output), `node_modules/` (vendored) and SURE's own `.sure/` are outside it: a
+//! run whose only writes land in those does not move the fingerprint, so it does
+//! not invalidate anything and cannot invalidate itself. The honest limit of that
+//! statement is the other half of it, and it is not papered over: a build that
+//! writes a file the walk **does** cover — a generated source file, a
+//! regenerated lockfile — has genuinely changed the project, and the run that
+//! caused it has genuinely invalidated its own evidence. That is not a false
+//! stale; it is the first failure in [`crate::fingerprint`]'s two-way list being
+//! paid for the sake of the second, which is the worse one.
+//!
+//! # What a run a user did not grant does
+//!
+//! **Nothing, and that is a reading rather than a promise.**
+//! [`crate::consent::decide_for`] refuses any command that runs the project's code
+//! in a mode that does not, so under [`ExecutionSettings::inspect_only`] the
+//! enforcement admits no such command and the runner is never reached. The
+//! measurement is `tests::a_run_a_user_did_not_grant_starts_nothing` below, which
+//! hands this pipeline a runner that records being called and cannot start
+//! anything: what it observes is that the recording is empty. The same seam, under
+//! a granted authority, observes a run *reaching* the runner — which is why the
+//! seam is a field rather than a default nobody can substitute.
+
 //!
 //! # The store
 //!
@@ -61,12 +106,12 @@
 
 use std::path::Path;
 
-use sure_domain::evidence::ClaimAssessment;
+use sure_domain::evidence::{ClaimAssessment, EvidenceClass, StalenessReason};
 use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
 use sure_domain::ids::{CheckId, ClaimId, FingerprintId};
 use sure_domain::intent::{IntentSource, ProjectIntent};
 use sure_domain::severity::Severity;
-use sure_domain::status::{CheckResult, NotCheckedReason};
+use sure_domain::status::{CheckResult, CheckStatus, NotCheckedReason};
 use sure_domain::vocabulary::{Claim, ProjectFingerprint, ProjectSupport, ProjectVerdict};
 
 use crate::aggregation::{RunReport, aggregate_run};
@@ -79,15 +124,19 @@ use crate::components::ComponentGraph;
 use crate::config::AnalysisProvider;
 use crate::config::Config;
 use crate::config::ExecutionSettings;
+use crate::consent::{PermissionPlan, PlannedCheck};
 use crate::coverage_summary::{CoverageNotCheckedSummary, summarize};
 use crate::demo_data_heuristics::DemoDataHeuristics;
 use crate::discover::{self, DiscoverOptions, Discovery, Ecosystem, Findings};
+use crate::enforce::Enforcement;
 use crate::false_completion_aggregator;
 use crate::findings_from_checks::findings_from_checks;
 use crate::fingerprint::{self, project_fingerprint};
 use crate::intent_implementation::compare_intent_to_project;
 use crate::intent_model;
 use crate::noop_heuristics::NoOpHeuristics;
+use crate::planned_check_runner::{CheckRunner, run_scheduled_checks};
+use crate::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use crate::project_intent;
 use crate::project_verdict::build_verdict;
 use crate::recheck_lifecycle::{self, LifecycleInputs, LifecycleUpdate};
@@ -95,6 +144,7 @@ use crate::repair_impact::{seed_rechecks, select_impacted_checks};
 use crate::route_consistency::RouteConsistency;
 use crate::runtime_probes::{PlanRefused, ProbePlan};
 use crate::schedule::{CheckProposal, CheckSchedule, PlanBuilder, ProposalRefused, ScheduledCheck};
+use crate::service_plan::ServicePlan;
 use crate::store::Store;
 use crate::support;
 use crate::ui_action_bridge::UiActionBridge;
@@ -583,6 +633,29 @@ pub struct Pipeline<'a> {
     /// checked against a different intent would be recording something it did not
     /// use.
     pub goal: Option<&'a str>,
+    /// What carries out the commands the enforcement admits.
+    ///
+    /// **A field rather than a default**, and that is the whole of why it is
+    /// here: *what may this run start?* is a question about this run, so the
+    /// answer is given where the run is described — at the call site — rather
+    /// than buried in the stage that happens to need it. A caller that hands a
+    /// runner which records being called and starts nothing is then measuring
+    /// this pipeline rather than a copy of it, which is how the acceptance
+    /// *a run a user did not grant starts nothing* is read rather than argued.
+    ///
+    /// [`ProcessRunner`](crate::planned_check_runner::ProcessRunner) is the only
+    /// runner in the product that starts a process. Nothing else in the product
+    /// implements [`CheckRunner`], and a caller's own is exactly that: a
+    /// caller's own.
+    ///
+    /// It is consulted only through
+    /// [`run_scheduled_checks`](crate::planned_check_runner::run_scheduled_checks),
+    /// which hands it an
+    /// [`AdmittedRun`](crate::planned_check_runner::AdmittedRun) or an
+    /// [`AdmittedService`](crate::planned_check_runner::AdmittedService) and
+    /// nothing else — values only an [`Enforcement`] can produce — so this field
+    /// cannot be used to start something the mode did not admit.
+    pub runner: &'a dyn CheckRunner,
 }
 
 /// A stage that stopped the run.
@@ -623,9 +696,40 @@ struct Planned {
     /// not plan and must record as not-checked rather than drop.
     missing: Vec<checks::MissingCommand>,
     /// How many runtime probes the project's shape ruled out.
+    ///
+    /// Read by nothing yet, and kept for the same reason
+    /// `ProbePlan::not_planned` is a list rather than a count: the number is the
+    /// half a report can print without a new sentence per reason, and a stage
+    /// that wanted the reasons has them one call away rather than nowhere.
     not_planned: usize,
     /// Why the probe planner refused, when it did.
     probe_refusal: Option<PlanRefused>,
+    /// How many of the project's `checks.services` declarations became checks.
+    ///
+    /// Zero for every project that declares none, which is every project until
+    /// somebody writes one — and **not** the same statement as an empty plan: a
+    /// declaration that was refused is counted by [`Self::service_refusals`]
+    /// instead, and a set that is empty because nothing was declared and a set
+    /// that is empty because everything was refused are two different projects.
+    services: usize,
+    /// The declarations that could not become checks, one value each.
+    ///
+    /// **Held as the refusals and not as their count**, unlike
+    /// [`Self::not_planned`]: a count says how many and nothing about what to
+    /// fix, while the sentence a refusal carries is the whole of what a user can
+    /// act on. `PlanRefused` beside it is reported the same way, and the two
+    /// readings are meant to be alike.
+    service_refusals: Vec<crate::service_plan::ServiceRefusal>,
+    /// The checks a declaration could have had and did not, one value each.
+    ///
+    /// **A different answer from [`Self::service_refusals`]**, and reported
+    /// beside it because a reader comparing the two is asking one question:
+    /// *the file asked for a check and the plan does not hold it — whose
+    /// decision was that?* A refusal is SURE's; a gap is the project's own
+    /// setting, or a field its declaration left empty. Held as the values rather
+    /// than as a count for the reason the refusals are — each sentence names the
+    /// setting that decided, and a count says how many and nothing about which.
+    service_gaps: Vec<crate::service_plan::ServiceGap>,
 }
 
 impl Pipeline<'_> {
@@ -703,23 +807,109 @@ impl Pipeline<'_> {
         stages.push(
             Stage::Plan,
             StageOutcome::Ran {
-                detail: describe_plan(&schedule, &refused, planned.probe_refusal.as_ref()),
+                detail: describe_plan(&schedule, &refused, &planned),
             },
         );
 
-        // The results every later stage aggregates. A check the mode stopped is the
-        // plan's own answer and nothing here invents one; a check the mode permits
-        // is left unreported, and `aggregate_run` records it as a check that
-        // reported nothing.
-        let mut results: Vec<CheckResult> = Vec::new();
-        for scheduled in schedule.checks() {
-            if let Some(stopped) = scheduled.not_run(&fingerprint) {
-                results.push(stopped);
+        // The plan of commands, and the decision about every one of them.
+        //
+        // Built here because this is the first point at which the fingerprint and
+        // the schedule exist together, and built from **the mode and the
+        // permissions this run was handed** — `self.execution`, which comes from
+        // `Authority::execution` — rather than from the project's own
+        // configuration. A plan built from `self.config.execution` would be a
+        // project granting itself the right to run its own code, which is the
+        // defect the authority layer exists to close and the one thing this
+        // wiring must not reintroduce.
+        //
+        // A check that holds one command has a command to plan, and a service's
+        // own command is one: a service is started by a program with an argument
+        // vector, and the mode's decision about *that* program is what lets the
+        // service door pair an admission with a `ServiceCheckSpec`. A service whose
+        // command was never planned is a service the enforcement can only stop,
+        // which is the honest answer for a program this run was not granted.
+        //
+        // A browser check holds a service too, and `P18-T010` applied the rule
+        // above to it: the program that starts its service is planned here, so the
+        // browser door can pair an admission with a `BrowserCheckSpec` exactly as
+        // the service door pairs one with a `ServiceCheckSpec`. **The page itself
+        // is not planned and has nothing to plan**: opening it starts no process
+        // and reaches no address SURE did not already reach — see
+        // `planned_check_runner.rs`, where a browser check's admission is the
+        // program that starts its service and nothing else.
+        //
+        // A detector's own observation is the one that is not a command, and it is
+        // not: it happened while the plan was being made and there is nothing left
+        // to admit.
+        //
+        // `Enforcement` has an answer for a check with no command: it is a check
+        // that launches nothing, and nothing is admitted for it.
+        let scheduled: Vec<PlannedCheck> = schedule.planned_checks();
+        debug_assert_eq!(
+            scheduled.len(),
+            schedule.checks().len(),
+            "`planned_checks` is one entry per scheduled check, in this schedule's order"
+        );
+        let mut permission_plan =
+            PermissionPlan::new(mode, fingerprint.clone(), permissions.clone());
+        for (scheduled_check, check) in schedule.checks().iter().zip(&scheduled) {
+            let command = match scheduled_check.operation() {
+                CheckOperation::Command(spec) => Some(spec),
+                CheckOperation::Service(service) => Some(service.command()),
+                CheckOperation::Browser(browser) => Some(browser.service().command()),
+                CheckOperation::Precomputed(_) => None,
+            };
+            if let Some(spec) = command {
+                permission_plan.add(check.clone(), spec.program(), spec.arguments().to_vec());
             }
         }
-        for declaration in &planned.missing {
-            results.push(declaration.not_checked(&fingerprint));
-        }
+        // The plan a report is built from, named the way a person reads it: the
+        // command they ran, `sure check` or `sure repair` or `sure recheck`
+        // (`Purpose::as_str`). The name reaches `CheckPlan::id` and nowhere else
+        // today — `Enforcement::check_plan()` is the only door onto it, the plan is
+        // not part of `RunOutcome`, and no render surface prints it — so this is
+        // the plan's identity for a caller, not a line in front of a reader.
+        let enforcement = Enforcement::of(
+            format!("sure {}", self.purpose.as_str()),
+            permission_plan,
+            &scheduled,
+        );
+
+        // The plan carried out, and the whole of what stages 5 and 6 describe.
+        //
+        // The runner's contract is one result per scheduled check, in the plan's
+        // order, and it is asked for every check — including the ones the mode
+        // stopped, whose result is the plan's own. So the results below are
+        // exactly as many as the schedule is long, and a check that produced
+        // nothing is an `Error` rather than a missing row: **there is no path
+        // from here to a check that quietly became green.**
+        //
+        // A refusal is not a shorter list of results — it is a plan this runner
+        // cannot read — so it stops the run at the stage that would have consumed
+        // the results, which is what `aggregate_run`'s own refusal does one stage
+        // later. Nothing is invented for a refusal and no repair is attempted.
+        let run_results =
+            match run_scheduled_checks(&schedule, &enforcement, &fingerprint, self.runner) {
+                Ok(results) => results,
+                Err(refusal) => {
+                    return self.stopped_at(
+                        stages,
+                        Stopped {
+                            stage: Stage::StaticChecks,
+                            detail: refusal.to_string(),
+                        },
+                    );
+                }
+            };
+
+        // The runner's results — and only those. The one kind of check it has
+        // never heard of is not pushed in here: a declared command the project
+        // does not have was never scheduled, so the runner was never handed it
+        // and nothing came back for it. Its own declaration stands in for an
+        // observation, and it is handed to `aggregate_run` beside these results
+        // at stage 10 rather than mixed into them, so that what this list holds
+        // stays *what the run reported*.
+        let mut results: Vec<CheckResult> = run_results.results().to_vec();
 
         // ---- 5. Static deterministic checks ----------------------------------
         let static_checks = schedule
@@ -728,6 +918,17 @@ impl Pipeline<'_> {
             .filter(|scheduled| !scheduled.proposal().requirements().runs_project_code())
             .count();
         let dynamic_checks = schedule.checks().len() - static_checks;
+        let stopped_static = schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| !scheduled.proposal().requirements().runs_project_code())
+            .filter(|scheduled| {
+                enforcement
+                    .stopped()
+                    .iter()
+                    .any(|result| &result.id == scheduled.proposal().id())
+            })
+            .count();
         stages.push(
             Stage::StaticChecks,
             if static_checks == 0 {
@@ -736,12 +937,13 @@ impl Pipeline<'_> {
                         .to_owned(),
                 }
             } else {
-                StageOutcome::NotRun {
-                    reason: None,
+                StageOutcome::Ran {
                     detail: format!(
                         "{static_checks} of the planned checks read your project's files and run \
-                         nothing. This build has no runner for a planned check, so none of them \
-                         reported a result and each is recorded as unknown rather than passed."
+                         nothing. Each of them has a result: {stopped_static} were stopped by the \
+                         execution mode and are recorded as not checked rather than passed, and the \
+                         rest are the runner's answer — a detector's own observation where the check \
+                         carries one, and its command's outcome where the plan holds a command."
                     ),
                 }
             },
@@ -750,7 +952,7 @@ impl Pipeline<'_> {
         // ---- 6. Approved dynamic checks --------------------------------------
         stages.push(
             Stage::DynamicChecks,
-            describe_dynamic(&schedule, dynamic_checks),
+            describe_dynamic(&schedule, &enforcement, dynamic_checks),
         );
 
         // ---- 7. Completeness analysis ----------------------------------------
@@ -773,7 +975,44 @@ impl Pipeline<'_> {
         stages.push(Stage::ClaimChecking, claim_outcome);
 
         // ---- 10. Aggregate ---------------------------------------------------
-        let report = match aggregate_run(&schedule, &results, &fingerprint) {
+        //
+        // **The project is read a second time, here, before anything is added
+        // up.** Stage 3's fingerprint is the state every result in this run
+        // names, and a run cannot notice from the inside that it has stopped
+        // being true: every result names the same state, so `aggregate_run`'s
+        // own refusal is a check on the set's consistency and never on the
+        // world. What the run has done since stage 3 is work that takes real
+        // time — a build, a test suite — and a project edited while it ran
+        // leaves exactly the stale pass `CheckResult::project_fingerprint`
+        // exists to prevent.
+        //
+        // **This is the last read that can still change anything**, which is why
+        // the pipeline takes it here: a fingerprint computed one line above
+        // `aggregate_run` covers the whole of the run's window, and one taken
+        // beside the runtime work covers a prefix of it. It is also why there is
+        // no thirteenth stage. The second read is not a phase of checking anybody
+        // asked for — nothing is discovered, planned, run or reported by it — it
+        // is a fact about whether this run's evidence is still current, so it
+        // belongs inside the stage that has to act on the answer.
+        // `Stage::Aggregate` is that stage: the results it is about to add up are
+        // the ones this changes, and a reader who wants to know what the verdict
+        // is about reads this stage's line.
+        //
+        // The page taken from the environment is the domain's own:
+        // [`StalenessReason::SupersededByLaterChange`] is the vocabulary's word
+        // for "this was checked before later changes were made", and it is quoted
+        // rather than paraphrased. The status is `Unknown`, which is the one
+        // `CheckResult::unknown` gives *SURE has evidence that supports no
+        // verdict* — never `Warning`, which `CriticalState::from_status` maps to
+        // `Passed` and which therefore blocks nothing on the checks where it
+        // matters most.
+        let current_state =
+            project_fingerprint(self.project, &fingerprint::FingerprintOptions::default());
+        let moved = stale_evidence_reason(&state, &current_state);
+        let stale = moved.as_deref().map_or_else(Vec::new, |reason| {
+            invalidate_runtime_passes(reason, &schedule, &mut results)
+        });
+        let report = match aggregate_run(&schedule, &results, &planned.missing, &fingerprint) {
             Ok(report) => report,
             Err(refusal) => {
                 return self.stopped_at(
@@ -840,11 +1079,50 @@ impl Pipeline<'_> {
             ),
             None => String::new(),
         };
+        // What the second read did, said on the stage a reader looks at for what
+        // the verdict is about. One sentence and not a paragraph: each replaced
+        // result carries the movement in its own reason, and the coverage summary
+        // lists every one of them under "could not run" — so this line says the
+        // thing only it can say, which is that there are such results at all.
+        //
+        // **The movement is said even when nothing was replaced**, which is the
+        // second arm and not an omission. `moved` and `stale` are two different
+        // facts — the project is not where stage 3 found it, and this run withdrew
+        // these passes — and a line that reported only the second would answer the
+        // first by saying nothing at all. That case is reachable on the ordinary
+        // path rather than a corner: it is every run with nothing to withdraw,
+        // which is every run whose checks read the project without running it.
+        // [`stale_evidence_reason`] answers `Some` when it could not read the
+        // project a second time *precisely so that the movement is not silently
+        // dropped*, and dropping it here would undo that decision one line later.
+        let stale_clause = match moved.as_deref() {
+            None => String::new(),
+            Some(reason) if stale.is_empty() => format!(
+                " {reason} Nothing above is replaced, because no check that ran your project's \
+                 own code was left standing as a pass — and these results describe the state \
+                 SURE read rather than the state the project is in now."
+            ),
+            Some(_) => {
+                let titles: Vec<&str> = results
+                    .iter()
+                    .filter(|result| stale.contains(&result.id))
+                    .map(|result| result.title.as_str())
+                    .collect();
+                format!(
+                    " {} of those checks ran your project's own code and the project changed \
+                     while the run was working, so their earlier results are not current: they \
+                     are not counted above as checks that produced a result, and each one says \
+                     what moved: {}.",
+                    stale.len(),
+                    titles.join(", "),
+                )
+            }
+        };
         stages.push(
             Stage::Aggregate,
             StageOutcome::Ran {
                 detail: format!(
-                    "{} {} check(s) produced a result, {} did not run.{capability_failure}",
+                    "{} {} check(s) produced a result, {} did not run.{stale_clause}{capability_failure}",
                     verdict.aggregate.headline,
                     coverage.checked_count,
                     coverage.not_checked.len(),
@@ -1340,7 +1618,7 @@ fn propose_everything(
     let mut planned = Planned::default();
 
     if let Some(node) = node_of(discovery) {
-        let checks = checks::node::NodeChecks::of(&node);
+        let checks = checks::node::NodeChecks::of(&node, &discovery.root);
         planned.missing.extend(checks.missing().iter().cloned());
         checks.add_to(builder);
 
@@ -1356,26 +1634,69 @@ fn propose_everything(
         }
     }
     if let Some(python) = python_of(discovery) {
-        let checks = checks::python::PythonChecks::of(&python);
+        let checks = checks::python::PythonChecks::of(&python, &discovery.root);
         planned.missing.extend(checks.missing().iter().cloned());
         checks.add_to(builder);
     }
     if let Some(rust) = rust_of(discovery) {
-        let checks = checks::rust::RustChecks::of(&rust);
+        let checks = checks::rust::RustChecks::of(&rust, &discovery.root);
         planned.missing.extend(checks.missing().iter().cloned());
         checks.add_to(builder);
     }
 
+    // The project's own declared services, planned **outside** the three blocks
+    // above and not inside any of them. A declaration names its launcher, its
+    // port, its readiness path and its page, and none of that is a fact about an
+    // ecosystem: the `node` block's probes need a discovered Node project, while
+    // a service only needs the project to have said, in its own file, what to
+    // start. A declaration that is refused, a check no preference plans and a
+    // declaration that became nothing are each recorded rather than dropped —
+    // which is what makes this stage's report able to say so.
+    let services = ServicePlan::of(&discovery.root, preferences);
+    planned.services = services.services().len();
+    planned.service_refusals = services.refusals().to_vec();
+    planned.service_gaps = services.gaps().to_vec();
+    services.add_to(builder);
+
     // Stage 7's own proposals are planned too: a candidate SURE can see is a check
     // SURE would run, and leaving them out of the plan would make the plan a
     // shorter and greener thing than the run.
+    //
+    // **The observation beside each is the one every one of these scanners made:
+    // a reading, and nothing settled by it.** Stage 7 reads source files and
+    // never runs the project, so a candidate it found is a
+    // `StaticObservation::Candidate` with the place it was read from in the
+    // sentence — the one answer that claims neither a pass nor a defect. It is
+    // not `CouldNotRun`: a scanner that could not read a file produced no
+    // proposal for it, and the reading that did happen is what this carries.
+    //
+    // Nothing here changes how the plan is assembled: the proposal, the missing
+    // commands and the refusals are exactly what they were before.
     for proposal in completeness_proposals(discovery, intent) {
         // A refusal is remembered by the builder rather than lost, and the plan
         // stage reports it. Nothing here second-guesses the decision.
-        drop(builder.propose(proposal));
+        let observation = reading_observation(&proposal);
+        drop(builder.propose(PlannedWork::new(proposal, observation)));
     }
 
     planned
+}
+
+/// The work beside one stage-7 candidate: the reading that produced it.
+///
+/// The sentence is [`CheckReason::plain_description`] — the same rendering the
+/// report prints — with this stage's own clause after it, so the check's
+/// evidence and its reason name one place rather than two that agree today.
+/// [`crate::false_completion_aggregator`] files these as candidates, and a
+/// candidate is what the placeholder used to say on their behalf: since
+/// `P18-T004` each scanner says it in its own words, and stage 7 says it here
+/// because this loop is where five scanners and the intent comparison meet.
+fn reading_observation(proposal: &CheckProposal) -> CheckOperation {
+    CheckOperation::Precomputed(PrecomputedEvidence::candidate(format!(
+        "{} Nothing has settled it: it was read from the source, and no command has \
+         been run for it.",
+        proposal.reason().plain_description()
+    )))
 }
 
 /// Stage 7: the completeness scanners, and the aggregator that orders them.
@@ -1517,7 +1838,7 @@ fn describe_intent(intent: &ProjectIntent) -> String {
 fn describe_plan(
     schedule: &CheckSchedule,
     refused: &[ProposalRefused],
-    probe_refusal: Option<&PlanRefused>,
+    planned: &Planned,
 ) -> String {
     let mut parts = vec![format!(
         // "stopped by the mode" rather than "was stopped": the count is
@@ -1540,44 +1861,253 @@ fn describe_plan(
                 .join("; ")
         ));
     }
-    if let Some(refusal) = probe_refusal {
+    if let Some(refusal) = planned.probe_refusal.as_ref() {
         parts.push(format!("the runtime probes were not planned: {refusal}."));
+    }
+    // What part of the plan came from the project's own file rather than from
+    // what discovery found. It is stated beside the refusals rather than folded
+    // into the count above, because a reader has to be able to tell *this project
+    // declared nothing* from *it declared a service and that service is one of
+    // the checks counted*. The second is what a project that took the trouble to
+    // write a declaration is owed, and a count alone would read as the first.
+    if planned.services > 0 {
+        parts.push(format!(
+            "{} of them are services the project declared in {}.",
+            planned.services,
+            crate::config::Config::FILE_NAME,
+        ));
+    }
+    // A declaration SURE would not act on is stated the same way a proposal the
+    // builder refused is, and for the same reason: the project asked for a check
+    // and the answer is *no, and here is why*. A silent drop would leave a report
+    // whose plan is short by one service and says nothing about the one.
+    if !planned.service_refusals.is_empty() {
+        parts.push(format!(
+            "{} declared service(s) could not become a check: {}.",
+            planned.service_refusals.len(),
+            planned
+                .service_refusals
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+    // The other answer to the same question, and the one a report has to state
+    // rather than leave to the reader: a service row can be missing because SURE
+    // refused the declaration and because the project's own setting declined it,
+    // and those two send a person to different places. `docs/architecture/
+    // EXECUTION_SAFETY.md` makes the distinction the reason the sentences exist —
+    // *this project switched it off* against *SURE does not open a page on a
+    // guess* — so every sentence below names which setting decided, and the
+    // lead-in claims only what is true of all of them.
+    if !planned.service_gaps.is_empty() {
+        parts.push(format!(
+            "{} declared service(s) were planned with a check left out, and each says why: {}.",
+            planned.service_gaps.len(),
+            planned
+                .service_gaps
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
     }
     parts.join(" ")
 }
 
-fn describe_dynamic(schedule: &CheckSchedule, dynamic: usize) -> StageOutcome {
+/// Stage 6, in the terms of what the run did with each dynamic check.
+///
+/// **The enforcement's answer and not the schedule's**, because the two are two
+/// views of one decision and it is the enforcement's that stops a command: a
+/// check the plan allowed whose command the mode did not admit is stopped here,
+/// and a stage that read `schedule.blocked()` would report it as one that ran.
+/// `run_scheduled_checks` asks the same two questions in the same order, so this
+/// description and that result set cannot disagree about which checks ran.
+fn describe_dynamic(
+    schedule: &CheckSchedule,
+    enforcement: &Enforcement,
+    dynamic: usize,
+) -> StageOutcome {
     if dynamic == 0 {
         return StageOutcome::NotPartOfWork {
             detail: "no check in the plan would run your project's code.".to_owned(),
         };
     }
-    let blocked: Vec<&str> = schedule
-        .blocked()
-        .filter(|scheduled: &&ScheduledCheck| {
-            scheduled.proposal().requirements().runs_project_code()
+    let dynamic_checks = || {
+        schedule
+            .checks()
+            .iter()
+            .filter(|scheduled: &&ScheduledCheck| {
+                scheduled.proposal().requirements().runs_project_code()
+            })
+    };
+    let stopped: Vec<&str> = dynamic_checks()
+        .filter(|scheduled| {
+            enforcement
+                .stopped()
+                .iter()
+                .any(|result| &result.id == scheduled.proposal().id())
         })
         .map(|scheduled| scheduled.proposal().title())
         .collect();
-    if blocked.is_empty() {
+    if stopped.len() == dynamic {
         return StageOutcome::NotRun {
-            reason: None,
+            reason: Some(NotCheckedReason::ExecutionNotAuthorized),
             detail: format!(
-                "{dynamic} check(s) would run your project's code and the mode allows it. This \
-                 build has no runner for a planned check, so none of them ran and each is \
-                 recorded as unknown rather than passed."
+                "{dynamic} check(s) would run your project's code and the execution mode stopped \
+                 every one of them, so none was carried out and each is recorded as not checked \
+                 rather than passed: {}.",
+                stopped.join(", ")
+            ),
+        };
+    }
+    if stopped.is_empty() {
+        return StageOutcome::Ran {
+            detail: format!(
+                "{dynamic} check(s) would run your project's code and the execution mode allowed \
+                 them. Each one has a result: the runner reports one for every scheduled check, \
+                 and a check it produced nothing for is an error rather than a pass."
             ),
         };
     }
     StageOutcome::NotRun {
         reason: Some(NotCheckedReason::ExecutionNotAuthorized),
         detail: format!(
-            "{dynamic} check(s) would run your project's code. {} of them were stopped by the \
-             execution mode and are recorded as not checked: {}.",
-            blocked.len(),
-            blocked.join(", ")
+            "{dynamic} check(s) would run your project's code. The execution mode stopped {} of \
+             them and those are recorded as not checked: {}. The rest were carried out and each \
+             has a result.",
+            stopped.len(),
+            stopped.join(", ")
         ),
     }
+}
+
+/// Why a run's results may no longer describe the project, if they may not.
+///
+/// **The whole of clause one, read against the world rather than against the
+/// value.** [`CheckResult::project_fingerprint`] binds every result to the state
+/// that produced it and `aggregate_run` refuses a set whose members name
+/// different states — and neither of those can see the project. Every result in
+/// one run names the one state stage 3 took, so the refusal is a check on the
+/// set and never on the world, and a run whose project moved has no member of
+/// the set that disagrees. `before` is that state, `after` is the project read
+/// again, and the comparison is [`ProjectFingerprint::matches`] — `kind` and
+/// `digest`, never the `id`, which is freshly generated per computation and would
+/// differ for two reads of one unchanged project.
+///
+/// `None` is the ordinary answer: the project is where stage 3 found it, nothing
+/// is replaced, and a run that only built its own caches lands here. `Some` is
+/// the reason, written once and quoted by every result the answer replaces.
+///
+/// **A project SURE could not read again is not a project that stayed still.**
+/// The error arm answers `Some`, because the honest statement is that SURE could
+/// not tell — and of the two ways to be wrong about that, invalidating evidence
+/// SURE could not confirm is the one that costs a repeated check rather than a
+/// green about a project nobody looked at twice.
+fn stale_evidence_reason(
+    before: &ProjectFingerprint,
+    after: &Result<ProjectFingerprint, fingerprint::FingerprintError>,
+) -> Option<String> {
+    match after {
+        Ok(after) if before.matches(after) => None,
+        Ok(after) => Some(format!(
+            "{} SURE took this project's fingerprint as {} before the run's checks were carried \
+             out, and the project is now at {}.",
+            StalenessReason::SupersededByLaterChange.plain_explanation(),
+            before.digest,
+            after.digest,
+        )),
+        Err(error) => Some(format!(
+            "SURE could not take the project's fingerprint again after the run's checks were \
+             carried out, so it cannot confirm that this still describes the project: {error}"
+        )),
+    }
+}
+
+/// Replace every pass whose evidence came from running the project's own code
+/// now that the project is not the one that evidence is about.
+///
+/// Returns the checks it replaced, in plan order, so that the stage which has to
+/// say what happened and the results themselves are answering from one rule
+/// rather than from two that agree today.
+///
+/// # What is replaced, and what is deliberately not
+///
+/// **Only a `Pass`.** [`CheckResult::blocks_green`] is what the verdict turns on,
+/// and a result that already failed, warned, could not run or established nothing
+/// is not a pass that could stand as current — replacing one would cost a finding
+/// the run actually made (a failing test is the most useful thing a runtime
+/// check produces) and would buy no safety at all, because none of those statuses
+/// is green. `Pass` is the only status this rule can be about, which is why the
+/// clause it implements is phrased about an *earlier pass* and not about an
+/// earlier result.
+///
+/// **Only a check whose evidence came from a process**, which is
+/// [`CheckOperation::starts_a_process`]: a check whose operation is
+/// [`CheckOperation::Precomputed`] has evidence SURE can read again, and every
+/// other operation started something whose execution is over by the time this
+/// runs.
+///
+/// **That predicate used to be the consent one, and a browser check is where the
+/// two part.** `requirements().runs_project_code()` answers *would this need the
+/// user's permission to run project code*, and a browser probe does not: it
+/// connects to a service SURE started, under `connect_service`, which is why
+/// `ActionKind::BrowserProbe` is deliberately not one of the actions
+/// `ActionKind::executes_project_code` lists. That is the right answer to the
+/// consent question and the wrong one to this one — a page row's evidence is a
+/// page served by the project's own service, so it is about an execution that has
+/// ended in exactly the way the service row's is. Reading the consent predicate
+/// here **kept a `Pass`** that said a page answered, about a project that had
+/// since moved, while withdrawing the `Pass` beside it about the service that
+/// served that page: a false green, and the failure this repository treats as
+/// worse than a visible error. So this rule asks the question it is about, and
+/// stages 5 and 6 go on asking theirs.
+///
+/// The status is [`CheckStatus::Unknown`] with a reason — not `Warning`, which
+/// maps to `CriticalState::Passed` and so blocks nothing on a critical check, and
+/// not `Skipped`, which would read as a decision somebody made when nobody did.
+///
+/// The result keeps **its own** `project_fingerprint`. That is not an oversight
+/// and the alternative is worse in both directions: binding it to the newer state
+/// would make `aggregate_run` refuse the whole set and leave the run with no
+/// verdict at all, and binding it to the older state is simply true — the run is
+/// about the state stage 3 read, every other result in it is about that state,
+/// and this result is SURE saying it may not be carried forward to the one that
+/// is there now. Which state that is, is in the reason.
+fn invalidate_runtime_passes(
+    reason: &str,
+    schedule: &CheckSchedule,
+    results: &mut [CheckResult],
+) -> Vec<CheckId> {
+    let mut replaced: Vec<CheckId> = Vec::new();
+    for scheduled in schedule.checks() {
+        if !scheduled.operation().starts_a_process() {
+            continue;
+        }
+        let id = scheduled.proposal().id();
+        let Some(result) = results.iter_mut().find(|result| &result.id == id) else {
+            continue;
+        };
+        if result.status != CheckStatus::Pass {
+            continue;
+        }
+        *result = CheckResult::unknown(
+            id.clone(),
+            result.title.clone(),
+            result.severity,
+            result.critical,
+            // The class a result SURE cannot stand behind carries: `unknown`'s own
+            // documentation keeps this a parameter rather than a default *because*
+            // this is the case that needs one — the check did observe something,
+            // and what it observed is not about the project in front of a reader.
+            EvidenceClass::Unknown,
+            result.project_fingerprint.clone(),
+        )
+        .with_reason(reason.to_owned());
+        replaced.push(id.clone());
+    }
+    replaced
 }
 
 fn describe_candidates(candidates: &Candidates) -> String {
@@ -1597,6 +2127,11 @@ fn describe_candidates(candidates: &Candidates) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    use crate::planned_check_runner::ProcessRunner;
+    use crate::planned_work::CommandRun;
+    use crate::process::{Cancellation, CapturedOutput, Outcome, Termination};
 
     #[test]
     fn every_purpose_performs_a_contiguous_run_of_the_documented_stages() {
@@ -1766,6 +2301,7 @@ mod tests {
 
         let store = Store::open_at(&store_dir.join("sure.db")).expect("the store opens");
         let config = Config::default();
+        let runner = nothing_starts();
         let run_recheck = |store: &Store| {
             Pipeline {
                 project: &project,
@@ -1774,6 +2310,7 @@ mod tests {
                 execution: ExecutionSettings::inspect_only(),
                 store: Some(store),
                 goal: None,
+                runner: &runner,
             }
             .run()
         };
@@ -1896,6 +2433,999 @@ mod tests {
             !saturated.is_green(),
             "a run whose stage 12 could not read what the last run left open reported itself \
              as clean"
+        );
+    }
+
+    // --- what a run may start, read rather than argued --------------------
+
+    /// A runner that starts nothing, because a stop has already been asked for.
+    ///
+    /// **This is the product's own runner with one thing already decided**, and
+    /// that is the point of using it here rather than a fake: `process::run`
+    /// checks whether a stop has been asked for *before* it spawns anything, so
+    /// the answer this runner gives — [`Termination::CancelledBeforeStart`] — is
+    /// a real answer the product really produces, and no process can have been
+    /// started to produce it. A fake returning a canned pass would be able to
+    /// agree with this one on everything except the thing being measured.
+    ///
+    /// [`Termination::CancelledBeforeStart`]: crate::process::Termination::CancelledBeforeStart
+    fn nothing_starts() -> ProcessRunner {
+        let stop = Cancellation::new();
+        stop.cancel();
+        ProcessRunner::new(stop)
+    }
+
+    /// A runner that records every command it is handed, and starts nothing.
+    ///
+    /// The recording is the measurement: it answers *was the runner reached at
+    /// all?*, which is the question the acceptance's second clause is about and
+    /// a question a silenced runner could not answer. The answer it returns is
+    /// [`nothing_starts`]'s.
+    ///
+    /// `run_service` is unreachable through the runs this file makes — a
+    /// [`CheckOperation::Service`] is planned by [`crate::service_plan`], and every
+    /// run here is configured by `Config::default()`, which declares none — so it
+    /// records the check's identity and delegates to the same cancelled runner
+    /// rather than pretending to answer. It is here rather than defaulted on the
+    /// trait because a runner that *cannot* be asked to start a service is a
+    /// different claim from one that answers nothing to every question.
+    ///
+    /// [`CheckOperation::Service`]: crate::planned_work::CheckOperation::Service
+    #[derive(Debug)]
+    struct Recording {
+        asked: RefCell<Vec<String>>,
+        services: RefCell<Vec<String>>,
+        browsers: RefCell<Vec<String>>,
+        runner: ProcessRunner,
+    }
+
+    impl Recording {
+        fn new() -> Self {
+            Self {
+                asked: RefCell::new(Vec::new()),
+                services: RefCell::new(Vec::new()),
+                browsers: RefCell::new(Vec::new()),
+                runner: nothing_starts(),
+            }
+        }
+
+        /// What the runner was asked to run, in the order it was asked.
+        fn asked(&self) -> Vec<String> {
+            self.asked.borrow().clone()
+        }
+
+        /// Which checks were handed to it as services, in order.
+        fn services(&self) -> Vec<String> {
+            self.services.borrow().clone()
+        }
+
+        /// Which checks were handed to it as browser pages, in order.
+        ///
+        /// The third half of the same seam, kept apart from the other two for the
+        /// reason the two above are kept apart: *this check went to the browser
+        /// door* and *this check went to the service door* are different
+        /// measurements, and one list could not tell them apart.
+        fn browsers(&self) -> Vec<String> {
+            self.browsers.borrow().clone()
+        }
+    }
+
+    impl CheckRunner for Recording {
+        fn run(
+            &self,
+            work: &crate::planned_check_runner::AdmittedRun<'_>,
+        ) -> crate::planned_work::CommandRun {
+            let spec = work.command();
+            self.asked.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            self.runner.run(work)
+        }
+
+        fn run_service(
+            &self,
+            work: &crate::planned_check_runner::AdmittedService<'_>,
+        ) -> CheckResult {
+            let spec = work.service().command();
+            self.services.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            self.runner.run_service(work)
+        }
+
+        /// Records the page and hands it to the real runner, which has no browser
+        /// driver and therefore answers with an `Error`.
+        ///
+        /// **The delegation is the point**: this fake decides nothing about a
+        /// browser, so if a planner emits one, the answer is
+        /// [`ProcessRunner`]'s own — *SURE was not given a browser driver* — and
+        /// not a status invented in a test. It is also why this arm is recorded
+        /// separately rather than folded into `asked`: the page is not a command,
+        /// and a test that could not tell the two apart could not tell a browser
+        /// check reaching the browser door from one reaching the wrong one.
+        fn run_browser(
+            &self,
+            work: &crate::planned_check_runner::AdmittedBrowser<'_>,
+        ) -> CheckResult {
+            let spec = work.browser();
+            self.browsers
+                .borrow_mut()
+                .push(format!("{} {}", spec.loopback_url(), spec.path()));
+            self.runner.run_browser(work)
+        }
+    }
+
+    /// A small Rust project on disk, under a directory of this test's own.
+    ///
+    /// Rust because its declared checks are the ones this build turns into
+    /// commands it would have to run: `cargo check --all-targets`, `cargo
+    /// clippy --all-targets` and `cargo test` all run the project's code, so a
+    /// run that carries one of them out is a run that starts a process.
+    fn a_rust_project(name: &str) -> std::path::PathBuf {
+        let root = crate::store::scratch_root().join(format!("{name}-{}", std::process::id()));
+        match std::fs::remove_dir_all(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot clear {}: {error}", root.display()),
+        }
+        std::fs::create_dir_all(root.join("src")).expect("a scratch project directory");
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"thing\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("a manifest");
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn add(a: u32, b: u32) -> u32 {\n    a + b\n}\n",
+        )
+        .expect("a source file");
+        std::fs::write(
+            root.join("README.md"),
+            "# A project SURE was pointed at\n\nIt is small on purpose: what this test is about is \
+             what SURE would run for it.\n",
+        )
+        .expect("a project file");
+        root
+    }
+
+    /// The checks in a run's plan that would run the project's own code.
+    fn would_run_the_project_code(run: &RunOutcome) -> Vec<String> {
+        run.schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| scheduled.proposal().requirements().runs_project_code())
+            .map(|scheduled| scheduled.proposal().title().to_owned())
+            .collect()
+    }
+
+    /// The second acceptance clause, read rather than promised.
+    ///
+    /// **What is measured is the number of commands the runner was handed**, and
+    /// the instrument is a runner that records every one and starts nothing —
+    /// see [`Recording`]. Under [`ExecutionSettings::inspect_only`] the plan
+    /// holds checks that would run this project's code and the mode admits none
+    /// of them, so the recording must be empty: not "a process was reported as
+    /// stopped", but *the runner was never reached*. The guard below is what
+    /// makes that a measurement rather than a walk over an empty plan — a
+    /// fixture that planned nothing dynamic would satisfy the empty recording
+    /// while measuring nothing, which is the shape of a test that cannot fail.
+    #[test]
+    fn a_run_a_user_did_not_grant_starts_nothing() {
+        let project = a_rust_project("pipeline-inspect-only");
+        let config = Config::default();
+        let runner = Recording::new();
+
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: ExecutionSettings::inspect_only(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::InspectOnly);
+        assert!(
+            !run.permissions.run_project_code,
+            "the default settings grant execution, so this test is not measuring the default"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(
+            !dynamic.is_empty(),
+            "this project planned no check that would run its code, so an empty recording would \
+             measure nothing: {:?}",
+            run.schedule.plain_description()
+        );
+
+        let asked = runner.asked();
+        assert!(
+            asked.is_empty(),
+            "a run the user granted nothing started {} command(s): {asked:?}",
+            asked.len()
+        );
+        let services = runner.services();
+        assert!(
+            services.is_empty(),
+            "a run the user granted nothing started {} service(s): {services:?}",
+            services.len()
+        );
+    }
+
+    #[test]
+    fn a_user_requesting_a_container_never_reaches_the_host_runner() {
+        let project = a_rust_project("pipeline-container-refused");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: container\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let runner = Recording::new();
+        let config = Config::default();
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::Container);
+        assert!(
+            run.permissions.run_project_code,
+            "the user's grant must be real"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(!dynamic.is_empty(), "the fixture must plan project code");
+        assert!(runner.asked().is_empty(), "the host runner was reached");
+        assert!(runner.services().is_empty(), "a host service was reached");
+        assert!(
+            runner.browsers().is_empty(),
+            "a host browser check was reached"
+        );
+        for result in run.report.results() {
+            if dynamic.contains(&result.title) {
+                assert_eq!(result.status, sure_domain::status::CheckStatus::Skipped);
+                assert_eq!(
+                    result.not_checked_reason,
+                    Some(NotCheckedReason::ContainerExecutionUnavailable),
+                    "{}: {}",
+                    result.title,
+                    result.reason
+                );
+                if result.critical {
+                    assert!(result.blocks_green());
+                }
+            }
+        }
+    }
+
+    /// The control for the measurement above, and the proof the seam is live.
+    ///
+    /// The same project and the same runner, with the user's own configuration
+    /// file granting execution. One thing moves, and it is the user's file — read
+    /// through [`Authority::load`], which is the route `sure check` reads it by
+    /// rather than a literal handed to the pipeline.
+    ///
+    /// Two readings, and the second is why this test is here at all. The runner
+    /// **is** reached now, which is what stops the first test from being
+    /// satisfied by a stage that never consults a runner at all. And what comes
+    /// back for those checks is *nothing ran* — this runner has been asked to
+    /// stop before it started — reported as an `Error` and never as a pass, which
+    /// is the same false-green rule read from the other side.
+    #[test]
+    fn a_run_a_user_granted_reaches_the_runner_and_is_never_reported_as_passed() {
+        let project = a_rust_project("pipeline-granted");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+        let runner = Recording::new();
+
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert_eq!(run.mode, ExecutionMode::HostConfirmed);
+        assert!(
+            run.permissions.run_project_code,
+            "the user's own file did not move the mode, so this test is not the control it claims \
+             to be"
+        );
+        let dynamic = would_run_the_project_code(run);
+        assert!(
+            !dynamic.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            run.schedule.plain_description()
+        );
+
+        let asked = runner.asked();
+        assert!(
+            !asked.is_empty(),
+            "the user granted execution and the runner was never reached, so the run above is \
+             satisfied by a runner nothing consults: {dynamic:?}"
+        );
+        // The other two doors of the same seam are **not** reached here, and since
+        // `P18-T012`'s follow-up that is a fact about this run rather than about the
+        // build: a project that declares a service in `checks.services` gets a
+        // `CheckOperation::Service` from `crate::service_plan`, and a declaration
+        // that names a page gets a `CheckOperation::Browser` beside it. This run is
+        // configured by `Config::default()`, which declares neither. The wiring
+        // that would carry one out is measured in `planned_check_runner.rs` with a
+        // runner that starts nothing, because a test that made this path live would
+        // have to start a real service.
+        //
+        // Asserted for both doors and not just the one: `pipeline.rs` now plans a
+        // browser check's *service* command into the permission plan, so a planner
+        // that emitted one would be admitted rather than stopped, and a run that
+        // carried a page out would reach the runner as a browser check and not as
+        // a service. An assertion about `services()` alone would not see it.
+        assert!(
+            runner.services().is_empty(),
+            "this run declares no service, so nothing should have been handed to the runner as \
+             one: {:?}",
+            runner.services()
+        );
+        assert!(
+            runner.browsers().is_empty(),
+            "this run declares no page, so nothing should have been handed to the runner as a \
+             browser check: {:?}",
+            runner.browsers()
+        );
+        for result in run.report.results() {
+            if dynamic.contains(&result.title) {
+                // `Error`, and not merely "not `Pass`". The weaker assertion is
+                // the one a reader writes first, and it is not enough here:
+                // `CriticalState::from_status` maps `Warning` to `Passed`, so a
+                // regression that made this arm a warning would satisfy
+                // `!= Pass` and put a green on the check that matters most. The
+                // doc comment above says `Error`; this is it as a measurement.
+                assert_eq!(
+                    result.status,
+                    sure_domain::status::CheckStatus::Error,
+                    "{} was admitted, the runner started nothing, and the run reports it as \
+                     something other than an error: {}",
+                    result.title,
+                    result.reason
+                );
+                assert!(
+                    result
+                        .reason
+                        .contains("cancelled before the command was started"),
+                    "{} is reported with a reason that does not say what happened: {}",
+                    result.title,
+                    result.reason
+                );
+            }
+        }
+    }
+
+    // --- the project, read a second time ----------------------------------
+
+    /// The identities of the checks in a run's plan whose evidence came from a
+    /// process, in plan order.
+    ///
+    /// The predicate [`invalidate_runtime_passes`] itself uses —
+    /// [`CheckOperation::starts_a_process`] and not the consent predicate stages
+    /// 5 and 6 split the plan by — rather than a list of titles, so this test and
+    /// the pipeline agree on what "runtime evidence" is by construction. The two
+    /// predicates part on a browser row, for the reason the production function
+    /// records: a page row's evidence is about an execution and its permission is
+    /// not `run_project_code`, so a helper that asked the consent question here
+    /// would quietly stop covering the row this rule was repaired for.
+    fn runtime_check_ids(run: &RunOutcome) -> Vec<CheckId> {
+        run.schedule
+            .checks()
+            .iter()
+            .filter(|scheduled| scheduled.operation().starts_a_process())
+            .map(|scheduled| scheduled.proposal().id().clone())
+            .collect()
+    }
+
+    /// A run's results as `(title, status)` pairs, for a failing assertion's
+    /// message.
+    fn statuses(results: &[&CheckResult]) -> Vec<(String, CheckStatus)> {
+        results
+            .iter()
+            .map(|result| (result.title.clone(), result.status))
+            .collect()
+    }
+
+    /// The stage line a reader of this run sees for one stage.
+    fn stage_detail(outcome: &PipelineOutcome, stage: Stage) -> String {
+        outcome
+            .stages
+            .iter()
+            .find(|record| record.stage == stage)
+            .unwrap_or_else(|| panic!("a finished run has a record for every stage"))
+            .outcome
+            .detail()
+            .to_owned()
+    }
+
+    /// The third acceptance clause, **measured rather than argued**.
+    ///
+    /// The second reading in the run below would fire on every honest run if a
+    /// build moved the fingerprint, so the rule is stated for the trees a build
+    /// legitimately writes rather than pretending those trees do not exist. The
+    /// tree already carries the answer — the scan's ignore tables *are* the
+    /// fingerprint's coverage, so `target/`, `node_modules/` and SURE's own
+    /// `.sure/` are outside the walk — and this is that answer as a reading
+    /// rather than a second statement of it.
+    ///
+    /// **The last third is the control, and without it this test could not
+    /// fail.** A fingerprint that answered `matches` for every pair would
+    /// satisfy both readings above while measuring nothing, so the same fixture
+    /// then gets a file the walk *does* cover — a generated module under `src/`.
+    /// That is the honest limit of the rule and it is not papered over: a build
+    /// that writes a generated source file, or regenerates a lockfile, has
+    /// genuinely changed the project, and a run that caused that has genuinely
+    /// invalidated its own evidence.
+    #[test]
+    fn a_builds_own_caches_do_not_move_the_fingerprint() {
+        let project = a_rust_project("pipeline-caches");
+        let now = || {
+            project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+                .expect("this fixture is readable")
+        };
+
+        let before = now();
+        for (tree, file) in [
+            ("target", "debug/thing.exe"),
+            ("node_modules", "left-pad/index.js"),
+            (crate::paths::PROJECT_CACHE_DIR, "evidence/current.json"),
+        ] {
+            let path = project.join(tree).join(file);
+            std::fs::create_dir_all(path.parent().expect("a parent directory"))
+                .expect("a cache directory a build would write");
+            std::fs::write(&path, b"a build wrote this").expect("a cache file a build would write");
+        }
+        let after = now();
+        assert!(
+            before.matches(&after),
+            "a build writing its own caches moved the fingerprint, so every honest run would \
+             invalidate its own evidence: {} became {}",
+            before.digest,
+            after.digest
+        );
+
+        std::fs::write(
+            project.join("src").join("generated.rs"),
+            "pub fn generated() -> u32 {\n    7\n}\n",
+        )
+        .expect("a generated source file");
+        let moved = now();
+        assert!(
+            !after.matches(&moved),
+            "a file the walk covers did not move the fingerprint, so the reading above measures \
+             nothing: both are {}",
+            after.digest
+        );
+    }
+
+    /// A runner that answers *the command passed*, and writes a file first.
+    ///
+    /// **It starts nothing.** The seam `P18-T007` added exists so that the wired
+    /// path is measurable with a runner that records being called and starts no
+    /// process, and this test would be worth nothing without it: a real `cargo
+    /// test` would measure the machine rather than the pipeline, and the one
+    /// thing this test needs — a project that moves *while the run is working* —
+    /// can only be arranged from inside the window the project's own checks
+    /// occupy.
+    ///
+    /// The answer it returns is a real shape rather than a convenience: an
+    /// [`Outcome`] whose process exited with code 0 and whose streams SURE holds
+    /// whole is exactly what [`CommandRun::to_result`] reports as a `Pass`, and a
+    /// pass is the only thing this test is about — it is the status a stale
+    /// result must not be left standing as.
+    #[derive(Debug)]
+    struct Moves {
+        /// Written, in order, every time the runner is asked to run anything.
+        writes: Vec<std::path::PathBuf>,
+        /// Every command it was handed, so a test can show it was reached.
+        asked: RefCell<Vec<String>>,
+        /// The exit code it answers with. `Some(0)` is the pass a stale result
+        /// must not be left standing as; anything else is a finding the run made,
+        /// which the stale rule is deliberately not about.
+        exit: Option<i32>,
+    }
+
+    impl CheckRunner for Moves {
+        fn run(
+            &self,
+            work: &crate::planned_check_runner::AdmittedRun<'_>,
+        ) -> crate::planned_work::CommandRun {
+            let spec = work.command();
+            self.asked.borrow_mut().push(format!(
+                "{} {}",
+                spec.program().to_string_lossy(),
+                spec.arguments()
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            for path in &self.writes {
+                std::fs::create_dir_all(path.parent().expect("a parent directory"))
+                    .expect("a directory for the write");
+                std::fs::write(path, b"written while the run was working")
+                    .expect("a write inside the run's window");
+            }
+            CommandRun::Ran(Outcome::new(
+                spec.program().to_owned(),
+                Termination::Exited { code: self.exit },
+                CapturedOutput::empty(),
+                CapturedOutput::empty(),
+                std::time::SystemTime::now(),
+                std::time::Duration::ZERO,
+            ))
+        }
+
+        /// Unreachable through the runs this file makes, and answered the way
+        /// everything unreachable in this file is: with an `Error`.
+        ///
+        /// A `CheckOperation::Service` is planned by `crate::service_plan`, and
+        /// every run here is configured by `Config::default()`, which declares no
+        /// service — so a test that needed this arm would have to plan one by hand,
+        /// and a test that made it live would have to start a real service. An
+        /// `Error` rather than a pass, so that a future path reaching it without
+        /// measuring anything cannot look like a success — the same rule the rest
+        /// of this file is written under.
+        fn run_service(
+            &self,
+            work: &crate::planned_check_runner::AdmittedService<'_>,
+        ) -> CheckResult {
+            let check = work.admitted().command().check();
+            self.asked
+                .borrow_mut()
+                .push(format!("service {}", check.id()));
+            CheckResult::errored(
+                check.id().clone(),
+                check.title().to_owned(),
+                check.severity(),
+                check.critical(),
+                "this run declares no service and this runner starts nothing, so a service check \
+                 reaching it is not a result",
+                work.fingerprint().clone(),
+            )
+        }
+
+        /// Unreachable through the runs this file makes for the same reason and
+        /// for one more: a `CheckOperation::Browser` needs a declaration that
+        /// names a page, and this runner was given no browser driver even if one
+        /// arrived.
+        fn run_browser(
+            &self,
+            work: &crate::planned_check_runner::AdmittedBrowser<'_>,
+        ) -> CheckResult {
+            let check = work.admitted().command().check();
+            self.asked
+                .borrow_mut()
+                .push(format!("browser {}", check.id()));
+            CheckResult::errored(
+                check.id().clone(),
+                check.title().to_owned(),
+                check.severity(),
+                check.critical(),
+                "this run declares no page and this runner holds no browser driver, so a browser \
+                 check reaching it is not a result",
+                work.fingerprint().clone(),
+            )
+        }
+    }
+
+    /// The second acceptance clause, in both directions, over the real pipeline.
+    ///
+    /// **Two runs of the same project with the same runner, differing in one
+    /// thing: which file the runner writes while the run's checks are being
+    /// carried out.** The runner is [`Moves`], and it answers every admitted
+    /// command with a clean exit — so every runtime check comes back `Pass`,
+    /// which is what makes the second run a measurement rather than a run that
+    /// never had a pass to lose.
+    ///
+    /// - **The control** writes only where a build legitimately writes, into
+    ///   `target/` and `node_modules/`. Those same checks are still `Pass`, which
+    ///   is the other half of the clause: a rule that invalidated on any write to
+    ///   the tree would fail here, and a fingerprint that moves when the project
+    ///   did not teaches a reader to stop reading the word "stale".
+    /// - **The run whose project moved** writes a file the walk covers, and the
+    ///   checks that had passed come back `Unknown`, carrying the domain
+    ///   vocabulary's own sentence and the digest of the state the project is
+    ///   *actually* in.
+    ///
+    /// Two guard assertions keep this from being a test that cannot fail: the
+    /// runner must have been reached, and at least one runtime check must have
+    /// come back `Pass` in the control. The project's movement is measured too —
+    /// the fingerprint is taken again after the run and the run's own state is
+    /// asserted not to match it.
+    #[test]
+    fn a_project_that_moved_under_a_run_leaves_no_pass_from_running_it_standing() {
+        let project = a_rust_project("pipeline-moved");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+
+        let run_writing = |writes: Vec<std::path::PathBuf>| {
+            let runner = Moves {
+                writes,
+                asked: RefCell::new(Vec::new()),
+                exit: Some(0),
+            };
+            let outcome = Pipeline {
+                project: &project,
+                purpose: Purpose::Check,
+                config: &config,
+                execution: authority.execution(),
+                store: None,
+                goal: None,
+                runner: &runner,
+            }
+            .run();
+            let asked = runner.asked.borrow().clone();
+            (outcome, asked)
+        };
+
+        // The control: the same runner, writing only where a build writes.
+        let (control_outcome, control_asked) = run_writing(vec![
+            project.join("target").join("debug").join("thing.exe"),
+            project
+                .join("node_modules")
+                .join("left-pad")
+                .join("index.js"),
+        ]);
+        let control = control_outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the control run stopped: {:?}", control_outcome.stopped_at));
+        assert_eq!(control.mode, ExecutionMode::HostConfirmed);
+        assert!(
+            control.permissions.run_project_code,
+            "the user's own file did not move the mode, so the runs below are not the granted runs \
+             they claim to be"
+        );
+        assert!(
+            !control_asked.is_empty(),
+            "the user granted execution and the runner was never reached, so there is no pass to \
+             lose and the second run measures nothing: {:?}",
+            control.schedule.plain_description()
+        );
+        let runtime_ids = runtime_check_ids(control);
+        assert!(
+            !runtime_ids.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            control.schedule.plain_description()
+        );
+        let runtime_in_control: Vec<&CheckResult> = control
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        let passed_in_control: Vec<CheckId> = runtime_in_control
+            .iter()
+            .filter(|result| result.status == CheckStatus::Pass)
+            .map(|result| result.id.clone())
+            .collect();
+        assert!(
+            !passed_in_control.is_empty(),
+            "the runner answered every admitted command with a clean exit and no check that ran \
+             this project's code came back as a pass, so the run below has nothing to invalidate: \
+             {:?}",
+            statuses(&runtime_in_control)
+        );
+
+        // The same run, with the runner writing a file the walk covers.
+        let (moved_outcome, moved_asked) =
+            run_writing(vec![project.join("src").join("generated.rs")]);
+        let moved = moved_outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", moved_outcome.stopped_at));
+        assert!(
+            !moved_asked.is_empty(),
+            "the runner was never reached in the run whose project moved, so nothing was \
+             invalidated because nothing was ever observed"
+        );
+        let now = project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+            .expect("this fixture is readable");
+        assert!(
+            !moved.project_state.matches(&now),
+            "the fixture did not move, so this run is not the run it claims to be: {} and {}",
+            moved.project_state.digest,
+            now.digest
+        );
+
+        let runtime_in_moved: Vec<&CheckResult> = moved
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        assert_eq!(
+            runtime_in_moved.len(),
+            runtime_ids.len(),
+            "the run reports {} of the {} checks in its plan that would run the project's code",
+            runtime_in_moved.len(),
+            runtime_ids.len()
+        );
+        assert!(
+            runtime_in_moved
+                .iter()
+                .all(|result| result.status != CheckStatus::Pass),
+            "the project moved while these ran and the run still stands one of them up as current: \
+             {:?}",
+            statuses(&runtime_in_moved)
+        );
+        for result in runtime_in_moved
+            .iter()
+            .filter(|result| passed_in_control.contains(&result.id))
+        {
+            assert_eq!(
+                result.status,
+                CheckStatus::Unknown,
+                "{} passed, the project moved while it was working, and the run reports it as \
+                 `{:?}` rather than as evidence that supports no verdict: {}",
+                result.title,
+                result.status,
+                result.reason
+            );
+            assert!(
+                result
+                    .reason
+                    .contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+                "{} does not say why in the vocabulary's own words: {}",
+                result.title,
+                result.reason
+            );
+            assert!(
+                result.reason.contains(&now.digest),
+                "{} does not name the state the project is actually in, so a reader cannot tell \
+                 what its result is stale against: {}",
+                result.title,
+                result.reason
+            );
+            assert!(
+                result.blocks_green() || !result.critical,
+                "{} is critical and its pass is no longer current, but the run still counts it as \
+                 passing: {:?}",
+                result.title,
+                result.status
+            );
+        }
+
+        // The line a reader of the report looks at for what the verdict is
+        // about, and the coverage entry that carries the same fact.
+        let aggregate_line = stage_detail(&moved_outcome, Stage::Aggregate);
+        assert!(
+            aggregate_line.contains("the project changed while the run was working"),
+            "the aggregate stage does not say the project moved: {aggregate_line}"
+        );
+        for id in &passed_in_control {
+            let title = moved
+                .report
+                .results()
+                .iter()
+                .find(|result| &result.id == id)
+                .map(|result| result.title.as_str())
+                .expect("a result that was in the control run is in this one");
+            assert!(
+                aggregate_line.contains(title),
+                "the aggregate stage does not name {title} among the results it is not counting: \
+                 {aggregate_line}"
+            );
+            let entry = moved
+                .coverage
+                .not_checked
+                .iter()
+                .find(|entry| entry.check_id == id.to_string())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{title} is not in the coverage summary's not-checked list: {:?}",
+                        moved.coverage.not_checked
+                    )
+                });
+            assert!(
+                entry
+                    .reason
+                    .contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+                "{title} is listed as not checked with a reason that does not say why: {}",
+                entry.reason
+            );
+        }
+
+        // The control's own report says nothing of the sort, which is the
+        // direction that would otherwise be this rule's false positive.
+        assert!(
+            !stage_detail(&control_outcome, Stage::Aggregate)
+                .contains("the project changed while the run was working"),
+            "a run that only wrote its own build caches was reported as one whose project moved: \
+             {}",
+            stage_detail(&control_outcome, Stage::Aggregate)
+        );
+        let control_passed: Vec<&CheckResult> = control
+            .report
+            .results()
+            .iter()
+            .filter(|result| passed_in_control.contains(&result.id))
+            .collect();
+        assert_eq!(
+            control_passed.len(),
+            passed_in_control.len(),
+            "a check that passed in the control run is missing from its report: {:?}",
+            statuses(&control_passed)
+        );
+        assert!(
+            control_passed
+                .iter()
+                .all(|result| result.status == CheckStatus::Pass),
+            "a run that wrote only its own build caches invalidated a check that ran the project's \
+             code: {:?}",
+            statuses(&control_passed)
+        );
+    }
+
+    /// The movement named even when there was nothing to withdraw, over the real
+    /// pipeline.
+    ///
+    /// [`invalidate_runtime_passes`] replaces a `Pass` and nothing else — rightly,
+    /// because a failing check is a finding the run actually made rather than a
+    /// stale one — so a run whose project moved and whose runtime checks all
+    /// *failed* has an empty withdrawal list while the second read has still
+    /// answered. **A stage line that spoke only for the non-empty list is silent
+    /// in exactly that run**, and silent too in every run that plans no check
+    /// which runs the project's code at all, which is every run a user has not
+    /// granted execution. This is the reading that keeps the second read from
+    /// being taken and then dropped — the shape
+    /// [`stale_evidence_reason`]'s error arm exists to avoid one line earlier.
+    ///
+    /// The runner answers with a failing exit code and writes a file the walk
+    /// covers, so both halves of the fixture are arranged by the one call the run
+    /// makes. Three guard assertions keep this from being a test that cannot
+    /// fail: the runner must have been reached, no runtime check may have passed,
+    /// and the project must actually have moved.
+    #[test]
+    fn a_project_that_moved_is_named_even_when_no_pass_was_withdrawn() {
+        let project = a_rust_project("pipeline-moved-unreplaced");
+        let config_root = project.join("configuration");
+        std::fs::create_dir_all(&config_root).expect("a scratch configuration directory");
+        let user_config = config_root.join("config.yaml");
+        std::fs::write(
+            &user_config,
+            "execution:\n  mode: host_confirmed\n  allow_network: true\n",
+        )
+        .expect("the user's own configuration file");
+        let authority = crate::config::Authority::load(&project, &user_config)
+            .expect("the two configuration files are readable");
+        let config = Config::default();
+
+        let runner = Moves {
+            writes: vec![project.join("src").join("generated.rs")],
+            asked: RefCell::new(Vec::new()),
+            // A command that ran, ended on its own, and reported failure: the
+            // `fail` row of `CommandRun::to_result`'s table rather than the pass
+            // the other test needs.
+            exit: Some(1),
+        };
+        let outcome = Pipeline {
+            project: &project,
+            purpose: Purpose::Check,
+            config: &config,
+            execution: authority.execution(),
+            store: None,
+            goal: None,
+            runner: &runner,
+        }
+        .run();
+        let run = outcome
+            .run
+            .as_ref()
+            .unwrap_or_else(|| panic!("the run stopped: {:?}", outcome.stopped_at));
+        assert!(
+            !runner.asked.borrow().is_empty(),
+            "the user granted execution and the runner was never reached, so this run has no \
+             runtime result at all and measures nothing: {:?}",
+            run.schedule.plain_description()
+        );
+        let now = project_fingerprint(&project, &fingerprint::FingerprintOptions::default())
+            .expect("this fixture is readable");
+        assert!(
+            !run.project_state.matches(&now),
+            "the fixture did not move, so this run is not the run it claims to be: {} and {}",
+            run.project_state.digest,
+            now.digest
+        );
+
+        let runtime_ids = runtime_check_ids(run);
+        assert!(
+            !runtime_ids.is_empty(),
+            "this project planned no check that would run its code: {:?}",
+            run.schedule.plain_description()
+        );
+        let runtime: Vec<&CheckResult> = run
+            .report
+            .results()
+            .iter()
+            .filter(|result| runtime_ids.contains(&result.id))
+            .collect();
+        assert!(
+            runtime
+                .iter()
+                .all(|result| result.status == CheckStatus::Fail),
+            "the runner answered every admitted command with a failing exit code, so no runtime \
+             check has a pass to withdraw and the run below is about the empty list; one came \
+             back as something else: {:?}",
+            statuses(&runtime)
+        );
+
+        // The line a reader of the verdict looks at. **Both assertions are about
+        // the second read's answer reaching the page**, not about how it is
+        // phrased: a run whose project did not move carries neither of these, and
+        // that is the difference this test exists to measure.
+        let line = stage_detail(&outcome, Stage::Aggregate);
+        assert!(
+            line.contains(StalenessReason::SupersededByLaterChange.plain_explanation()),
+            "the project moved while the run was working and the run's own line does not say so, \
+             because it had no pass to withdraw: {line}"
+        );
+        assert!(
+            line.contains(&now.digest),
+            "the line does not name the state the project is actually in, so a reader cannot tell \
+             what this run's results are stale against: {line}"
         );
     }
 }

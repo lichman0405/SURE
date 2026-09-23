@@ -81,7 +81,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sure_core::browser::{
     AbsenceReason, BrowserDriver, Limits, Observation, ProblemKind, Report, Target,
@@ -408,7 +408,14 @@ fn observe(
     let target = Target::local(port, path).expect("a loopback target");
     let limits = Limits::new(budget, PROBLEMS_KEPT).expect("a budget and room for problems");
     let driver: Box<dyn BrowserDriver> = Box::new(Browser::system());
-    driver.observe(&target, &limits, cancellation)
+    let started = Instant::now();
+    let report = driver.observe(&target, &limits, cancellation);
+    println!(
+        "browser observation for {path}: {:?} after {:.3} seconds",
+        report.status(),
+        started.elapsed().as_secs_f32()
+    );
+    report
 }
 
 /// The report, refused unless it is the shape this machine should have produced.

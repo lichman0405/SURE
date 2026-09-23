@@ -64,6 +64,7 @@
 
 use sure_core::consent::PermissionPlan;
 use sure_core::enforce::Enforcement;
+use sure_core::planned_work::{CheckOperation, PlannedWork, PrecomputedEvidence};
 use sure_core::scan::{ScanOptions, scan};
 use sure_core::schedule::{
     CheckProposal, CheckReason, CheckSchedule, ExecutionRequirements, PlanBuilder, ScheduledCheck,
@@ -329,7 +330,9 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          handed and reads back the plan they produced: `PlanBuilder::refused` is \
          what lets it report a candidate that could not become a check, and the \
          schedule it builds is what the aggregate, the coverage summary and the \
-         verdict are all computed over. **If this file ever gains a line that \
+         verdict are all computed over — and, since `P18-T007`, what the runner is \
+         handed, which is a fact about the check's *operation* rather than about \
+         who proposed it. **If this file ever gains a line that \
          constructs a `CheckProposal`, that is a proposer and belongs in a \
          `checks/` module rather than here** — which is the distinction this entry \
          is written down to make checkable rather than assumed",
@@ -341,10 +344,17 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          module, where a fixture builds a one-check schedule so that a check's \
          frame, its exit status and its two streams can be tested against a run \
          that has a clean variant and an unclean one. A real project cannot \
-         supply the clean variant in this build — stage 5 reads every static \
-         check as `unknown` and stage 8 has no provider, so `sure check` is 1 for \
-         every project it can read — which is why the pair is built rather than \
-         observed. The shipped half of the file proposes nothing; **a line naming \
+         supply the clean variant in this build — every check that would run the \
+         project's code is stopped by the mode a run starts in, and stage 8 has \
+         no provider — so `sure check` is 1 for both projects it was measured \
+         over: a scratch crate (`0 of 2` produced a result, both stopped by \
+         `inspect_only`) and this repository (`14 of 18` produced a result, the \
+         four dynamic ones stopped), which is why the pair is built rather than \
+         observed. **The first half of that reason was written as *stage 5 reads \
+         every static check as `unknown`*, and `P18-T007` made that false** by \
+         wiring the runner: stage 5 now reports the 14 static checks' own \
+         results, as the run above its second reading shows. The shipped half of \
+         the file proposes nothing; **a line naming \
          a proposer word above `#[cfg(test)]` would be a proposer arriving in the \
          CLI, and this entry is not cover for it**",
     ),
@@ -386,6 +396,57 @@ const MAY_PROPOSE: &[(&str, &str)] = &[
          result. **A line above `#[cfg(test)]` naming any of the four would be a \
          proposer arriving in the module that reads results, and this entry is not \
          cover for it**",
+    ),
+    (
+        "src/planned_work.rs",
+        "`P18-T002`, and the sixth entry here that decides nothing: it is the value \
+         that carries a check's proposal beside the operation that would carry the \
+         check out, so a caller that has one of the two cannot have the other \
+         missing. It names `CheckProposal` because it *holds* one — a field, a \
+         constructor and an accessor, plus `PrecomputedEvidence::to_result`, which \
+         is handed a proposal and **reads** its weight rather than building one, so \
+         it is a consumer and not a proposer either. Every proposal that reaches \
+         the file was built by a module in the entries above and is stored, handed \
+         back unchanged, or read for the severity and identity it already carries. \
+         **A line here that built a proposal of its own, rather than storing and \
+         returning its caller's, would be a proposer**, and this entry is not cover \
+         for it. The entry was missing until `P18-T003` ran this rule against the \
+         file: the task that added it ran the module's own tests and not this one, \
+         so the rule was red for a whole task and nothing read it — which is the \
+         failure mode the list is written down to make visible",
+    ),
+    (
+        "src/planned_check_runner.rs",
+        "`P18-T006`, and the seventh entry here that decides nothing: it is the door \
+         between a plan and a process, and it proposes for no project. Every line of \
+         the file that names one of the four words is inside its `#[cfg(test)]` \
+         module. `PlanBuilder::new` is the only door any code in this tree has to a \
+         `CheckSchedule`, and the runner's own rules — one result per scheduled \
+         check, an admitted check that reported nothing is an `Error` rather than a \
+         missing row, and a command the enforcement did not admit never reaching the \
+         runner — can only be exercised against a schedule that really has checks in \
+         it, so the fixtures build one and the words appear there and nowhere else. \
+         The shipped half reads `scheduled.proposal()` for the identity and the \
+         weight it already carries, in the same way `findings_from_checks.rs` above \
+         reads a result it was handed; it constructs no proposal and hands no \
+         proposal to a builder. **A line above `#[cfg(test)]` naming any of the four \
+         would be a proposer arriving in the runner, and this entry is not cover for \
+         it**",
+    ),
+    (
+        "src/service_plan.rs",
+        "`P18-T012`'s follow-up, and the first entry here whose project writes its \
+         declaration in `sure.yaml` rather than in a manifest: it turns a \
+         `checks.services` entry into the two checks a declared service can be — \
+         start it, and look at a page on it — so it is a proposer for the reason \
+         `runtime_probes.rs` above is one, and not a consumer for the reason \
+         `planned_work.rs` is one. **What it is not is another way to run \
+         something**: the launcher a declaration names is a tagged enum \
+         (`config/services.rs`) instead of a command line, the program it plans is \
+         the constant `node`, and the argument vector is built as one element, so \
+         there is no string anywhere in this file that is split back into \
+         arguments. It proposes and stops: no admission, no admitted command, no \
+         process — the same seam every entry above stands on",
     ),
 ];
 
@@ -501,6 +562,25 @@ fn proposal(
     )
 }
 
+/// The plan entry for a proposal, since `P18-T003` a proposal plus its operation.
+///
+/// **A candidate observation, because that is the whole of what these fixtures
+/// establish.** Every check below is built by hand and nothing here starts a
+/// process or reads a file: the value is *nothing has settled this check*, which
+/// maps to a warning and never to a pass — the one answer that claims nothing.
+/// These files are about ordering, decisions and enforcement rather than about
+/// operations, so what they supply beside the proposal is the most conservative
+/// thing they can honestly say, and `P18-T004` is the task that replaces the
+/// placeholders on the product's own paths with real observations.
+fn work(proposal: CheckProposal) -> PlannedWork {
+    PlannedWork::new(
+        proposal,
+        CheckOperation::Precomputed(PrecomputedEvidence::candidate(
+            "this fixture builds a plan and observes nothing",
+        )),
+    )
+}
+
 fn titles(schedule: &CheckSchedule) -> Vec<&str> {
     schedule
         .checks()
@@ -527,7 +607,7 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
     // rather than about code that can reach private fields.
     let mut builder = an_executing_builder();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the lockfile matches the manifest",
             Severity::MustFix,
@@ -537,10 +617,10 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 path: "package-lock.json".to_owned(),
             },
             &[ActionKind::ReadFile, ActionKind::ReadMetadata],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the declared tests pass",
             Severity::MustFix,
@@ -551,10 +631,10 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 command: "npm test".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "nothing surprising in the layout",
             Severity::CanFixLater,
@@ -565,7 +645,7 @@ fn every_check_in_the_plan_carries_a_reason_an_evidence_class_and_its_requiremen
                 stack: "node".to_owned(),
             },
             &[ActionKind::ListDirectory],
-        ))
+        )))
         .unwrap();
 
     let schedule = builder.build();
@@ -683,7 +763,7 @@ fn the_order_is_the_one_the_rules_describe_whatever_order_the_checks_arrived_in(
     for order in permutations(4) {
         let mut builder = an_executing_builder();
         for index in &order {
-            builder.propose(proposals[*index].clone()).unwrap();
+            builder.propose(work(proposals[*index].clone())).unwrap();
         }
         let built_schedule = builder.build();
         assert_eq!(
@@ -740,7 +820,7 @@ fn a_check_that_cannot_run_stays_in_the_plan_and_can_only_be_skipped() {
         ExecutionPermissions::inspect_only(),
     );
     builder
-        .propose(CheckProposal::new(
+        .propose(work(CheckProposal::new(
             CheckId::generate(),
             "the declared tests pass",
             Severity::MustFix,
@@ -751,16 +831,16 @@ fn a_check_that_cannot_run_stays_in_the_plan_and_can_only_be_skipped() {
                 command: "npm test".to_owned(),
             },
             &[ActionKind::RunTests],
-        ))
+        )))
         .unwrap();
     builder
-        .propose(proposal(
+        .propose(work(proposal(
             CheckId::generate(),
             "the manifest is readable",
             Severity::CanFixLater,
             EvidenceClass::ObservedFact,
             &[ActionKind::ReadMetadata],
-        ))
+        )))
         .unwrap();
 
     let schedule = builder.build();
@@ -838,13 +918,13 @@ fn the_schedule_hands_enforcement_its_checks_in_the_same_order() {
         ("lists", Severity::MustFix, ActionKind::ListDirectory),
     ] {
         builder
-            .propose(proposal(
+            .propose(work(proposal(
                 CheckId::generate(),
                 title,
                 severity,
                 EvidenceClass::DeterministicCheck,
                 &[action],
-            ))
+            )))
             .unwrap();
     }
 

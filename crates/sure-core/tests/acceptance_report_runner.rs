@@ -22,8 +22,14 @@
 //! results — the drive `repair_fixture_e2e.rs` makes in full. A `src` module
 //! cannot do it: `crates/sure-core/tests/spawn_sites.rs`'s rule two forbids any
 //! file under `crates/**/src/**` outside `MAY_NAME_A_PROCESS_REQUEST` from naming
-//! a `ProcessRequest`, and `sure_core::support`'s ceiling of level C rests on no
-//! product path running project code. So the module reports the case
+//! a `ProcessRequest`, and **that rule is the whole of the reason**. It is a rule
+//! about which files may *name* a request, not about whether this build is able
+//! to run one: since `P18-T007` a product path does run project code, which is
+//! what `sure_core::support`'s module comment records, and the ceiling of level C
+//! rests on platform coverage rather than on that path having been absent. A
+//! sentence here used to say the opposite — that the ceiling *rests on no product
+//! path running project code* — and it was a true conclusion resting on a premise
+//! that had gone; `P18-T012` corrected it. So the module reports the case
 //! `cannot_confirm` with that rule written into the row, and this file measures
 //! it and supplies the measurement through
 //! `acceptance_report_with` — which is why the row's `surfaces` name this file
@@ -69,6 +75,7 @@ use sure_core::discover::node::{MANIFEST, NodeProject, ScriptRole};
 use sure_core::discover::{DiscoverOptions, Ecosystem, Findings, discover};
 use sure_core::fingerprint::{FingerprintOptions, content_fingerprint, project_fingerprint};
 use sure_core::paths::CaseSensitivity;
+use sure_core::planned_work::PlannedWork;
 use sure_core::process::{
     Cancellation, Environment, Limits, Outcome, ProcessRequest, Termination, run,
 };
@@ -899,7 +906,10 @@ fn the_limitations_are_in_the_document_rather_than_in_a_commit_message() {
             "the closing half of the repair loop is unreached, and why",
             "The closing half of the repair loop is unreached here",
         ),
-        ("no project code runs from a product path", "inspect_only"),
+        (
+            "this report's own drives run nothing that runs project code",
+            "inspect_only",
+        ),
         ("nothing touched the store", "store: None"),
         ("what is deterministic about it", "byte-identical"),
     ] {
@@ -1460,10 +1470,11 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         panic!("the Node report carried {:?} findings", report.findings);
     };
 
-    let checks = NodeChecks::of(node);
+    let checks = NodeChecks::of(node, copy.path());
     let proposed: Vec<&CheckProposal> = checks
-        .proposed()
+        .planned()
         .iter()
+        .map(PlannedWork::proposal)
         .filter(|proposal| {
             let manifest = declared_in(proposal);
             manifest == manifest_of(CHECKOUT) || manifest == manifest_of(BILLING)
@@ -1475,8 +1486,9 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         "the fixture's two members each declare one test script, so the checks layer proposes two \
          checks for them: {:?}",
         checks
-            .proposed()
+            .planned()
             .iter()
+            .map(PlannedWork::proposal)
             .map(|proposal| (declared_in(proposal), proposal.title().to_owned()))
             .collect::<Vec<_>>()
     );
@@ -1552,7 +1564,7 @@ fn run_the_checks(copy: &CopyOfFixture) -> Run {
         });
     }
 
-    let report = aggregate_run(&schedule, &results, &state)
+    let report = aggregate_run(&schedule, &results, &[], &state)
         .unwrap_or_else(|refusal| panic!("the run was refused: {refusal:?}"));
     let verdict = build_verdict(
         state.clone(),

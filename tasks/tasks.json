@@ -3241,5 +3241,226 @@
     ],
     "outputs": [],
     "notes": "Minted by the supervisor from a **read-only survey of tests that can pass without establishing their property**, whose every claim this task rests on was then checked against the source by the supervisor — because a subagent's report is model output and this repository does not turn model output into fact.\n\n**What was verified, and how.** `process_runner.rs:1020` reads `assert!(!report.exists(), \"the child reached the end of its sleep, so the deadline did not stop it\")`, in a test whose child sleeps ten seconds and whose assertions are all read by `outcome.took() < Duration::from_secs(3)`; the observation cannot distinguish stopping from detaching. `probe_local_service.rs:383-388` binds `127.0.0.1:0`, drops the listener and asserts `Refused`, while `http_routes.rs:354` and `runtime_start.rs:704` each carry a `free_port()` walking 10_000..32_000 whose doc comment is the argument against exactly that, and `http_routes.rs` additionally re-checks the chosen port with `connect_timeout` before returning it. `service_supervisor.rs:152` says \"Not removed on entry: a directory left behind by a killed run is evidence\" and line 154 is `let _ = fs::remove_dir_all(&directory);`. And `cli_contract.rs:4906` is `stdin.write_all(payload.as_bytes()).expect(\"write to stdin\")` over five cases that assert only a status and a store's emptiness, none of which differs for a `sure` that exits before touching standard input.\n\n**What was not verified and is therefore not in this task.** The survey's items 4, 5 and 8 — the launcher-observability half of `integration_thinness.rs:2598`, the EPIPE write sites in `install_flow.rs:1032` and `winget_manifest.rs:1162`, and the process-local `Winget` mutex — were read by the survey and not by the supervisor. They are not re-asserted here. The first is `P17-T003`'s subject and the second is named in the clause above as the task that follows it; the third is a claim about contention the survey itself declined to name an interleaving for.\n\n**Why this is a task and not a footnote.** This repository's product is a verdict, and its first priority is the correctness of verdicts. A test that cannot observe the property it asserts is the same defect as a green check that never ran the check — it reports a fact about the test rather than about the code, and it does so in the suite that the record cites as evidence for every claim of the form \"this is held\". `P17-T002` and `P17-T003` were both found by reading rather than by a red gate; this one was found by reading too, and the three sites are being repaired together because they are one finding: the suite contains observations that cannot fail."
+  },
+  {
+    "id": "P18-T001",
+    "phase": "P18",
+    "title": "Fix the planned-check execution contract in a decision record",
+    "required": true,
+    "depends_on": [],
+    "acceptance": [
+      "A decision record states the execution contract, the invariants it holds and what it deliberately excludes.",
+      "The record says what host_confirmed is and is not, and does not claim containment.",
+      "No behaviour changes: the tree is the same tree with a document beside it."
+    ],
+    "outputs": [
+      "docs/adr/"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T002",
+    "phase": "P18",
+    "title": "Add typed planned work and the operation vocabulary",
+    "required": true,
+    "depends_on": [
+      "P18-T001"
+    ],
+    "acceptance": [
+      "Executable work is typed from discovery onward and never recovered from a display string.",
+      "A planned check and its operation are bound by construction rather than by a lookup that could miss.",
+      "An operation carries program, arguments, working directory, environment policy, deadline and output bound as named fields.",
+      "Platform program resolution is a value with tests, not a string concatenation."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_work.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T003",
+    "phase": "P18",
+    "title": "Produce typed work from the Node, Python and Rust check builders",
+    "required": true,
+    "depends_on": [
+      "P18-T002"
+    ],
+    "acceptance": [
+      "Every check SURE already proposes for the three supported ecosystems has typed work behind it.",
+      "No title, reason, rendered command or manifest text is parsed to build an operation.",
+      "Report output is unchanged for the checks that already reported.",
+      "The Windows package-manager name is covered by a test on the resolution itself."
+    ],
+    "outputs": [
+      "crates/sure-core/src/checks/"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T004",
+    "phase": "P18",
+    "title": "Materialize precomputed evidence as honest check results",
+    "required": true,
+    "depends_on": [
+      "P18-T002"
+    ],
+    "acceptance": [
+      "A detector that already ran reports its own result without starting a process.",
+      "Status follows what was observed and the evidence class, never severity alone.",
+      "A detector that could not run is an error rather than a silence."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_work.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T005",
+    "phase": "P18",
+    "title": "Map a bounded process outcome to a check result",
+    "required": true,
+    "depends_on": [
+      "P18-T002"
+    ],
+    "acceptance": [
+      "Exit 0 with a complete observation is a pass; a non-zero exit is a failure of the check.",
+      "A spawn failure, a timeout, a cancellation, a stop that could not be confirmed and materially incomplete output are never a pass.",
+      "The mapping is unit-tested over every termination the runner can report."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_work.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T006",
+    "phase": "P18",
+    "title": "Implement the planned-check runner for precomputed and command work",
+    "required": true,
+    "depends_on": [
+      "P18-T003",
+      "P18-T004",
+      "P18-T005"
+    ],
+    "acceptance": [
+      "Exactly one explicit result is produced per scheduled check, and a duplicate is an internal error.",
+      "An admitted check whose runner reports nothing becomes an error rather than being dropped.",
+      "A command that enforcement did not admit cannot reach the runner, and a fake runner proves it."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_check_runner.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T007",
+    "phase": "P18",
+    "title": "Connect the schedule, permission plan and enforcement to the runner",
+    "required": true,
+    "depends_on": [
+      "P18-T006"
+    ],
+    "acceptance": [
+      "Permission planning and Enforcement are on the real check path rather than beside it.",
+      "inspect_only still starts zero project-controlled processes.",
+      "The spawn census and the support ceiling are updated deliberately and with their reasons."
+    ],
+    "outputs": [
+      "crates/sure-core/src/pipeline.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T008",
+    "phase": "P18",
+    "title": "Invalidate runtime evidence whose project fingerprint has changed",
+    "required": true,
+    "depends_on": [
+      "P18-T007"
+    ],
+    "acceptance": [
+      "Runtime evidence is bound to the project state that produced it.",
+      "A project input that changed while the run was working cannot leave an earlier pass standing as current.",
+      "The rule is stated for the caches a build legitimately writes, rather than pretending they do not exist."
+    ],
+    "outputs": [
+      "crates/sure-core/src/pipeline.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T009",
+    "phase": "P18",
+    "title": "Run admitted service checks with a settled environment policy",
+    "required": true,
+    "depends_on": [
+      "P18-T007"
+    ],
+    "acceptance": [
+      "The environment a service is given is stated and tested before any service check reaches the product path.",
+      "A service is stopped on every path, including failure, timeout and an observation that errored.",
+      "A service that ends during its window fails, and one that survives without answering anything is not promoted to a pass."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_check_runner.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T010",
+    "phase": "P18",
+    "title": "Run browser checks after loopback readiness with unconditional cleanup",
+    "required": true,
+    "depends_on": [
+      "P18-T009"
+    ],
+    "acceptance": [
+      "A browser check runs only after the supervised service answers on loopback.",
+      "The service is stopped whether the browser observation passed, failed or errored.",
+      "A machine with no usable browser support produces an explicit result rather than a pass."
+    ],
+    "outputs": [
+      "crates/sure-core/src/planned_check_runner.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T011",
+    "phase": "P18",
+    "title": "Carry real results into aggregation, repair contracts and re-check",
+    "required": true,
+    "depends_on": [
+      "P18-T007"
+    ],
+    "acceptance": [
+      "Runtime results reach the human and machine reports through the existing renderers.",
+      "A critical result that is not a pass blocks green, and an unreported critical check does too.",
+      "Re-check measures current state rather than accepting a repair claim."
+    ],
+    "outputs": [
+      "crates/sure-core/src/pipeline.rs"
+    ],
+    "notes": ""
+  },
+  {
+    "id": "P18-T012",
+    "phase": "P18",
+    "title": "Measure the pipeline end to end over adversarial fixtures and the full gate set",
+    "required": true,
+    "depends_on": [
+      "P18-T008",
+      "P18-T010",
+      "P18-T011"
+    ],
+    "acceptance": [
+      "Adversarial fixtures cover the false-green paths the pipeline could introduce.",
+      "The full tracked gate set passes and the artifact is recorded in the task ledger.",
+      "The support ceiling is raised only if the measured evidence earns it, and the decision is recorded either way."
+    ],
+    "outputs": [
+      "docs/adr/",
+      "progress/HANDOFF.md"
+    ],
+    "notes": ""
   }
 ]

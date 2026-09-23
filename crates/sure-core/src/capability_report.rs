@@ -525,15 +525,10 @@ mod tests {
 
     /// A store of this test's own, under the repository's scratch space.
     ///
-    /// Unique per test name rather than cleared and reused, because a fixed path
-    /// that is cleared on Windows is a path the next run may still be holding.
+    /// Claimed by the shared testkit allocator. A recycled process id cannot
+    /// make this test reopen an earlier run's database.
     fn store_in(name: &str) -> Store {
-        let directory = crate::store::scratch_root().join(format!(
-            "capability-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        let directory = sure_testkit::scratch::directory("capability-report", name);
         Store::open_at(&directory.join("sure.db")).expect("the store opens")
     }
 
@@ -555,6 +550,31 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             document_kind: DocumentKind::Event,
         }
+    }
+
+    #[test]
+    fn a_recycled_pid_cannot_add_an_earlier_runs_events_to_this_report() {
+        let name = "recycled-pid-control";
+        let old_directory = crate::store::scratch_root().join(format!(
+            "capability-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&old_directory).expect("the earlier run's directory");
+        let old_store = Store::open_at(&old_directory.join("sure.db"))
+            .expect("the earlier run's database opens");
+        let root = "C:\\work\\recycled pid control";
+        record(
+            &old_store,
+            root,
+            &timed("tool.completed", "2026-09-14T09:10:56.827Z"),
+        );
+        drop(old_store);
+
+        let fresh = store_in(name);
+        let report = for_project(Some(&fresh), root).report;
+        assert_eq!(report.tier, CapabilityTier::Snapshot);
+        assert_eq!(report.evidence.expect("the store was read").events, 0);
     }
 
     #[test]
@@ -733,12 +753,7 @@ mod tests {
     /// invented path could only ever exercise the `Sensitive` fallback and would
     /// say nothing about the arm this machine is actually on.
     fn scratch_project(name: &str) -> std::path::PathBuf {
-        let directory = crate::store::scratch_root().join(format!(
-            "capability-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&directory).expect("a scratch project directory");
+        let directory = sure_testkit::scratch::directory("capability-project", name);
         // A name with a case to flip, which is what the volume probe reads.
         std::fs::write(directory.join("Cargo.toml"), b"[package]\n").expect("a project file");
         directory

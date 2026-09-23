@@ -547,6 +547,9 @@ $stream = [System.IO.File]::OpenRead($archive)
 try { $hasher = [System.Security.Cryptography.SHA256]::Create(); try { $hash = $hasher.ComputeHash($stream) } finally { $hasher.Dispose() } } finally { $stream.Dispose() }
 $digest = ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
 [System.IO.File]::WriteAllText("$archive.sha256", "$digest  $name.zip`n", [System.Text.Encoding]::ASCII)
+# The Rust reader expects UTF-8; Windows PowerShell 5.1 otherwise writes the
+# console's code page, which corrupts the Unicode path returned below.
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Write-Output $archive
 "#;
 
@@ -584,6 +587,15 @@ Write-Output $archive
         let archive = PathBuf::from(run.stdout.trim());
         let checksum = PathBuf::from(format!("{}.sha256", archive.display()));
         (archive, checksum)
+    }
+
+    #[test]
+    fn a_unicode_archive_path_returns_intact_from_the_stager() {
+        let scratch = a_directory_of_our_own("stager output encoding");
+        let (archive, checksum) = a_release_archive(&a_host(), &scratch, "0.0.0-stager-test");
+        assert!(archive.starts_with(&scratch), "{archive:?}");
+        assert!(archive.is_file(), "{archive:?}");
+        assert!(checksum.is_file(), "{checksum:?}");
     }
 
     /// The SHA-256 of a file, from a program that is not SURE and not the

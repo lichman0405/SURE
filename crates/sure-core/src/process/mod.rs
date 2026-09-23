@@ -28,18 +28,23 @@
 //!
 //! # What is not here
 //!
-//! **This module is still a mechanism: it has exactly one caller, and that
-//! caller has no caller.** [`crate::service`] starts a service by running a
-//! [`ProcessRequest`] on a thread and stopping it through
-//! [`ProcessRequest::cancellation`], so the runner has a real dependant rather
-//! than none. Nothing in the product builds a `Supervisor` yet, though, so no
-//! *ship* path reaches [`run`] — and that is again checkable rather than
-//! asserted, because `tests/spawn_sites.rs` holds the census of files that may
-//! name a `Supervisor`, and `sure check` still records a goal and says that
-//! nothing was checked. The distinction it would be easy to lose: the runner is
-//! no longer uncalled, it is still unreached by the product — and those are two
-//! different facts about the same code. `P3-T010` (the port/HTTP probe) is the
-//! next task that will run something through this path.
+//! **This module is a mechanism with a shipped caller, and since `P18-T007` a
+//! shipped *path* to it.** It has two callers.
+//! [`crate::planned_check_runner`] runs the command behind each check the
+//! enforcement admitted, and `sure check` reaches it through
+//! [`crate::pipeline`] — so a product path reaches [`run`], which is the fact
+//! this section used to deny. The boundary in front of it is not this module's:
+//! a command arrives as an [`crate::enforce::AdmittedCommand`] or it does not
+//! arrive, and under `inspect_only` — the mode a run starts in — none is
+//! admitted, which is measured in `pipeline.rs`'s
+//! `a_run_a_user_did_not_grant_starts_nothing`. [`crate::service`] is the other
+//! caller: it starts a service by running a [`ProcessRequest`] on a thread and
+//! stopping it through [`ProcessRequest::cancellation`], and **that** half is
+//! still unreached by the product, because nothing builds a `Supervisor` yet.
+//! `tests/spawn_sites.rs` holds the census of files that may name a
+//! `Supervisor`, a `StartSmoke` or a `ProcessRequest`. The distinction it would
+//! be easy to lose: a route reaches this runner now, and it is the one the
+//! checks take, not the one a service would take.
 //!
 //! **Windows brings a command interpreter to a batch file.** Measured on
 //! Windows 11 with Rust 1.98, and held by tests in `tests/process_runner.rs`:

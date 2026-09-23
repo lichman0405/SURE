@@ -17,6 +17,7 @@
 //! Enforcement::of      enforce.rs          which of those may run
 //! Supervisor::start    service.rs          the process, and stopping it
 //! StartSmoke::run      here                the window, the question, the stop, the verdict
+//! StartSmoke::run_then here                the same, with the caller's own step before the stop
 //! ```
 //!
 //! [`StartSmoke::of`] takes an [`Enforcement`] and not a command, which is
@@ -27,6 +28,42 @@
 //! command that a mode stopped, and cannot run a command that was planned for a
 //! different check. What a mode stopped is answered by [`Enforcement::stopped`],
 //! which is the plan's own `Skipped` result and not a second one invented here.
+//!
+//! **There is a second door since `P18-T009`, and it is the one a product path
+//! uses.** [`StartSmoke::planned`] builds the same value from a scheduled
+//! [`ServiceCheckSpec`] and the command the enforcement admitted for that check:
+//! `planned_check_runner.rs` carries a `CheckOperation::Service` out through it.
+//! The two differ in what they were handed and in nothing else — `of` has a
+//! probe and a project root, `planned` has the plan's own spec, which carries the
+//! directory the command runs in — and both hand [`StartSmoke::run`] the same
+//! four things: one admitted command, a directory, bounds, and an environment.
+//!
+//! # The environment a service is started with, which is stated per door
+//!
+//! *What does this service start with* is one question with one answer, and since
+//! `P18-T009` the answer is written once per door rather than left to whichever
+//! default a request happened to carry.
+//!
+//! **A planned service gets the environment the plan holds.**
+//! [`StartSmoke::planned`] takes it from
+//! [`ServiceCheckSpec::command`] — the same rule the command path follows in
+//! `planned_check_runner.rs`, where the request ends in
+//! `.with_environment(spec.environment().clone())` — so the project's process
+//! starts with what the plan states and not with SURE's own variables.
+//!
+//! **A probe gets [`Environment::inherited`], and that is a choice rather than a
+//! leftover.** [`StartSmoke::of`] has no plan-side `CommandSpec` to read an
+//! environment from: what it is handed is an [`Enforcement`], and an admission is
+//! a decision about a program and an argument vector (`safety::classify`'s own
+//! limit). A service that cannot find the tools it needs by name is a service
+//! that fails to start — on Windows `CreateProcess` searches `PATH` — so
+//! inheritance is the value this door states, in its constructor, where a reader
+//! can find it rather than infer it from [`crate::service`]'s default.
+//!
+//! [`Supervisor::request`] is where either answer becomes the request a process
+//! is started from, and it is what this module's tests read: **no test here starts
+//! anything**, and the environment a service would be given is a value a test can
+//! hold.
 //!
 //! **The split is deliberately not here.** Turning a declared line — `npm start`
 //! — into a program and an argument vector is the executor's work, one step
@@ -114,8 +151,9 @@ use sure_domain::ids::{CheckId, FingerprintId};
 use sure_domain::status::{CheckResult, CheckStatus};
 
 use crate::enforce::{AdmittedCommand, Enforcement};
+use crate::planned_work::ServiceCheckSpec;
 use crate::probe::{self, Endpoint, Probe, ProbeOutcome};
-use crate::process::{self, Cancellation, Outcome, Termination};
+use crate::process::{self, Cancellation, Environment, Outcome, Stop, Termination};
 use crate::runtime_probes::{ProbeKind, RuntimeProbe};
 use crate::service::{Service, Supervisor};
 
@@ -311,19 +349,28 @@ impl std::error::Error for SmokeRefused {}
 
 /// One serve probe, the command the mode admitted for it, and the bounds.
 ///
-/// Built by [`StartSmoke::of`], which is the only constructor — the working
-/// directory comes from the probe's component, the command comes from the
-/// enforcement, and a type that could be assembled from a pair that disagree
-/// would be a type that could start one component's command in another
-/// component's directory.
+/// Built by [`StartSmoke::of`] or [`StartSmoke::planned`] — **the two
+/// constructors, and there is no third** — so that the working directory and the
+/// command cannot come from different places: `of` takes the directory from the
+/// probe's component and looks its command up by the probe's own check id, and
+/// `planned` takes both from the plan's own spec. A type assembled from a pair
+/// that disagree would be a type that could start one component's command in
+/// another component's directory.
 #[derive(Debug)]
 pub struct StartSmoke<'a> {
-    /// The directory the service is started in: the project root joined with the
-    /// probe's component, which is relative and empty for the root itself.
+    /// The directory the service is started in. From the probe's component for
+    /// [`StartSmoke::of`], and from the command's own working directory for
+    /// [`StartSmoke::planned`] — where the plan put it and where the admission
+    /// was a decision about a program and an argument vector, not about where it
+    /// runs.
     directory: PathBuf,
     admitted: AdmittedCommand<'a>,
     fingerprint: FingerprintId,
     limits: Limits,
+    /// What the service starts with. Per door, and the module comment argues
+    /// both: the plan's own environment for [`StartSmoke::planned`],
+    /// [`Environment::inherited`] for [`StartSmoke::of`].
+    environment: Environment,
 }
 
 impl<'a> StartSmoke<'a> {
@@ -333,6 +380,10 @@ impl<'a> StartSmoke<'a> {
     /// workspace member's `start` script runs where the manifest that declares
     /// it lives — which is the same rule `Package` uses to read that manifest,
     /// applied to the directory rather than to the file.
+    ///
+    /// The environment is [`Environment::inherited`], stated here rather than
+    /// left to the request's default; the module comment says why this door has
+    /// nothing else to state.
     ///
     /// # Errors
     ///
@@ -368,6 +419,59 @@ impl<'a> StartSmoke<'a> {
             // admitted for.
             fingerprint: enforcement.check_plan().fingerprint.clone(),
             limits,
+            environment: Environment::inherited(),
+        })
+    }
+
+    /// A smoke check for a scheduled service, out of the plan's own spec.
+    ///
+    /// This is the door a product path uses: `planned_check_runner.rs` pairs the
+    /// admitted command with the `CheckOperation::Service` the schedule holds and
+    /// calls this once. Every budget and both policies come from the spec or from
+    /// the caller rather than from a constant here:
+    ///
+    /// - the **window** and the **service's whole-life budget** are the spec's own
+    ///   ([`ServiceCheckSpec::window`] and the command's `limits`), and the
+    ///   address — when there is one — is [`Readiness::endpoint`]'s;
+    /// - the **working directory** is the command's, because the plan decided
+    ///   where this command runs;
+    /// - the **environment** is the command's, which is the whole of clause one of
+    ///   `P18-T009`: the project's process starts with what the plan states.
+    /// - `request` is the one budget neither the plan nor the command carries: how
+    ///   long the single exchange SURE makes with the service has, and how much of
+    ///   the answer it keeps. [`crate::probe::Limits`] says why a caller must
+    ///   choose it — *"a caller that does not choose a bound has not decided what
+    ///   the check is allowed to cost"* — and the caller here is the runner,
+    ///   which is where that decision belongs.
+    ///
+    /// [`Readiness::endpoint`]: crate::planned_work::Readiness::endpoint
+    ///
+    /// # Errors
+    ///
+    /// [`LimitsError`], from [`Limits::new`], when the spec's own numbers cannot
+    /// be run: a window of zero, or one that cannot close before the service's
+    /// budget runs out. **Refused here and not carried out**, because a plan
+    /// whose numbers cannot produce a verdict is a defect to report rather than a
+    /// check to run into a warning.
+    pub fn planned(
+        admitted: AdmittedCommand<'a>,
+        spec: &ServiceCheckSpec,
+        project_fingerprint: &FingerprintId,
+        request: probe::Limits,
+    ) -> Result<Self, LimitsError> {
+        let command = spec.command();
+        let limits = Limits::new(
+            spec.window(),
+            command.limits(),
+            request,
+            spec.readiness().endpoint().cloned(),
+        )?;
+        Ok(Self {
+            directory: command.working_directory().to_path_buf(),
+            admitted,
+            fingerprint: project_fingerprint.clone(),
+            limits,
+            environment: command.environment().clone(),
         })
     }
 
@@ -383,6 +487,26 @@ impl<'a> StartSmoke<'a> {
         &self.limits
     }
 
+    /// What the service will be started with.
+    #[must_use]
+    pub const fn environment(&self) -> &Environment {
+        &self.environment
+    }
+
+    /// The supervisor every run from this value goes through.
+    ///
+    /// Built here and nowhere else, so that [`StartSmoke::run`] and a test read
+    /// the same value: the directory, the service's whole-life budget and the
+    /// environment are the three things a service is held to, and a test that
+    /// could only re-read the fields would be measuring a copy of the expression
+    /// rather than the expression itself. It builds no process — a `Supervisor`
+    /// is a description until [`Supervisor::start`] is called — so this is
+    /// reachable from a test that starts nothing.
+    fn supervisor(&self) -> Supervisor {
+        Supervisor::new(&self.directory, self.limits.service)
+            .with_environment(self.environment.clone())
+    }
+
     /// Start it, watch it, ask it, stop it, and say what came of it.
     ///
     /// Infallible, and that is `probe.rs`'s rule for the same reason: every way
@@ -393,15 +517,74 @@ impl<'a> StartSmoke<'a> {
     /// failure of this function.
     #[must_use]
     pub fn run(&self, cancellation: &Cancellation) -> CheckResult {
+        // The window, the question and the stop are all this module's, and a
+        // caller with nothing else to do while the service is up is
+        // [`Self::run_then`] with a step that does nothing. **One lifecycle
+        // rather than two spellings of one**: a browser check is the caller
+        // that has somewhere else to look, and the alternative — a second copy
+        // of the start, the window and the stop written beside this one — is
+        // the second answer to *did this service work* that this module exists
+        // to be the only one of.
+        self.run_then(cancellation, |_| ()).0
+    }
+
+    /// Start it, watch it, ask it, hand the answer to `look`, stop it, and say
+    /// what came of all of it.
+    ///
+    /// [`Self::run`] with one step inserted, and the step is the caller's
+    /// because the caller is the one that knows what else there is to do while
+    /// a service is up: a browser check holds a service **and a page**, and the
+    /// page is read between the readiness question and the stop.
+    ///
+    /// # The four things that make this the same rule as `run`
+    ///
+    /// - **`look` is called only when the readiness question was answered.** The
+    ///   condition is the one [`Self::run`] already uses to ask — the window
+    ///   closed with the service still running and there was an endpoint — plus
+    ///   the answer itself: a port that accepted a connection and said nothing
+    ///   is [`ProbeOutcome::NoAnswer`], which is *an open port is not an
+    ///   answer*, so a caller cannot look at a page on a service SURE never
+    ///   reached. **A refusal is not an absence of an answer** — an HTTP status
+    ///   outside the 2xx–3xx window is [`ProbeOutcome::Answered`] and does
+    ///   reach `look`, because the question this gates is *did the service
+    ///   answer at all* and not *was the answer to SURE's liking*.
+    /// - **It is called with the endpoint that answered**, so the address a
+    ///   caller goes on to is the one SURE has just read a status line from
+    ///   rather than one it assumed.
+    /// - **It is called before the stop**, so whatever it observed was observed
+    ///   while the service was up.
+    /// - **The stop happens on every path.** It is not a branch: it is the next
+    ///   statement after the look for every look there is — the one that
+    ///   returned a clean page, the one that reported a page that threw, and
+    ///   the one that never ran because the service never answered. A `look`
+    ///   that panics is the one path this function does not walk, and it is
+    ///   covered rather than excused: dropping a [`Service`] cancels it, which
+    ///   is what [`Service`]'s own documentation says a drop does.
+    ///
+    /// # What comes back
+    ///
+    /// The service's own verdict **and** what `look` produced, or `None` when
+    /// `look` was never called. They answer different questions — *did this
+    /// service come up* and *what did its page do* — and this function does not
+    /// choose between them: a caller that looked reports what it saw, and one
+    /// that did not has the service's own words for why. **Neither half is a
+    /// status this module invented for a page**, which is the whole of why the
+    /// caller's step is a closure rather than a second row in the table above.
+    #[must_use]
+    pub fn run_then<O>(
+        &self,
+        cancellation: &Cancellation,
+        look: impl FnOnce(&Endpoint) -> O,
+    ) -> (CheckResult, Option<O>) {
         let check = self.admitted.command().check();
-        let (status, reason) = self.observe(cancellation);
+        let (status, reason, looked) = self.observe(cancellation, look);
         let id = check.id().clone();
         let title = check.title().to_owned();
         let severity = check.severity();
         let critical = check.critical();
         let fingerprint = self.fingerprint.clone();
         let class = EvidenceClass::ObservedFact;
-        match status {
+        let result = match status {
             CheckStatus::Pass => {
                 CheckResult::pass(id, title, severity, critical, class, fingerprint)
                     .with_reason(reason)
@@ -433,7 +616,8 @@ impl<'a> StartSmoke<'a> {
             CheckStatus::Error | CheckStatus::Skipped => {
                 CheckResult::errored(id, title, severity, critical, reason, fingerprint)
             }
-        }
+        };
+        (result, looked)
     }
 
     /// Run it and return the status and the sentence together.
@@ -443,15 +627,20 @@ impl<'a> StartSmoke<'a> {
     /// `reason()` separately and argue that the two run the same rows in the
     /// same order. Here the rows are the same rows and they are walked once, so
     /// there is no order for the two to disagree about.
-    fn observe(&self, cancellation: &Cancellation) -> (CheckStatus, String) {
+    fn observe<O>(
+        &self,
+        cancellation: &Cancellation,
+        look: impl FnOnce(&Endpoint) -> O,
+    ) -> (CheckStatus, String, Option<O>) {
         if cancellation.is_cancelled() {
             return (
                 CheckStatus::Error,
                 String::from("the check was cancelled before it started"),
+                None,
             );
         }
 
-        let supervisor = Supervisor::new(&self.directory, self.limits.service);
+        let supervisor = self.supervisor();
         let service_cancellation = Cancellation::default();
         let service = match supervisor.start(self.admitted, service_cancellation) {
             Ok(service) => service,
@@ -459,6 +648,7 @@ impl<'a> StartSmoke<'a> {
                 return (
                     CheckStatus::Error,
                     format!("SURE could not start it, so nothing about it was checked: {error}"),
+                    None,
                 );
             }
         };
@@ -468,6 +658,23 @@ impl<'a> StartSmoke<'a> {
             self.ask()
         } else {
             None
+        };
+
+        // The caller's own step, taken **here** and nowhere else: after the
+        // readiness question has come back and before the stop. `Answered` and
+        // not `status() == Pass`, because the question this gates is *did the
+        // service answer* — a `/health` a project never wrote answers 404, and
+        // a browser check whose service 404s its health route is a check that
+        // should still look at the page.
+        let looked = match &asked {
+            Some((endpoint, answer)) => match answer {
+                ProbeOutcome::Answered { .. } => Some(look(endpoint)),
+                ProbeOutcome::Refused { .. }
+                | ProbeOutcome::Unreachable { .. }
+                | ProbeOutcome::NoAnswer { .. }
+                | ProbeOutcome::NotHttp { .. } => None,
+            },
+            None => None,
         };
 
         // The stop is called on every path, including the one where the service
@@ -481,6 +688,7 @@ impl<'a> StartSmoke<'a> {
                 return (
                     CheckStatus::Error,
                     format!("SURE started it and cannot say what it did: {error}"),
+                    looked,
                 );
             }
         };
@@ -505,20 +713,32 @@ impl<'a> StartSmoke<'a> {
                 });
                 CheckStatus::Fail
             }
-            Termination::Cancelled { .. } => {
+            Termination::Cancelled { stopped } => {
                 clauses.push(format!(
                     "the service was still running after {}, so SURE stopped it",
                     spoken(self.limits.window)
                 ));
+                // The reach, as its own clause rather than folded into the
+                // sentence above: a reason that says only "SURE stopped it"
+                // cannot tell a service stopped whole from one whose children
+                // still hold the port, and on this arm the status can be
+                // `Warning`, which does not block a green. The same clause
+                // `planned_work.rs` pushes for a command, for the same reason:
+                // once this function returns, the `Stop` is gone with the
+                // outcome and there is nowhere left to read it.
+                clauses.push(stop_clause(stopped).to_owned());
                 asked
                     .as_ref()
                     .map_or(CheckStatus::Warning, |(_, answer)| answer.status())
             }
-            Termination::TimedOut { .. } => {
+            Termination::TimedOut { stopped } => {
                 clauses.push(format!(
                     "the service ran until its own budget of {} ran out, and SURE stopped it",
                     spoken(self.limits.service.timeout())
                 ));
+                // See the arm above: the reach is a clause of its own on both
+                // stops, and this one's status can be a `Warning` as well.
+                clauses.push(stop_clause(stopped).to_owned());
                 asked
                     .as_ref()
                     .map_or(CheckStatus::Warning, |(_, answer)| answer.status())
@@ -537,6 +757,7 @@ impl<'a> StartSmoke<'a> {
                          {:?}",
                         outcome.termination()
                     ),
+                    looked,
                 );
             }
         };
@@ -566,7 +787,7 @@ impl<'a> StartSmoke<'a> {
             }
         }
 
-        (status, clauses.join("; "))
+        (status, clauses.join("; "), looked)
     }
 
     /// Whether the service ended before the window closed.
@@ -610,6 +831,28 @@ fn ended_with(code: Option<i32>) -> String {
     match code {
         Some(code) => format!("exit code {code}"),
         None => "no exit code, because the operating system ended it".to_owned(),
+    }
+}
+
+/// What a stop reached, in the words a report uses for a service.
+///
+/// The service half of the same rule `planned_work.rs`'s `stop_clause` applies
+/// to a command, and it is stated for the same reason:
+/// [`Stop::WholeTree`] is the operating system's own account of the tree — what
+/// `taskkill /T /F` reporting success means on Windows — and
+/// [`Stop::ProcessOnly`] is a stop that reached the service and nothing below
+/// it, so anything the service started may still be running. **Both are the
+/// answer to a question a person waiting on a check asks** — *is the thing I
+/// started gone, and is everything it started gone with it* — and the `Stop` is
+/// a field of the termination the outcome is carrying, so a sentence that does
+/// not print it here leaves the answer nowhere else to be read.
+fn stop_clause(stopped: Stop) -> &'static str {
+    match stopped {
+        Stop::WholeTree => "the stop reached the service and the programs it started",
+        Stop::ProcessOnly => {
+            "the stop reached only the service itself, so anything it started may still be \
+             running"
+        }
     }
 }
 
@@ -700,6 +943,14 @@ mod tests {
     use super::*;
     use crate::process::CapturedOutput;
     use std::ffi::OsString;
+
+    use sure_domain::execution::{ExecutionMode, ExecutionPermissions};
+    use sure_domain::ids::{CheckId, FingerprintId};
+    use sure_domain::severity::Severity;
+
+    use crate::consent::{PermissionPlan, PlannedCheck};
+    use crate::enforce::Enforcement;
+    use crate::planned_work::{CommandSpec, Readiness};
 
     /// An outcome built by hand, which is the only place this module's quoting
     /// can be tested without a process: every branch of it is about text that
@@ -944,5 +1195,178 @@ mod tests {
             ended_with(None).starts_with("no exit code"),
             "a fabricated code would be read as the program's own"
         );
+    }
+
+    // ---- the second door: a scheduled service, and what it is given ----------
+
+    /// An enforcement holding one admitted command, built the way the product
+    /// builds one: a permission plan holding this program, decided under a mode
+    /// that runs the project's code.
+    ///
+    /// **`npm run start` and not `python -m http.server`**, and the reason is a
+    /// measurement rather than a preference: the classifier knows `npm`'s `start`
+    /// verb as running the project's code, while `python -m http.server` names a
+    /// module the classifier does not know, so the command needs permissions this
+    /// fixture does not grant and nothing is admitted for it. A service is usually
+    /// a server, and this fixture is not about what the program does — it is about
+    /// what the door passes on.
+    fn an_enforcement(fingerprint: &FingerprintId) -> Enforcement {
+        let check = PlannedCheck::new(
+            CheckId::parse("chk_served").expect("a well-formed check id"),
+            "a service",
+            Severity::MustFix,
+            true,
+        );
+        let mut plan = PermissionPlan::new(
+            ExecutionMode::HostConfirmed,
+            fingerprint.clone(),
+            ExecutionPermissions {
+                run_project_code: true,
+                ..ExecutionPermissions::inspect_only()
+            },
+        );
+        plan.add(check.clone(), "npm", ["run", "start"]);
+        Enforcement::of("a fixture", plan, &[check])
+    }
+
+    /// A `ServiceCheckSpec` whose every field is a value this test chose, so that
+    /// the assertions below can only pass if each one came from the spec.
+    fn a_spec() -> ServiceCheckSpec {
+        ServiceCheckSpec::new(
+            CommandSpec::new(
+                "npm",
+                std::env::temp_dir().join("sure-planned-service"),
+                Environment::only([
+                    (OsString::from("PATH"), OsString::from("/usr/bin")),
+                    (OsString::from("PORT"), OsString::from("5173")),
+                ]),
+                process::Limits::new(Duration::from_secs(30), 4096, 8192),
+            )
+            .with_arguments(["run", "start"]),
+            Readiness::Answers {
+                endpoint: Endpoint::loopback(5173, "/health").expect("a loopback path"),
+            },
+            Duration::from_secs(2),
+        )
+    }
+
+    #[test]
+    fn a_planned_service_carries_the_plans_own_environment_and_bounds() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = a_spec();
+        let request = probe::Limits::new(Duration::from_millis(500), 64 * 1024);
+
+        let smoke = StartSmoke::planned(admitted, &spec, &fingerprint, request)
+            .expect("the spec's own numbers are runnable");
+
+        assert_eq!(
+            smoke.environment(),
+            spec.command().environment(),
+            "the service starts with the environment the plan holds, which is clause one of \
+             P18-T009 and the reason this door exists"
+        );
+        assert_eq!(
+            smoke.working_directory(),
+            spec.command().working_directory(),
+            "the directory is the command's own, because the plan decided where this command runs"
+        );
+        assert_eq!(smoke.limits().window(), spec.window());
+        assert_eq!(smoke.limits().service(), spec.command().limits());
+        assert_eq!(smoke.limits().request(), request);
+        assert_eq!(smoke.limits().endpoint(), spec.readiness().endpoint());
+    }
+
+    /// The joint the value above is only half of: what a run would actually hand
+    /// the supervisor. `run` is not called anywhere here — it is the one function
+    /// in this file that can start something — and the supervisor it would use is
+    /// reachable without one, because a `Supervisor` is a description until it is
+    /// asked to start anything.
+    #[test]
+    fn a_planned_service_hands_its_supervisor_the_same_three_things() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = a_spec();
+
+        let smoke = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect("the spec's own numbers are runnable");
+
+        let supervisor = smoke.supervisor();
+
+        assert_eq!(
+            supervisor.environment(),
+            spec.command().environment(),
+            "the environment reaches the supervisor and not only this struct's field"
+        );
+        assert_eq!(
+            supervisor.working_directory(),
+            spec.command().working_directory()
+        );
+        assert_eq!(supervisor.limits(), spec.command().limits());
+    }
+
+    #[test]
+    fn a_planned_service_whose_window_cannot_close_is_refused_rather_than_run() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        // The same command with a window that is not shorter than its own budget:
+        // `Limits::new`'s second refusal, reached through this door.
+        let spec = ServiceCheckSpec::new(
+            a_spec().command().clone(),
+            Readiness::StaysUp,
+            Duration::from_secs(30),
+        );
+
+        let refused = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect_err("a window that cannot close before the budget is not runnable");
+
+        assert_eq!(refused, LimitsError::WindowOutlastsTheBudget);
+    }
+
+    #[test]
+    fn a_planned_service_with_a_zero_window_is_refused_rather_than_rounded() {
+        let fingerprint = FingerprintId::generate();
+        let enforcement = an_enforcement(&fingerprint);
+        let admitted = enforcement
+            .admitted()
+            .next()
+            .expect("the fixture's mode admits one command");
+        let spec = ServiceCheckSpec::new(
+            a_spec().command().clone(),
+            Readiness::StaysUp,
+            Duration::ZERO,
+        );
+
+        let refused = StartSmoke::planned(
+            admitted,
+            &spec,
+            &fingerprint,
+            probe::Limits::new(Duration::from_millis(500), 64 * 1024),
+        )
+        .expect_err("a zero window is refused, not rounded");
+
+        assert_eq!(refused, LimitsError::ZeroWindow);
     }
 }

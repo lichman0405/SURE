@@ -196,5 +196,16 @@
       "No known false-green regression is introduced.",
       "Documentation matches implemented behavior."
     ]
+  },
+  {
+    "id": "P18",
+    "title": "Planned-check execution pipeline",
+    "objective": "Connect the check schedule to the permission plan, to Enforcement and to bounded process, service and browser execution, so that every scheduled check produces exactly one explicit result and no path turns missing output into a pass.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
   }
 ]

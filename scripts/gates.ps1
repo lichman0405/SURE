@@ -104,6 +104,19 @@
 # list of known failures, nothing is skipped, and the suppression census below
 # reads THIS FILE as well as every file it calls. `-ErrorAction <the-silent-one>`
 # appears nowhere in it, and the census is what would say so.
+#
+# It also does not set the console's code page, and it says which one it ran
+# under rather than leaving that to the operator's memory (`P18-T012`). Three
+# `sure-cli` test targets read a child's stdout as UTF-8 while Windows PowerShell
+# 5.1 writes redirected stdout in the console's code page, so on a console that is
+# not UTF-8 they are red for a reason that is not the tree -- 17 failures across
+# `install_flow`, `quickstart_flow` and `winget_manifest` on this machine's default
+# `zh-CN` console (CP936), against `passed=2818 failed=0` for the same seven gates
+# at the same commit from a UTF-8 console. Filed as Issue #11 and not fixed here.
+# The reading is recorded for the same reason the execution policy's is: reading
+# it is how a future red is told apart from a tree that is wrong, and *setting* it
+# would be this runner moving the console under the commands it runs, which is the
+# clause-10 line the policy block above refuses to cross for the same reason.
 
 param(
     [Parameter(Mandatory = $true)][string]$Label,
@@ -345,6 +358,35 @@ $Preference = if ([string]::IsNullOrEmpty($env:PSExecutionPolicyPreference)) {
     $env:PSExecutionPolicyPreference
 }
 Add-GateLine ("env: execution policy scopes: {0}; PSExecutionPolicyPreference={1}" -f $Scopes, $Preference)
+
+# 1b. The console's code page. RECORDED, never set, and the disclosure is the
+#     point rather than the number: `sure-cli`'s `install_flow`, `quickstart_flow`
+#     and `winget_manifest` targets read a child's stdout as UTF-8 while Windows
+#     PowerShell 5.1 writes redirected stdout in the CONSOLE's code page, so on a
+#     console that is not UTF-8 those three targets are red for a reason that is
+#     not the tree -- measured 2026-09-22 on this machine's default `zh-CN`
+#     console (CP936): 17 failures across the three, against `passed=2818
+#     failed=0` for the same seven gates at the same commit from a UTF-8 console.
+#     Filed as Issue #11 and not fixed here. This file does not change the code
+#     page for the same reason it does not set an execution policy (clause 10 of
+#     CLAUDE.md's discipline): a runner that moved the console under the commands
+#     it runs would be a runner whose readings are not the operator's. It records
+#     what it ran under instead, so a future red can be read rather than guessed
+#     at -- and the two readings differ only in this line, which is what makes it
+#     usable for that.
+#     `[Console]::OutputEncoding.CodePage` rather than `chcp.com`: the shell
+#     command's output is localised on a machine whose display language is not
+#     English, and a record that parses differently per locale is a record that
+#     cannot be compared.
+$OutputCodePage = [Console]::OutputEncoding.CodePage
+$InputCodePage = [Console]::InputEncoding.CodePage
+if ($OutputCodePage -eq 65001) {
+    $CodePageReading = 'UTF-8, so the readings below are comparable with the ones P18 took'
+} else {
+    $CodePageReading = 'NOT UTF-8, so install_flow/quickstart_flow/winget_manifest may be red for a reason that is not the tree (Issue #11)'
+}
+Add-GateLine ('env: console code page {0} (output; input {1}); SURE does not set it -- {2}' -f
+    $OutputCodePage, $InputCodePage, $CodePageReading)
 
 if ($Edition.Major -lt 7) {
     Stop-WithRefusal -Code 'ps-edition' -ExitCode $ExitCannotRun -Subject (

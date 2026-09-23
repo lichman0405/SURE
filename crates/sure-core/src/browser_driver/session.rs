@@ -160,6 +160,10 @@ const DEPARTURE: Duration = Duration::from_secs(2);
 /// fail with an option error rather than by timing out, and the report would
 /// blame the browser for the clock.
 const NO_LESS_THAN: Duration = Duration::from_millis(50);
+/// A just-opened debugging endpoint can answer before its first page exists.
+/// Re-read its target list within the same look budget instead of treating that
+/// transient empty list as a permanently unusable browser.
+const TARGET_POLL: Duration = Duration::from_millis(25);
 
 /// How many requests are remembered so that a failure can name its address.
 ///
@@ -598,6 +602,7 @@ impl Connection {
             return Err(Trouble::Link(WsError::Cancelled));
         }
 
+        let deadline = Instant::now() + timeout;
         let mut socket = WebSocket::connect(browser.address(), browser.browser_path(), timeout)?;
         socket.set_read_timeout(timeout)?;
         let mut connection = Self {
@@ -608,16 +613,10 @@ impl Connection {
             patience: timeout,
         };
 
-        let targets = connection.call("Target.getTargets", json!({}))?;
-        let page = targets
-            .get("targetInfos")
-            .and_then(Value::as_array)
-            .and_then(|infos| infos.iter().find(|info| text(info, "type") == Some("page")))
-            .and_then(|info| text(info, "targetId"))
-            .ok_or_else(|| Trouble::Refused {
-                method: String::from("Target.getTargets"),
-                said: String::from("the browser reported no page to attach to"),
-            })?;
+        let page = await_page(deadline, cancellation, |patience| {
+            connection.patience = patience;
+            connection.call("Target.getTargets", json!({}))
+        })?;
 
         // `flatten` is what makes the whole session run over this one socket:
         // every later message carries the session id this returns, and without
@@ -807,6 +806,43 @@ impl Connection {
     }
 }
 
+/// Waits for the first page within the remaining look budget. Chromium may
+/// publish its debugging endpoint before it creates the initial `about:blank`
+/// target; issue #15 caught that exact empty reply on Ubuntu. Only an empty
+/// successful reply is retried. A protocol or socket error remains an error.
+fn await_page(
+    deadline: Instant,
+    cancellation: &Cancellation,
+    mut targets: impl FnMut(Duration) -> Result<Value, Trouble>,
+) -> Result<String, Trouble> {
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(Trouble::Link(WsError::Cancelled));
+        }
+        let patience = deadline
+            .saturating_duration_since(Instant::now())
+            .max(NO_LESS_THAN);
+        let reply = targets(patience)?;
+        let page = reply
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .and_then(|infos| infos.iter().find(|info| text(info, "type") == Some("page")))
+            .and_then(|info| text(info, "targetId"));
+        if let Some(page) = page {
+            return Ok(page.to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(Trouble::Refused {
+                method: String::from("Target.getTargets"),
+                said: String::from(
+                    "the browser reported no page to attach to before the look budget ended",
+                ),
+            });
+        }
+        std::thread::sleep(TARGET_POLL);
+    }
+}
+
 /// Opens `target` in a browser and reports what the page did.
 ///
 /// `program` is the browser to drive, or `None` to look for one. A caller that
@@ -837,20 +873,24 @@ pub(crate) fn open(
 
     // What is left of the budget rather than a fresh one, so that one look
     // cannot take longer than the caller allowed however the time is spent.
-    let left = limits
+    let launch_left = limits
         .timeout()
         .saturating_sub(started.elapsed())
         .max(NO_LESS_THAN);
 
-    let mut browser = match launch::start(&program, left, cancellation) {
+    let mut browser = match launch::start(&program, launch_left, cancellation) {
         Ok(browser) => browser,
         Err(error) => {
             return Report::absent(AbsenceReason::DriverWouldNotStart, error.to_string());
         }
     };
 
+    let attach_left = limits
+        .timeout()
+        .saturating_sub(started.elapsed())
+        .max(NO_LESS_THAN);
     let mut connection =
-        match Connection::attach(&browser, left, limits.problems_kept(), cancellation) {
+        match Connection::attach(&browser, attach_left, limits.problems_kept(), cancellation) {
             Ok(connection) => connection,
             Err(trouble) => {
                 return Report::absent(
@@ -950,6 +990,38 @@ mod tests {
     use super::*;
 
     const OURS: &str = "a-session";
+
+    #[test]
+    fn an_empty_target_list_can_precede_the_page_the_browser_then_creates() {
+        let mut replies = vec![
+            json!({ "targetInfos": [] }),
+            json!({ "targetInfos": [{ "type": "page", "targetId": "INITIAL" }] }),
+        ]
+        .into_iter();
+        let page = await_page(
+            Instant::now() + Duration::from_secs(1),
+            &Cancellation::new(),
+            |_| Ok(replies.next().expect("only two target polls")),
+        )
+        .expect("the second reply contains the initial page");
+        assert_eq!(page, "INITIAL");
+        assert!(
+            replies.next().is_none(),
+            "the page took two polls to appear"
+        );
+    }
+
+    #[test]
+    fn a_browser_that_never_creates_a_page_still_fails_visibly() {
+        let error = await_page(Instant::now(), &Cancellation::new(), |_| {
+            Ok(json!({ "targetInfos": [] }))
+        })
+        .expect_err("an empty target list cannot be treated as a page");
+        assert!(
+            matches!(error, Trouble::Refused { .. }),
+            "no page remains a browser error: {error}"
+        );
+    }
 
     /// One message, shaped the way the browser sends them.
     fn event(method: &str, params: Value) -> Value {

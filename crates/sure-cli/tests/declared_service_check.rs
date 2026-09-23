@@ -189,8 +189,46 @@ const { spawn } = require('node:child_process');
 const PORT = __PORT__;
 const markers = path.resolve(__dirname, '..', 'markers');
 
+// **A marker is written whole or it is not written at all.** `writeFileSync` opens with
+// `O_TRUNC`, so it empties the file before the bytes go in: a reader that arrives inside
+// that window sees an empty file, and a writer that is *killed* inside it leaves one
+// behind for good. That is not a theory — `taskkill /T /F` ends this process outright, and
+// on CI the stop landed exactly while this function was writing `heartbeat`, so the test
+// read an empty counter and failed with `the heartbeat is a number: ParseIntError { kind:
+// Empty }`. Writing under a scratch name and renaming it into place makes the replacement
+// a single step, so a reader sees the previous value or the next one and never a
+// half-written file, and a kill leaves the previous complete value rather than a hole.
+//
+// **The rename is refused, not queued, while another process holds the target open.** On
+// Windows `MoveFileEx` answers `EPERM` for that, and inside a timer callback a refusal is
+// an uncaught throw that ends this service — a collision with a reader would kill the
+// thing being measured. Measured, not assumed: `target/tmp/rename-alone.mjs` renames five
+// bytes over themselves 5469 times in two seconds with no reader and is refused **zero**
+// times, while `target/tmp/marker-write-probe.mjs` refuses the same rename from a reader
+// polling without pause on **20 rounds of 20**. So the rename is retried for half the beat
+// interval below — 25 ms of the 50 ms between beats, because a beat that waits longer than
+// that is behind the next one anyway — and only then written in place: that is the old
+// spelling and it can be caught mid-truncation, which is worse than the retry gives and
+// much better than a beat that never lands or a service that throws.
+const park = new Int32Array(new SharedArrayBuffer(4));
+
 function note(name, text) {
-  fs.writeFileSync(path.join(markers, name), text);
+  const target = path.join(markers, name);
+  const scratch = `${target}.writing`;
+  fs.writeFileSync(scratch, text);
+  const until = Date.now() + 25;
+  for (;;) {
+    try {
+      fs.renameSync(scratch, target);
+      return;
+    } catch (error) {
+      if (error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+      if (Date.now() >= until) break;
+      Atomics.wait(park, 0, 0, 1);
+    }
+  }
+  fs.writeFileSync(target, text);
+  fs.rmSync(scratch, { force: true });
 }
 
 // A switch the test sets before the run and never inside the project: a file in
@@ -264,9 +302,11 @@ server.listen({ host: '127.0.0.1', port: PORT, exclusive: true }, () => {
 /// The descendant of the service, which listens on nothing.
 ///
 /// **It exists so that a stop can be measured rather than trusted.** A stop that
-/// reached only the process SURE started leaves this one running, and this one
-/// says so for as long as it is alive — which is the Windows-specific half of the
-/// stop case below.
+/// reached only the process SURE started leaves this one running and beating, and
+/// the stop case below reads its counter before and after the stop to catch
+/// exactly that — on the platform whose stop reaches the whole tree. Off Windows
+/// it goes on beating and nothing reads it, which the stop case names as a gap
+/// rather than passing over in silence.
 ///
 /// **It ends itself after five minutes**, and that is not a detail about the
 /// service: on a platform whose stop reaches one process, this descendant is
@@ -278,10 +318,35 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const markers = path.resolve(__dirname, '..', 'markers');
+// Whole or not at all, for the reason the service's own `note` gives — and refused, not
+// queued, while a reader holds the file open, which is why the rename is retried there
+// too. This file is written by a process that outlives the run on platforms whose stop
+// reaches one process, so a kill landing inside `writeFileSync`'s truncate window would
+// leave it empty and the reading would be about the kill rather than about the counter.
+const park = new Int32Array(new SharedArrayBuffer(4));
+
+function note(name, text) {
+  const target = path.join(markers, name);
+  const scratch = `${target}.writing`;
+  fs.writeFileSync(scratch, text);
+  const until = Date.now() + 25;
+  for (;;) {
+    try {
+      fs.renameSync(scratch, target);
+      return;
+    } catch (error) {
+      if (error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+      if (Date.now() >= until) break;
+      Atomics.wait(park, 0, 0, 1);
+    }
+  }
+  fs.writeFileSync(target, text);
+  fs.rmSync(scratch, { force: true });
+}
 let beats = 0;
 const beat = setInterval(() => {
   beats += 1;
-  fs.writeFileSync(path.join(markers, 'helper-heartbeat'), String(beats));
+  note('helper-heartbeat', String(beats));
 }, 50);
 setTimeout(() => {
   clearInterval(beat);
@@ -869,9 +934,10 @@ fn the_started_process_and_its_descendant_are_stopped() {
         "the service never wrote the marker it writes once it is listening: {service}"
     );
 
-    // The descendant ran at all, which is what makes the assertion below about
-    // it mean something: a helper that never started leaves no file, and a
-    // missing file cannot be one that stopped moving.
+    // The descendant ran at all. That is the whole of what the non-Windows legs
+    // say about it, and it is what makes the Windows comparison below mean
+    // something: a helper that never started leaves no file, and a missing file
+    // cannot be one that stopped moving.
     let helper = fixture.marker("helper-heartbeat");
     assert!(
         helper.exists(),
@@ -880,6 +946,12 @@ fn the_started_process_and_its_descendant_are_stopped() {
     );
 
     let heartbeat = read(&fixture.marker("heartbeat"));
+    // **Read only where it is compared.** The comparison below is `#[cfg(windows)]`
+    // because this platform's stop reaches the whole tree while the others stop the one
+    // process SURE started, and off Windows the binding would be a read nobody uses —
+    // which `-D warnings` refuses, and did: both non-Windows legs went red on
+    // *unused variable: `helper_beat`* before either of them reached a single test.
+    #[cfg(windows)]
     let helper_beat = read(&helper);
     std::thread::sleep(SILENCE);
     assert_eq!(
@@ -888,16 +960,23 @@ fn the_started_process_and_its_descendant_are_stopped() {
         "the service SURE started was still running after the run returned"
     );
 
-    // **The descendant is the half only Windows reaches**, and it is asserted
-    // only here. `crates/sure-core/src/process/terminate.rs` documents the
+    // **The descendant is the half only Windows reaches, and only Windows
+    // reads.** `crates/sure-core/src/process/terminate.rs` documents the
     // mechanism and the difference: this platform runs `taskkill /T`, which
-    // reaches the whole tree, and every other platform stops the one process
-    // SURE started — so on those, the helper above is still running and saying
-    // so. A test that asserted a frozen helper there would fail for a reason
-    // that is already written down where the mechanism is, and a test that
-    // asserted nothing would be a silently omitted assertion. What runs on those
-    // platforms is the helper's own heartbeat having moved, above, and this
-    // comment.
+    // reaches everything the service started, and every other platform runs
+    // `Child::kill` on the one process SURE holds — reporting `Stop::ProcessOnly`
+    // for exactly that reason.
+    //
+    // So on those platforms the helper is still beating when this test returns.
+    // Nothing here reads it after the stop to find that out: asserting a frozen
+    // helper there would contradict the mechanism written down one file over, and
+    // reading it merely to have read it leaves a binding no comparison uses,
+    // which `-D warnings` refuses — and did, on both non-Windows legs, before
+    // either of them reached a single test. *The helper's survival is unmeasured
+    // off Windows*, and the existence check above is the whole of what those legs
+    // say about this descendant. That is a named gap rather than a passed check,
+    // and it is why `HELPER_JS` ends itself after five minutes: no test on those
+    // platforms can reach a process that outlives the run.
     #[cfg(windows)]
     assert_eq!(
         read(&helper),

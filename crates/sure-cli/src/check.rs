@@ -89,6 +89,7 @@ use sure_core::privacy::{ModelUse, PrivacyStatement};
 use sure_core::process::Cancellation;
 use sure_core::project_intent::{EXPLICIT_GOAL_ID, explicit_goal, record};
 use sure_core::recheck_lifecycle::store_run;
+use sure_core::redact::escape_control_characters;
 use sure_core::repair_impact::select_impacted_checks;
 use sure_core::status::NotCheckedReason;
 use sure_core::store::{Store, StoreError};
@@ -624,6 +625,7 @@ fn finished(
         out,
     )?;
     writeln!(out)?;
+    checks_that_passed(run, out)?;
 
     repairs(run, out)?;
     lifecycle(run, out)?;
@@ -662,6 +664,48 @@ fn finished(
     };
     status?;
     not_clean_note(report, outcome, out)
+}
+
+/// The checks that ran and passed, which nothing else in the report names.
+///
+/// This section exists for one gap and is written to exactly that gap. A check
+/// that failed or warned reaches the reader as a finding above, and one that
+/// did not run reaches them under "Could not check"; a check that **passed** is
+/// a finding by no rule, so before this section a completed pass appeared
+/// nowhere in the run at all. Listing every produced result instead would print
+/// the title of every failing and warning check a second time — and
+/// `is_a_finding` is `false` only for `Pass`, so every one of them is already
+/// above, with the reason the plain-language renderer chose for it rather than
+/// the raw one.
+///
+/// It is also where a reader can see that a project's own tests actually ran.
+/// The distinction it draws is between a command that completed and a plan that
+/// merely allowed one to run. A green here says the command completed; it is
+/// not a statement about payment, email, authentication or any other live
+/// service the project may talk to.
+fn checks_that_passed(run: &RunOutcome, out: &mut impl Write) -> io::Result<()> {
+    let passed: Vec<_> = run
+        .report
+        .results()
+        .iter()
+        .filter(|result| result.status.is_green())
+        .collect();
+    if passed.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "Checks that passed")?;
+    for result in passed {
+        writeln!(
+            out,
+            "  {}: {}",
+            result.status.as_str(),
+            escape_control_characters(&result.title)
+        )?;
+        if !result.reason.is_empty() {
+            writeln!(out, "    {}", escape_control_characters(&result.reason))?;
+        }
+    }
+    writeln!(out)
 }
 
 /// The repair contracts this run wrote, one block each.
@@ -993,6 +1037,10 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = json!(run.mode.as_str());
             details["support"] = support_machine(run);
             details["report"] = verdict_machine(&run.verdict);
+            // Keep every row, including passes, in the pipeline-specific part
+            // of the frame. The verdict's versioned schema summarizes findings
+            // and gaps; it deliberately has no slot for a passing check.
+            details["check_results"] = json!(run.report.results());
             // The two things only a run of *this* pipeline produces, and which
             // no earlier form carried: what stage 11 wrote, and what stage 12
             // compared. They sit here rather than under `report` because
@@ -1012,6 +1060,7 @@ pub fn machine(report: &CheckReport) -> Value {
             details["mode"] = Value::Null;
             details["support"] = Value::Null;
             details["report"] = Value::Null;
+            details["check_results"] = Value::Null;
             details["repairs"] = Value::Null;
             details["lifecycle"] = Value::Null;
         }

@@ -3529,5 +3529,20 @@
     ],
     "outputs": ["crates/sure-cli/tests/", "progress/HANDOFF.md"],
     "notes": "https://github.com/lichman0405/SURE/issues/10"
+  },
+  {
+    "id": "P20-T001",
+    "phase": "P20",
+    "title": "Plan service and browser checks from a typed declaration",
+    "required": true,
+    "depends_on": ["P19-T005"],
+    "acceptance": [
+      "A planner emits a CheckOperation::Service only from a typed declaration of a start command that a person can see and edit, and never from a check title, a rendered command, a README sentence or any other display text.",
+      "A planner emits a CheckOperation::Browser only beside a loopback endpoint and a page target taken from the same typed declaration, and a project that declares neither plans neither.",
+      "A project that declares no service and no browser still plans neither, so pipeline.rs's existing assertions that nothing reaches those two runner doors continue to hold for it.",
+      "An emitted service or browser check produces exactly one explicit result bound to the run's fingerprint, and a service that will not start or a browser that is found but unusable stays visible as an error rather than a pass."
+    ],
+    "outputs": ["crates/sure-core/src/", "docs/architecture/CHECK_PIPELINE.md"],
+    "notes": "The remaining scope of https://github.com/lichman0405/SURE/issues/10: no planner in this build emits a service or browser operation, so a real project cannot plan one. Tracked separately from P19-T005, which verifies the declared-command path. Keep issue #10 open until this task is accepted."
   }
 ]

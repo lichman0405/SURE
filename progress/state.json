@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P19",
-  "last_updated": "2026-09-23T02:04:26.371Z",
+  "last_updated": "2026-09-23T02:42:11.000Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3673,15 +3673,24 @@
       "notes": "Issue #11: PowerShell fixture stdout explicitly UTF-8 before returning Unicode archive path. New direct stager tests pass under CP936 and UTF-8 for install_flow, quickstart_flow, and winget_manifest (6 runs), both Windows PowerShell 5.1 and PowerShell 7 where applicable. Full quickstart reaches sure check but sandbox denies real user store; full CI remains."
     },
     "P19-T004": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-23T02:04:26.371Z",
+      "finished_at": "2026-09-23T02:30:58.035Z",
+      "base_sha": null,
+      "head_sha": null,
+      "evidence": [],
+      "notes": "Issue #15: 3991163 push run 35809998670 and PR run 35810002788 completed success on Windows, Ubuntu and macOS; Ubuntu repeated browser observations passed in 11.916s, 0.728s, 0.722s. Transient empty page targets are retried within the existing budget; absent/unusable browser remains red."
+    },
+    "P19-T005": {
+      "status": "in_progress",
+      "started_at": "2026-09-23T02:31:02.677Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "Investigating Ubuntu Chromium startup evidence for issue #15."
+      "notes": "Reviewing declared-check product path, completed rows and issue #10 acceptance. The human report now lists only the checks that passed: findings_from_checks::is_a_finding is false only for Pass, so every failing and warning result was already rendered as a finding above, and the earlier produced_a_result filter printed those titles twice. Details.check_results in the machine frame still carries every row. No local gate was run in this session: cargo, node, gh and network fetch were all denied by the permission layer, so the fixture, fmt, clippy and the workspace suite are unverified here and CI is the first reading. The remaining service and browser planner scope is decided: it is outside this issue's completion and is tracked as P20-T001."
     },
-    "P19-T005": {
+    "P20-T001": {
       "status": "queued",
       "started_at": null,
       "finished_at": null,

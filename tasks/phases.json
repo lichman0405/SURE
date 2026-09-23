@@ -218,5 +218,16 @@
       "Ubuntu browser startup failures are diagnosed and verified by CI without silent skips.",
       "A safe declared check completes through the product path and the full gates pass."
     ]
+  },
+  {
+    "id": "P20",
+    "title": "Service and browser planner emission",
+    "objective": "Give the check schedule a safe typed source for a service command, a loopback endpoint and a browser target, so that a real project can plan a service or browser check that reaches the runners this build already has.",
+    "exit_criteria": [
+      "All required tasks in phase are accepted or explicitly external-blocked where allowed.",
+      "Affected tests/gates pass.",
+      "No known false-green regression is introduced.",
+      "Documentation matches implemented behavior."
+    ]
   }
 ]

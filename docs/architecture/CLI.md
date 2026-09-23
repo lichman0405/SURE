@@ -789,6 +789,15 @@ stage in the order `CHECK_PIPELINE.md` lists them, each with its outcome
 (`ran`, `not_run`, `not_part_of_work`, `unfinished`) and, when it did not run,
 the vocabulary's own reason plus the sentence a person reads:
 
+`details.check_results` carries the run's explicit `CheckResult` rows, including
+passes that the verdict's `findings` and `not_checked` lists do not contain.
+Each row names the check, its status, evidence class and project fingerprint.
+The human form lists only the passing rows, under **Checks that passed**: a
+failing or warning check is already a finding above, and one that did not run is
+already under **Could not check**, so listing them here would print one result
+twice. A passing project-owned test means that test passed; it does not validate
+external payment, email, authentication or other live services.
+
 ```json
 {"command":"check","details":{"checked_count":0,"green":false,"has_critical_gaps":true,"mode":"inspect_only","not_checked_count":18,"project":"…","purpose":"check","recorded_goal":null,"report":{…},"stages":[{"detail":"…","number":1,"outcome":"ran","reason":null,"stage":"discover","title":"Find the project's parts"},…,{"detail":"…","number":6,"outcome":"not_run","reason":"execution_not_authorized","reason_explained":"Checking this would have meant running your project's code, and you have not allowed that.","stage":"dynamic-checks","title":"Run the project's own checks"},…],"state":"finished","stopped_at":null,"support":{"letter":"C","level":"inspect_only","reason":"…"}},"exit_code":1,"outcome":"not_green","protocol_version":1,"sure_version":"0.1.2"}
 ```

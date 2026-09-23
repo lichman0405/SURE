@@ -47,11 +47,49 @@
 //! `TMP`, `PATH` and `USERPROFILE` were each tried alone and each still aborted.
 //! So it is `SystemRoot` or nothing, and that is what the file now does:
 //! `service_plan.rs`'s `service_environment` passes where Windows is installed,
-//! read from SURE's own process when the plan is made, and passes nothing at all
-//! on the platforms no measurement covers. The empty list that stood in its
-//! place is gone rather than defaulted, and `service_environment`'s own doc
-//! comment carries this measurement and the test beside it asserts the value, so
-//! the next person to consider emptying it again has to argue with both.
+//! read from SURE's own process when the plan is made. The empty list that stood
+//! in its place is gone rather than defaulted, and `service_environment`'s own
+//! doc comment carries this measurement and the test beside it asserts the value,
+//! so the next person to consider emptying it again has to argue with both.
+//! **What that did not yet cover is the second half of the same shape, measured
+//! one paragraph down.**
+//!
+//! # The second measurement, on the platforms the first one did not cover
+//!
+//! **These cases' first run on macOS and Linux found no declared service able to
+//! start at all**, and it is the same defect one variable wide. `rust
+//! (ubuntu-latest)` and `rust (macos-latest)` at `dfbd94f`, runs `35834410398`
+//! and `35834415130`, read `7 passed; 11 failed` each — every failure the same
+//! row:
+//!
+//! ```text
+//! SURE could not start "node" in "/home/runner/work/SURE/SURE/target/tmp/…".
+//!
+//! The operating system said: No such file or directory (os error 2)
+//! ```
+//!
+//! **Nothing was wrong with the fixture and nothing was wrong with the machine.**
+//! The same two jobs, on an earlier green run at `216b7ee` (runs `35813185753`
+//! and `35813190842`), had run `node scripts/product-evals.mjs` **by that name**
+//! and exited 0 — so `node` was on `PATH` in SURE's own process on both runners.
+//! What the service lacked was the block: off Windows a bare name is resolved by
+//! the operating system out of the environment the child is *handed*, and
+//! `declared_service` handed it an empty one. The cost is not a service that
+//! behaves differently but a service that cannot start, for any declaration
+//! naming a program rather than a path — which is every declaration `NODE`
+//! builds. `service_plan.rs` now passes this machine's `PATH` there, with the
+//! measurement beside it, and **the confirmation is the CI run this repair is
+//! pushed with** rather than anything below: the cases themselves are its
+//! evidence, and they are the only instrument on this repository that starts a
+//! program on a Unix machine and a Windows one with the same file.
+//!
+//! **Why the defect had never been seen is worth keeping with it.** Every CI run
+//! that contained this file before `518f513` ended both Unix legs in
+//! `cargo clippy … -D warnings` — `12d955c` is the earliest of them and its step
+//! list has Clippy `completed/failure` with `cargo test` **`skipped`** — so no
+//! case here had ever run on either platform. A lint that stops a job before it
+//! reaches a test hides exactly what a green job that did not look hides, and
+//! the two were repaired in the same round.
 //!
 //! `node` v25.8.1, `C:\Program Files\nodejs\node.exe`, the machine's only
 //! `node`, measured at `f614dc4` and repaired after it. **No assertion below was

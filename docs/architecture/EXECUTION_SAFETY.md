@@ -201,12 +201,17 @@ reaches over loopback.
 
 **A service is not given SURE's own environment.** ADR 0014's decision 11, and
 the plan states it rather than leaving it to a default: a declared service's
-`CommandSpec` carries `Environment::only` over the machine's own minimum — on
-Windows that is `SystemRoot` and nothing else — so the child starts with **none
-of SURE's variables and none of the user's**: not their tokens, not SURE's own
-settings, not a `PATH`. Where Windows is installed is the platform's answer and
-not the user's configuration, and the program that needs it needs it to *exist*
+`CommandSpec` carries `Environment::only` over the machine's own minimum, which
+is one variable per platform and each one measured — `SystemRoot` on Windows, the
+search path everywhere else — so the child starts with **none of the user's own
+settings and nothing of SURE's beyond that minimum**: not their tokens, not
+SURE's configuration. Where Windows is installed is the platform's answer and not
+the user's configuration, and the program that needs it needs it to *exist*
 rather than to behave differently; nothing of the user's rides along with it.
+**`PATH` is on that list and it was not always**: it is the variable a service's
+own program name is resolved through, and a version of this minimum that left it
+out could not start a declared service on macOS or Linux at all (the second
+measurement below).
 
 **That minimum is a measurement, and the first draft of it was the empty list.**
 What the empty list cost was found on the product path rather than reasoned
@@ -218,17 +223,28 @@ declared service would have reported that**, so the failure is a false one that
 SURE causes and the project wears. One variable is the whole difference, and
 `WINDIR`, `SystemDrive`, `TEMP`, `TMP`, `PATH` and `USERPROFILE` each did nothing
 for it — which is why the list is what was measured and must not grow into a
-curated set somebody extends on speculation, and why a platform nobody has
-measured passes nothing. `service_plan.rs` carries the measurement beside the
-list.
+curated set somebody extends on speculation. `service_plan.rs` carries the
+measurement beside the list.
 
-Two consequences belong with it. The program name `node` is still found, because
-SURE resolves it in its own process and the environment is the child's; and a
-service that tries to start *another* program by name may fail to find it, which
-is a reported failure of the check rather than something SURE works around.
-Neither half of that is isolation: an environment is a list of strings handed to
-a program, and `Environment`'s own documentation says plainly that it confines
-nothing.
+**The second measurement is the same paragraph one platform over, and it
+corrected a sentence that used to be here.** That sentence said the program name
+`node` is still found because SURE resolves it in its own process and the
+environment is the child's. The first CI run in which the declared-service cases
+compiled on macOS and Linux falsified it: off Windows a bare name is resolved by
+the operating system out of the environment the child is **handed**, so an empty
+block finds no program at all and every declared service was reported as *SURE
+could not start "node"* with `No such file or directory (os error 2)` — measured
+at `dfbd94f`, runs `35834410398` and `35834415130`, eleven of eighteen cases
+failing on both platforms, on machines where the same jobs had just run `node`
+by that name. What SURE resolves in its own process is a **check**'s program; a
+service's is resolved by the child's own spawn. So the Unix minimum is the search
+path, the Windows minimum is not, and neither branch is evidence for the other.
+
+One consequence belongs with the minimum: a service that tries to start
+*another* program by name may fail to find it, which is a reported failure of the
+check rather than something SURE works around. None of this is isolation: an
+environment is a list of strings handed to a program, and `Environment`'s own
+documentation says plainly that it confines nothing.
 
 **A service check and a browser check cost two different permissions.** Starting
 the service is `run_project_code`; opening a page on it is `connect_service`,

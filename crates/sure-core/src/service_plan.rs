@@ -854,11 +854,18 @@ fn endpoint_of(name: &str, port: u16, path: &str) -> Result<Endpoint, ServiceRef
 /// operating-system fact the machine declined to state.
 ///
 /// `PATH` is the variable a reader is most likely to think belongs beside it,
-/// and it is exactly the one that does not — the measurement above says it
-/// changes nothing, and find-the-program is `crate::process`'s business in
-/// SURE's own process for every check, this one included. A service that starts
-/// *another* program by name may therefore fail to find it, which stays a
-/// reported failure of the check rather than something SURE works around.
+/// and on **this** platform it is the one that changes nothing: the measurement
+/// above added it back alone and `node` aborted exactly as it did with no block
+/// at all. **That is a fact about the abort and not about finding the program**,
+/// which a later reading corrected. This paragraph used to say that
+/// find-the-program is `crate::process`'s business in SURE's own process for
+/// every check, this one included; on the platforms that are not Windows a bare
+/// name is resolved by the operating system out of the block the child is
+/// **handed**, and the branch below now passes the search path for exactly that
+/// reason. It stays out here: these cases have passed on `windows-latest`
+/// without it since they were written, and a variable added on this platform for
+/// a program the *service* starts would be SURE deciding what a project's own
+/// service needs.
 #[cfg(windows)]
 fn service_environment() -> Environment {
     std::env::var_os("SystemRoot").map_or_else(
@@ -867,18 +874,57 @@ fn service_environment() -> Environment {
     )
 }
 
-/// On a platform where no such measurement exists, the policy is the same and
-/// its answer is nothing.
+/// On a platform where the search path is what makes a bare name resolvable at
+/// all, the policy is the same and its answer is `PATH`.
 ///
-/// **This is not an oversight and not a placeholder.** The measurement above is
-/// a Windows one, and a variable added here for macOS or Linux on the strength
-/// of it would be a claim about a platform nobody looked at — the substitution
-/// `docs/adr/0015-support-ceiling-evidence.md` exists to prevent. The day
-/// somebody measures one, the variable goes here, with the measurement beside
-/// it.
+/// **What was measured, and why this list is not empty.** Both of these cases'
+/// first CI run on macOS and Linux reported **every declared service as an
+/// error**, in as many words:
+///
+/// ```text
+/// SURE could not start "node" in "/home/runner/work/SURE/SURE/target/tmp/…".
+///
+/// The operating system said: No such file or directory (os error 2)
+/// ```
+///
+/// That is `rust (ubuntu-latest)` and `rust (macos-latest)` on 2026-09-23, runs
+/// `35834410398` and `35834415130` at `dfbd94f`, with `declared_service_check`
+/// reading `7 passed; 11 failed` on each — and it is the *first* run in which
+/// those cases compiled on either platform: every CI run containing them before
+/// it ended both Unix legs in Clippy under `-D warnings`, with `cargo test`
+/// `skipped` after it, `12d955c` being the earliest of the four.
+/// **The program was not missing from either machine**: an earlier green run of
+/// the same two jobs (`216b7ee`, runs `35813185753` and `35813190842`) ran
+/// `node scripts/product-evals.mjs` **by that name** and exited 0. So what the
+/// service lacked was the block and not the machine — a bare name is resolved by
+/// the operating system out of the environment the child is *handed*, and this
+/// module handed it an empty one. The cost is not a service that behaves
+/// differently: it is a service that cannot start **at all**, on either
+/// platform, for any declaration that names a program rather than a path, which
+/// is every declaration [`NODE`] builds. The run that confirms the repair is the
+/// one this function is pushed with, and these cases are its evidence.
+///
+/// **Why `PATH` and not SURE's environment.** ADR 0014's decision 11 asks for an
+/// *explicit* environment and not for the absence of one, and this is one
+/// variable, named, read from SURE's own process at plan time — the same rule
+/// the Windows branch follows for its own variable. It is also the variable that
+/// makes this module's own description of [`NODE`] true: a name on this machine's
+/// `PATH` is only on a `PATH` the child can see.
+///
+/// **This is a widening and it is the measured minimum rather than a
+/// convenience** — a service started without it cannot find the interpreter it is
+/// written for, and one that starts *another* program by name could not find that
+/// either. A machine that sets no `PATH` passes nothing and its service fails as
+/// the reported failure it is. `crate::process::Environment::inherited`'s own
+/// documentation has said since it was written that a child started with no
+/// environment cannot start anything; what was wrong here was the belief that the
+/// *lookup* did not need one.
 #[cfg(not(windows))]
 fn service_environment() -> Environment {
-    Environment::only(Vec::new())
+    std::env::var_os("PATH").map_or_else(
+        || Environment::only(Vec::new()),
+        |path| Environment::only([(std::ffi::OsString::from("PATH"), path)]),
+    )
 }
 
 /// The two checks one declaration asks for, and the gaps a preference left.
@@ -1287,9 +1333,12 @@ mod tests {
         #[cfg(not(windows))]
         assert_eq!(
             command.environment(),
-            &Environment::only(Vec::new()),
-            "a service is not given SURE's own environment on any platform, and one nobody \
-             has measured is given nothing beyond that either"
+            &Environment::only([(
+                OsString::from("PATH"),
+                std::env::var_os("PATH").expect("this machine sets PATH")
+            )]),
+            "a service is not given SURE's own environment on any platform, and on this one the \
+             single variable it is given is the search path a bare name is resolved through"
         );
 
         let CheckOperation::Service(spec) = checks[0].operation() else {
@@ -1339,25 +1388,42 @@ mod tests {
         );
     }
 
-    /// The same policy on a platform nobody has measured: nothing is passed.
+    /// **The environment decision 11 asks for on this platform, as a value a
+    /// later edit has to argue with.**
     ///
-    /// This test exists so that adding a variable here is a deliberate act rather
-    /// than a plausible one. The measurement above is a Windows measurement; a
-    /// variable added for macOS or Linux on the strength of it would be a claim
-    /// about a platform nobody looked at, and the day somebody looks, that
-    /// measurement and this assertion change together.
+    /// This test used to be its own opposite: it asserted an empty list and its
+    /// documentation said that no variable had been measured as necessary here,
+    /// so none was invented. One was then measured, by the first CI run in which
+    /// these cases compiled on macOS and Linux — runs `35834410398` and
+    /// `35834415130` at `dfbd94f`, where every declared service was reported as
+    /// *SURE could not start "node"* with `No such file or directory (os error
+    /// 2)` — and the list it pins is the answer to that measurement rather than a
+    /// plausible guess. **It is still asserted as the exact list, and not as
+    /// `!is_empty()`**, for the reason the Windows case gives: emptying it again
+    /// has to fail a test with the measurement in its message, and a second
+    /// variable has to as well, because a longer list is SURE deciding what a
+    /// project's own service needs.
     #[test]
     #[cfg(not(windows))]
-    fn a_declared_service_is_given_no_environment_where_nothing_was_measured() {
+    fn a_declared_service_is_given_the_search_path_a_bare_name_is_resolved_through() {
         let root = project("service environment");
         let plan = ServicePlan::of(&root, &config(vec![declaration("api", 4310)]));
         let command = command_of(&planned(&plan)[0]);
 
+        let search_path = std::env::var_os("PATH").expect(
+            "this test is about this machine's own search path, and a machine without one is \
+             the case the other branch of `service_environment` covers",
+        );
         assert_eq!(
             command.environment(),
-            &Environment::only(Vec::new()),
-            "a declared service is not handed SURE's own environment, and no variable has been \
-             measured as necessary on this platform, so none is invented"
+            &Environment::only([(OsString::from("PATH"), search_path)]),
+            "**a declared service starts with the search path its program name is resolved \
+             through, and with nothing else of SURE's or the user's.** Making this list empty is \
+             not a tightening: a bare program name is resolved by the operating system out of the \
+             block the child is handed, so an empty one means no declaration naming `node` can \
+             start at all — which is what `rust (ubuntu-latest)` and `rust (macos-latest)` \
+             reported for every case in `declared_service_check` at `dfbd94f`, with the program \
+             resolvable in SURE's own process on the same machines"
         );
     }
 

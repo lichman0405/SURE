@@ -100,11 +100,21 @@ plans checks from that declaration and nothing else.**
    differs from a declared check, which runs in the user's own environment, and
    the asymmetry is deliberate: a check is the project's own command for the
    project's own tooling, and a service is a program SURE starts **in order to
-   watch it**. Two consequences are stated with it in
-   `docs/architecture/EXECUTION_SAFETY.md`: the program `node` is still found,
-   because SURE resolves it in its own process, and a service that starts another
-   program by name may not find it — which is a reported failure rather than
-   something SURE works around.
+   watch it**. One consequence is stated with it in
+   `docs/architecture/EXECUTION_SAFETY.md`: a service that starts another program
+   by name may not find it — which is a reported failure rather than something
+   SURE works around. **A second sentence stood here and is corrected rather than
+   deleted**: it said the program `node` is still found because SURE resolves it
+   in its own process, and the first CI run in which these cases compiled on
+   macOS and Linux falsified it. Off Windows a bare name is resolved by the
+   operating system out of the environment the child is handed, so a service
+   handed an empty block cannot be started at all — measured at `dfbd94f` in runs
+   `35834410398` and `35834415130`, `7 passed; 11 failed` on both platforms, each
+   failure *SURE could not start "node" … No such file or directory (os error
+   2)*, on machines where the same jobs had just run `node` by that name. What is
+   resolved in SURE's own process is the *check*'s program; a service's is
+   resolved by the child's own spawn, which is why the Unix minimum is now the
+   search path and the Windows minimum is not.
 
    **The minimum is a measurement, and the first draft of this decision took
    none.** It passed an empty block, and the cost was found on the product path
@@ -118,6 +128,18 @@ plans checks from that declaration and nothing else.**
    live beside the code in `service_plan.rs`, and a platform whose minimum nobody
    has measured passes nothing — the position
    `docs/adr/0015-support-ceiling-evidence.md` takes.
+
+   **The platform that had no measurement got one, and it is a different
+   variable.** macOS and Linux are not platforms whose minimum can be read off
+   the Windows one: their minimum is `PATH`, because without it no declaration
+   naming a program can start there at all — the `dfbd94f` reading above — and
+   the search path is what makes a bare name resolvable rather than something
+   that makes a service behave differently. So the two branches of
+   `service_environment` now pass different variables, each with its own
+   measurement beside it, and neither is a starting point for the other: the
+   Windows measurement recorded that `PATH` alone changes nothing *there*, and a
+   reader who carried that sentence across platforms would be making the
+   substitution this ADR's own last sentence forbids.
 
 4. **Readiness and page are validated through `probe::Endpoint::loopback`.** Not
    through a second copy of its rule: the endpoint constructor is what refuses a

@@ -6,7 +6,7 @@
   "mode": "bootstrap",
   "status": "in_progress",
   "current_phase": "P19",
-  "last_updated": "2026-09-23T01:53:14.768Z",
+  "last_updated": "2026-09-23T01:57:29.317Z",
   "tasks": {
     "P0-T001": {
       "status": "accepted",
@@ -3655,22 +3655,22 @@
       "notes": "Issue #12: container mode now denies project-running commands before host runner admission; a dedicated skipped reason is emitted. Measured with cargo test -p sure-domain -p sure-core --lib --quiet (1486+144 pass), sure-core container_isolation_claim and check_schedule, and sure-domain wire_contract. Full gates and CI remain for P19-T005."
     },
     "P19-T002": {
-      "status": "in_progress",
+      "status": "accepted",
       "started_at": "2026-09-23T01:53:14.767Z",
-      "finished_at": null,
+      "finished_at": "2026-09-23T01:57:29.239Z",
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": "Investigating issue #13 scratch database collisions."
+      "notes": "Issue #13: both affected test modules use sure-testkit scratch directory; controlled recycled-PID database fixtures are not reopened. cargo test -p sure-core --lib --quiet: 1488 passed; focused recycled_pid: 2 passed."
     },
     "P19-T003": {
-      "status": "queued",
-      "started_at": null,
+      "status": "in_progress",
+      "started_at": "2026-09-23T01:57:29.317Z",
       "finished_at": null,
       "base_sha": null,
       "head_sha": null,
       "evidence": [],
-      "notes": ""
+      "notes": "Investigating Windows PowerShell 5.1 output encoding in issue #11."
     },
     "P19-T004": {
       "status": "queued",

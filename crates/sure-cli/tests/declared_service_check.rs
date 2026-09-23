@@ -9,12 +9,12 @@
 //! measures, and it is the only place where a check that *starts a program* on
 //! the machine running the tests is measured end to end.
 //!
-//! # The measurement of 2026-09-23, which is why cases here are red
+//! # The measurement of 2026-09-23, what it found, and the repair
 //!
-//! **Every case below that needs the service to be *running* fails on this
-//! machine, and what it fails on is not in this file.** A run under
-//! `host_confirmed` with `run_project_code` planned the service check, admitted
-//! it, started it, and reported:
+//! **This file was written against a defect and then found it; the defect is
+//! fixed, and the record is here because the fix is one variable in one file.**
+//! The first run of these cases under `host_confirmed` with `run_project_code`
+//! planned the service check, admitted it, started it, and reported:
 //!
 //! ```text
 //! start api   fail   the service ended by itself after 65 milliseconds, before
@@ -22,12 +22,17 @@
 //!                    standard error:  3: ... node::Start+160 ...
 //! ```
 //!
-//! the process aborting with no request ever reaching it. The cause is one line
-//! of `crates/sure-core/src/service_plan.rs`: `declared_service` builds the
+//! the process aborting with no request ever reaching it. **The row keeps the
+//! tail of that stack and not its header** — the excerpt it carries begins at
+//! frame 3 — so the line that says what aborted came from starting the same
+//! binary outside SURE with a cleared environment block, which is also how the
+//! `SystemRoot` measurement below was taken. The cause was one line
+//! of `crates/sure-core/src/service_plan.rs`: `declared_service` built the
 //! command as `Environment::only(Vec::new())` — ADR 0014's decision 11, carried
-//! out where the plan is made — and the `node` this machine has cannot
-//! initialize without `SystemRoot`. Run with nothing in its environment, node
-//! aborts before it reads `server.js` at all:
+//! out as an *empty* environment where what the decision asks for is an
+//! *explicit* one — and the `node` this machine has cannot initialize without
+//! `SystemRoot`. Run with nothing in its environment, node aborts before it
+//! reads `server.js` at all:
 //!
 //! ```text
 //! Assertion failed: ncrypto::CSPRNG(nullptr, 0)
@@ -38,16 +43,25 @@
 //! `server.js` with a process whose environment block was cleared: exit code
 //! 134, about seventy milliseconds, no output on either stream but that stack.
 //! Adding back **one** variable — `SystemRoot=C:\Windows` — and nothing else
-//! makes the same file start and serve. `WINDIR`, `SystemDrive`, `TEMP`, `TMP`,
-//! `PATH` and `USERPROFILE` were each tried alone and each still aborts, so this
-//! is not a variable to add to a list: it is `SystemRoot` or nothing.
+//! made the same file start and serve, and `WINDIR`, `SystemDrive`, `TEMP`,
+//! `TMP`, `PATH` and `USERPROFILE` were each tried alone and each still aborted.
+//! So it is `SystemRoot` or nothing, and that is what the file now does:
+//! `service_plan.rs`'s `service_environment` passes where Windows is installed,
+//! read from SURE's own process when the plan is made, and passes nothing at all
+//! on the platforms no measurement covers. The empty list that stood in its
+//! place is gone rather than defaulted, and `service_environment`'s own doc
+//! comment carries this measurement and the test beside it asserts the value, so
+//! the next person to consider emptying it again has to argue with both.
 //!
 //! `node` v25.8.1, `C:\Program Files\nodejs\node.exe`, the machine's only
-//! `node`, measured at `f614dc4`. **None of the assertions below were weakened
-//! for it**: a case that says a service must be running goes on saying so, and
-//! the failing row carries the evidence. No fixture can work around it, because
-//! the empty environment is passed to the program and every launcher kind in
-//! this build is this program.
+//! `node`, measured at `f614dc4` and repaired after it. **No assertion below was
+//! weakened for it and none was weakened by the repair**: a case that says a
+//! service must be running said so while the run was red, with the failing row
+//! as its evidence, and the red proof of the repair is the same case run with
+//! the environment emptied again, which puts the exit-134 row back. Nothing here
+//! works around the defect either: the environment goes to the program SURE
+//! starts, every launcher kind in this build *is* that program, and a fixture
+//! that avoided the crash would have been a fixture checking something else.
 //!
 //! # What is on disk, and where
 //!
@@ -79,11 +93,13 @@
 //! Each fixture binds `127.0.0.1:0`, reads the port the operating system chose
 //! and **drops the listener** before writing that number into `sure.yaml`. It has
 //! to be written into the file and cannot be passed some other way: the command
-//! SURE runs is `node server.js` — one argument, an empty environment, and no
-//! argv of SURE's making. Dropping the listener leaves a window between choosing
-//! the port and the run using it, and nothing here closes that window; a machine
-//! that takes the port in that window makes the fixture service fail to bind, and
-//! the check reports that failure as the failure it is rather than as a pass.
+//! SURE runs is `node server.js` — one argument, an environment that is the
+//! operating system's own directory rather than SURE's (see the measurement
+//! above), and no argv of SURE's making. Dropping the listener leaves a window
+//! between choosing the port and the run using it, and nothing here closes that
+//! window; a machine that takes the port in that window makes the fixture service
+//! fail to bind, and the check reports that failure as the failure it is rather
+//! than as a pass.
 //!
 //! # What every case asserts on
 //!
@@ -105,11 +121,19 @@ use serde_json::Value;
 
 const SURE: &str = env!("CARGO_BIN_EXE_sure");
 
-/// The name the fixture's one declaration gives its service, and the two titles
-/// the two rows it becomes carry.
+/// The name the fixture's one declaration gives its service, and the title its
+/// service row carries.
+///
+/// **The browser row is titled by its verdict and not by the plan**, so there is
+/// no second constant beside this one. `ServicePlan` proposes that check as
+/// `check api in a browser` — asserted where it is decided, in `service_plan.rs`'s
+/// own unit tests — and the row in `details.check_results` reads
+/// `browser probe: <url>` instead, because that is what
+/// `crates/sure-core/src/browser.rs` titles a verdict with. The case below
+/// asserts the second, address and all, because that is the one the report a
+/// person reads carries.
 const NAME: &str = "api";
 const SERVICE_TITLE: &str = "start api";
-const PAGE_TITLE: &str = "check api in a browser";
 
 /// The readable half of the two rows' identifiers. See `service_plan.rs`'s
 /// `SERVICE_TAG` and `SERVICE_PAGE_TAG` for why they are two tags.
@@ -282,9 +306,22 @@ fn read(path: &Path) -> String {
 /// check — a declaration has to be looked at because somebody asked, not because
 /// a file mentioned a page — so the fixture asks.
 fn declaration_yaml(port: u16, entry: &str, readiness: &str, page: Option<&str>) -> String {
+    format!(
+        "checks:\n  browser_probe: always\n{}",
+        services_yaml(port, entry, readiness, page)
+    )
+}
+
+/// The `services:` list on its own, at the indentation `checks:` wants.
+///
+/// Split out from the file above because the two cases about a preference that
+/// *left a check out* need the same declaration under a different `checks:`
+/// block — one setting turned off, one left at its default — and a declaration
+/// written twice is a second thing to keep in step.
+fn services_yaml(port: u16, entry: &str, readiness: &str, page: Option<&str>) -> String {
     let page = page.map_or_else(String::new, |page| format!("      page: {page}\n"));
     format!(
-        "checks:\n  browser_probe: always\n  services:\n    - name: {NAME}\n      launcher:\n\
+        "  services:\n    - name: {NAME}\n      launcher:\n\
          \x20       kind: node_entry\n        entry: {entry}\n      port: {port}\n\
          \x20     readiness: {readiness}\n{page}"
     )
@@ -340,6 +377,24 @@ impl Fixture {
         fixture.declare(port, "server.js", "/readyz", Some("/"));
         fixture.settings(INSPECT_ONLY);
         fixture
+    }
+
+    /// An empty directory beside the project, for the one case that has to give
+    /// a run a place with no browser in it.
+    ///
+    /// **Made when it is asked for, and asked for on Windows only** —
+    /// `a_machine_with_no_browser_reports_an_absence_and_never_a_pass` is where
+    /// the question can be asked at all, and its documentation says why. A
+    /// platform that cannot ask it does not carry the directory either.
+    #[cfg(windows)]
+    fn nowhere(&self) -> PathBuf {
+        let directory = self
+            .project
+            .parent()
+            .expect("the scratch root above the project")
+            .join("nowhere a browser lives");
+        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        directory
     }
 
     /// Write the project's own `sure.yaml`, replacing whatever was there.
@@ -673,7 +728,18 @@ fn an_authorised_run_starts_the_service_and_looks_at_its_page() {
     // check that never happened described as a look; on a machine without one,
     // an absence is the answer and a `pass` would be a fabricated one.
     let page = row(&frame, PAGE_TAG);
-    assert_eq!(page["title"], PAGE_TITLE, "{page}");
+    // **The row's title is the verdict's, not the plan's.** `ServicePlan`
+    // proposes this check as `check api in a browser` — asserted in
+    // `service_plan.rs`'s own unit tests, where it is decided — and the row a
+    // report carries is titled by the browser verdict instead, which names the
+    // instrument and the address. Asserting the address as well is the stronger
+    // claim of the two: a row titled with another fixture's port would be a look
+    // at the wrong page.
+    assert_eq!(
+        page["title"],
+        format!("browser probe: http://127.0.0.1:{}/", fixture.port),
+        "{page}"
+    );
     match sure_core::browser_driver::find_installed_browser() {
         None => {
             eprintln!("no browser on this machine, so the page row is an absence");
@@ -1143,36 +1209,77 @@ fn a_project_that_changes_while_the_run_works_withdraws_its_runtime_evidence() {
 
 /// A machine with no browser gets an absence and a sentence, not a pass.
 ///
-/// **This machine has one, so the branch is reached by making this run's machine
-/// answer be `no`.** `browser_driver::installed` reads exactly two things — a
-/// table of paths compiled into the binary and `PATH` — and the table's roots are
-/// `ProgramFiles`, `ProgramFiles(x86)` and `LOCALAPPDATA`. With those three
-/// unset and the `PATH` entries that name a browser removed, `find` answers
-/// `None` for this process, which is the same answer a machine with no browser
-/// gives. That is a faithful way to ask the question and not a way around it:
-/// the product reads those variables and nothing else, and this run gives it the
-/// values a browserless machine has.
+/// **The question is a Windows one and is asked only there.** On macOS one of
+/// `browser_driver::installed`'s roots is `/Applications`, and on Linux its
+/// `ABSOLUTE` list names `/usr/bin/chromium` and `/snap/bin/chromium`; neither is
+/// read from the environment, so where one of them is a file there is no
+/// environment that hides it — the case would measure the runner's image, not
+/// the search. The Linux runner is exactly that machine, and this repository has
+/// the measurement: `.github/workflows/release-dry-run.yml` records
+/// `/usr/bin/chromium` on `ubuntu-latest` aborting at `ZygoteHostImpl::Init`
+/// with *No usable sandbox!*. On Windows every entry in the table is one of the
+/// three roots crossed with a browser's own directory and every root is an
+/// environment variable, which is what makes the question askable here.
+///
+/// **This machine has a browser, so this run is given the machine a browserless
+/// one is.** `installed` reads exactly two things — that table and `PATH` — so
+/// the run is given a block of its own in which the three roots point at an
+/// empty directory and `PATH` holds no directory a browser's executable is in:
+/// the answer a machine with no browser in either place gives. That is a
+/// faithful way to ask the question and not a way around it — the product reads
+/// those variables and nothing else, and nothing this run hands it is a browser.
+///
+/// **The block is cleared and rebuilt rather than overridden, and that is a
+/// measurement.** With the parent's block inherited, an override of one of these
+/// names is not reliably delivered on this machine: `.env("LOCALAPPDATA", …)`
+/// and `.env("ProgramFiles(x86)", …)` landed and `.env("PROGRAMFILES", …)` did
+/// not, so the child kept `C:\Program Files` and the earlier version of this
+/// case found the Chrome under it and reported a pass where it meant to measure
+/// an absence — the names it set and the names the search reads were both right
+/// and the value simply did not arrive. Measured 2026-09-23 with a two-binary
+/// probe that prints its own block: inherited plus those three overrides shows
+/// `PROGRAMFILES = C:\Program Files`, while `env_clear()` plus the same three
+/// names shows all three at the empty directory and five variables in the whole
+/// block. `env_remove` of the same name does not take either, and Git Bash's
+/// `env -i` is not an empty block at all — it keeps `PROGRAMFILES`,
+/// `SYSTEMROOT`, `WINDIR` and `PATH`, so a probe run through it measures the
+/// shell rather than the machine.
+///
+/// **What the block keeps is what a machine has and this run uses.** `SystemRoot`
+/// is the one variable `node` will not start without, which
+/// `crates/sure-core/src/service_plan.rs`'s `service_environment` documents and
+/// this file's own measurement above records; the service half of this case is
+/// asserted to pass, so the block has to keep it. `PATH` is where the search
+/// also looks for a browser and where the `node` this service runs is found by
+/// name. Nothing else is set, and nothing else is needed: the project, the store
+/// and the settings file are all given as arguments.
 ///
 /// What the row must not be is a pass: no page was looked at, and *nobody
 /// looked* is not *the page works*.
+#[cfg(windows)]
 #[test]
 fn a_machine_with_no_browser_reports_an_absence_and_never_a_pass() {
     let fixture = Fixture::new("declared service 没有浏览器");
     fixture.settings(AUTHORISED);
-    let output = Command::new(SURE)
+    let system_root =
+        std::env::var_os("SystemRoot").expect("a Windows machine names where Windows is");
+    let nowhere = fixture.nowhere();
+    let mut command = Command::new(SURE);
+    command
         .arg("--store-dir")
         .arg(&fixture.store)
         .arg("--settings-file")
         .arg(&fixture.settings)
         .args(["--format", "json", "check"])
         .arg(&fixture.project)
-        .env_remove("ProgramFiles")
-        .env_remove("ProgramFiles(x86)")
-        .env_remove("LOCALAPPDATA")
-        .env("PATH", without_a_browser())
         .stdin(Stdio::null())
-        .output()
-        .expect("the CLI starts");
+        .env_clear()
+        .env("SystemRoot", system_root)
+        .env("PATH", without_a_browser())
+        .env("ProgramFiles", &nowhere)
+        .env("ProgramFiles(x86)", &nowhere)
+        .env("LOCALAPPDATA", &nowhere);
+    let output = command.output().expect("the CLI starts");
     let stdout = String::from_utf8(output.stdout).expect("the JSON report is UTF-8");
     assert!(output.status.code().is_some(), "{stdout}");
     let frame: Value = serde_json::from_str(&stdout).expect("one JSON frame");
@@ -1207,6 +1314,13 @@ fn a_machine_with_no_browser_reports_an_absence_and_never_a_pass() {
 /// `...\Google\Chrome\Application` is a browser's directory however it got onto
 /// the list, and matching the program names rather than a fixed path is what
 /// keeps this working on a machine whose browser was installed somewhere else.
+///
+/// **What is left is a `PATH` no search finds a browser on, and it is also the
+/// `PATH` the service's own interpreter is found through** — so this drops
+/// entries by what they are, and it must not drop the one `node` is in. It does
+/// not: this build looks for a browser by name and `node`'s directory is not
+/// named after one, and the case that uses this asserts the service half passes.
+#[cfg(windows)]
 fn without_a_browser() -> std::ffi::OsString {
     let names = [
         "chrome", "chromium", "msedge", "edge", "brave", "vivaldi", "opera",
@@ -1252,5 +1366,94 @@ fn the_old_implementation_could_not_have_passed_this() {
     assert!(
         beat > started["beat"].as_u64().expect("a starting beat"),
         "the service started and did not run"
+    );
+}
+
+/// A project that turns its declared services off is told which setting did it.
+///
+/// **This is not a refusal and must not be reported like one.** The declaration
+/// is well formed, SURE would have started it, and what decided is the project's
+/// own `checks.start_local_services: never`. A plan that simply held no service
+/// row would leave the person who wrote the declaration looking for a mistake in
+/// their file, so the decision is recorded as a value
+/// (`ServicePlan::gaps`), carried into the run's plan
+/// (`crates/sure-core/src/pipeline.rs`), and read here out of stage 4's own
+/// `detail` — the one place all three meet.
+#[test]
+fn a_project_that_switches_its_services_off_is_told_that_it_did() {
+    let fixture = Fixture::new("declared service 关掉开关");
+    fixture.settings(AUTHORISED);
+    fixture.write_project(&format!(
+        "checks:\n  start_local_services: never\n  browser_probe: always\n{}",
+        services_yaml(fixture.port, "server.js", "/readyz", Some("/"))
+    ));
+    let frame = fixture.frame();
+
+    finished(&frame);
+    assert!(
+        rows(&frame, SERVICE_TAG).is_empty(),
+        "a project that turned its services off still got a service row: {:?}",
+        rows(&frame, SERVICE_TAG)
+    );
+    assert!(
+        rows(&frame, PAGE_TAG).is_empty(),
+        "a page was looked at on a service this project declined to start: {:?}",
+        rows(&frame, PAGE_TAG)
+    );
+    // The setting was in force and not merely mentioned: a run that planned
+    // nothing must also have started nothing.
+    nothing_started(&fixture, &frame);
+
+    let detail = plan_detail(&frame);
+    // The sentence is the product's own, built here rather than retyped: a
+    // paraphrase would pass while the wording a person reads said something else.
+    let sentence = sure_core::service_plan::ServiceGap::LocalServicesDisabled {
+        name: NAME.to_owned(),
+    }
+    .plain_description();
+    assert!(
+        detail.contains(&sentence),
+        "the plan stage does not say the project switched its own service off: it was looking \
+         for `{sentence}` and said `{detail}`"
+    );
+}
+
+/// A declaration whose page is not opened under the default preference says so.
+///
+/// `checks.browser_probe` defaults to `auto`, and `auto` does not open a page:
+/// nothing in a project's shape says it has an interface, so a declaration that
+/// names one gets a service row and a sentence rather than a browser row on a
+/// guess. **The service row is planned and running** — the gap is about the page
+/// and not about the service — which is what makes the sentence the only thing
+/// standing between a reader and *my page was never checked and nobody said
+/// why*.
+#[test]
+fn a_page_the_default_preference_does_not_open_is_still_explained() {
+    let fixture = Fixture::new("declared service 默认偏好");
+    fixture.settings(AUTHORISED);
+    fixture.write_project(&format!(
+        "checks:\n{}",
+        services_yaml(fixture.port, "server.js", "/readyz", Some("/"))
+    ));
+    let frame = fixture.frame();
+
+    finished(&frame);
+    let service = row(&frame, SERVICE_TAG);
+    assert_eq!(status(service), "pass", "{service}");
+    assert!(
+        rows(&frame, PAGE_TAG).is_empty(),
+        "`browser_probe: auto` planned a browser row: {:?}",
+        rows(&frame, PAGE_TAG)
+    );
+
+    let detail = plan_detail(&frame);
+    let sentence = sure_core::service_plan::ServiceGap::AutoDoesNotLookAtAPage {
+        name: NAME.to_owned(),
+    }
+    .plain_description();
+    assert!(
+        detail.contains(&sentence),
+        "the plan stage does not say why no browser looked at the declared page: it was looking \
+         for `{sentence}` and said `{detail}`"
     );
 }

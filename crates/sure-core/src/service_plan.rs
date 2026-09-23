@@ -813,6 +813,74 @@ fn endpoint_of(name: &str, port: u16, path: &str) -> Result<Endpoint, ServiceRef
     })
 }
 
+/// The environment a declared service starts with: **the machine's own
+/// operating-system directory, and nothing else.**
+///
+/// `docs/adr/0014`'s decision 11 asks for an *explicit* environment rather than
+/// SURE's own, and this is the whole of what that policy passes on Windows. It
+/// is not a curated list of what a service is thought to want, and it must not
+/// become one: the list is what was measured, not a starting point somebody may
+/// extend on speculation.
+///
+/// **What was measured, and why the list is not empty.** On 2026-09-23 a
+/// declared service on Windows was reported as having *ended by itself after 65
+/// milliseconds*, before SURE could ask it anything, with exit code 134 and
+/// `Assertion failed: ncrypto::CSPRNG(nullptr, 0)` on standard error — which is
+/// `node` v25.8.1 aborting inside `node::InitializeOncePerProcessInternal`
+/// (`src\node.cc:1204`) before it reads one line of the declared entry. The
+/// cause was the environment block, empty because this module made it empty.
+/// **One variable is the whole difference**: adding `SystemRoot=C:\Windows` by
+/// itself makes the same file start and serve, and `WINDIR`, `SystemDrive`,
+/// `TEMP`, `TMP`, `PATH` and `USERPROFILE` were each added back alone and each
+/// still aborts. So this one is passed, and it is read from SURE's own process
+/// at plan time because that is where the machine's answer is.
+///
+/// **The measurement needs a genuinely empty block, which is easy to think you
+/// have and not have.** Git Bash's `env -i` leaves `SYSTEMROOT`, `WINDIR`,
+/// `MSYSTEM` and `PATH` in place — it is not an empty environment and it does
+/// not reproduce the crash — and that trap has already produced one round of
+/// *cannot reproduce* in this repository. Clearing the block through the API
+/// that starts the process (`ProcessStartInfo.EnvironmentVariables.Clear()`,
+/// or `Command::env_clear()`, which is what [`crate::process`] does) is what
+/// turns the abort into a reproducible fact.
+///
+/// **The operating system's own directory is a fact about the machine, not
+/// SURE's environment leaking.** Where Windows is installed is the platform's
+/// answer and not the user's configuration — nothing of the user's, and nothing
+/// of SURE's settings, rides along with it — and the program that needs it needs
+/// it to exist at all rather than to behave differently. A machine that does not
+/// set `SystemRoot` passes nothing and a service there fails as the reported
+/// failure it is: a substitute directory would be SURE inventing an
+/// operating-system fact the machine declined to state.
+///
+/// `PATH` is the variable a reader is most likely to think belongs beside it,
+/// and it is exactly the one that does not — the measurement above says it
+/// changes nothing, and find-the-program is `crate::process`'s business in
+/// SURE's own process for every check, this one included. A service that starts
+/// *another* program by name may therefore fail to find it, which stays a
+/// reported failure of the check rather than something SURE works around.
+#[cfg(windows)]
+fn service_environment() -> Environment {
+    std::env::var_os("SystemRoot").map_or_else(
+        || Environment::only(Vec::new()),
+        |root| Environment::only([(std::ffi::OsString::from("SystemRoot"), root)]),
+    )
+}
+
+/// On a platform where no such measurement exists, the policy is the same and
+/// its answer is nothing.
+///
+/// **This is not an oversight and not a placeholder.** The measurement above is
+/// a Windows one, and a variable added here for macOS or Linux on the strength
+/// of it would be a claim about a platform nobody looked at — the substitution
+/// `docs/adr/0015-support-ceiling-evidence.md` exists to prevent. The day
+/// somebody measures one, the variable goes here, with the measurement beside
+/// it.
+#[cfg(not(windows))]
+fn service_environment() -> Environment {
+    Environment::only(Vec::new())
+}
+
 /// The two checks one declaration asks for, and the gaps a preference left.
 ///
 /// **`Err` is a browser row that could not be built and never a service row that
@@ -840,17 +908,15 @@ fn declared_service(
     // `crate::checks::command_operation` says so; this is the other case, and the
     // two are different on purpose.
     //
-    // Nothing is passed at all rather than a curated list, because a listed
-    // variable would be SURE deciding what a project's service needs. What a
-    // service that needs `PATH` does is `crate::process`'s business — a program
-    // is found by name for every check SURE runs, this one included.
-    let command = CommandSpec::new(
-        NODE,
-        &directory.full,
-        Environment::only(Vec::new()),
-        CHECK_LIMITS,
-    )
-    .with_arguments(vec![entry]);
+    // What is passed is [`service_environment`]'s whole subject, and its
+    // documentation carries the measurement that settled it: not a curated list,
+    // because a listed variable would be SURE deciding what a project's service
+    // needs, and not nothing either, because one variable turned out to be what
+    // the operating system has to tell a program before it will start. What a
+    // service that needs `PATH` does is still `crate::process`'s business — a
+    // program is found by name for every check SURE runs, this one included.
+    let command = CommandSpec::new(NODE, &directory.full, service_environment(), CHECK_LIMITS)
+        .with_arguments(vec![entry]);
 
     // Built before either proposal, because both of them stand on it: the
     // browser check carries the very same service — same command, same port,
@@ -1203,10 +1269,27 @@ mod tests {
             "the command runs in the directory the declaration named, which is the root \
              when it named none"
         );
+        // The environment is a policy with a measurement behind it, so what is
+        // asserted is its exact content and not merely that it is not SURE's.
+        // `service_environment` and its documentation carry both halves, and
+        // the Windows half is argued by name in
+        // `a_declared_service_is_given_where_windows_is_installed_and_nothing_else`
+        // below rather than restated here.
+        #[cfg(windows)]
+        assert_eq!(
+            command.environment(),
+            &Environment::only([(
+                OsString::from("SystemRoot"),
+                std::env::var_os("SystemRoot").expect("this machine sets SystemRoot")
+            )]),
+            "a declared service gets the operating system's own directory and nothing else"
+        );
+        #[cfg(not(windows))]
         assert_eq!(
             command.environment(),
             &Environment::only(Vec::new()),
-            "a service is not given SURE's own environment by accident"
+            "a service is not given SURE's own environment on any platform, and one nobody \
+             has measured is given nothing beyond that either"
         );
 
         let CheckOperation::Service(spec) = checks[0].operation() else {
@@ -1218,6 +1301,64 @@ mod tests {
         assert_eq!(endpoint.path(), "/healthz");
         assert_eq!(endpoint.address().port(), 4310);
         assert_eq!(spec.window(), A_SERVICES_WINDOW);
+    }
+
+    /// **The environment decision 11 asks for, as a value a later edit has to
+    /// argue with.**
+    ///
+    /// An empty environment block is not a stricter version of this one, it is a
+    /// block `node` does not start in: the service aborts inside its own
+    /// initialization, before it reads the declared entry, and the check reports
+    /// the project's service as having ended by itself. That is why the policy is
+    /// asserted here as the **exact list** — one entry, named, with this
+    /// machine's own value — rather than as `!is_empty()`: emptying it again has
+    /// to fail a test with the measurement in its message, and adding a second
+    /// variable to it has to as well, because a longer list is SURE deciding what
+    /// a project's service needs.
+    #[test]
+    #[cfg(windows)]
+    fn a_declared_service_is_given_where_windows_is_installed_and_nothing_else() {
+        let root = project("service environment");
+        let plan = ServicePlan::of(&root, &config(vec![declaration("api", 4310)]));
+        let command = command_of(&planned(&plan)[0]);
+
+        let installed_at = std::env::var_os("SystemRoot").expect(
+            "this test is about the machine's own operating-system directory, and a machine \
+             without one is the case the other branch of `service_environment` covers",
+        );
+        assert_eq!(
+            command.environment(),
+            &Environment::only([(OsString::from("SystemRoot"), installed_at)]),
+            "**a declared service starts with where Windows is installed and with nothing \
+             else.** Making this list empty is not a tightening: `node` v25.8.1 aborts in \
+             `node::InitializeOncePerProcessInternal` with an empty block — exit code 134, \
+             `Assertion failed: ncrypto::CSPRNG(nullptr, 0)` — before it runs one line of the \
+             declared entry, so a declared service would always be reported as having ended by \
+             itself. `WINDIR`, `SystemDrive`, `TEMP`, `TMP`, `PATH` and `USERPROFILE` each did \
+             nothing for it, which is why exactly one variable is passed"
+        );
+    }
+
+    /// The same policy on a platform nobody has measured: nothing is passed.
+    ///
+    /// This test exists so that adding a variable here is a deliberate act rather
+    /// than a plausible one. The measurement above is a Windows measurement; a
+    /// variable added for macOS or Linux on the strength of it would be a claim
+    /// about a platform nobody looked at, and the day somebody looks, that
+    /// measurement and this assertion change together.
+    #[test]
+    #[cfg(not(windows))]
+    fn a_declared_service_is_given_no_environment_where_nothing_was_measured() {
+        let root = project("service environment");
+        let plan = ServicePlan::of(&root, &config(vec![declaration("api", 4310)]));
+        let command = command_of(&planned(&plan)[0]);
+
+        assert_eq!(
+            command.environment(),
+            &Environment::only(Vec::new()),
+            "a declared service is not handed SURE's own environment, and no variable has been \
+             measured as necessary on this platform, so none is invented"
+        );
     }
 
     #[test]

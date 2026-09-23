@@ -371,6 +371,16 @@ fn frame_without_the_per_run_ids(frame: &Value) -> (Value, usize) {
             "fnd",
         );
     }
+    if let Some(rows) = details
+        .get_mut("check_results")
+        .and_then(Value::as_array_mut)
+    {
+        for row in rows {
+            if let Some(field) = row.get_mut("project_fingerprint") {
+                replaced_ids += replaced_id(field, "<this reading's fingerprint id>", "fp");
+            }
+        }
+    }
     if let Some(lifecycle) = details.get_mut("lifecycle") {
         for rows in ["still_open", "closed"] {
             replaced_ids += replace_ids_in_array(
